@@ -69,6 +69,9 @@ type AiInstructionVersion = {
   temperature: number | null;
   is_current: boolean;
   change_note: string | null;
+  content_hash: string | null;
+  copied_from_version_id: string | null;
+  created_at: string;
 };
 
 type AppointmentView = "active" | "archived";
@@ -188,6 +191,34 @@ function includesAny(value: string, terms: string[]): boolean {
   return terms.some((term) => normalized.includes(term));
 }
 
+async function hashInstructionContent({
+  model,
+  outputSchema,
+  systemPrompt,
+  temperature,
+  userPrompt,
+}: {
+  model: string;
+  outputSchema: unknown;
+  systemPrompt: string;
+  temperature: number;
+  userPrompt: string;
+}): Promise<string> {
+  const payload = JSON.stringify({
+    model: model.trim(),
+    outputSchema,
+    systemPrompt,
+    temperature,
+    userPrompt,
+  });
+  const data = new TextEncoder().encode(payload);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function formatDate(value: string | null): string {
   if (!value) {
     return "Date not set";
@@ -266,6 +297,11 @@ export default function Home() {
     useState<AiInstructionSet | null>(null);
   const [aiInstructionVersion, setAiInstructionVersion] =
     useState<AiInstructionVersion | null>(null);
+  const [aiInstructionVersions, setAiInstructionVersions] = useState<
+    AiInstructionVersion[]
+  >([]);
+  const [draftSourceVersion, setDraftSourceVersion] =
+    useState<AiInstructionVersion | null>(null);
   const [instructionSystemPrompt, setInstructionSystemPrompt] = useState("");
   const [instructionUserPrompt, setInstructionUserPrompt] = useState("");
   const [instructionOutputSchema, setInstructionOutputSchema] = useState(
@@ -273,6 +309,9 @@ export default function Home() {
   );
   const [instructionModel, setInstructionModel] = useState("gpt-4.1-mini");
   const [instructionChangeNote, setInstructionChangeNote] = useState("");
+  const [revertingInstructionForId, setRevertingInstructionForId] = useState<
+    string | null
+  >(null);
   const [noteDrafts, setNoteDrafts] = useState<
     Record<
       string,
@@ -674,6 +713,8 @@ export default function Home() {
 
       if (!instructionSet) {
         setAiInstructionVersion(null);
+        setAiInstructionVersions([]);
+        setDraftSourceVersion(null);
         const draft = resetInstructionDraft(null);
         setInstructionSystemPrompt(draft.systemPrompt);
         setInstructionUserPrompt(draft.userPrompt);
@@ -687,18 +728,22 @@ export default function Home() {
       const { data: versions, error: versionError } = await supabase
         .from("ai_instruction_versions")
         .select(
-          "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,is_current,change_note"
+          "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,is_current,change_note,content_hash,copied_from_version_id,created_at"
         )
         .eq("instruction_set_id", instructionSet.id)
-        .eq("is_current", true)
-        .limit(1);
+        .order("version_number", { ascending: false });
 
       if (versionError) {
         throw versionError;
       }
 
-      const version = versions?.[0] ?? null;
+      const allVersions = versions ?? [];
+      const version =
+        allVersions.find((instructionVersion) => instructionVersion.is_current) ??
+        null;
+      setAiInstructionVersions(allVersions);
       setAiInstructionVersion(version);
+      setDraftSourceVersion(version);
       const draft = resetInstructionDraft(version);
       setInstructionSystemPrompt(draft.systemPrompt);
       setInstructionUserPrompt(draft.userPrompt);
@@ -726,6 +771,19 @@ export default function Home() {
     }
   }
 
+  function loadInstructionVersionIntoEditor(version: AiInstructionVersion) {
+    setDraftSourceVersion(version);
+    const draft = resetInstructionDraft(version);
+    setInstructionSystemPrompt(draft.systemPrompt);
+    setInstructionUserPrompt(draft.userPrompt);
+    setInstructionOutputSchema(draft.outputSchema);
+    setInstructionModel(draft.model);
+    setInstructionChangeNote(
+      version.is_current ? "" : `Based on v${version.version_number}`
+    );
+    setMessage(`Loaded v${version.version_number} into the editor.`);
+  }
+
   async function handleSaveCarePrepInstructions(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSavingInstructions(true);
@@ -734,6 +792,14 @@ export default function Home() {
     try {
       const { careCircleId, userId } = await getPrimaryCareContext();
       const parsedSchema = JSON.parse(instructionOutputSchema);
+      const temperature = 0.2;
+      const contentHash = await hashInstructionContent({
+        model: instructionModel,
+        outputSchema: parsedSchema,
+        systemPrompt: instructionSystemPrompt,
+        temperature,
+        userPrompt: instructionUserPrompt,
+      });
       let instructionSet = aiInstructionSet;
 
       if (!instructionSet) {
@@ -788,19 +854,20 @@ export default function Home() {
         .from("ai_instruction_versions")
         .insert({
           change_note: instructionChangeNote.trim() || null,
-          copied_from_version_id: aiInstructionVersion?.id ?? null,
+          content_hash: contentHash,
+          copied_from_version_id: draftSourceVersion?.id ?? aiInstructionVersion?.id ?? null,
           created_by_user_id: userId,
           instruction_set_id: instructionSet.id,
           is_current: true,
           model: instructionModel.trim() || null,
           output_schema: parsedSchema,
           system_prompt: instructionSystemPrompt,
-          temperature: 0.2,
+          temperature,
           user_prompt_template: instructionUserPrompt,
           version_number: nextVersionNumber,
         })
         .select(
-          "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,is_current,change_note"
+          "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,is_current,change_note,content_hash,copied_from_version_id,created_at"
         )
         .single();
 
@@ -809,6 +876,14 @@ export default function Home() {
       }
 
       setAiInstructionVersion(newVersion);
+      setDraftSourceVersion(newVersion);
+      setAiInstructionVersions((currentVersions) => [
+        newVersion,
+        ...currentVersions.map((version) => ({
+          ...version,
+          is_current: false,
+        })),
+      ]);
       const draft = resetInstructionDraft(newVersion);
       setInstructionSystemPrompt(draft.systemPrompt);
       setInstructionUserPrompt(draft.userPrompt);
@@ -820,6 +895,95 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setSavingInstructions(false);
+    }
+  }
+
+  async function handleRevertInstructionVersion(version: AiInstructionVersion) {
+    setRevertingInstructionForId(version.id);
+    setMessage("");
+
+    try {
+      const { userId } = await getPrimaryCareContext();
+
+      if (!aiInstructionSet) {
+        throw new Error("No instruction set is loaded.");
+      }
+
+      const { data: latestVersions, error: latestVersionError } = await supabase
+        .from("ai_instruction_versions")
+        .select("version_number")
+        .eq("instruction_set_id", aiInstructionSet.id)
+        .order("version_number", { ascending: false })
+        .limit(1);
+
+      if (latestVersionError) {
+        throw latestVersionError;
+      }
+
+      const nextVersionNumber = (latestVersions?.[0]?.version_number ?? 0) + 1;
+
+      if (aiInstructionVersion) {
+        const { error: supersedeError } = await supabase
+          .from("ai_instruction_versions")
+          .update({
+            is_current: false,
+            superseded_at: new Date().toISOString(),
+          })
+          .eq("id", aiInstructionVersion.id);
+
+        if (supersedeError) {
+          throw supersedeError;
+        }
+      }
+
+      const { data: revertedVersion, error: revertError } = await supabase
+        .from("ai_instruction_versions")
+        .insert({
+          change_note: `Reverted from v${version.version_number}`,
+          content_hash: version.content_hash,
+          copied_from_version_id: version.id,
+          created_by_user_id: userId,
+          instruction_set_id: aiInstructionSet.id,
+          is_current: true,
+          model: version.model,
+          output_schema: version.output_schema,
+          system_prompt: version.system_prompt,
+          temperature: version.temperature ?? 0.2,
+          user_prompt_template: version.user_prompt_template,
+          version_number: nextVersionNumber,
+        })
+        .select(
+          "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,is_current,change_note,content_hash,copied_from_version_id,created_at"
+        )
+        .single();
+
+      if (revertError) {
+        throw revertError;
+      }
+
+      setAiInstructionVersion(revertedVersion);
+      setDraftSourceVersion(revertedVersion);
+      setAiInstructionVersions((currentVersions) => [
+        revertedVersion,
+        ...currentVersions.map((currentVersion) => ({
+          ...currentVersion,
+          is_current: false,
+        })),
+      ]);
+
+      const draft = resetInstructionDraft(revertedVersion);
+      setInstructionSystemPrompt(draft.systemPrompt);
+      setInstructionUserPrompt(draft.userPrompt);
+      setInstructionOutputSchema(draft.outputSchema);
+      setInstructionModel(draft.model);
+      setInstructionChangeNote("");
+      setMessage(
+        `Reverted v${version.version_number} into new current v${revertedVersion.version_number}.`
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setRevertingInstructionForId(null);
     }
   }
 
@@ -1634,6 +1798,15 @@ export default function Home() {
                 </div>
 
                 <form className="mt-5 space-y-4" onSubmit={handleSaveCarePrepInstructions}>
+                  {draftSourceVersion ? (
+                    <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">
+                      Editing from v{draftSourceVersion.version_number}
+                      {draftSourceVersion.content_hash
+                        ? ` · ${draftSourceVersion.content_hash.slice(0, 12)}`
+                        : ""}
+                    </p>
+                  ) : null}
+
                   <label className="block text-sm font-medium text-slate-700">
                     Model
                     <input
@@ -1698,6 +1871,72 @@ export default function Home() {
                     {savingInstructions ? "Saving..." : "Save new version"}
                   </button>
                 </form>
+
+                {aiInstructionVersions.length > 0 ? (
+                  <section className="mt-6 border-t border-slate-200 pt-5">
+                    <h3 className="text-lg font-semibold text-slate-900">
+                      Version history
+                    </h3>
+                    <div className="mt-3 space-y-3">
+                      {aiInstructionVersions.map((version) => (
+                        <article
+                          className="rounded-md border border-slate-200 p-4"
+                          key={version.id}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-slate-900">
+                                v{version.version_number}
+                                {version.is_current ? " · current" : ""}
+                              </p>
+                              <p className="mt-1 text-sm text-slate-500">
+                                {formatDate(version.created_at)}
+                                {version.model ? ` · ${version.model}` : ""}
+                              </p>
+                              {version.content_hash ? (
+                                <p className="mt-1 font-mono text-xs text-slate-500">
+                                  {version.content_hash}
+                                </p>
+                              ) : null}
+                              {version.change_note ? (
+                                <p className="mt-2 text-sm text-slate-700">
+                                  {version.change_note}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                                onClick={() =>
+                                  loadInstructionVersionIntoEditor(version)
+                                }
+                                type="button"
+                              >
+                                View
+                              </button>
+                              {!version.is_current ? (
+                                <button
+                                  className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
+                                  disabled={
+                                    revertingInstructionForId === version.id
+                                  }
+                                  onClick={() =>
+                                    handleRevertInstructionVersion(version)
+                                  }
+                                  type="button"
+                                >
+                                  {revertingInstructionForId === version.id
+                                    ? "Reverting..."
+                                    : "Revert"}
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
               </section>
             ) : null}
 
