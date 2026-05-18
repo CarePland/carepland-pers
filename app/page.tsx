@@ -1915,6 +1915,10 @@ export default function Home() {
         throw new Error("Enter a valid email address.");
       }
 
+      if (!profileDraft.displayName.trim()) {
+        throw new Error("Display name is required.");
+      }
+
       if (!profileDraft.timezone.trim()) {
         throw new Error("Time zone is required.");
       }
@@ -1939,7 +1943,7 @@ export default function Home() {
         address_line2: profileDraft.addressLine2.trim() || null,
         city: profileDraft.city.trim() || null,
         country: profileDraft.country.trim() || null,
-        display_name: profileDraft.displayName.trim() || null,
+        display_name: profileDraft.displayName.trim(),
         email: profileEmail,
         id: user.id,
         onboarding_completed_at: completedAt,
@@ -3342,13 +3346,14 @@ export default function Home() {
                 />
               </label>
               <label className="block text-sm font-medium text-slate-700">
-                Display name
+                Your name
                 <input
                   className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
                   onChange={(event) =>
                     updateProfileDraft("displayName", event.target.value)
                   }
-                  placeholder="Optional"
+                  placeholder="What should we call you?"
+                  required
                   type="text"
                   value={profileDraft.displayName}
                 />
