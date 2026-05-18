@@ -126,6 +126,34 @@ function linesToList(value: string): string[] {
     .filter(Boolean);
 }
 
+function uniqueItems(items: string[], limit: number): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const item of items) {
+    const normalized = item.trim();
+    const key = normalized.toLowerCase();
+
+    if (!normalized || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(normalized);
+
+    if (result.length >= limit) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function includesAny(value: string, terms: string[]): boolean {
+  const normalized = value.toLowerCase();
+  return terms.some((term) => normalized.includes(term));
+}
+
 function formatDate(value: string | null): string {
   if (!value) {
     return "Date not set";
@@ -214,6 +242,9 @@ export default function Home() {
     string | null
   >(null);
   const [savingNoteForId, setSavingNoteForId] = useState<string | null>(null);
+  const [generatingCarePrepForId, setGeneratingCarePrepForId] = useState<
+    string | null
+  >(null);
   const [restoringAppointmentForId, setRestoringAppointmentForId] = useState<
     string | null
   >(null);
@@ -837,6 +868,163 @@ export default function Home() {
     }
   }
 
+  async function handleGenerateCarePrep(appointment: Appointment) {
+    setGeneratingCarePrepForId(appointment.id);
+    setMessage("");
+
+    try {
+      const { careCircleId, userId } = await getPrimaryCareContext(
+        appointment.care_subject_id ?? undefined
+      );
+
+      if (!appointment.care_subject_id) {
+        throw new Error("This appointment needs a Care VIP before CarePrep can run.");
+      }
+
+      let priorAppointmentsQuery = supabase
+        .from("appointments")
+        .select("id,title,reason,starts_at")
+        .eq("care_circle_id", careCircleId)
+        .eq("care_subject_id", appointment.care_subject_id)
+        .neq("id", appointment.id)
+        .neq("status", "archived")
+        .order("starts_at", { ascending: false })
+        .limit(8);
+
+      if (appointment.starts_at) {
+        priorAppointmentsQuery = priorAppointmentsQuery.lt(
+          "starts_at",
+          appointment.starts_at
+        );
+      }
+
+      const { data: priorAppointments, error: priorAppointmentsError } =
+        await priorAppointmentsQuery;
+
+      if (priorAppointmentsError) {
+        throw priorAppointmentsError;
+      }
+
+      const priorAppointmentIds =
+        priorAppointments?.map((priorAppointment) => priorAppointment.id) ?? [];
+
+      const { data: priorNotes, error: priorNotesError } =
+        priorAppointmentIds.length > 0
+          ? await supabase
+              .from("appointment_notes")
+              .select("appointment_id,summary_short,takeaways,followups")
+              .in("appointment_id", priorAppointmentIds)
+              .eq("is_current", true)
+          : { data: [], error: null };
+
+      if (priorNotesError) {
+        throw priorNotesError;
+      }
+
+      const priorSummaries =
+        priorNotes
+          ?.map((note) => note.summary_short)
+          .filter((summary): summary is string => Boolean(summary)) ?? [];
+      const priorTakeaways = priorNotes?.flatMap((note) => asTextList(note.takeaways)) ?? [];
+      const priorFollowups = priorNotes?.flatMap((note) => asTextList(note.followups)) ?? [];
+      const allPriorItems = [...priorSummaries, ...priorTakeaways, ...priorFollowups];
+      const medTerms = [
+        "dose",
+        "gabapentin",
+        "med",
+        "medication",
+        "prescription",
+        "supplement",
+      ];
+      const watchTerms = [
+        "breath",
+        "change",
+        "energy",
+        "eating",
+        "fatigue",
+        "lethargy",
+        "pain",
+        "symptom",
+        "weight",
+      ];
+
+      const sinceLastVisit = uniqueItems([...priorSummaries, ...priorTakeaways], 5);
+      const medReview = uniqueItems(
+        allPriorItems.filter((item) => includesAny(item, medTerms)),
+        5
+      );
+      const watchouts = uniqueItems(
+        allPriorItems.filter((item) => includesAny(item, watchTerms)),
+        5
+      );
+      const nextSteps = uniqueItems(priorFollowups, 5);
+      const keyQuestions = uniqueItems(
+        [
+          ...priorFollowups.map((followup) => `What is the status of: ${followup}`),
+          ...priorTakeaways.map((takeaway) => `Should we revisit: ${takeaway}`),
+          appointment.reason
+            ? `What should we know about ${appointment.reason}?`
+            : "What has changed since the last visit?",
+        ],
+        5
+      );
+      const bringList = uniqueItems(
+        [
+          "Current medication list",
+          "Recent test results or portal messages",
+          medReview.length > 0 ? "Medication or supplement details" : "",
+          nextSteps.length > 0 ? "Notes on open follow-ups" : "",
+        ],
+        4
+      );
+      const careVipName = appointment.care_subject_id
+        ? subjectsById.get(appointment.care_subject_id)?.display_name
+        : null;
+      const summary =
+        sinceLastVisit.length > 0
+          ? `CarePrep for ${careVipName ?? "this Care VIP"}: review ${sinceLastVisit
+              .slice(0, 2)
+              .join("; ")}. Bring key records and ask about open follow-ups.`
+          : `CarePrep for ${careVipName ?? "this Care VIP"}: no prior notes were found yet. Use this visit to capture concerns, questions, and follow-ups.`;
+
+      const guidancePayload = {
+        appointment_id: appointment.id,
+        bring_list: bringList,
+        care_circle_id: careCircleId,
+        generated_at: new Date().toISOString(),
+        key_questions: keyQuestions,
+        med_review: medReview,
+        model: "local-rule-based",
+        next_steps: nextSteps,
+        prompt_version: "careprep-mvp-1",
+        since_last_visit: sinceLastVisit,
+        status: "completed",
+        summary,
+        user_id: userId,
+        watchouts,
+      };
+
+      const existingGuidance = guidanceByAppointment.get(appointment.id);
+      const { error: guidanceError } = existingGuidance
+        ? await supabase
+            .from("careprep_guidance")
+            .update(guidancePayload)
+            .eq("id", existingGuidance.id)
+        : await supabase.from("careprep_guidance").insert(guidancePayload);
+
+      if (guidanceError) {
+        throw guidanceError;
+      }
+
+      await loadAppointments();
+      setMessage(existingGuidance ? "CarePrep refreshed." : "CarePrep generated.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setGeneratingCarePrepForId(null);
+    }
+  }
+
   function updateNoteDraft(
     appointmentId: string,
     field: "followups" | "summary" | "takeaways",
@@ -1410,6 +1598,23 @@ export default function Home() {
                         <h3 className="font-semibold text-slate-900">Reason</h3>
                         <p className="mt-1 text-slate-700">{appointment.reason}</p>
                       </section>
+                    ) : null}
+
+                    {!isArchived ? (
+                      <div className="mt-5">
+                        <button
+                          className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                          disabled={generatingCarePrepForId === appointment.id}
+                          onClick={() => handleGenerateCarePrep(appointment)}
+                          type="button"
+                        >
+                          {generatingCarePrepForId === appointment.id
+                            ? "Generating CarePrep..."
+                            : prep
+                              ? "Refresh CarePrep"
+                              : "Generate CarePrep"}
+                        </button>
+                      </div>
                     ) : null}
 
                     {note ? (
