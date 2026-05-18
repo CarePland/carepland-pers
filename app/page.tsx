@@ -2295,9 +2295,9 @@ export default function Home() {
                           {generatingCarePrepForId === appointment.id
                             ? "Generating CarePrep..."
                             : carePrepDraft
-                              ? "Regenerate draft"
+                              ? "Regenerate CarePrep"
                               : prep
-                                ? "Generate new draft"
+                                ? "Generate new CarePrep"
                                 : "Generate CarePrep"}
                         </button>
                       </div>
@@ -2308,11 +2308,11 @@ export default function Home() {
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <h3 className="text-lg font-semibold text-blue-900">
-                              Review AI CarePrep draft
+                              Review new CarePrep
                             </h3>
                             <p className="mt-1 text-sm text-blue-800">
-                              AI draft version {carePrepDraft.version_number}. Accept
-                              it as-is, edit it into your version, or discard it.
+                              AI prepared this version. Accept it as-is, edit it
+                              into your version, or discard it.
                             </p>
                           </div>
                           <button
@@ -2332,7 +2332,7 @@ export default function Home() {
                           >
                             {discardingCarePrepForId === appointment.id
                               ? "Discarding..."
-                              : "Discard draft"}
+                              : "Discard"}
                           </button>
                         </div>
 
@@ -2462,7 +2462,7 @@ export default function Home() {
                           >
                             {savingCarePrepForId === appointment.id
                               ? "Accepting..."
-                              : "Accept AI draft"}
+                              : "Accept CarePrep"}
                           </button>
                           <button
                             className="rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
