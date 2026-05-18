@@ -138,6 +138,18 @@ type TextIntakeMatch = {
   score: number;
 };
 
+type AppointmentDetailChange = {
+  currentValue: string;
+  field:
+    | "location_address"
+    | "location_name"
+    | "location_phone"
+    | "provider_name"
+    | "provider_organization";
+  label: string;
+  newValue: string;
+};
+
 const ALL_SUBJECTS = "all";
 
 const defaultEntitlement: CareCircleEntitlement = {
@@ -320,6 +332,61 @@ function fieldTokenOverlap(
   return sharedTokenCount(textTokens(left ?? ""), textTokens(right ?? ""));
 }
 
+function appointmentDetailChanges(
+  appointment: Appointment,
+  draft: TextIntakeDraft
+): AppointmentDetailChange[] {
+  const fields: Array<{
+    currentValue: string | null;
+    field: AppointmentDetailChange["field"];
+    label: string;
+    newValue: string;
+  }> = [
+    {
+      currentValue: appointment.provider_name,
+      field: "provider_name",
+      label: "Provider",
+      newValue: draft.providerName,
+    },
+    {
+      currentValue: appointment.provider_organization,
+      field: "provider_organization",
+      label: "Practice",
+      newValue: draft.providerOrganization,
+    },
+    {
+      currentValue: appointment.location_name,
+      field: "location_name",
+      label: "Location name",
+      newValue: draft.locationName,
+    },
+    {
+      currentValue: appointment.location_address,
+      field: "location_address",
+      label: "Address",
+      newValue: draft.locationAddress,
+    },
+    {
+      currentValue: appointment.location_phone,
+      field: "location_phone",
+      label: "Phone",
+      newValue: draft.locationPhone,
+    },
+  ];
+
+  return fields
+    .map((item) => ({
+      ...item,
+      currentValue: item.currentValue?.trim() ?? "",
+      newValue: item.newValue.trim(),
+    }))
+    .filter(
+      (item) =>
+        item.newValue &&
+        item.currentValue.toLowerCase() !== item.newValue.toLowerCase()
+    );
+}
+
 function dayDifference(left: string | null, right: string): number | null {
   if (!left || !right) {
     return null;
@@ -465,6 +532,45 @@ function DetailList({
   );
 }
 
+function AppointmentDetailUpdateOption({
+  checked,
+  changes,
+  onChange,
+}: {
+  checked: boolean;
+  changes: AppointmentDetailChange[];
+  onChange: (checked: boolean) => void;
+}) {
+  if (changes.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+      <h4 className="font-semibold text-amber-950">
+        Appointment details found
+      </h4>
+      <div className="mt-2 space-y-2 text-sm text-amber-950">
+        {changes.map((change) => (
+          <p key={change.field}>
+            <span className="font-semibold">{change.label}:</span>{" "}
+            {change.currentValue || "Blank"} -&gt; {change.newValue}
+          </p>
+        ))}
+      </div>
+      <label className="mt-3 flex items-start gap-2 text-sm font-semibold text-amber-950">
+        <input
+          checked={checked}
+          className="mt-1"
+          onChange={(event) => onChange(event.target.checked)}
+          type="checkbox"
+        />
+        <span>Update appointment details when saving notes</span>
+      </label>
+    </section>
+  );
+}
+
 function resetInstructionDraft(version: AiInstructionVersion | null) {
   return {
     model: version?.model ?? "gpt-4.1-mini",
@@ -537,6 +643,10 @@ export default function Home() {
     useState<string | null>(null);
   const [contextualTextIntakeValue, setContextualTextIntakeValue] =
     useState("");
+  const [
+    applyTextIntakeAppointmentDetails,
+    setApplyTextIntakeAppointmentDetails,
+  ] = useState(false);
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
   const [showAiAdmin, setShowAiAdmin] = useState(false);
@@ -1396,6 +1506,7 @@ export default function Home() {
     setSelectedTextIntakeMatchId("new");
     setTextIntakeTargetAppointmentId(null);
     setContextualTextIntakeValue("");
+    setApplyTextIntakeAppointmentDetails(false);
     setNewCareVipName("");
     setManagingCareVips(false);
     setMessage("Signed out.");
@@ -1602,6 +1713,7 @@ export default function Home() {
     setTextIntakeMatches([]);
     setSelectedTextIntakeMatchId(appointment.id);
     setTextIntakeSubjectId(appointment.care_subject_id ?? "");
+    setApplyTextIntakeAppointmentDetails(false);
     setMessage("");
   }
 
@@ -1613,6 +1725,7 @@ export default function Home() {
     setSelectedTextIntakeMatchId("new");
     setTextIntakeTargetAppointmentId(null);
     setContextualTextIntakeValue("");
+    setApplyTextIntakeAppointmentDetails(false);
   }
 
   async function findTextIntakeMatches(
@@ -1871,6 +1984,10 @@ export default function Home() {
         throw new Error("Add notes before updating an existing appointment.");
       }
 
+      const detailChanges =
+        targetAppointment && applyTextIntakeAppointmentDetails
+          ? appointmentDetailChanges(targetAppointment, textIntakeDraft)
+          : [];
       let appointmentId = selectedMatch?.appointment.id ?? "";
 
       if (!appointmentId) {
@@ -2000,6 +2117,9 @@ export default function Home() {
             archived_at:
               selectedMatch?.appointment.status === "archived" ? null : undefined,
             current_note_id: note.id,
+            ...Object.fromEntries(
+              detailChanges.map((change) => [change.field, change.newValue])
+            ),
             status:
               selectedMatch?.appointment.status === "archived"
                 ? "scheduled"
@@ -2018,9 +2138,23 @@ export default function Home() {
           .update({
             accepted_at: new Date().toISOString(),
             accepted_by_user_id: userId,
-            accepted_interpretation: acceptedInterpretation,
+            accepted_interpretation: {
+              ...acceptedInterpretation,
+              appointment_detail_updates: detailChanges.map((change) => ({
+                field: change.field,
+                from: change.currentValue,
+                to: change.newValue,
+              })),
+            },
             appointment_id: appointmentId,
-            interpretation: acceptedInterpretation,
+            interpretation: {
+              ...acceptedInterpretation,
+              appointment_detail_updates: detailChanges.map((change) => ({
+                field: change.field,
+                from: change.currentValue,
+                to: change.newValue,
+              })),
+            },
             match_candidates: textIntakeMatches.map((match) => ({
               appointment_id: match.appointment.id,
               reasons: match.reasons,
@@ -2060,6 +2194,7 @@ export default function Home() {
       setSelectedTextIntakeMatchId("new");
       setTextIntakeTargetAppointmentId(null);
       setContextualTextIntakeValue("");
+      setApplyTextIntakeAppointmentDetails(false);
       setAppointmentView(hasNotes ? "logged" : "upcoming");
       await loadAppointments(hasNotes ? "logged" : "upcoming");
       setMessage("Intake saved.");
@@ -3762,6 +3897,15 @@ export default function Home() {
                         </button>
                       </>
                     ) : (
+                      <>
+                      <AppointmentDetailUpdateOption
+                        checked={applyTextIntakeAppointmentDetails}
+                        changes={appointmentDetailChanges(
+                          notesReminderAppointment,
+                          textIntakeDraft
+                        )}
+                        onChange={setApplyTextIntakeAppointmentDetails}
+                      />
                       <div className="mt-4 grid gap-4 lg:grid-cols-3">
                         <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
                           Visit summary
@@ -3812,6 +3956,7 @@ export default function Home() {
                           </button>
                         </div>
                       </div>
+                      </>
                     )}
                   </form>
                 ) : null}
@@ -4061,6 +4206,14 @@ export default function Home() {
                                 ? ` · ${textIntakeDraft.suggestedAction}`
                                 : ""}
                             </p>
+                            <AppointmentDetailUpdateOption
+                              checked={applyTextIntakeAppointmentDetails}
+                              changes={appointmentDetailChanges(
+                                appointment,
+                                textIntakeDraft
+                              )}
+                              onChange={setApplyTextIntakeAppointmentDetails}
+                            />
                             <div className="mt-4 grid gap-4 lg:grid-cols-3">
                               <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
                                 Visit summary
