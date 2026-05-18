@@ -3613,7 +3613,7 @@ export default function Home() {
                     }
                     type="button"
                   >
-                    Add notes
+                    Type
                   </button>
                   <button
                     className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
@@ -3623,7 +3623,7 @@ export default function Home() {
                     }
                     type="button"
                   >
-                    Paste notes
+                    Paste
                   </button>
                 </div>
                 {editingNoteIds[notesReminderAppointment.id] ? (
@@ -3979,7 +3979,7 @@ export default function Home() {
                             onClick={() => startContextualTextIntake(appointment)}
                             type="button"
                           >
-                            Paste notes
+                            Paste
                           </button>
                         ) : null}
                         <button
