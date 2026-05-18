@@ -14,6 +14,10 @@ type Appointment = {
   archived_at?: string | null;
 };
 
+type NotesReminderAppointment = Appointment & {
+  care_circle_id: string;
+};
+
 type CareSubject = {
   id: string;
   care_circle_id: string;
@@ -377,6 +381,8 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [notesReminderAppointment, setNotesReminderAppointment] =
+    useState<NotesReminderAppointment | null>(null);
   const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
   const [entitlement, setEntitlement] =
     useState<CareCircleEntitlement>(defaultEntitlement);
@@ -509,6 +515,7 @@ export default function Home() {
 
     if (circleIds.length === 0) {
       setAppointments([]);
+      setNotesReminderAppointment(null);
       setCareSubjects([]);
       setEntitlement(defaultEntitlement);
       setNotes([]);
@@ -600,12 +607,37 @@ export default function Home() {
       appointmentQuery = appointmentQuery.eq("care_subject_id", effectiveSubjectId);
     }
 
-    const { data: appointmentRows, error: appointmentsError } =
-      await appointmentQuery;
+    let notesReminderQuery = supabase
+      .from("appointments")
+      .select("id,care_circle_id,care_subject_id,current_note_id,title,reason,starts_at,status")
+      .in("care_circle_id", circleIds)
+      .neq("status", "archived")
+      .is("current_note_id", null)
+      .lt("starts_at", new Date().toISOString())
+      .order("starts_at", { ascending: false })
+      .limit(1);
+
+    if (effectiveSubjectId !== ALL_SUBJECTS) {
+      notesReminderQuery = notesReminderQuery.eq(
+        "care_subject_id",
+        effectiveSubjectId
+      );
+    }
+
+    const [
+      { data: appointmentRows, error: appointmentsError },
+      { data: reminderRows, error: reminderError },
+    ] = await Promise.all([appointmentQuery, notesReminderQuery]);
 
     if (appointmentsError) {
       throw appointmentsError;
     }
+
+    if (reminderError) {
+      throw reminderError;
+    }
+
+    setNotesReminderAppointment(reminderRows?.[0] ?? null);
 
     const visibleAppointments =
       appointmentRows?.filter((item) =>
@@ -1094,6 +1126,7 @@ export default function Home() {
     setSignedInEmail(null);
     setPassword("");
     setAppointments([]);
+    setNotesReminderAppointment(null);
     setCareSubjects([]);
     setEntitlement(defaultEntitlement);
     setNotes([]);
@@ -1653,6 +1686,29 @@ export default function Home() {
       ...currentDrafts,
       [appointmentId]: emptyNoteDraft,
     }));
+  }
+
+  async function handleStartReminderNotes(appointment: NotesReminderAppointment) {
+    setAppointmentView("upcoming");
+    setLoading(true);
+    setMessage("");
+
+    try {
+      await loadAppointments("upcoming");
+      setNoteDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [appointment.id]: emptyNoteDraft,
+      }));
+      setEditingNoteIds((currentIds) => ({
+        ...currentIds,
+        [appointment.id]: true,
+      }));
+      setMessage(`Add notes for ${appointment.title || "this appointment"}.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleSaveNote(
@@ -2323,6 +2379,34 @@ export default function Home() {
                   Archived
                 </button>
               </div>
+            ) : null}
+
+            {signedInEmail &&
+            appointmentView === "upcoming" &&
+            notesReminderAppointment ? (
+              <section className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold text-blue-950">
+                      Add notes for your last appointment
+                    </h2>
+                    <p className="mt-1 text-sm text-blue-900">
+                      {notesReminderAppointment.title || "Untitled appointment"} ·{" "}
+                      {formatDate(notesReminderAppointment.starts_at)}
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                    disabled={loading}
+                    onClick={() =>
+                      handleStartReminderNotes(notesReminderAppointment)
+                    }
+                    type="button"
+                  >
+                    Add notes
+                  </button>
+                </div>
+              </section>
             ) : null}
 
             {appointments.length === 0 ? (
