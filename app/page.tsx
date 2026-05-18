@@ -121,6 +121,13 @@ type TextIntakeDraft = {
   takeaways: string;
 };
 
+type TextIntakeMatch = {
+  appointment: Appointment;
+  currentNote: AppointmentNote | null;
+  reasons: string[];
+  score: number;
+};
+
 const ALL_SUBJECTS = "all";
 
 const defaultEntitlement: CareCircleEntitlement = {
@@ -227,6 +234,63 @@ function linesToList(value: string): string[] {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+const matchStopWords = new Set([
+  "about",
+  "after",
+  "appointment",
+  "current",
+  "follow",
+  "followup",
+  "notes",
+  "patient",
+  "review",
+  "scheduled",
+  "visit",
+  "with",
+]);
+
+function textTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 3 && !matchStopWords.has(token))
+  );
+}
+
+function sharedTokenCount(left: Set<string>, right: Set<string>): number {
+  let count = 0;
+
+  left.forEach((token) => {
+    if (right.has(token)) {
+      count += 1;
+    }
+  });
+
+  return count;
+}
+
+function dayDifference(left: string | null, right: string): number | null {
+  if (!left || !right) {
+    return null;
+  }
+
+  const leftDate = new Date(left);
+  const rightDate = new Date(right);
+
+  if (Number.isNaN(leftDate.getTime()) || Number.isNaN(rightDate.getTime())) {
+    return null;
+  }
+
+  return Math.abs(
+    Math.round(
+      (leftDate.getTime() - rightDate.getTime()) / (1000 * 60 * 60 * 24)
+    )
+  );
 }
 
 async function hashInstructionContent({
@@ -352,6 +416,11 @@ export default function Home() {
   const [textIntakeAiDraft, setTextIntakeAiDraft] =
     useState<TextIntakeDraft | null>(null);
   const [textIntakeItemId, setTextIntakeItemId] = useState<string | null>(null);
+  const [textIntakeMatches, setTextIntakeMatches] = useState<TextIntakeMatch[]>(
+    []
+  );
+  const [selectedTextIntakeMatchId, setSelectedTextIntakeMatchId] =
+    useState("new");
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
   const [showAiAdmin, setShowAiAdmin] = useState(false);
@@ -1202,6 +1271,8 @@ export default function Home() {
     setTextIntakeDraft(null);
     setTextIntakeAiDraft(null);
     setTextIntakeItemId(null);
+    setTextIntakeMatches([]);
+    setSelectedTextIntakeMatchId("new");
     setNewCareVipName("");
     setManagingCareVips(false);
     setMessage("Signed out.");
@@ -1302,11 +1373,27 @@ export default function Home() {
       }
 
       const interpretedDraft = intakeDraftFromResult(result.draft);
+      const interpretedSubjectId = result.careSubjectId ?? textIntakeSubjectId;
+      const { careCircleId, careSubjectId } =
+        await getPrimaryCareContext(interpretedSubjectId);
+      const matches = careSubjectId
+        ? await findTextIntakeMatches(
+            interpretedDraft,
+            careCircleId,
+            careSubjectId
+          )
+        : [];
       setTextIntakeDraft(interpretedDraft);
       setTextIntakeAiDraft(interpretedDraft);
       setTextIntakeItemId(result.intakeItemId ?? null);
-      setTextIntakeSubjectId(result.careSubjectId ?? textIntakeSubjectId);
-      setMessage("Text interpreted. Review before saving.");
+      setTextIntakeMatches(matches);
+      setSelectedTextIntakeMatchId("new");
+      setTextIntakeSubjectId(interpretedSubjectId);
+      setMessage(
+        matches.length > 0
+          ? "Text interpreted. Possible appointment match found."
+          : "Text interpreted. Review before saving."
+      );
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -1322,6 +1409,109 @@ export default function Home() {
       ...(currentDraft ?? emptyTextIntakeDraft),
       [field]: value,
     }));
+  }
+
+  async function findTextIntakeMatches(
+    draft: TextIntakeDraft,
+    careCircleId: string,
+    careSubjectId: string
+  ): Promise<TextIntakeMatch[]> {
+    const { data: appointmentRows, error: appointmentError } = await supabase
+      .from("appointments")
+      .select(
+        "id,care_subject_id,current_note_id,title,reason,starts_at,status,archived_at"
+      )
+      .eq("care_circle_id", careCircleId)
+      .eq("care_subject_id", careSubjectId)
+      .order("starts_at", { ascending: false, nullsFirst: false })
+      .limit(80);
+
+    if (appointmentError) {
+      throw appointmentError;
+    }
+
+    const candidates = appointmentRows ?? [];
+    const noteIds = candidates
+      .map((appointment) => appointment.current_note_id)
+      .filter(Boolean) as string[];
+    let noteMap = new Map<string, AppointmentNote>();
+
+    if (noteIds.length > 0) {
+      const { data: noteRows, error: notesError } = await supabase
+        .from("appointment_notes")
+        .select(
+          "id,appointment_id,summary_short,takeaways,followups,is_current,version_number,superseded_at,superseded_by_note_id"
+        )
+        .in("id", noteIds);
+
+      if (notesError) {
+        throw notesError;
+      }
+
+      noteMap = new Map((noteRows ?? []).map((note) => [note.id, note]));
+    }
+
+    const draftText = [
+      draft.appointmentTitle,
+      draft.appointmentReason,
+      draft.notesSummary,
+      draft.takeaways,
+      draft.followups,
+    ].join(" ");
+    const draftTokens = textTokens(draftText);
+
+    return candidates
+      .map((appointment) => {
+        const appointmentText = [
+          appointment.title ?? "",
+          appointment.reason ?? "",
+        ].join(" ");
+        const appointmentTokens = textTokens(appointmentText);
+        const sharedTokens = sharedTokenCount(draftTokens, appointmentTokens);
+        const daysApart = dayDifference(appointment.starts_at, draft.startsAt);
+        const reasons: string[] = [];
+        let score = 0;
+
+        if (daysApart !== null) {
+          if (daysApart === 0) {
+            score += 6;
+            reasons.push("same date");
+          } else if (daysApart <= 7) {
+            score += 4;
+            reasons.push(`within ${daysApart} day${daysApart === 1 ? "" : "s"}`);
+          } else if (daysApart <= 30) {
+            score += 2;
+            reasons.push("nearby date");
+          }
+        }
+
+        if (sharedTokens > 0) {
+          score += Math.min(sharedTokens, 5);
+          reasons.push(`${sharedTokens} text match${sharedTokens === 1 ? "" : "es"}`);
+        }
+
+        if (!appointment.current_note_id) {
+          score += 1;
+          reasons.push("no notes yet");
+        }
+
+        if (appointment.status === "archived") {
+          score -= 1;
+          reasons.push("archived");
+        }
+
+        return {
+          appointment,
+          currentNote: appointment.current_note_id
+            ? noteMap.get(appointment.current_note_id) ?? null
+            : null,
+          reasons,
+          score,
+        };
+      })
+      .filter((match) => match.score >= 3 && match.reasons.length > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 3);
   }
 
   async function handleSaveTextIntakeDraft(event: FormEvent<HTMLFormElement>) {
@@ -1383,35 +1573,55 @@ export default function Home() {
             aiTakeaways.length > 0 ||
             aiFollowups.length > 0)
       );
+      const selectedMatch =
+        selectedTextIntakeMatchId === "new"
+          ? null
+          : textIntakeMatches.find(
+              (match) => match.appointment.id === selectedTextIntakeMatchId
+            ) ?? null;
 
-      const { data: appointment, error: appointmentError } = await supabase
-        .from("appointments")
-        .insert({
-          care_circle_id: careCircleId,
-          care_subject_id: careSubjectId,
-          owner_user_id: userId,
-          reason: textIntakeDraft.appointmentReason.trim() || null,
-          source: "manual",
-          starts_at: startsAt,
-          status: "scheduled",
-          title: textIntakeDraft.appointmentTitle.trim(),
-        })
-        .select("id")
-        .single();
+      if (selectedMatch && !hasNotes) {
+        throw new Error("Add notes before updating an existing appointment.");
+      }
 
-      if (appointmentError) {
-        throw appointmentError;
+      let appointmentId = selectedMatch?.appointment.id ?? "";
+
+      if (!appointmentId) {
+        const { data: appointment, error: appointmentError } = await supabase
+          .from("appointments")
+          .insert({
+            care_circle_id: careCircleId,
+            care_subject_id: careSubjectId,
+            owner_user_id: userId,
+            reason: textIntakeDraft.appointmentReason.trim() || null,
+            source: "manual",
+            starts_at: startsAt,
+            status: "scheduled",
+            title: textIntakeDraft.appointmentTitle.trim(),
+          })
+          .select("id")
+          .single();
+
+        if (appointmentError) {
+          throw appointmentError;
+        }
+
+        appointmentId = appointment.id;
       }
 
       if (hasNotes) {
         let aiNoteId: string | null = null;
+        const existingNote = selectedMatch?.currentNote ?? null;
+        const nextVersionNumber = existingNote
+          ? existingNote.version_number + 1
+          : 1;
 
         if (textIntakeAiDraft && hasAiNoteDraft) {
           const { data: aiNote, error: aiNoteError } = await supabase
             .from("appointment_notes")
             .insert({
               accepted_by_user: false,
-              appointment_id: appointment.id,
+              appointment_id: appointmentId,
               care_circle_id: careCircleId,
               followups: aiFollowups,
               generated_by_ai: true,
@@ -1421,7 +1631,7 @@ export default function Home() {
               summary_short: textIntakeAiDraft.notesSummary.trim() || null,
               takeaways: aiTakeaways,
               user_id: userId,
-              version_number: 1,
+              version_number: nextVersionNumber,
             })
             .select("id")
             .single();
@@ -1437,7 +1647,7 @@ export default function Home() {
           .from("appointment_notes")
           .insert({
             accepted_by_user: true,
-            appointment_id: appointment.id,
+            appointment_id: appointmentId,
             care_circle_id: careCircleId,
             followups,
             generated_by_ai: false,
@@ -1447,7 +1657,7 @@ export default function Home() {
             summary_short: textIntakeDraft.notesSummary.trim() || null,
             takeaways,
             user_id: userId,
-            version_number: aiNoteId ? 2 : 1,
+            version_number: aiNoteId ? nextVersionNumber + 1 : nextVersionNumber,
           })
           .select("id")
           .single();
@@ -1470,12 +1680,33 @@ export default function Home() {
           }
         }
 
+        if (existingNote) {
+          const { error: existingArchiveError } = await supabase
+            .from("appointment_notes")
+            .update({
+              is_current: false,
+              superseded_at: new Date().toISOString(),
+              superseded_by_note_id: note.id,
+            })
+            .eq("id", existingNote.id);
+
+          if (existingArchiveError) {
+            throw existingArchiveError;
+          }
+        }
+
         const { error: appointmentNoteError } = await supabase
           .from("appointments")
           .update({
+            archived_at:
+              selectedMatch?.appointment.status === "archived" ? null : undefined,
             current_note_id: note.id,
+            status:
+              selectedMatch?.appointment.status === "archived"
+                ? "scheduled"
+                : undefined,
           })
-          .eq("id", appointment.id);
+          .eq("id", appointmentId);
 
         if (appointmentNoteError) {
           throw appointmentNoteError;
@@ -1489,8 +1720,22 @@ export default function Home() {
             accepted_at: new Date().toISOString(),
             accepted_by_user_id: userId,
             accepted_interpretation: acceptedInterpretation,
-            appointment_id: appointment.id,
+            appointment_id: appointmentId,
             interpretation: acceptedInterpretation,
+            match_candidates: textIntakeMatches.map((match) => ({
+              appointment_id: match.appointment.id,
+              reasons: match.reasons,
+              score: match.score,
+              status: match.appointment.status,
+              title: match.appointment.title,
+            })),
+            match_status: selectedMatch
+              ? "user_selected_existing"
+              : textIntakeMatches.length > 0
+                ? "user_created_new_despite_matches"
+                : "no_match",
+            suggested_appointment_id: textIntakeMatches[0]?.appointment.id ?? null,
+            user_match_decision: selectedMatch ? "attach_existing" : "create_new",
             status: "accepted",
           })
           .eq("id", textIntakeItemId);
@@ -1504,6 +1749,8 @@ export default function Home() {
       setTextIntakeDraft(null);
       setTextIntakeAiDraft(null);
       setTextIntakeItemId(null);
+      setTextIntakeMatches([]);
+      setSelectedTextIntakeMatchId("new");
       setAppointmentView(hasNotes ? "logged" : "upcoming");
       await loadAppointments(hasNotes ? "logged" : "upcoming");
       setMessage("Intake saved.");
@@ -2326,6 +2573,86 @@ export default function Home() {
                         ? ` · ${textIntakeDraft.suggestedAction}`
                         : ""}
                     </p>
+                    {textIntakeMatches.length > 0 ? (
+                      <div className="mt-4 rounded-md border border-blue-200 bg-white p-3">
+                        <h4 className="font-semibold text-slate-900">
+                          This may belong to an existing appointment
+                        </h4>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Choose a match to update its notes, or create a new
+                          logged appointment.
+                        </p>
+                        <div className="mt-3 space-y-3">
+                          {textIntakeMatches.map((match) => (
+                            <label
+                              className="block rounded-md border border-slate-200 bg-slate-50 p-3"
+                              key={match.appointment.id}
+                            >
+                              <span className="flex items-start gap-3">
+                                <input
+                                  checked={
+                                    selectedTextIntakeMatchId ===
+                                    match.appointment.id
+                                  }
+                                  className="mt-1"
+                                  name="text-intake-match"
+                                  onChange={() =>
+                                    setSelectedTextIntakeMatchId(
+                                      match.appointment.id
+                                    )
+                                  }
+                                  type="radio"
+                                  value={match.appointment.id}
+                                />
+                                <span>
+                                  <span className="block font-semibold text-slate-900">
+                                    {match.appointment.title ?? "Untitled appointment"}
+                                  </span>
+                                  <span className="mt-1 block text-sm text-slate-600">
+                                    {formatDate(match.appointment.starts_at)} ·{" "}
+                                    {match.appointment.status}
+                                    {match.currentNote ? " · already has notes" : ""}
+                                  </span>
+                                  <span className="mt-1 block text-xs text-slate-500">
+                                    Why: {match.reasons.join(", ")}
+                                  </span>
+                                  {match.currentNote?.summary_short ? (
+                                    <span className="mt-2 block text-sm text-slate-700">
+                                      Current notes:{" "}
+                                      {match.currentNote.summary_short.slice(0, 140)}
+                                      {match.currentNote.summary_short.length > 140
+                                        ? "..."
+                                        : ""}
+                                    </span>
+                                  ) : null}
+                                </span>
+                              </span>
+                            </label>
+                          ))}
+                          <label className="block rounded-md border border-slate-200 bg-white p-3">
+                            <span className="flex items-start gap-3">
+                              <input
+                                checked={selectedTextIntakeMatchId === "new"}
+                                className="mt-1"
+                                name="text-intake-match"
+                                onChange={() => setSelectedTextIntakeMatchId("new")}
+                                type="radio"
+                                value="new"
+                              />
+                              <span>
+                                <span className="block font-semibold text-slate-900">
+                                  Create a new appointment
+                                </span>
+                                <span className="mt-1 block text-sm text-slate-600">
+                                  Use the reviewed draft below as a new logged
+                                  appointment.
+                                </span>
+                              </span>
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+                    ) : null}
                     <label className="mt-3 block text-sm font-medium text-slate-700">
                       Title
                       <input
@@ -2407,6 +2734,8 @@ export default function Home() {
                           setTextIntakeDraft(null);
                           setTextIntakeAiDraft(null);
                           setTextIntakeItemId(null);
+                          setTextIntakeMatches([]);
+                          setSelectedTextIntakeMatchId("new");
                         }}
                         type="button"
                       >
