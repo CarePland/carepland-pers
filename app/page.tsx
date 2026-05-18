@@ -349,6 +349,8 @@ export default function Home() {
   const [textIntakeValue, setTextIntakeValue] = useState("");
   const [textIntakeDraft, setTextIntakeDraft] =
     useState<TextIntakeDraft | null>(null);
+  const [textIntakeAiDraft, setTextIntakeAiDraft] =
+    useState<TextIntakeDraft | null>(null);
   const [textIntakeItemId, setTextIntakeItemId] = useState<string | null>(null);
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
@@ -1198,6 +1200,7 @@ export default function Home() {
     setTextIntakeSubjectId("");
     setTextIntakeValue("");
     setTextIntakeDraft(null);
+    setTextIntakeAiDraft(null);
     setTextIntakeItemId(null);
     setNewCareVipName("");
     setManagingCareVips(false);
@@ -1298,7 +1301,9 @@ export default function Home() {
         throw new Error(result.error ?? "Text intake failed.");
       }
 
-      setTextIntakeDraft(intakeDraftFromResult(result.draft));
+      const interpretedDraft = intakeDraftFromResult(result.draft);
+      setTextIntakeDraft(interpretedDraft);
+      setTextIntakeAiDraft(interpretedDraft);
       setTextIntakeItemId(result.intakeItemId ?? null);
       setTextIntakeSubjectId(result.careSubjectId ?? textIntakeSubjectId);
       setMessage("Text interpreted. Review before saving.");
@@ -1352,6 +1357,12 @@ export default function Home() {
       const startsAt = startsAtDate ? startsAtDate.toISOString() : null;
       const takeaways = linesToList(textIntakeDraft.takeaways);
       const followups = linesToList(textIntakeDraft.followups);
+      const aiTakeaways = textIntakeAiDraft
+        ? linesToList(textIntakeAiDraft.takeaways)
+        : [];
+      const aiFollowups = textIntakeAiDraft
+        ? linesToList(textIntakeAiDraft.followups)
+        : [];
       const acceptedInterpretation = {
         appointment_reason: textIntakeDraft.appointmentReason,
         appointment_title: textIntakeDraft.appointmentTitle,
@@ -1366,6 +1377,12 @@ export default function Home() {
         Boolean(textIntakeDraft.notesSummary.trim()) ||
         takeaways.length > 0 ||
         followups.length > 0;
+      const hasAiNoteDraft = Boolean(
+        textIntakeAiDraft &&
+          (textIntakeAiDraft.notesSummary.trim() ||
+            aiTakeaways.length > 0 ||
+            aiFollowups.length > 0)
+      );
 
       const { data: appointment, error: appointmentError } = await supabase
         .from("appointments")
@@ -1387,6 +1404,35 @@ export default function Home() {
       }
 
       if (hasNotes) {
+        let aiNoteId: string | null = null;
+
+        if (textIntakeAiDraft && hasAiNoteDraft) {
+          const { data: aiNote, error: aiNoteError } = await supabase
+            .from("appointment_notes")
+            .insert({
+              accepted_by_user: false,
+              appointment_id: appointment.id,
+              care_circle_id: careCircleId,
+              followups: aiFollowups,
+              generated_by_ai: true,
+              input_text: textIntakeValue.trim() || null,
+              is_current: false,
+              source: "intake_ai_draft",
+              summary_short: textIntakeAiDraft.notesSummary.trim() || null,
+              takeaways: aiTakeaways,
+              user_id: userId,
+              version_number: 1,
+            })
+            .select("id")
+            .single();
+
+          if (aiNoteError) {
+            throw aiNoteError;
+          }
+
+          aiNoteId = aiNote.id;
+        }
+
         const { data: note, error: noteError } = await supabase
           .from("appointment_notes")
           .insert({
@@ -1397,17 +1443,31 @@ export default function Home() {
             generated_by_ai: false,
             input_text: textIntakeValue.trim() || null,
             is_current: true,
-            source: "manual",
+            source: textIntakeItemId ? "intake_user_accepted" : "manual",
             summary_short: textIntakeDraft.notesSummary.trim() || null,
             takeaways,
             user_id: userId,
-            version_number: 1,
+            version_number: aiNoteId ? 2 : 1,
           })
           .select("id")
           .single();
 
         if (noteError) {
           throw noteError;
+        }
+
+        if (aiNoteId) {
+          const { error: aiArchiveError } = await supabase
+            .from("appointment_notes")
+            .update({
+              superseded_at: new Date().toISOString(),
+              superseded_by_note_id: note.id,
+            })
+            .eq("id", aiNoteId);
+
+          if (aiArchiveError) {
+            throw aiArchiveError;
+          }
         }
 
         const { error: appointmentNoteError } = await supabase
@@ -1442,6 +1502,7 @@ export default function Home() {
 
       setTextIntakeValue("");
       setTextIntakeDraft(null);
+      setTextIntakeAiDraft(null);
       setTextIntakeItemId(null);
       setAppointmentView(hasNotes ? "logged" : "upcoming");
       await loadAppointments(hasNotes ? "logged" : "upcoming");
@@ -2344,6 +2405,7 @@ export default function Home() {
                         className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
                         onClick={() => {
                           setTextIntakeDraft(null);
+                          setTextIntakeAiDraft(null);
                           setTextIntakeItemId(null);
                         }}
                         type="button"
