@@ -33,6 +33,25 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object") {
+    const possibleMessage = "message" in error ? String(error.message) : "";
+    const possibleCode = "code" in error ? String(error.code) : "";
+
+    if (possibleMessage || possibleCode) {
+      return [possibleCode, possibleMessage].filter(Boolean).join(": ");
+    }
+
+    return JSON.stringify(error);
+  }
+
+  return String(error || "Something went wrong.");
+}
+
 function asTextList(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -151,6 +170,12 @@ export default function Home() {
     setMessage("");
 
     try {
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error(
+          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel."
+        );
+      }
+
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -162,7 +187,7 @@ export default function Home() {
 
       await loadAppointments();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Something went wrong.");
+      setMessage(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
