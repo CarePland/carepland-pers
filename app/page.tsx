@@ -110,6 +110,17 @@ type CarePrepHistoryRow = {
   superseded_by_guidance_id: string | null;
 };
 
+type TextIntakeDraft = {
+  appointmentReason: string;
+  appointmentTitle: string;
+  confidence: number;
+  followups: string;
+  notesSummary: string;
+  startsAt: string;
+  suggestedAction: string;
+  takeaways: string;
+};
+
 const ALL_SUBJECTS = "all";
 
 const defaultEntitlement: CareCircleEntitlement = {
@@ -149,6 +160,17 @@ const emptyAppointmentDraft = {
   startsAt: "",
   status: "scheduled",
   title: "",
+};
+
+const emptyTextIntakeDraft: TextIntakeDraft = {
+  appointmentReason: "",
+  appointmentTitle: "",
+  confidence: 0,
+  followups: "",
+  notesSummary: "",
+  startsAt: "",
+  suggestedAction: "",
+  takeaways: "",
 };
 
 const emptyCarePrepDraft = {
@@ -297,6 +319,25 @@ function resetInstructionDraft(version: AiInstructionVersion | null) {
   };
 }
 
+function intakeDraftFromResult(value: unknown): TextIntakeDraft {
+  const draft =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+
+  return {
+    appointmentReason: String(draft.appointment_reason ?? ""),
+    appointmentTitle: String(draft.appointment_title ?? ""),
+    confidence:
+      typeof draft.confidence === "number" ? draft.confidence : Number(draft.confidence) || 0,
+    followups: asTextList(draft.followups).join("\n"),
+    notesSummary: String(draft.notes_summary ?? ""),
+    startsAt: String(draft.starts_at_local ?? ""),
+    suggestedAction: String(draft.suggested_action ?? ""),
+    takeaways: asTextList(draft.takeaways).join("\n"),
+  };
+}
+
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -304,6 +345,11 @@ export default function Home() {
   const [newAppointmentReason, setNewAppointmentReason] = useState("");
   const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState("");
   const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState("");
+  const [textIntakeSubjectId, setTextIntakeSubjectId] = useState("");
+  const [textIntakeValue, setTextIntakeValue] = useState("");
+  const [textIntakeDraft, setTextIntakeDraft] =
+    useState<TextIntakeDraft | null>(null);
+  const [textIntakeItemId, setTextIntakeItemId] = useState<string | null>(null);
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
   const [showAiAdmin, setShowAiAdmin] = useState(false);
@@ -355,6 +401,8 @@ export default function Home() {
   const [editingNoteIds, setEditingNoteIds] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
+  const [processingTextIntake, setProcessingTextIntake] = useState(false);
+  const [savingTextIntake, setSavingTextIntake] = useState(false);
   const [creatingCareVip, setCreatingCareVip] = useState(false);
   const [appointmentView, setAppointmentView] =
     useState<AppointmentView>("upcoming");
@@ -588,6 +636,15 @@ export default function Home() {
     setCareSubjects(subjects);
     setSelectedSubjectId(effectiveSubjectId);
     setNewAppointmentSubjectId((currentSubjectId) => {
+      if (currentSubjectId && subjects.some((subject) => subject.id === currentSubjectId)) {
+        return currentSubjectId;
+      }
+
+      return effectiveSubjectId !== ALL_SUBJECTS
+        ? effectiveSubjectId
+        : defaultSubjectId;
+    });
+    setTextIntakeSubjectId((currentSubjectId) => {
       if (currentSubjectId && subjects.some((subject) => subject.id === currentSubjectId)) {
         return currentSubjectId;
       }
@@ -1138,6 +1195,10 @@ export default function Home() {
     setAppointmentView("upcoming");
     setSelectedSubjectId(ALL_SUBJECTS);
     setNewAppointmentSubjectId("");
+    setTextIntakeSubjectId("");
+    setTextIntakeValue("");
+    setTextIntakeDraft(null);
+    setTextIntakeItemId(null);
     setNewCareVipName("");
     setManagingCareVips(false);
     setMessage("Signed out.");
@@ -1190,6 +1251,202 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setCreatingCareVip(false);
+    }
+  }
+
+  async function handleInterpretTextIntake(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setProcessingTextIntake(true);
+    setMessage("");
+
+    try {
+      const rawText = textIntakeValue.trim();
+
+      if (!rawText) {
+        throw new Error("Paste some text before running intake.");
+      }
+
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before using intake.");
+      }
+
+      const response = await fetch("/api/intake", {
+        body: JSON.stringify({
+          careSubjectId:
+            textIntakeSubjectId ||
+            (selectedSubjectId !== ALL_SUBJECTS ? selectedSubjectId : ""),
+          rawText,
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Text intake failed.");
+      }
+
+      setTextIntakeDraft(intakeDraftFromResult(result.draft));
+      setTextIntakeItemId(result.intakeItemId ?? null);
+      setTextIntakeSubjectId(result.careSubjectId ?? textIntakeSubjectId);
+      setMessage("Text interpreted. Review before saving.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setProcessingTextIntake(false);
+    }
+  }
+
+  function updateTextIntakeDraft(
+    field: keyof TextIntakeDraft,
+    value: string | number
+  ) {
+    setTextIntakeDraft((currentDraft) => ({
+      ...(currentDraft ?? emptyTextIntakeDraft),
+      [field]: value,
+    }));
+  }
+
+  async function handleSaveTextIntakeDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!textIntakeDraft) {
+      return;
+    }
+
+    setSavingTextIntake(true);
+    setMessage("");
+
+    try {
+      if (!textIntakeDraft.appointmentTitle.trim()) {
+        throw new Error("Please enter an appointment title.");
+      }
+
+      const { careCircleId, careSubjectId, userId } =
+        await getPrimaryCareContext(textIntakeSubjectId);
+
+      if (!careSubjectId) {
+        throw new Error("Please choose who this appointment is for.");
+      }
+
+      const startsAtDate = textIntakeDraft.startsAt
+        ? new Date(textIntakeDraft.startsAt)
+        : null;
+
+      if (startsAtDate && Number.isNaN(startsAtDate.getTime())) {
+        throw new Error("Check the intake appointment date and time.");
+      }
+
+      const startsAt = startsAtDate ? startsAtDate.toISOString() : null;
+      const takeaways = linesToList(textIntakeDraft.takeaways);
+      const followups = linesToList(textIntakeDraft.followups);
+      const hasNotes =
+        Boolean(textIntakeDraft.notesSummary.trim()) ||
+        takeaways.length > 0 ||
+        followups.length > 0;
+
+      const { data: appointment, error: appointmentError } = await supabase
+        .from("appointments")
+        .insert({
+          care_circle_id: careCircleId,
+          care_subject_id: careSubjectId,
+          owner_user_id: userId,
+          reason: textIntakeDraft.appointmentReason.trim() || null,
+          source: "manual",
+          starts_at: startsAt,
+          status: "scheduled",
+          title: textIntakeDraft.appointmentTitle.trim(),
+        })
+        .select("id")
+        .single();
+
+      if (appointmentError) {
+        throw appointmentError;
+      }
+
+      if (hasNotes) {
+        const { data: note, error: noteError } = await supabase
+          .from("appointment_notes")
+          .insert({
+            accepted_by_user: true,
+            appointment_id: appointment.id,
+            care_circle_id: careCircleId,
+            followups,
+            generated_by_ai: false,
+            input_text: textIntakeValue.trim() || null,
+            is_current: true,
+            source: "manual",
+            summary_short: textIntakeDraft.notesSummary.trim() || null,
+            takeaways,
+            user_id: userId,
+            version_number: 1,
+          })
+          .select("id")
+          .single();
+
+        if (noteError) {
+          throw noteError;
+        }
+
+        const { error: appointmentNoteError } = await supabase
+          .from("appointments")
+          .update({
+            current_note_id: note.id,
+          })
+          .eq("id", appointment.id);
+
+        if (appointmentNoteError) {
+          throw appointmentNoteError;
+        }
+      }
+
+      if (textIntakeItemId) {
+        const { error: intakeUpdateError } = await supabase
+          .from("intake_items")
+          .update({
+            accepted_at: new Date().toISOString(),
+            appointment_id: appointment.id,
+            interpretation: {
+              appointment_reason: textIntakeDraft.appointmentReason,
+              appointment_title: textIntakeDraft.appointmentTitle,
+              confidence: textIntakeDraft.confidence,
+              followups,
+              notes_summary: textIntakeDraft.notesSummary,
+              starts_at_local: textIntakeDraft.startsAt,
+              suggested_action: textIntakeDraft.suggestedAction,
+              takeaways,
+            },
+            status: "accepted",
+          })
+          .eq("id", textIntakeItemId);
+
+        if (intakeUpdateError) {
+          throw intakeUpdateError;
+        }
+      }
+
+      setTextIntakeValue("");
+      setTextIntakeDraft(null);
+      setTextIntakeItemId(null);
+      setAppointmentView(hasNotes ? "logged" : "upcoming");
+      await loadAppointments(hasNotes ? "logged" : "upcoming");
+      setMessage("Intake saved.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingTextIntake(false);
     }
   }
 
@@ -1945,6 +2202,155 @@ export default function Home() {
                   </form>
                 ) : null}
               </div>
+            ) : null}
+
+            {signedInEmail ? (
+              <section className="mt-6 border-t border-slate-200 pt-6">
+                <form onSubmit={handleInterpretTextIntake}>
+                  <h2 className="text-xl font-semibold">Paste intake</h2>
+                  {canUseMultipleCareVips ? (
+                    <label className="mt-4 block text-sm font-medium text-slate-700">
+                      Who is this for?
+                      <select
+                        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={careSubjects.length === 0}
+                        onChange={(event) =>
+                          setTextIntakeSubjectId(event.target.value)
+                        }
+                        value={textIntakeSubjectId}
+                      >
+                        {careSubjects.length === 0 ? (
+                          <option value="">No Care VIPs found</option>
+                        ) : null}
+                        {careSubjects.map((subject) => (
+                          <option key={subject.id} value={subject.id}>
+                            {subject.display_name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  <label className="mt-4 block text-sm font-medium text-slate-700">
+                    Text
+                    <textarea
+                      className="mt-2 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      onChange={(event) => setTextIntakeValue(event.target.value)}
+                      placeholder="Paste appointment details, portal text, or visit notes."
+                      value={textIntakeValue}
+                    />
+                  </label>
+                  <button
+                    className="mt-4 w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                    disabled={processingTextIntake}
+                    type="submit"
+                  >
+                    {processingTextIntake ? "Interpreting..." : "Interpret text"}
+                  </button>
+                </form>
+
+                {textIntakeDraft ? (
+                  <form
+                    className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-4"
+                    onSubmit={handleSaveTextIntakeDraft}
+                  >
+                    <h3 className="font-semibold text-blue-950">
+                      Review intake draft
+                    </h3>
+                    <p className="mt-1 text-xs text-blue-800">
+                      Confidence {Math.round(textIntakeDraft.confidence * 100)}%
+                      {textIntakeDraft.suggestedAction
+                        ? ` · ${textIntakeDraft.suggestedAction}`
+                        : ""}
+                    </p>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Title
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft(
+                            "appointmentTitle",
+                            event.target.value
+                          )
+                        }
+                        value={textIntakeDraft.appointmentTitle}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Date & time
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft("startsAt", event.target.value)
+                        }
+                        type="datetime-local"
+                        value={textIntakeDraft.startsAt}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Reason
+                      <textarea
+                        className="mt-2 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft(
+                            "appointmentReason",
+                            event.target.value
+                          )
+                        }
+                        value={textIntakeDraft.appointmentReason}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Notes summary
+                      <textarea
+                        className="mt-2 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft("notesSummary", event.target.value)
+                        }
+                        value={textIntakeDraft.notesSummary}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Takeaways
+                      <textarea
+                        className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft("takeaways", event.target.value)
+                        }
+                        value={textIntakeDraft.takeaways}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Follow-ups
+                      <textarea
+                        className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft("followups", event.target.value)
+                        }
+                        value={textIntakeDraft.followups}
+                      />
+                    </label>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <button
+                        className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                        disabled={savingTextIntake}
+                        type="submit"
+                      >
+                        {savingTextIntake ? "Saving..." : "Save intake"}
+                      </button>
+                      <button
+                        className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                        onClick={() => {
+                          setTextIntakeDraft(null);
+                          setTextIntakeItemId(null);
+                        }}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+              </section>
             ) : null}
 
             {signedInEmail ? (
