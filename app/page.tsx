@@ -213,6 +213,7 @@ const defaultCarePrepOutputSchema = {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -637,6 +638,22 @@ function normalizeUsPhone(value: string):
 
 function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function authRedirectUrl(): string | undefined {
+  if (appUrl) {
+    return appUrl;
+  }
+
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  if (window.location.hostname === "localhost") {
+    return undefined;
+  }
+
+  return window.location.origin;
 }
 
 function DetailList({
@@ -1342,8 +1359,7 @@ export default function Home() {
         email: trimmedEmail,
         password,
         options: {
-          emailRedirectTo:
-            typeof window === "undefined" ? undefined : window.location.origin,
+          emailRedirectTo: authRedirectUrl(),
         },
       });
 
@@ -1393,8 +1409,7 @@ export default function Home() {
       const { error } = await supabase.auth.resetPasswordForEmail(
         trimmedEmail,
         {
-          redirectTo:
-            typeof window === "undefined" ? undefined : window.location.origin,
+          redirectTo: authRedirectUrl(),
         }
       );
 
