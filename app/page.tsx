@@ -284,7 +284,7 @@ function getAuthErrorMessage(error: unknown): string {
   const rawMessage = getErrorMessage(error).toLowerCase();
 
   if (rawMessage.includes("invalid login credentials")) {
-    return "That email and password did not match. Try again or reset your password.";
+    return "We couldn't sign you in with that email and password. Check your password, create an account, or reset your password.";
   }
 
   if (rawMessage.includes("email not confirmed")) {
