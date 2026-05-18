@@ -284,7 +284,7 @@ function getAuthErrorMessage(error: unknown): string {
   const rawMessage = getErrorMessage(error).toLowerCase();
 
   if (rawMessage.includes("invalid login credentials")) {
-    return "We couldn't sign you in with that email and password. Check your password, create an account, or reset your password.";
+    return "Incorrect email or password. Please try again or reset your password.";
   }
 
   if (rawMessage.includes("email not confirmed")) {
@@ -3599,7 +3599,7 @@ export default function Home() {
                         }}
                         type="button"
                       >
-                        Create a new account
+                        Don&apos;t have an account? Sign up
                       </button>
                       <button
                         className="block font-semibold text-blue-700"
@@ -3609,7 +3609,7 @@ export default function Home() {
                         }}
                         type="button"
                       >
-                        Forgot password?
+                        Forgot your password?
                       </button>
                     </>
                   )}
