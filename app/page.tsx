@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 type Appointment = {
   id: string;
   care_subject_id: string | null;
+  current_note_id: string | null;
   title: string | null;
   reason: string | null;
   starts_at: string | null;
@@ -83,7 +84,7 @@ type AiInstructionVersion = {
   created_at: string;
 };
 
-type AppointmentView = "active" | "archived";
+type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
 
 type CarePrepHistoryRow = {
@@ -352,7 +353,7 @@ export default function Home() {
   const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [creatingCareVip, setCreatingCareVip] = useState(false);
   const [appointmentView, setAppointmentView] =
-    useState<AppointmentView>("active");
+    useState<AppointmentView>("upcoming");
   const [selectedSubjectId, setSelectedSubjectId] = useState(ALL_SUBJECTS);
   const [savingAppointmentForId, setSavingAppointmentForId] = useState<
     string | null
@@ -512,6 +513,8 @@ export default function Home() {
       setEntitlement(defaultEntitlement);
       setNotes([]);
       setGuidance([]);
+      setCarePrepHistory([]);
+      setHistoryAppointmentId("");
       setMessage("Signed in, but no care circle membership was found.");
       return;
     }
@@ -589,7 +592,7 @@ export default function Home() {
 
     let appointmentQuery = supabase
       .from("appointments")
-      .select("id,care_subject_id,title,reason,starts_at,status")
+      .select("id,care_subject_id,current_note_id,title,reason,starts_at,status")
       .in("care_circle_id", circleIds)
       .order("starts_at", { ascending: true });
 
@@ -608,7 +611,9 @@ export default function Home() {
       appointmentRows?.filter((item) =>
         view === "archived"
           ? item.status === "archived"
-          : item.status !== "archived"
+          : view === "logged"
+            ? item.status !== "archived" && Boolean(item.current_note_id)
+            : item.status !== "archived" && !item.current_note_id
       ) ?? [];
     const appointmentIds = visibleAppointments.map((item) => item.id);
     setAppointments(visibleAppointments);
@@ -619,7 +624,9 @@ export default function Home() {
       setMessage(
         view === "archived"
           ? "No archived appointments found."
-          : "Signed in. No appointments found yet."
+          : view === "logged"
+            ? "No logged appointments found yet."
+            : "No upcoming appointments found yet."
       );
       return;
     }
@@ -1093,6 +1100,7 @@ export default function Home() {
     setGuidance([]);
     setCarePrepHistory([]);
     setHistoryAppointmentId("");
+    setAppointmentView("upcoming");
     setSelectedSubjectId(ALL_SUBJECTS);
     setNewAppointmentSubjectId("");
     setNewCareVipName("");
@@ -1706,6 +1714,17 @@ export default function Home() {
         }
       }
 
+      const { error: appointmentLogError } = await supabase
+        .from("appointments")
+        .update({
+          current_note_id: newNote.id,
+        })
+        .eq("id", appointment.id);
+
+      if (appointmentLogError) {
+        throw appointmentLogError;
+      }
+
       setNoteDrafts((currentDrafts) => ({
         ...currentDrafts,
         [appointment.id]: emptyNoteDraft,
@@ -2269,15 +2288,27 @@ export default function Home() {
               <div className="flex flex-wrap gap-2">
                 <button
                   className={`rounded-md px-4 py-2 text-sm font-semibold ${
-                    appointmentView === "active"
+                    appointmentView === "upcoming"
                       ? "bg-blue-700 text-white"
                       : "border border-slate-300 bg-white text-slate-700"
                   }`}
                   disabled={loading}
-                  onClick={() => handleChangeAppointmentView("active")}
+                  onClick={() => handleChangeAppointmentView("upcoming")}
                   type="button"
                 >
-                  Active
+                  Upcoming
+                </button>
+                <button
+                  className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                    appointmentView === "logged"
+                      ? "bg-blue-700 text-white"
+                      : "border border-slate-300 bg-white text-slate-700"
+                  }`}
+                  disabled={loading}
+                  onClick={() => handleChangeAppointmentView("logged")}
+                  type="button"
+                >
+                  Logged
                 </button>
                 <button
                   className={`rounded-md px-4 py-2 text-sm font-semibold ${
@@ -2298,7 +2329,9 @@ export default function Home() {
               <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600">
                 {appointmentView === "archived"
                   ? "No archived appointments found."
-                  : "No appointments loaded yet."}
+                  : appointmentView === "logged"
+                    ? "No logged appointments found yet."
+                    : "No upcoming appointments found yet."}
               </div>
             ) : (
               appointments.map((appointment) => {
