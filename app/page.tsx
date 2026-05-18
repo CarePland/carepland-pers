@@ -509,6 +509,12 @@ function toDatetimeLocalValue(value: string | null): string {
   return localDate.toISOString().slice(0, 16);
 }
 
+function startOfToday(): Date {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
 function DetailList({
   emptyLabel,
   items,
@@ -967,7 +973,7 @@ export default function Home() {
       .in("care_circle_id", circleIds)
       .neq("status", "archived")
       .is("current_note_id", null)
-      .lt("starts_at", new Date().toISOString())
+      .lt("starts_at", startOfToday().toISOString())
       .order("starts_at", { ascending: false })
       .limit(1);
 
@@ -978,6 +984,7 @@ export default function Home() {
       );
     }
 
+    const upcomingStart = startOfToday();
     const [
       { data: appointmentRows, error: appointmentsError },
       { data: reminderRows, error: reminderError },
@@ -1001,7 +1008,8 @@ export default function Home() {
             ? item.status !== "archived" && Boolean(item.current_note_id)
             : item.status !== "archived" &&
               !item.current_note_id &&
-              (!item.starts_at || new Date(item.starts_at) >= new Date())
+              (!item.starts_at ||
+                new Date(item.starts_at) >= upcomingStart)
       ) ?? [];
     const appointmentIds = visibleAppointments.map((item) => item.id);
     setAppointments(visibleAppointments);
@@ -1715,6 +1723,18 @@ export default function Home() {
     setTextIntakeSubjectId(appointment.care_subject_id ?? "");
     setApplyTextIntakeAppointmentDetails(false);
     setMessage("");
+  }
+
+  function startTypingNote(appointmentId: string) {
+    cancelTextIntake();
+    setNoteDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointmentId]: emptyNoteDraft,
+    }));
+    setEditingNoteIds((currentIds) => ({
+      ...currentIds,
+      [appointmentId]: true,
+    }));
   }
 
   function cancelTextIntake() {
@@ -2725,15 +2745,7 @@ export default function Home() {
 
   async function handleStartReminderNotes(appointment: NotesReminderAppointment) {
     setMessage("");
-    cancelTextIntake();
-    setNoteDrafts((currentDrafts) => ({
-      ...currentDrafts,
-      [appointment.id]: emptyNoteDraft,
-    }));
-    setEditingNoteIds((currentIds) => ({
-      ...currentIds,
-      [appointment.id]: true,
-    }));
+    startTypingNote(appointment.id);
   }
 
   async function handleSaveNote(
@@ -4005,7 +4017,8 @@ export default function Home() {
                 const isArchived = appointment.status === "archived";
                 const isLogged = Boolean(appointment.current_note_id);
                 const isFutureOrUndated =
-                  !appointment.starts_at || new Date(appointment.starts_at) >= new Date();
+                  !appointment.starts_at ||
+                  new Date(appointment.starts_at) >= startOfToday();
                 const canGenerateCarePrep =
                   !isArchived && !isLogged && isFutureOrUndated;
                 const canPasteContextualNotes = !isArchived && !isLogged;
@@ -4117,6 +4130,15 @@ export default function Home() {
                             </svg>
                             Calendar
                           </a>
+                        ) : null}
+                        {canPasteContextualNotes ? (
+                          <button
+                            className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700"
+                            onClick={() => startTypingNote(appointment.id)}
+                            type="button"
+                          >
+                            Type
+                          </button>
                         ) : null}
                         {canPasteContextualNotes ? (
                           <button
@@ -4943,7 +4965,7 @@ export default function Home() {
 
                     {!isArchived &&
                     !isContextualTextIntake &&
-                    (note && !isEditingNote ? null : (
+                    ((note && !isEditingNote) || (!note && !isEditingNote) ? null : (
                       <form
                         className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
                         onSubmit={(event) => handleSaveNote(event, appointment)}
