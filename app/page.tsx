@@ -84,6 +84,26 @@ type AiInstructionVersion = {
 };
 
 type AppointmentView = "active" | "archived";
+type AiAdminTab = "history" | "instructions";
+
+type CarePrepHistoryRow = {
+  id: string;
+  appointment_id: string;
+  generated_at: string | null;
+  summary: string | null;
+  is_current: boolean;
+  version_number: number;
+  review_status: string | null;
+  source: string | null;
+  model: string | null;
+  prompt_version: string | null;
+  instruction_content_hash: string | null;
+  instruction_version_id: string | null;
+  edited_from_guidance_id: string | null;
+  ai_generated_guidance_id: string | null;
+  superseded_at: string | null;
+  superseded_by_guidance_id: string | null;
+};
 
 const ALL_SUBJECTS = "all";
 
@@ -282,7 +302,9 @@ export default function Home() {
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
   const [showAiAdmin, setShowAiAdmin] = useState(false);
+  const [aiAdminTab, setAiAdminTab] = useState<AiAdminTab>("instructions");
   const [loadingInstructions, setLoadingInstructions] = useState(false);
+  const [loadingCarePrepHistory, setLoadingCarePrepHistory] = useState(false);
   const [savingInstructions, setSavingInstructions] = useState(false);
   const [aiInstructionSet, setAiInstructionSet] =
     useState<AiInstructionSet | null>(null);
@@ -359,6 +381,10 @@ export default function Home() {
     useState<CareCircleEntitlement>(defaultEntitlement);
   const [notes, setNotes] = useState<AppointmentNote[]>([]);
   const [guidance, setGuidance] = useState<CarePrepGuidance[]>([]);
+  const [carePrepHistory, setCarePrepHistory] = useState<CarePrepHistoryRow[]>(
+    []
+  );
+  const [historyAppointmentId, setHistoryAppointmentId] = useState("");
 
   const notesByAppointment = useMemo(() => {
     return new Map(notes.map((note) => [note.appointment_id, note]));
@@ -779,13 +805,65 @@ export default function Home() {
     }
   }
 
+  async function loadCarePrepHistory(appointmentId = historyAppointmentId) {
+    setLoadingCarePrepHistory(true);
+    setMessage("");
+
+    try {
+      const effectiveAppointmentId = appointmentId || appointments[0]?.id || "";
+
+      if (!effectiveAppointmentId) {
+        setCarePrepHistory([]);
+        setMessage("No appointment is available for CarePrep history yet.");
+        return;
+      }
+
+      setHistoryAppointmentId(effectiveAppointmentId);
+
+      const { data: historyRows, error: historyError } = await supabase
+        .from("careprep_guidance")
+        .select(
+          "id,appointment_id,generated_at,summary,is_current,version_number,review_status,source,model,prompt_version,instruction_content_hash,instruction_version_id,edited_from_guidance_id,ai_generated_guidance_id,superseded_at,superseded_by_guidance_id"
+        )
+        .eq("appointment_id", effectiveAppointmentId)
+        .order("generated_at", { ascending: false });
+
+      if (historyError) {
+        throw historyError;
+      }
+
+      setCarePrepHistory(historyRows ?? []);
+      setMessage(`Loaded ${historyRows?.length ?? 0} CarePrep history row(s).`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingCarePrepHistory(false);
+    }
+  }
+
   async function handleToggleAiAdmin() {
     const nextState = !showAiAdmin;
     setShowAiAdmin(nextState);
 
     if (nextState) {
+      setAiAdminTab("instructions");
       await loadCarePrepInstructions();
     }
+  }
+
+  async function handleChangeAiAdminTab(tab: AiAdminTab) {
+    setAiAdminTab(tab);
+
+    if (tab === "instructions") {
+      await loadCarePrepInstructions();
+    } else {
+      await loadCarePrepHistory();
+    }
+  }
+
+  async function handleChangeHistoryAppointment(appointmentId: string) {
+    setHistoryAppointmentId(appointmentId);
+    await loadCarePrepHistory(appointmentId);
   }
 
   function loadInstructionVersionIntoEditor(version: AiInstructionVersion) {
@@ -1013,6 +1091,8 @@ export default function Home() {
     setEntitlement(defaultEntitlement);
     setNotes([]);
     setGuidance([]);
+    setCarePrepHistory([]);
+    setHistoryAppointmentId("");
     setSelectedSubjectId(ALL_SUBJECTS);
     setNewAppointmentSubjectId("");
     setNewCareVipName("");
@@ -1882,24 +1962,64 @@ export default function Home() {
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-2xl font-semibold">AI instructions</h2>
+                    <h2 className="text-2xl font-semibold">AI admin</h2>
                     <p className="mt-1 text-slate-600">
-                      CarePrep generation
-                      {aiInstructionVersion
+                      {aiAdminTab === "instructions"
+                        ? "CarePrep generation"
+                        : "CarePrep output audit trail"}
+                      {aiAdminTab === "instructions" && aiInstructionVersion
                         ? ` · current v${aiInstructionVersion.version_number}`
-                        : " · no current version"}
+                        : ""}
+                      {aiAdminTab === "instructions" && !aiInstructionVersion
+                        ? " · no current version"
+                        : ""}
                     </p>
                   </div>
                   <button
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                    disabled={loadingInstructions}
-                    onClick={loadCarePrepInstructions}
+                    disabled={loadingInstructions || loadingCarePrepHistory}
+                    onClick={() =>
+                      aiAdminTab === "instructions"
+                        ? loadCarePrepInstructions()
+                        : loadCarePrepHistory()
+                    }
                     type="button"
                   >
-                    {loadingInstructions ? "Loading..." : "Reload"}
+                    {loadingInstructions || loadingCarePrepHistory
+                      ? "Loading..."
+                      : "Reload"}
                   </button>
                 </div>
 
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <button
+                    className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                      aiAdminTab === "instructions"
+                        ? "bg-blue-700 text-white"
+                        : "border border-slate-300 bg-white text-slate-700"
+                    }`}
+                    disabled={loadingInstructions || loadingCarePrepHistory}
+                    onClick={() => handleChangeAiAdminTab("instructions")}
+                    type="button"
+                  >
+                    AI Instructions
+                  </button>
+                  <button
+                    className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                      aiAdminTab === "history"
+                        ? "bg-blue-700 text-white"
+                        : "border border-slate-300 bg-white text-slate-700"
+                    }`}
+                    disabled={loadingInstructions || loadingCarePrepHistory}
+                    onClick={() => handleChangeAiAdminTab("history")}
+                    type="button"
+                  >
+                    CarePrep History
+                  </button>
+                </div>
+
+                {aiAdminTab === "instructions" ? (
+                  <>
                 <form className="mt-5 space-y-4" onSubmit={handleSaveCarePrepInstructions}>
                   {draftSourceVersion ? (
                     <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">
@@ -2040,6 +2160,108 @@ export default function Home() {
                     </div>
                   </section>
                 ) : null}
+                  </>
+                ) : (
+                  <section className="mt-5 space-y-4">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <label className="block min-w-64 text-sm font-medium text-slate-700">
+                        Appointment
+                        <select
+                          className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          onChange={(event) =>
+                            handleChangeHistoryAppointment(event.target.value)
+                          }
+                          value={historyAppointmentId || appointments[0]?.id || ""}
+                        >
+                          {appointments.length === 0 ? (
+                            <option value="">No appointments loaded</option>
+                          ) : null}
+                          {appointments.map((appointment) => (
+                            <option key={appointment.id} value={appointment.id}>
+                              {appointment.title || "Untitled appointment"} ·{" "}
+                              {formatDate(appointment.starts_at)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                        disabled={loadingCarePrepHistory}
+                        onClick={() => loadCarePrepHistory()}
+                        type="button"
+                      >
+                        {loadingCarePrepHistory ? "Loading..." : "Load history"}
+                      </button>
+                    </div>
+
+                    {carePrepHistory.length === 0 ? (
+                      <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">
+                        No CarePrep history loaded for this appointment yet.
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        {carePrepHistory.map((row) => (
+                          <article
+                            className="rounded-md border border-slate-200 p-4"
+                            key={row.id}
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <p className="font-semibold text-slate-900">
+                                  {row.version_number > 0
+                                    ? `v${row.version_number}`
+                                    : "Unaccepted"}
+                                  {row.is_current ? " · current" : ""}
+                                  {row.review_status
+                                    ? ` · ${row.review_status}`
+                                    : ""}
+                                  {row.source ? ` · ${row.source}` : ""}
+                                </p>
+                                <p className="mt-1 text-sm text-slate-500">
+                                  {formatDate(row.generated_at)}
+                                  {row.model ? ` · ${row.model}` : ""}
+                                  {row.prompt_version
+                                    ? ` · ${row.prompt_version}`
+                                    : ""}
+                                </p>
+                                {row.instruction_content_hash ? (
+                                  <p className="mt-1 font-mono text-xs text-slate-500">
+                                    {row.instruction_content_hash}
+                                  </p>
+                                ) : null}
+                                {row.summary ? (
+                                  <p className="mt-2 text-sm text-slate-700">
+                                    {row.summary}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="mt-3 grid gap-2 text-xs text-slate-500 md:grid-cols-2">
+                              {row.ai_generated_guidance_id ? (
+                                <p>
+                                  AI source: {row.ai_generated_guidance_id}
+                                </p>
+                              ) : null}
+                              {row.edited_from_guidance_id ? (
+                                <p>
+                                  Edited from: {row.edited_from_guidance_id}
+                                </p>
+                              ) : null}
+                              {row.superseded_by_guidance_id ? (
+                                <p>
+                                  Superseded by: {row.superseded_by_guidance_id}
+                                </p>
+                              ) : null}
+                              {row.superseded_at ? (
+                                <p>Superseded: {formatDate(row.superseded_at)}</p>
+                              ) : null}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                )}
               </section>
             ) : null}
 
