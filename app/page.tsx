@@ -645,7 +645,9 @@ export default function Home() {
           ? item.status === "archived"
           : view === "logged"
             ? item.status !== "archived" && Boolean(item.current_note_id)
-            : item.status !== "archived" && !item.current_note_id
+            : item.status !== "archived" &&
+              !item.current_note_id &&
+              (!item.starts_at || new Date(item.starts_at) >= new Date())
       ) ?? [];
     const appointmentIds = visibleAppointments.map((item) => item.id);
     setAppointments(visibleAppointments);
