@@ -2,7 +2,12 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 type JsonObject = Record<string, unknown>;
-type ReviewAction = "accept" | "discard" | "generate" | "save_edit";
+type ReviewAction =
+  | "accept"
+  | "discard"
+  | "edit_current"
+  | "generate"
+  | "save_edit";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -122,6 +127,7 @@ export async function POST(request: NextRequest) {
     const action: ReviewAction =
       body.action === "accept" ||
       body.action === "discard" ||
+      body.action === "edit_current" ||
       body.action === "save_edit"
         ? body.action
         : "generate";
@@ -177,6 +183,98 @@ export async function POST(request: NextRequest) {
 
     if (!membership || membership.length === 0) {
       throw new Error("You do not have access to this appointment.");
+    }
+
+    if (action === "edit_current") {
+      const currentGuidanceId =
+        typeof body.currentGuidanceId === "string" ? body.currentGuidanceId : "";
+      const editedGuidance =
+        body.editedGuidance &&
+        typeof body.editedGuidance === "object" &&
+        !Array.isArray(body.editedGuidance)
+          ? (body.editedGuidance as JsonObject)
+          : null;
+
+      if (!currentGuidanceId) {
+        throw new Error("Missing current CarePrep id.");
+      }
+
+      if (!editedGuidance) {
+        throw new Error("Missing edited CarePrep content.");
+      }
+
+      const { data: currentGuidance, error: currentGuidanceError } =
+        await supabase
+          .from("careprep_guidance")
+          .select("*")
+          .eq("id", currentGuidanceId)
+          .eq("appointment_id", appointment.id)
+          .eq("is_current", true)
+          .single();
+
+      if (currentGuidanceError) {
+        throw currentGuidanceError;
+      }
+
+      const editedPayload = carePrepPayload(editedGuidance);
+
+      if (!editedPayload.summary) {
+        throw new Error("Edited CarePrep needs a summary.");
+      }
+
+      const { data: editedVersion, error: editedError } = await supabase
+        .from("careprep_guidance")
+        .insert({
+          ...editedPayload,
+          accepted_at: new Date().toISOString(),
+          accepted_by_user_id: userId,
+          ai_generated_guidance_id:
+            currentGuidance.ai_generated_guidance_id ??
+            (currentGuidance.source === "ai_generated" ? currentGuidance.id : null),
+          appointment_id: appointment.id,
+          care_circle_id: appointment.care_circle_id,
+          edited_from_guidance_id: currentGuidance.id,
+          generated_at: new Date().toISOString(),
+          input_context_snapshot: currentGuidance.input_context_snapshot ?? {},
+          instruction_content_hash:
+            currentGuidance.instruction_content_hash ?? null,
+          instruction_set_id: currentGuidance.instruction_set_id ?? null,
+          instruction_version_id: currentGuidance.instruction_version_id ?? null,
+          is_current: true,
+          model: currentGuidance.model ?? null,
+          prompt_version: currentGuidance.prompt_version ?? null,
+          review_status: "accepted",
+          reviewed_at: new Date().toISOString(),
+          reviewed_by_user_id: userId,
+          source: "user_edited",
+          status: "succeeded",
+          user_id: userId,
+          version_number: currentGuidance.version_number + 1,
+        })
+        .select("id")
+        .single();
+
+      if (editedError) {
+        throw editedError;
+      }
+
+      const { error: archiveError } = await supabase
+        .from("careprep_guidance")
+        .update({
+          is_current: false,
+          review_status: "superseded",
+          superseded_at: new Date().toISOString(),
+          superseded_by_guidance_id: editedVersion.id,
+        })
+        .eq("id", currentGuidance.id);
+
+      if (archiveError) {
+        throw archiveError;
+      }
+
+      return NextResponse.json({
+        message: "CarePrep edit saved. Previous version archived.",
+      });
     }
 
     if (action === "accept" || action === "discard" || action === "save_edit") {

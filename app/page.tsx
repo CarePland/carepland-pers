@@ -319,6 +319,9 @@ export default function Home() {
   const [carePrepDrafts, setCarePrepDrafts] = useState<
     Record<string, typeof emptyCarePrepDraft>
   >({});
+  const [editingCarePrepIds, setEditingCarePrepIds] = useState<
+    Record<string, boolean>
+  >({});
   const [editingAppointmentIds, setEditingAppointmentIds] = useState<
     Record<string, boolean>
   >({});
@@ -1365,6 +1368,88 @@ export default function Home() {
     }));
   }
 
+  function startEditingCarePrep(appointmentId: string, prep: CarePrepGuidance) {
+    setCarePrepDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointmentId]: carePrepFormValues(appointmentId, prep),
+    }));
+    setEditingCarePrepIds((currentIds) => ({
+      ...currentIds,
+      [appointmentId]: true,
+    }));
+  }
+
+  function cancelEditingCarePrep(appointmentId: string) {
+    setCarePrepDrafts((currentDrafts) => {
+      const nextDrafts = { ...currentDrafts };
+      delete nextDrafts[appointmentId];
+      return nextDrafts;
+    });
+    setEditingCarePrepIds((currentIds) => ({
+      ...currentIds,
+      [appointmentId]: false,
+    }));
+  }
+
+  async function saveCurrentCarePrepEdit(
+    appointmentId: string,
+    prep: CarePrepGuidance
+  ) {
+    setSavingCarePrepForId(appointmentId);
+    setMessage("");
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before editing CarePrep.");
+      }
+
+      const draftValues = carePrepFormValues(appointmentId, prep);
+      const response = await fetch("/api/careprep", {
+        body: JSON.stringify({
+          action: "edit_current",
+          appointmentId,
+          currentGuidanceId: prep.id,
+          editedGuidance: {
+            bring_list: linesToList(draftValues.bringList),
+            key_questions: linesToList(draftValues.keyQuestions),
+            med_review: linesToList(draftValues.medReview),
+            next_steps: linesToList(draftValues.nextSteps),
+            since_last_visit: linesToList(draftValues.sinceLastVisit),
+            summary: draftValues.summary.trim(),
+            watchouts: linesToList(draftValues.watchouts),
+          },
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "CarePrep edit failed.");
+      }
+
+      cancelEditingCarePrep(appointmentId);
+      await loadAppointments();
+      setMessage(result.message ?? "CarePrep edit saved.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingCarePrepForId(null);
+    }
+  }
+
   async function submitCarePrepReview({
     action,
     appointmentId,
@@ -2009,6 +2094,8 @@ export default function Home() {
                   editingAppointmentIds[appointment.id] ?? false;
                 const noteDraft = noteDrafts[appointment.id] ?? emptyNoteDraft;
                 const isEditingNote = editingNoteIds[appointment.id] ?? false;
+                const isEditingCarePrep =
+                  editingCarePrepIds[appointment.id] ?? false;
                 const takeaways = asTextList(note?.takeaways);
                 const followups = asTextList(note?.followups);
                 const bringList = asTextList(prep?.bring_list);
@@ -2018,6 +2105,9 @@ export default function Home() {
                 const sinceLastVisit = asTextList(prep?.since_last_visit);
                 const draftValues = carePrepDraft
                   ? carePrepFormValues(appointment.id, carePrepDraft)
+                  : emptyCarePrepDraft;
+                const prepEditValues = prep
+                  ? carePrepFormValues(appointment.id, prep)
                   : emptyCarePrepDraft;
                 const isArchived = appointment.status === "archived";
 
@@ -2452,62 +2542,214 @@ export default function Home() {
                               Current version {prep.version_number}
                             </p>
                           </div>
-                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-                            Prep for visit
-                          </span>
-                        </div>
-                        <p className="mt-2 text-slate-700">{prep.summary}</p>
-
-                        <div className="mt-5 grid gap-4 lg:grid-cols-3">
-                          <section className="rounded-md bg-white p-4">
-                            <h4 className="font-semibold text-slate-900">Bring</h4>
-                            <DetailList
-                              emptyLabel="No bring-list items saved yet."
-                              items={bringList}
-                            />
-                          </section>
-
-                          <section className="rounded-md bg-white p-4">
-                            <h4 className="font-semibold text-slate-900">Ask</h4>
-                            <DetailList
-                              emptyLabel="No questions saved yet."
-                              items={questions}
-                            />
-                          </section>
-
-                          <section className="rounded-md bg-white p-4">
-                            <h4 className="font-semibold text-slate-900">
-                              Watch for
-                            </h4>
-                            <DetailList
-                              emptyLabel="No watchouts saved yet."
-                              items={watchouts}
-                            />
-                          </section>
-                        </div>
-
-                        {(medReview.length > 0 || sinceLastVisit.length > 0) && (
-                          <div className="mt-4 grid gap-4 md:grid-cols-2">
-                            <section className="rounded-md bg-white p-4">
-                              <h4 className="font-semibold text-slate-900">
-                                Medication review
-                              </h4>
-                              <DetailList
-                                emptyLabel="No medication review items saved yet."
-                                items={medReview}
-                              />
-                            </section>
-
-                            <section className="rounded-md bg-white p-4">
-                              <h4 className="font-semibold text-slate-900">
-                                Since last visit
-                              </h4>
-                              <DetailList
-                                emptyLabel="No prior-visit context saved yet."
-                                items={sinceLastVisit}
-                              />
-                            </section>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {!isArchived && !isEditingCarePrep ? (
+                              <button
+                                className="rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800"
+                                onClick={() =>
+                                  startEditingCarePrep(appointment.id, prep)
+                                }
+                                type="button"
+                              >
+                                Edit CarePrep
+                              </button>
+                            ) : null}
+                            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                              Prep for visit
+                            </span>
                           </div>
+                        </div>
+                        {isEditingCarePrep ? (
+                          <div className="mt-4 grid gap-4">
+                            <label className="block text-sm font-medium text-slate-700">
+                              Summary
+                              <textarea
+                                className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                onChange={(event) =>
+                                  updateCarePrepDraft(
+                                    appointment.id,
+                                    "summary",
+                                    event.target.value,
+                                    prepEditValues
+                                  )
+                                }
+                                value={prepEditValues.summary}
+                              />
+                            </label>
+
+                            <div className="grid gap-4 md:grid-cols-2">
+                              <label className="block text-sm font-medium text-slate-700">
+                                Bring
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateCarePrepDraft(
+                                      appointment.id,
+                                      "bringList",
+                                      event.target.value,
+                                      prepEditValues
+                                    )
+                                  }
+                                  value={prepEditValues.bringList}
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Ask
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateCarePrepDraft(
+                                      appointment.id,
+                                      "keyQuestions",
+                                      event.target.value,
+                                      prepEditValues
+                                    )
+                                  }
+                                  value={prepEditValues.keyQuestions}
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Watch for
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateCarePrepDraft(
+                                      appointment.id,
+                                      "watchouts",
+                                      event.target.value,
+                                      prepEditValues
+                                    )
+                                  }
+                                  value={prepEditValues.watchouts}
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Medication review
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateCarePrepDraft(
+                                      appointment.id,
+                                      "medReview",
+                                      event.target.value,
+                                      prepEditValues
+                                    )
+                                  }
+                                  value={prepEditValues.medReview}
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Since last visit
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateCarePrepDraft(
+                                      appointment.id,
+                                      "sinceLastVisit",
+                                      event.target.value,
+                                      prepEditValues
+                                    )
+                                  }
+                                  value={prepEditValues.sinceLastVisit}
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Next steps
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateCarePrepDraft(
+                                      appointment.id,
+                                      "nextSteps",
+                                      event.target.value,
+                                      prepEditValues
+                                    )
+                                  }
+                                  value={prepEditValues.nextSteps}
+                                />
+                              </label>
+                            </div>
+
+                            <div className="flex flex-wrap gap-3">
+                              <button
+                                className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                                disabled={savingCarePrepForId === appointment.id}
+                                onClick={() =>
+                                  saveCurrentCarePrepEdit(appointment.id, prep)
+                                }
+                                type="button"
+                              >
+                                {savingCarePrepForId === appointment.id
+                                  ? "Saving..."
+                                  : "Save CarePrep edit"}
+                              </button>
+                              <button
+                                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                                onClick={() =>
+                                  cancelEditingCarePrep(appointment.id)
+                                }
+                                type="button"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="mt-2 text-slate-700">{prep.summary}</p>
+
+                            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                              <section className="rounded-md bg-white p-4">
+                                <h4 className="font-semibold text-slate-900">Bring</h4>
+                                <DetailList
+                                  emptyLabel="No bring-list items saved yet."
+                                  items={bringList}
+                                />
+                              </section>
+
+                              <section className="rounded-md bg-white p-4">
+                                <h4 className="font-semibold text-slate-900">Ask</h4>
+                                <DetailList
+                                  emptyLabel="No questions saved yet."
+                                  items={questions}
+                                />
+                              </section>
+
+                              <section className="rounded-md bg-white p-4">
+                                <h4 className="font-semibold text-slate-900">
+                                  Watch for
+                                </h4>
+                                <DetailList
+                                  emptyLabel="No watchouts saved yet."
+                                  items={watchouts}
+                                />
+                              </section>
+                            </div>
+
+                            {(medReview.length > 0 || sinceLastVisit.length > 0) && (
+                              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                                <section className="rounded-md bg-white p-4">
+                                  <h4 className="font-semibold text-slate-900">
+                                    Medication review
+                                  </h4>
+                                  <DetailList
+                                    emptyLabel="No medication review items saved yet."
+                                    items={medReview}
+                                  />
+                                </section>
+
+                                <section className="rounded-md bg-white p-4">
+                                  <h4 className="font-semibold text-slate-900">
+                                    Since last visit
+                                  </h4>
+                                  <DetailList
+                                    emptyLabel="No prior-visit context saved yet."
+                                    items={sinceLastVisit}
+                                  />
+                                </section>
+                              </div>
+                            )}
+                          </>
                         )}
                       </section>
                     ) : null}
