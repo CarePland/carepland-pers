@@ -935,13 +935,23 @@ export default function Home() {
                     </div>
 
                     {!isEditingAppointment && !isArchived ? (
-                      <div className="mt-4">
+                      <div className="mt-4 flex flex-wrap gap-3">
                         <button
                           className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
                           onClick={() => startEditingAppointment(appointment)}
                           type="button"
                         >
                           Edit appointment
+                        </button>
+                        <button
+                          className="rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 disabled:text-slate-400"
+                          disabled={archivingAppointmentForId === appointment.id}
+                          onClick={() => handleArchiveAppointment(appointment)}
+                          type="button"
+                        >
+                          {archivingAppointmentForId === appointment.id
+                            ? "Archiving..."
+                            : "Archive appointment"}
                         </button>
                       </div>
                     ) : null}
@@ -974,8 +984,7 @@ export default function Home() {
                               Edit appointment
                             </h3>
                             <p className="mt-1 text-sm text-slate-500">
-                              Archive keeps the appointment for history, but
-                              removes it from this active view.
+                              Update the appointment details saved on this record.
                             </p>
                           </div>
                           <button
@@ -1062,16 +1071,6 @@ export default function Home() {
                             {savingAppointmentForId === appointment.id
                               ? "Saving..."
                               : "Save appointment"}
-                          </button>
-                          <button
-                            className="rounded-md border border-rose-300 px-4 py-2 font-semibold text-rose-700 disabled:text-slate-400"
-                            disabled={archivingAppointmentForId === appointment.id}
-                            onClick={() => handleArchiveAppointment(appointment)}
-                            type="button"
-                          >
-                            {archivingAppointmentForId === appointment.id
-                              ? "Archiving..."
-                              : "Archive appointment"}
                           </button>
                         </div>
                       </form>
