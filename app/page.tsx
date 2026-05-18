@@ -762,6 +762,48 @@ export default function Home() {
     }
   }
 
+  async function loadCurrentCarePrepInstruction(careCircleId: string) {
+    const { data: instructionSets, error: instructionSetError } = await supabase
+      .from("ai_instruction_sets")
+      .select("id,instruction_key,name,description")
+      .eq("care_circle_id", careCircleId)
+      .eq("instruction_key", "careprep_generation")
+      .eq("is_active", true)
+      .limit(1);
+
+    if (instructionSetError) {
+      throw instructionSetError;
+    }
+
+    const instructionSet = instructionSets?.[0] ?? null;
+
+    if (!instructionSet) {
+      return {
+        instructionSet: null,
+        instructionVersion: null,
+      };
+    }
+
+    const { data: instructionVersions, error: instructionVersionError } =
+      await supabase
+        .from("ai_instruction_versions")
+        .select(
+          "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,is_current,change_note,content_hash,copied_from_version_id,created_at"
+        )
+        .eq("instruction_set_id", instructionSet.id)
+        .eq("is_current", true)
+        .limit(1);
+
+    if (instructionVersionError) {
+      throw instructionVersionError;
+    }
+
+    return {
+      instructionSet,
+      instructionVersion: instructionVersions?.[0] ?? null,
+    };
+  }
+
   async function handleToggleAiAdmin() {
     const nextState = !showAiAdmin;
     setShowAiAdmin(nextState);
@@ -1274,6 +1316,8 @@ export default function Home() {
       const { careCircleId, userId } = await getPrimaryCareContext(
         appointment.care_subject_id ?? undefined
       );
+      const { instructionSet, instructionVersion } =
+        await loadCurrentCarePrepInstruction(careCircleId);
 
       if (!appointment.care_subject_id) {
         throw new Error("This appointment needs a Care VIP before CarePrep can run.");
@@ -1319,12 +1363,13 @@ export default function Home() {
         throw priorNotesError;
       }
 
+      const priorNoteRows = priorNotes ?? [];
       const priorSummaries =
-        priorNotes
+        priorNoteRows
           ?.map((note) => note.summary_short)
           .filter((summary): summary is string => Boolean(summary)) ?? [];
-      const priorTakeaways = priorNotes?.flatMap((note) => asTextList(note.takeaways)) ?? [];
-      const priorFollowups = priorNotes?.flatMap((note) => asTextList(note.followups)) ?? [];
+      const priorTakeaways = priorNoteRows.flatMap((note) => asTextList(note.takeaways));
+      const priorFollowups = priorNoteRows.flatMap((note) => asTextList(note.followups));
       const allPriorItems = [...priorSummaries, ...priorTakeaways, ...priorFollowups];
       const medTerms = [
         "dose",
@@ -1384,17 +1429,46 @@ export default function Home() {
               .slice(0, 2)
               .join("; ")}. Bring key records and ask about open follow-ups.`
           : `CarePrep for ${careVipName ?? "this Care VIP"}: no prior notes were found yet. Use this visit to capture concerns, questions, and follow-ups.`;
+      const inputContextSnapshot = {
+        future_appointment: {
+          care_subject_id: appointment.care_subject_id,
+          id: appointment.id,
+          reason: appointment.reason,
+          starts_at: appointment.starts_at,
+          status: appointment.status,
+          title: appointment.title,
+        },
+        generator: "local-rule-based",
+        past_appointments:
+          priorAppointments?.map((priorAppointment) => ({
+            id: priorAppointment.id,
+            note:
+              priorNoteRows.find(
+                (note) => note.appointment_id === priorAppointment.id
+              ) ?? null,
+            reason: priorAppointment.reason,
+            starts_at: priorAppointment.starts_at,
+            title: priorAppointment.title,
+          })) ?? [],
+      };
+      const promptVersion = instructionVersion
+        ? `careprep_generation:v${instructionVersion.version_number}`
+        : "careprep-mvp-1";
 
       const guidancePayload = {
         appointment_id: appointment.id,
         bring_list: bringList,
         care_circle_id: careCircleId,
         generated_at: new Date().toISOString(),
+        input_context_snapshot: inputContextSnapshot,
+        instruction_content_hash: instructionVersion?.content_hash ?? null,
+        instruction_set_id: instructionSet?.id ?? null,
+        instruction_version_id: instructionVersion?.id ?? null,
         key_questions: keyQuestions,
         med_review: medReview,
-        model: "local-rule-based",
+        model: instructionVersion?.model ?? "local-rule-based",
         next_steps: nextSteps,
-        prompt_version: "careprep-mvp-1",
+        prompt_version: promptVersion,
         since_last_visit: sinceLastVisit,
         status: "succeeded",
         summary,
