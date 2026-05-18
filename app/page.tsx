@@ -1917,11 +1917,17 @@ export default function Home() {
         throw new Error("Time zone is required.");
       }
 
-      const normalizedPhone = profileDraft.phone.trim()
-        ? normalizeUsPhone(profileDraft.phone)
-        : null;
+      if (!profileDraft.phone.trim()) {
+        throw new Error("Phone number is required.");
+      }
 
-      if (profileDraft.phone.trim() && !normalizedPhone) {
+      if (!profileDraft.postalCode.trim()) {
+        throw new Error("ZIP code is required.");
+      }
+
+      const normalizedPhone = normalizeUsPhone(profileDraft.phone);
+
+      if (!normalizedPhone) {
         throw new Error("Enter a valid 10-digit U.S. phone number.");
       }
 
@@ -3328,6 +3334,7 @@ export default function Home() {
                   }
                   inputMode="numeric"
                   placeholder="(___) ___-____"
+                  required
                   type="tel"
                   value={profileDraft.phone}
                 />
@@ -3418,6 +3425,7 @@ export default function Home() {
                   onChange={(event) =>
                     updateProfileDraft("postalCode", event.target.value)
                   }
+                  required
                   value={profileDraft.postalCode}
                 />
               </label>
