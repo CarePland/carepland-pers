@@ -17,6 +17,10 @@ type AppointmentNote = {
   summary_short: string | null;
   takeaways: unknown;
   followups: unknown;
+  is_current: boolean;
+  version_number: number;
+  superseded_at: string | null;
+  superseded_by_note_id: string | null;
 };
 
 type CarePrepGuidance = {
@@ -138,6 +142,7 @@ export default function Home() {
       }
     >
   >({});
+  const [editingNoteIds, setEditingNoteIds] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [savingNoteForId, setSavingNoteForId] = useState<string | null>(null);
@@ -257,8 +262,11 @@ export default function Home() {
       await Promise.all([
         supabase
           .from("appointment_notes")
-          .select("id,appointment_id,summary_short,takeaways,followups")
-          .in("appointment_id", appointmentIds),
+          .select(
+            "id,appointment_id,summary_short,takeaways,followups,is_current,version_number,superseded_at,superseded_by_note_id"
+          )
+          .in("appointment_id", appointmentIds)
+          .eq("is_current", true),
         supabase
           .from("careprep_guidance")
           .select(
@@ -391,7 +399,33 @@ export default function Home() {
     }));
   }
 
-  async function handleCreateNote(
+  function startEditingNote(appointmentId: string, note: AppointmentNote) {
+    setNoteDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointmentId]: {
+        followups: asTextList(note.followups).join("\n"),
+        summary: note.summary_short ?? "",
+        takeaways: asTextList(note.takeaways).join("\n"),
+      },
+    }));
+    setEditingNoteIds((currentIds) => ({
+      ...currentIds,
+      [appointmentId]: true,
+    }));
+  }
+
+  function cancelEditingNote(appointmentId: string) {
+    setEditingNoteIds((currentIds) => ({
+      ...currentIds,
+      [appointmentId]: false,
+    }));
+    setNoteDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointmentId]: emptyNoteDraft,
+    }));
+  }
+
+  async function handleSaveNote(
     event: FormEvent<HTMLFormElement>,
     appointment: Appointment
   ) {
@@ -410,8 +444,11 @@ export default function Home() {
       }
 
       const { careCircleId, userId } = await getPrimaryCareContext();
+      const existingNote = notesByAppointment.get(appointment.id);
 
-      const { error } = await supabase.from("appointment_notes").insert({
+      const { data: newNote, error: insertError } = await supabase
+        .from("appointment_notes")
+        .insert({
         appointment_id: appointment.id,
         care_circle_id: careCircleId,
         user_id: userId,
@@ -419,21 +456,44 @@ export default function Home() {
         summary_short: summary || null,
         takeaways,
         followups,
-        source: "manual",
+        is_current: true,
+        version_number: existingNote ? existingNote.version_number + 1 : 1,
+        source: existingNote ? "manual_edit" : "manual",
         generated_by_ai: false,
         accepted_by_user: true,
-      });
+        })
+        .select("id")
+        .single();
 
-      if (error) {
-        throw error;
+      if (insertError) {
+        throw insertError;
+      }
+
+      if (existingNote) {
+        const { error: archiveError } = await supabase
+          .from("appointment_notes")
+          .update({
+            is_current: false,
+            superseded_at: new Date().toISOString(),
+            superseded_by_note_id: newNote.id,
+          })
+          .eq("id", existingNote.id);
+
+        if (archiveError) {
+          throw archiveError;
+        }
       }
 
       setNoteDrafts((currentDrafts) => ({
         ...currentDrafts,
         [appointment.id]: emptyNoteDraft,
       }));
+      setEditingNoteIds((currentIds) => ({
+        ...currentIds,
+        [appointment.id]: false,
+      }));
       await loadAppointments();
-      setMessage("Notes added.");
+      setMessage(existingNote ? "Notes updated. Previous version archived." : "Notes added.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -583,6 +643,7 @@ export default function Home() {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
                 const noteDraft = noteDrafts[appointment.id] ?? emptyNoteDraft;
+                const isEditingNote = editingNoteIds[appointment.id] ?? false;
                 const takeaways = asTextList(note?.takeaways);
                 const followups = asTextList(note?.followups);
                 const bringList = asTextList(prep?.bring_list);
@@ -615,6 +676,28 @@ export default function Home() {
                         <h3 className="font-semibold text-slate-900">Reason</h3>
                         <p className="mt-1 text-slate-700">{appointment.reason}</p>
                       </section>
+                    ) : null}
+
+                    {note ? (
+                      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h3 className="font-semibold text-blue-800">
+                            Visit notes
+                          </h3>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Current version {note.version_number}
+                          </p>
+                        </div>
+                        {!isEditingNote ? (
+                          <button
+                            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                            onClick={() => startEditingNote(appointment.id, note)}
+                            type="button"
+                          >
+                            Edit notes
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
 
                     {note?.summary_short ? (
@@ -708,72 +791,97 @@ export default function Home() {
                       </section>
                     ) : null}
 
-                    <form
-                      className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
-                      onSubmit={(event) => handleCreateNote(event, appointment)}
-                    >
-                      <h3 className="text-lg font-semibold text-slate-900">
-                        Add notes
-                      </h3>
-                      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                        <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
-                          Visit summary
-                          <textarea
-                            className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                            onChange={(event) =>
-                              updateNoteDraft(
-                                appointment.id,
-                                "summary",
-                                event.target.value
-                              )
-                            }
-                            placeholder="What happened in the visit?"
-                            value={noteDraft.summary}
-                          />
-                        </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                          Takeaways
-                          <textarea
-                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                            onChange={(event) =>
-                              updateNoteDraft(
-                                appointment.id,
-                                "takeaways",
-                                event.target.value
-                              )
-                            }
-                            placeholder={"One per line\nExample: Medication changed"}
-                            value={noteDraft.takeaways}
-                          />
-                        </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                          Follow-ups
-                          <textarea
-                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                            onChange={(event) =>
-                              updateNoteDraft(
-                                appointment.id,
-                                "followups",
-                                event.target.value
-                              )
-                            }
-                            placeholder={"One per line\nExample: Schedule labs"}
-                            value={noteDraft.followups}
-                          />
-                        </label>
-                        <div className="flex items-end">
-                          <button
-                            className="w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                            disabled={savingNoteForId === appointment.id}
-                            type="submit"
-                          >
-                            {savingNoteForId === appointment.id
-                              ? "Saving..."
-                              : "Save notes"}
-                          </button>
+                    {note && !isEditingNote ? null : (
+                      <form
+                        className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
+                        onSubmit={(event) => handleSaveNote(event, appointment)}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-semibold text-slate-900">
+                              {note ? "Edit notes" : "Add notes"}
+                            </h3>
+                            {note ? (
+                              <p className="mt-1 text-sm text-slate-500">
+                                Saving creates version {note.version_number + 1}
+                                and keeps the old one archived.
+                              </p>
+                            ) : null}
+                          </div>
+                          {note ? (
+                            <button
+                              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                              onClick={() => cancelEditingNote(appointment.id)}
+                              type="button"
+                            >
+                              Cancel
+                            </button>
+                          ) : null}
                         </div>
-                      </div>
-                    </form>
+                        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                          <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                            Visit summary
+                            <textarea
+                              className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateNoteDraft(
+                                  appointment.id,
+                                  "summary",
+                                  event.target.value
+                                )
+                              }
+                              placeholder="What happened in the visit?"
+                              value={noteDraft.summary}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Takeaways
+                            <textarea
+                              className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateNoteDraft(
+                                  appointment.id,
+                                  "takeaways",
+                                  event.target.value
+                                )
+                              }
+                              placeholder={
+                                "One per line\nExample: Medication changed"
+                              }
+                              value={noteDraft.takeaways}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Follow-ups
+                            <textarea
+                              className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateNoteDraft(
+                                  appointment.id,
+                                  "followups",
+                                  event.target.value
+                                )
+                              }
+                              placeholder={"One per line\nExample: Schedule labs"}
+                              value={noteDraft.followups}
+                            />
+                          </label>
+                          <div className="flex items-end">
+                            <button
+                              className="w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                              disabled={savingNoteForId === appointment.id}
+                              type="submit"
+                            >
+                              {savingNoteForId === appointment.id
+                                ? "Saving..."
+                                : note
+                                  ? "Save edited notes"
+                                  : "Save notes"}
+                            </button>
+                          </div>
+                        </div>
+                      </form>
+                    )}
                   </article>
                 );
               })
