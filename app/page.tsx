@@ -288,7 +288,7 @@ function getAuthErrorMessage(error: unknown): string {
   }
 
   if (rawMessage.includes("email not confirmed")) {
-    return "This account exists, but the email address still needs to be confirmed. Check your inbox for the Supabase confirmation email.";
+    return "This account exists, but the email address still needs to be confirmed. Check your inbox and junk folder for the confirmation email.";
   }
 
   if (
@@ -1391,7 +1391,7 @@ export default function Home() {
       setPassword("");
       setConfirmPassword("");
       setMessage(
-        "Account created. Check your email to confirm the account, then sign in."
+        "Account created. Check your email, including your junk folder, to confirm the account. Then sign in."
       );
     } catch (error) {
       logAuthError("signUp", error);
@@ -1433,7 +1433,9 @@ export default function Home() {
       setAuthMode("signIn");
       setPassword("");
       setConfirmPassword("");
-      setMessage("If this email has an account, a password reset link has been sent.");
+      setMessage(
+        "If this email has an account, a password reset link has been sent. Check your inbox and junk folder."
+      );
     } catch (error) {
       logAuthError("passwordReset", error);
       setMessage(getAuthErrorMessage(error));
