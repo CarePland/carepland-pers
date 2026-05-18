@@ -22,6 +22,12 @@ type CareSubject = {
   is_active: boolean;
 };
 
+type CareCircleEntitlement = {
+  max_active_subjects: number;
+  plan_id: string;
+  plan_name: string;
+};
+
 type AppointmentNote = {
   id: string;
   appointment_id: string;
@@ -49,6 +55,12 @@ type CarePrepGuidance = {
 type AppointmentView = "active" | "archived";
 
 const ALL_SUBJECTS = "all";
+
+const defaultEntitlement: CareCircleEntitlement = {
+  max_active_subjects: 1,
+  plan_id: "personal",
+  plan_name: "Personal",
+};
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -170,6 +182,8 @@ export default function Home() {
   const [newAppointmentReason, setNewAppointmentReason] = useState("");
   const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState("");
   const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState("");
+  const [newCareVipName, setNewCareVipName] = useState("");
+  const [newCareVipType, setNewCareVipType] = useState("person");
   const [noteDrafts, setNoteDrafts] = useState<
     Record<
       string,
@@ -189,6 +203,7 @@ export default function Home() {
   const [editingNoteIds, setEditingNoteIds] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
+  const [creatingCareVip, setCreatingCareVip] = useState(false);
   const [appointmentView, setAppointmentView] =
     useState<AppointmentView>("active");
   const [selectedSubjectId, setSelectedSubjectId] = useState(ALL_SUBJECTS);
@@ -206,6 +221,8 @@ export default function Home() {
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
+  const [entitlement, setEntitlement] =
+    useState<CareCircleEntitlement>(defaultEntitlement);
   const [notes, setNotes] = useState<AppointmentNote[]>([]);
   const [guidance, setGuidance] = useState<CarePrepGuidance[]>([]);
 
@@ -220,6 +237,9 @@ export default function Home() {
   const subjectsById = useMemo(() => {
     return new Map(careSubjects.map((subject) => [subject.id, subject]));
   }, [careSubjects]);
+
+  const canUseMultipleCareVips = entitlement.max_active_subjects > 1;
+  const canAddCareVip = careSubjects.length < entitlement.max_active_subjects;
 
   useEffect(() => {
     async function restoreSession() {
@@ -316,11 +336,45 @@ export default function Home() {
     if (circleIds.length === 0) {
       setAppointments([]);
       setCareSubjects([]);
+      setEntitlement(defaultEntitlement);
       setNotes([]);
       setGuidance([]);
       setMessage("Signed in, but no care circle membership was found.");
       return;
     }
+
+    const { data: entitlementRows, error: entitlementError } = await supabase
+      .from("care_circle_entitlements")
+      .select("care_circle_id,plan_id,status")
+      .in("care_circle_id", circleIds)
+      .eq("status", "active");
+
+    if (entitlementError) {
+      throw entitlementError;
+    }
+
+    const planId = entitlementRows?.[0]?.plan_id ?? defaultEntitlement.plan_id;
+
+    const { data: planRows, error: planError } = await supabase
+      .from("plans")
+      .select("id,name,max_active_subjects")
+      .eq("id", planId)
+      .limit(1);
+
+    if (planError) {
+      throw planError;
+    }
+
+    const plan = planRows?.[0];
+    const currentEntitlement = plan
+      ? {
+          max_active_subjects: plan.max_active_subjects,
+          plan_id: plan.id,
+          plan_name: plan.name,
+        }
+      : defaultEntitlement;
+
+    setEntitlement(currentEntitlement);
 
     const { data: subjectRows, error: subjectsError } = await supabase
       .from("care_subjects")
@@ -335,11 +389,13 @@ export default function Home() {
     }
 
     const subjects = subjectRows ?? [];
+    const canUseMultipleSubjects = currentEntitlement.max_active_subjects > 1;
     const defaultSubjectId =
       subjects.find((subject) => subject.is_default)?.id ?? subjects[0]?.id ?? "";
-    const effectiveSubjectId =
-      subjectId === ALL_SUBJECTS ||
-      subjects.some((subject) => subject.id === subjectId)
+    const effectiveSubjectId = !canUseMultipleSubjects
+      ? defaultSubjectId || ALL_SUBJECTS
+      : subjectId === ALL_SUBJECTS ||
+          subjects.some((subject) => subject.id === subjectId)
         ? subjectId
         : ALL_SUBJECTS;
 
@@ -504,11 +560,64 @@ export default function Home() {
     setPassword("");
     setAppointments([]);
     setCareSubjects([]);
+    setEntitlement(defaultEntitlement);
     setNotes([]);
     setGuidance([]);
     setSelectedSubjectId(ALL_SUBJECTS);
     setNewAppointmentSubjectId("");
+    setNewCareVipName("");
+    setNewCareVipType("person");
     setMessage("Signed out.");
+  }
+
+  async function handleCreateCareVip(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreatingCareVip(true);
+    setMessage("");
+
+    try {
+      const displayName = newCareVipName.trim();
+
+      if (!displayName) {
+        throw new Error("Please enter a Care VIP name.");
+      }
+
+      if (!canAddCareVip) {
+        throw new Error(
+          `${entitlement.plan_name} allows ${entitlement.max_active_subjects} active Care VIP.`
+        );
+      }
+
+      const { careCircleId } = await getPrimaryCareContext();
+      const isFirstCareVip = careSubjects.length === 0;
+
+      const { data: newSubject, error } = await supabase
+        .from("care_subjects")
+        .insert({
+          care_circle_id: careCircleId,
+          display_name: displayName,
+          is_active: true,
+          is_default: isFirstCareVip,
+          subject_type: newCareVipType,
+        })
+        .select("id")
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      setNewCareVipName("");
+      setNewCareVipType("person");
+      setSelectedSubjectId(newSubject.id);
+      setNewAppointmentSubjectId(newSubject.id);
+      await loadAppointments(appointmentView, newSubject.id);
+      setMessage("Care VIP added.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setCreatingCareVip(false);
+    }
   }
 
   async function handleCreateAppointment(event: FormEvent<HTMLFormElement>) {
@@ -920,9 +1029,9 @@ export default function Home() {
               </p>
             </div>
 
-            {signedInEmail ? (
+            {signedInEmail && canUseMultipleCareVips ? (
               <div className="mt-6 border-t border-slate-200 pt-6">
-                <h2 className="text-xl font-semibold">View subject</h2>
+                <h2 className="text-xl font-semibold">View Care VIP</h2>
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Showing
                   <select
@@ -931,7 +1040,7 @@ export default function Home() {
                     onChange={(event) => handleChangeSubject(event.target.value)}
                     value={selectedSubjectId}
                   >
-                    <option value={ALL_SUBJECTS}>All subjects</option>
+                    <option value={ALL_SUBJECTS}>All Care VIPs</option>
                     {careSubjects.map((subject) => (
                       <option key={subject.id} value={subject.id}>
                         {subject.display_name}
@@ -942,32 +1051,80 @@ export default function Home() {
               </div>
             ) : null}
 
+            {signedInEmail && (canUseMultipleCareVips || careSubjects.length === 0) ? (
+              <form
+                className="mt-6 border-t border-slate-200 pt-6"
+                onSubmit={handleCreateCareVip}
+              >
+                <h2 className="text-xl font-semibold">Add Care VIP</h2>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Name
+                  <input
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    disabled={!canAddCareVip}
+                    onChange={(event) => setNewCareVipName(event.target.value)}
+                    placeholder="e.g. Dixie"
+                    type="text"
+                    value={newCareVipName}
+                  />
+                </label>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Type
+                  <select
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                    disabled={!canAddCareVip}
+                    onChange={(event) => setNewCareVipType(event.target.value)}
+                    value={newCareVipType}
+                  >
+                    <option value="person">Person</option>
+                    <option value="pet">Pet</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <button
+                  className="mt-4 w-full rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                  disabled={creatingCareVip || !canAddCareVip}
+                  type="submit"
+                >
+                  {creatingCareVip ? "Adding..." : "+ Add Care VIP"}
+                </button>
+                {!canAddCareVip ? (
+                  <p className="mt-3 text-sm text-slate-500">
+                    {entitlement.plan_name} includes{" "}
+                    {entitlement.max_active_subjects} active Care VIP.
+                  </p>
+                ) : null}
+              </form>
+            ) : null}
+
             {signedInEmail ? (
               <form
                 className="mt-6 border-t border-slate-200 pt-6"
                 onSubmit={handleCreateAppointment}
               >
                 <h2 className="text-xl font-semibold">Add appointment</h2>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  For
-                  <select
-                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                    disabled={careSubjects.length === 0}
-                    onChange={(event) =>
-                      setNewAppointmentSubjectId(event.target.value)
-                    }
-                    value={newAppointmentSubjectId}
-                  >
-                    {careSubjects.length === 0 ? (
-                      <option value="">No subjects found</option>
-                    ) : null}
-                    {careSubjects.map((subject) => (
-                      <option key={subject.id} value={subject.id}>
-                        {subject.display_name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {canUseMultipleCareVips ? (
+                  <label className="mt-4 block text-sm font-medium text-slate-700">
+                    Who is this for?
+                    <select
+                      className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                      disabled={careSubjects.length === 0}
+                      onChange={(event) =>
+                        setNewAppointmentSubjectId(event.target.value)
+                      }
+                      value={newAppointmentSubjectId}
+                    >
+                      {careSubjects.length === 0 ? (
+                        <option value="">No Care VIPs found</option>
+                      ) : null}
+                      {careSubjects.map((subject) => (
+                        <option key={subject.id} value={subject.id}>
+                          {subject.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Title
                   <input
