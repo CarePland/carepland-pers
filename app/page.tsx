@@ -43,6 +43,7 @@ type AppointmentNote = {
 type CarePrepGuidance = {
   id: string;
   appointment_id: string;
+  generated_at: string | null;
   summary: string | null;
   key_questions: unknown;
   bring_list: unknown;
@@ -52,8 +53,12 @@ type CarePrepGuidance = {
   next_steps?: unknown;
   is_current: boolean;
   version_number: number;
+  review_status: string | null;
+  source: string | null;
   superseded_at: string | null;
   superseded_by_guidance_id: string | null;
+  edited_from_guidance_id: string | null;
+  ai_generated_guidance_id: string | null;
 };
 
 type AiInstructionSet = {
@@ -119,6 +124,16 @@ const emptyAppointmentDraft = {
   startsAt: "",
   status: "scheduled",
   title: "",
+};
+
+const emptyCarePrepDraft = {
+  bringList: "",
+  keyQuestions: "",
+  medReview: "",
+  nextSteps: "",
+  sinceLastVisit: "",
+  summary: "",
+  watchouts: "",
 };
 
 function getErrorMessage(error: unknown): string {
@@ -301,6 +316,9 @@ export default function Home() {
   const [appointmentDrafts, setAppointmentDrafts] = useState<
     Record<string, typeof emptyAppointmentDraft>
   >({});
+  const [carePrepDrafts, setCarePrepDrafts] = useState<
+    Record<string, typeof emptyCarePrepDraft>
+  >({});
   const [editingAppointmentIds, setEditingAppointmentIds] = useState<
     Record<string, boolean>
   >({});
@@ -321,6 +339,12 @@ export default function Home() {
   const [generatingCarePrepForId, setGeneratingCarePrepForId] = useState<
     string | null
   >(null);
+  const [savingCarePrepForId, setSavingCarePrepForId] = useState<string | null>(
+    null
+  );
+  const [discardingCarePrepForId, setDiscardingCarePrepForId] = useState<
+    string | null
+  >(null);
   const [restoringAppointmentForId, setRestoringAppointmentForId] = useState<
     string | null
   >(null);
@@ -338,7 +362,19 @@ export default function Home() {
   }, [notes]);
 
   const guidanceByAppointment = useMemo(() => {
-    return new Map(guidance.map((item) => [item.appointment_id, item]));
+    return new Map(
+      guidance
+        .filter((item) => item.is_current)
+        .map((item) => [item.appointment_id, item])
+    );
+  }, [guidance]);
+
+  const draftGuidanceByAppointment = useMemo(() => {
+    return new Map(
+      guidance
+        .filter((item) => item.review_status === "draft")
+        .map((item) => [item.appointment_id, item])
+    );
   }, [guidance]);
 
   const subjectsById = useMemo(() => {
@@ -571,10 +607,11 @@ export default function Home() {
         supabase
           .from("careprep_guidance")
           .select(
-            "id,appointment_id,summary,key_questions,bring_list,watchouts,med_review,since_last_visit,next_steps,is_current,version_number,superseded_at,superseded_by_guidance_id"
+            "id,appointment_id,generated_at,summary,key_questions,bring_list,watchouts,med_review,since_last_visit,next_steps,is_current,version_number,review_status,source,superseded_at,superseded_by_guidance_id,edited_from_guidance_id,ai_generated_guidance_id"
           )
           .in("appointment_id", appointmentIds)
-          .eq("is_current", true),
+          .or("is_current.eq.true,review_status.eq.draft")
+          .order("generated_at", { ascending: true }),
       ]);
 
     if (notesError) {
@@ -1288,6 +1325,121 @@ export default function Home() {
     }
   }
 
+  function carePrepFormValues(appointmentId: string, draft: CarePrepGuidance) {
+    return {
+      bringList:
+        carePrepDrafts[appointmentId]?.bringList ??
+        asTextList(draft.bring_list).join("\n"),
+      keyQuestions:
+        carePrepDrafts[appointmentId]?.keyQuestions ??
+        asTextList(draft.key_questions).join("\n"),
+      medReview:
+        carePrepDrafts[appointmentId]?.medReview ??
+        asTextList(draft.med_review).join("\n"),
+      nextSteps:
+        carePrepDrafts[appointmentId]?.nextSteps ??
+        asTextList(draft.next_steps).join("\n"),
+      sinceLastVisit:
+        carePrepDrafts[appointmentId]?.sinceLastVisit ??
+        asTextList(draft.since_last_visit).join("\n"),
+      summary: carePrepDrafts[appointmentId]?.summary ?? draft.summary ?? "",
+      watchouts:
+        carePrepDrafts[appointmentId]?.watchouts ??
+        asTextList(draft.watchouts).join("\n"),
+    };
+  }
+
+  function updateCarePrepDraft(
+    appointmentId: string,
+    field: keyof typeof emptyCarePrepDraft,
+    value: string
+  ) {
+    setCarePrepDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointmentId]: {
+        ...emptyCarePrepDraft,
+        ...currentDrafts[appointmentId],
+        [field]: value,
+      },
+    }));
+  }
+
+  async function submitCarePrepReview({
+    action,
+    appointmentId,
+    draft,
+  }: {
+    action: "accept" | "discard" | "save_edit";
+    appointmentId: string;
+    draft: CarePrepGuidance;
+  }) {
+    if (action === "discard") {
+      setDiscardingCarePrepForId(appointmentId);
+    } else {
+      setSavingCarePrepForId(appointmentId);
+    }
+    setMessage("");
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before reviewing CarePrep.");
+      }
+
+      const draftValues = carePrepFormValues(appointmentId, draft);
+      const response = await fetch("/api/careprep", {
+        body: JSON.stringify({
+          action,
+          appointmentId,
+          draftGuidanceId: draft.id,
+          editedGuidance:
+            action === "save_edit"
+              ? {
+                  bring_list: linesToList(draftValues.bringList),
+                  key_questions: linesToList(draftValues.keyQuestions),
+                  med_review: linesToList(draftValues.medReview),
+                  next_steps: linesToList(draftValues.nextSteps),
+                  since_last_visit: linesToList(draftValues.sinceLastVisit),
+                  summary: draftValues.summary.trim(),
+                  watchouts: linesToList(draftValues.watchouts),
+                }
+              : null,
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "CarePrep review failed.");
+      }
+
+      setCarePrepDrafts((currentDrafts) => {
+        const nextDrafts = { ...currentDrafts };
+        delete nextDrafts[appointmentId];
+        return nextDrafts;
+      });
+      await loadAppointments();
+      setMessage(result.message ?? "CarePrep reviewed.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingCarePrepForId(null);
+      setDiscardingCarePrepForId(null);
+    }
+  }
+
   function updateNoteDraft(
     appointmentId: string,
     field: "followups" | "summary" | "takeaways",
@@ -1844,6 +1996,9 @@ export default function Home() {
               appointments.map((appointment) => {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
+                const carePrepDraft = draftGuidanceByAppointment.get(
+                  appointment.id
+                );
                 const appointmentSubject = appointment.care_subject_id
                   ? subjectsById.get(appointment.care_subject_id)
                   : null;
@@ -1860,6 +2015,9 @@ export default function Home() {
                 const watchouts = asTextList(prep?.watchouts);
                 const medReview = asTextList(prep?.med_review);
                 const sinceLastVisit = asTextList(prep?.since_last_visit);
+                const draftValues = carePrepDraft
+                  ? carePrepFormValues(appointment.id, carePrepDraft)
+                  : emptyCarePrepDraft;
                 const isArchived = appointment.status === "archived";
 
                 return (
@@ -2045,11 +2203,187 @@ export default function Home() {
                         >
                           {generatingCarePrepForId === appointment.id
                             ? "Generating CarePrep..."
-                            : prep
-                              ? "Refresh CarePrep"
-                              : "Generate CarePrep"}
+                            : carePrepDraft
+                              ? "Regenerate draft"
+                              : prep
+                                ? "Generate new draft"
+                                : "Generate CarePrep"}
                         </button>
                       </div>
+                    ) : null}
+
+                    {carePrepDraft && !isArchived ? (
+                      <section className="mt-5 rounded-md border border-blue-200 bg-blue-50 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-semibold text-blue-900">
+                              Review AI CarePrep draft
+                            </h3>
+                            <p className="mt-1 text-sm text-blue-800">
+                              AI draft version {carePrepDraft.version_number}. Accept
+                              it as-is, edit it into your version, or discard it.
+                            </p>
+                          </div>
+                          <button
+                            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                            disabled={
+                              savingCarePrepForId === appointment.id ||
+                              discardingCarePrepForId === appointment.id
+                            }
+                            onClick={() =>
+                              submitCarePrepReview({
+                                action: "discard",
+                                appointmentId: appointment.id,
+                                draft: carePrepDraft,
+                              })
+                            }
+                            type="button"
+                          >
+                            {discardingCarePrepForId === appointment.id
+                              ? "Discarding..."
+                              : "Discard draft"}
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid gap-4">
+                          <label className="block text-sm font-medium text-slate-700">
+                            Summary
+                            <textarea
+                              className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateCarePrepDraft(
+                                  appointment.id,
+                                  "summary",
+                                  event.target.value
+                                )
+                              }
+                              value={draftValues.summary}
+                            />
+                          </label>
+
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <label className="block text-sm font-medium text-slate-700">
+                              Bring
+                              <textarea
+                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                onChange={(event) =>
+                                  updateCarePrepDraft(
+                                    appointment.id,
+                                    "bringList",
+                                    event.target.value
+                                  )
+                                }
+                                value={draftValues.bringList}
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              Ask
+                              <textarea
+                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                onChange={(event) =>
+                                  updateCarePrepDraft(
+                                    appointment.id,
+                                    "keyQuestions",
+                                    event.target.value
+                                  )
+                                }
+                                value={draftValues.keyQuestions}
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              Watch for
+                              <textarea
+                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                onChange={(event) =>
+                                  updateCarePrepDraft(
+                                    appointment.id,
+                                    "watchouts",
+                                    event.target.value
+                                  )
+                                }
+                                value={draftValues.watchouts}
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              Medication review
+                              <textarea
+                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                onChange={(event) =>
+                                  updateCarePrepDraft(
+                                    appointment.id,
+                                    "medReview",
+                                    event.target.value
+                                  )
+                                }
+                                value={draftValues.medReview}
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              Since last visit
+                              <textarea
+                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                onChange={(event) =>
+                                  updateCarePrepDraft(
+                                    appointment.id,
+                                    "sinceLastVisit",
+                                    event.target.value
+                                  )
+                                }
+                                value={draftValues.sinceLastVisit}
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              Next steps
+                              <textarea
+                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                onChange={(event) =>
+                                  updateCarePrepDraft(
+                                    appointment.id,
+                                    "nextSteps",
+                                    event.target.value
+                                  )
+                                }
+                                value={draftValues.nextSteps}
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-3">
+                          <button
+                            className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                            disabled={savingCarePrepForId === appointment.id}
+                            onClick={() =>
+                              submitCarePrepReview({
+                                action: "accept",
+                                appointmentId: appointment.id,
+                                draft: carePrepDraft,
+                              })
+                            }
+                            type="button"
+                          >
+                            {savingCarePrepForId === appointment.id
+                              ? "Accepting..."
+                              : "Accept AI draft"}
+                          </button>
+                          <button
+                            className="rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                            disabled={savingCarePrepForId === appointment.id}
+                            onClick={() =>
+                              submitCarePrepReview({
+                                action: "save_edit",
+                                appointmentId: appointment.id,
+                                draft: carePrepDraft,
+                              })
+                            }
+                            type="button"
+                          >
+                            {savingCarePrepForId === appointment.id
+                              ? "Saving..."
+                              : "Save edited version"}
+                          </button>
+                        </div>
+                      </section>
                     ) : null}
 
                     {note ? (

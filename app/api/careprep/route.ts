@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 type JsonObject = Record<string, unknown>;
+type ReviewAction = "accept" | "discard" | "generate" | "save_edit";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -84,6 +85,20 @@ function normalizeCarePrepOutput(output: JsonObject) {
   };
 }
 
+function carePrepPayload(output: JsonObject) {
+  const guidance = normalizeCarePrepOutput(output);
+
+  return {
+    bring_list: guidance.bring_list,
+    key_questions: guidance.key_questions,
+    med_review: guidance.med_review,
+    next_steps: guidance.next_steps,
+    since_last_visit: guidance.since_last_visit,
+    summary: guidance.summary,
+    watchouts: guidance.watchouts,
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
@@ -104,6 +119,12 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const appointmentId =
       typeof body.appointmentId === "string" ? body.appointmentId : "";
+    const action: ReviewAction =
+      body.action === "accept" ||
+      body.action === "discard" ||
+      body.action === "save_edit"
+        ? body.action
+        : "generate";
 
     if (!appointmentId) {
       throw new Error("Missing appointment id.");
@@ -156,6 +177,182 @@ export async function POST(request: NextRequest) {
 
     if (!membership || membership.length === 0) {
       throw new Error("You do not have access to this appointment.");
+    }
+
+    if (action === "accept" || action === "discard" || action === "save_edit") {
+      const draftGuidanceId =
+        typeof body.draftGuidanceId === "string" ? body.draftGuidanceId : "";
+
+      if (!draftGuidanceId) {
+        throw new Error("Missing CarePrep draft id.");
+      }
+
+      const { data: draftGuidance, error: draftError } = await supabase
+        .from("careprep_guidance")
+        .select("*")
+        .eq("id", draftGuidanceId)
+        .eq("appointment_id", appointment.id)
+        .eq("review_status", "draft")
+        .single();
+
+      if (draftError) {
+        throw draftError;
+      }
+
+      if (action === "discard") {
+        const { error: discardError } = await supabase
+          .from("careprep_guidance")
+          .update({
+            review_status: "discarded",
+            reviewed_at: new Date().toISOString(),
+            reviewed_by_user_id: userId,
+          })
+          .eq("id", draftGuidance.id);
+
+        if (discardError) {
+          throw discardError;
+        }
+
+        return NextResponse.json({ message: "CarePrep draft discarded." });
+      }
+
+      const { data: existingGuidanceRows, error: existingGuidanceError } =
+        await supabase
+          .from("careprep_guidance")
+          .select("id,version_number")
+          .eq("appointment_id", appointment.id)
+          .eq("is_current", true)
+          .limit(1);
+
+      if (existingGuidanceError) {
+        throw existingGuidanceError;
+      }
+
+      const existingGuidance = existingGuidanceRows?.[0] ?? null;
+
+      if (action === "accept") {
+        const { error: acceptError } = await supabase
+          .from("careprep_guidance")
+          .update({
+            is_current: true,
+            review_status: "accepted",
+            reviewed_at: new Date().toISOString(),
+            reviewed_by_user_id: userId,
+            version_number: existingGuidance
+              ? existingGuidance.version_number + 1
+              : 1,
+          })
+          .eq("id", draftGuidance.id);
+
+        if (acceptError) {
+          throw acceptError;
+        }
+
+        if (existingGuidance) {
+          const { error: archiveError } = await supabase
+            .from("careprep_guidance")
+            .update({
+              is_current: false,
+              review_status: "superseded",
+              superseded_at: new Date().toISOString(),
+              superseded_by_guidance_id: draftGuidance.id,
+            })
+            .eq("id", existingGuidance.id);
+
+          if (archiveError) {
+            throw archiveError;
+          }
+        }
+
+        return NextResponse.json({ message: "AI CarePrep accepted." });
+      }
+
+      const editedGuidance =
+        body.editedGuidance &&
+        typeof body.editedGuidance === "object" &&
+        !Array.isArray(body.editedGuidance)
+          ? (body.editedGuidance as JsonObject)
+          : null;
+
+      if (!editedGuidance) {
+        throw new Error("Missing edited CarePrep content.");
+      }
+
+      const editedPayload = carePrepPayload(editedGuidance);
+
+      if (!editedPayload.summary) {
+        throw new Error("Edited CarePrep needs a summary.");
+      }
+
+      const { data: editedVersion, error: editedError } = await supabase
+        .from("careprep_guidance")
+        .insert({
+          ...editedPayload,
+          accepted_at: new Date().toISOString(),
+          accepted_by_user_id: userId,
+          ai_generated_guidance_id: draftGuidance.id,
+          appointment_id: appointment.id,
+          care_circle_id: appointment.care_circle_id,
+          edited_from_guidance_id: draftGuidance.id,
+          generated_at: new Date().toISOString(),
+          input_context_snapshot: draftGuidance.input_context_snapshot ?? {},
+          instruction_content_hash: draftGuidance.instruction_content_hash ?? null,
+          instruction_set_id: draftGuidance.instruction_set_id ?? null,
+          instruction_version_id: draftGuidance.instruction_version_id ?? null,
+          is_current: true,
+          model: draftGuidance.model ?? null,
+          prompt_version: draftGuidance.prompt_version ?? null,
+          review_status: "accepted",
+          reviewed_at: new Date().toISOString(),
+          reviewed_by_user_id: userId,
+          source: "user_edited",
+          status: "succeeded",
+          user_id: userId,
+          version_number: existingGuidance
+            ? existingGuidance.version_number + 1
+            : 1,
+        })
+        .select("id")
+        .single();
+
+      if (editedError) {
+        throw editedError;
+      }
+
+      const { error: draftArchiveError } = await supabase
+        .from("careprep_guidance")
+        .update({
+          review_status: "accepted_with_edits",
+          reviewed_at: new Date().toISOString(),
+          reviewed_by_user_id: userId,
+          superseded_at: new Date().toISOString(),
+          superseded_by_guidance_id: editedVersion.id,
+        })
+        .eq("id", draftGuidance.id);
+
+      if (draftArchiveError) {
+        throw draftArchiveError;
+      }
+
+      if (existingGuidance) {
+        const { error: archiveError } = await supabase
+          .from("careprep_guidance")
+          .update({
+            is_current: false,
+            review_status: "superseded",
+            superseded_at: new Date().toISOString(),
+            superseded_by_guidance_id: editedVersion.id,
+          })
+          .eq("id", existingGuidance.id);
+
+        if (archiveError) {
+          throw archiveError;
+        }
+      }
+
+      return NextResponse.json({
+        message: "Edited CarePrep saved. AI draft preserved.",
+      });
     }
 
     const { data: instructionSets, error: instructionSetError } = await supabase
@@ -354,22 +551,21 @@ export async function POST(request: NextRequest) {
       throw new Error("OpenAI returned CarePrep without a summary.");
     }
 
-    const { data: existingGuidanceRows, error: existingGuidanceError } =
+    const { data: existingDraftRows, error: existingDraftError } =
       await supabase
         .from("careprep_guidance")
-        .select("id,version_number")
+        .select("id")
         .eq("appointment_id", appointment.id)
-        .eq("is_current", true)
-        .limit(1);
+        .eq("review_status", "draft");
 
-    if (existingGuidanceError) {
-      throw existingGuidanceError;
+    if (existingDraftError) {
+      throw existingDraftError;
     }
 
-    const existingGuidance = existingGuidanceRows?.[0] ?? null;
+    const existingDrafts = existingDraftRows ?? [];
     const promptVersion = `careprep_generation:v${instructionVersion.version_number}`;
 
-    const { data: newGuidance, error: guidanceError } = await supabase
+    const { error: guidanceError } = await supabase
       .from("careprep_guidance")
       .insert({
         appointment_id: appointment.id,
@@ -380,47 +576,48 @@ export async function POST(request: NextRequest) {
         instruction_content_hash: instructionVersion.content_hash ?? null,
         instruction_set_id: instructionSet.id,
         instruction_version_id: instructionVersion.id,
-        is_current: true,
+        is_current: false,
         key_questions: guidance.key_questions,
         med_review: guidance.med_review,
         model: instructionVersion.model ?? "gpt-4.1-mini",
         next_steps: guidance.next_steps,
         prompt_version: promptVersion,
+        review_status: "draft",
         since_last_visit: guidance.since_last_visit,
+        source: "ai_generated",
         status: "succeeded",
         summary: guidance.summary,
         user_id: userId,
-        version_number: existingGuidance
-          ? existingGuidance.version_number + 1
-          : 1,
+        version_number: 0,
         watchouts: guidance.watchouts,
       })
-      .select("id")
-      .single();
 
     if (guidanceError) {
       throw guidanceError;
     }
 
-    if (existingGuidance) {
-      const { error: archiveError } = await supabase
+    if (existingDrafts.length > 0) {
+      const { error: discardDraftError } = await supabase
         .from("careprep_guidance")
         .update({
-          is_current: false,
-          superseded_at: new Date().toISOString(),
-          superseded_by_guidance_id: newGuidance.id,
+          review_status: "discarded",
+          reviewed_at: new Date().toISOString(),
+          reviewed_by_user_id: userId,
         })
-        .eq("id", existingGuidance.id);
+        .in(
+          "id",
+          existingDrafts.map((draft) => draft.id)
+        );
 
-      if (archiveError) {
-        throw archiveError;
+      if (discardDraftError) {
+        throw discardDraftError;
       }
     }
 
     return NextResponse.json({
-      message: existingGuidance
-        ? "CarePrep refreshed with AI. Previous version archived."
-        : "CarePrep generated with AI.",
+      message: existingDrafts.length > 0
+        ? "New AI CarePrep draft generated."
+        : "AI CarePrep draft generated.",
     });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
