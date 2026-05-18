@@ -36,6 +36,12 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+const emptyNoteDraft = {
+  followups: "",
+  summary: "",
+  takeaways: "",
+};
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -72,6 +78,13 @@ function asTextList(value: unknown): string[] {
 
       return "";
     })
+    .filter(Boolean);
+}
+
+function linesToList(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
     .filter(Boolean);
 }
 
@@ -115,8 +128,19 @@ export default function Home() {
   const [newAppointmentTitle, setNewAppointmentTitle] = useState("");
   const [newAppointmentReason, setNewAppointmentReason] = useState("");
   const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState("");
+  const [noteDrafts, setNoteDrafts] = useState<
+    Record<
+      string,
+      {
+        followups: string;
+        summary: string;
+        takeaways: string;
+      }
+    >
+  >({});
   const [loading, setLoading] = useState(false);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
+  const [savingNoteForId, setSavingNoteForId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -352,6 +376,71 @@ export default function Home() {
     }
   }
 
+  function updateNoteDraft(
+    appointmentId: string,
+    field: "followups" | "summary" | "takeaways",
+    value: string
+  ) {
+    setNoteDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointmentId]: {
+        ...emptyNoteDraft,
+        ...currentDrafts[appointmentId],
+        [field]: value,
+      },
+    }));
+  }
+
+  async function handleCreateNote(
+    event: FormEvent<HTMLFormElement>,
+    appointment: Appointment
+  ) {
+    event.preventDefault();
+    setSavingNoteForId(appointment.id);
+    setMessage("");
+
+    try {
+      const draft = noteDrafts[appointment.id];
+      const summary = draft?.summary.trim() ?? "";
+      const takeaways = linesToList(draft?.takeaways ?? "");
+      const followups = linesToList(draft?.followups ?? "");
+
+      if (!summary && takeaways.length === 0 && followups.length === 0) {
+        throw new Error("Please add a summary, takeaway, or follow-up.");
+      }
+
+      const { careCircleId, userId } = await getPrimaryCareContext();
+
+      const { error } = await supabase.from("appointment_notes").insert({
+        appointment_id: appointment.id,
+        care_circle_id: careCircleId,
+        user_id: userId,
+        input_text: summary || null,
+        summary_short: summary || null,
+        takeaways,
+        followups,
+        source: "manual",
+        generated_by_ai: false,
+        accepted_by_user: true,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setNoteDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [appointment.id]: emptyNoteDraft,
+      }));
+      await loadAppointments();
+      setMessage("Notes added.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingNoteForId(null);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
       <section className="mx-auto max-w-6xl">
@@ -493,6 +582,7 @@ export default function Home() {
               appointments.map((appointment) => {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
+                const noteDraft = noteDrafts[appointment.id] ?? emptyNoteDraft;
                 const takeaways = asTextList(note?.takeaways);
                 const followups = asTextList(note?.followups);
                 const bringList = asTextList(prep?.bring_list);
@@ -617,6 +707,73 @@ export default function Home() {
                         )}
                       </section>
                     ) : null}
+
+                    <form
+                      className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
+                      onSubmit={(event) => handleCreateNote(event, appointment)}
+                    >
+                      <h3 className="text-lg font-semibold text-slate-900">
+                        Add notes
+                      </h3>
+                      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                        <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                          Visit summary
+                          <textarea
+                            className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateNoteDraft(
+                                appointment.id,
+                                "summary",
+                                event.target.value
+                              )
+                            }
+                            placeholder="What happened in the visit?"
+                            value={noteDraft.summary}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Takeaways
+                          <textarea
+                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateNoteDraft(
+                                appointment.id,
+                                "takeaways",
+                                event.target.value
+                              )
+                            }
+                            placeholder={"One per line\nExample: Medication changed"}
+                            value={noteDraft.takeaways}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Follow-ups
+                          <textarea
+                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateNoteDraft(
+                                appointment.id,
+                                "followups",
+                                event.target.value
+                              )
+                            }
+                            placeholder={"One per line\nExample: Schedule labs"}
+                            value={noteDraft.followups}
+                          />
+                        </label>
+                        <div className="flex items-end">
+                          <button
+                            className="w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                            disabled={savingNoteForId === appointment.id}
+                            type="submit"
+                          >
+                            {savingNoteForId === appointment.id
+                              ? "Saving..."
+                              : "Save notes"}
+                          </button>
+                        </div>
+                      </div>
+                    </form>
                   </article>
                 );
               })
