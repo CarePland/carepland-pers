@@ -167,34 +167,6 @@ function linesToList(value: string): string[] {
     .filter(Boolean);
 }
 
-function uniqueItems(items: string[], limit: number): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const item of items) {
-    const normalized = item.trim();
-    const key = normalized.toLowerCase();
-
-    if (!normalized || seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    result.push(normalized);
-
-    if (result.length >= limit) {
-      break;
-    }
-  }
-
-  return result;
-}
-
-function includesAny(value: string, terms: string[]): boolean {
-  const normalized = value.toLowerCase();
-  return terms.some((term) => normalized.includes(term));
-}
-
 async function hashInstructionContent({
   model,
   outputSchema,
@@ -767,48 +739,6 @@ export default function Home() {
     }
   }
 
-  async function loadCurrentCarePrepInstruction(careCircleId: string) {
-    const { data: instructionSets, error: instructionSetError } = await supabase
-      .from("ai_instruction_sets")
-      .select("id,instruction_key,name,description")
-      .eq("care_circle_id", careCircleId)
-      .eq("instruction_key", "careprep_generation")
-      .eq("is_active", true)
-      .limit(1);
-
-    if (instructionSetError) {
-      throw instructionSetError;
-    }
-
-    const instructionSet = instructionSets?.[0] ?? null;
-
-    if (!instructionSet) {
-      return {
-        instructionSet: null,
-        instructionVersion: null,
-      };
-    }
-
-    const { data: instructionVersions, error: instructionVersionError } =
-      await supabase
-        .from("ai_instruction_versions")
-        .select(
-          "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,is_current,change_note,content_hash,copied_from_version_id,created_at"
-        )
-        .eq("instruction_set_id", instructionSet.id)
-        .eq("is_current", true)
-        .limit(1);
-
-    if (instructionVersionError) {
-      throw instructionVersionError;
-    }
-
-    return {
-      instructionSet,
-      instructionVersion: instructionVersions?.[0] ?? null,
-    };
-  }
-
   async function handleToggleAiAdmin() {
     const nextState = !showAiAdmin;
     setShowAiAdmin(nextState);
@@ -1318,203 +1248,39 @@ export default function Home() {
     setMessage("");
 
     try {
-      const { careCircleId, userId } = await getPrimaryCareContext(
-        appointment.care_subject_id ?? undefined
-      );
-      const { instructionSet, instructionVersion } =
-        await loadCurrentCarePrepInstruction(careCircleId);
-
       if (!appointment.care_subject_id) {
         throw new Error("This appointment needs a Care VIP before CarePrep can run.");
       }
 
-      let priorAppointmentsQuery = supabase
-        .from("appointments")
-        .select("id,title,reason,starts_at")
-        .eq("care_circle_id", careCircleId)
-        .eq("care_subject_id", appointment.care_subject_id)
-        .neq("id", appointment.id)
-        .neq("status", "archived")
-        .order("starts_at", { ascending: false })
-        .limit(8);
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
 
-      if (appointment.starts_at) {
-        priorAppointmentsQuery = priorAppointmentsQuery.lt(
-          "starts_at",
-          appointment.starts_at
-        );
+      if (sessionError) {
+        throw sessionError;
       }
 
-      const { data: priorAppointments, error: priorAppointmentsError } =
-        await priorAppointmentsQuery;
+      const accessToken = sessionData.session?.access_token;
 
-      if (priorAppointmentsError) {
-        throw priorAppointmentsError;
+      if (!accessToken) {
+        throw new Error("Please sign in before generating CarePrep.");
       }
 
-      const priorAppointmentIds =
-        priorAppointments?.map((priorAppointment) => priorAppointment.id) ?? [];
-
-      const { data: priorNotes, error: priorNotesError } =
-        priorAppointmentIds.length > 0
-          ? await supabase
-              .from("appointment_notes")
-              .select("appointment_id,summary_short,takeaways,followups")
-              .in("appointment_id", priorAppointmentIds)
-              .eq("is_current", true)
-          : { data: [], error: null };
-
-      if (priorNotesError) {
-        throw priorNotesError;
-      }
-
-      const priorNoteRows = priorNotes ?? [];
-      const priorSummaries =
-        priorNoteRows
-          ?.map((note) => note.summary_short)
-          .filter((summary): summary is string => Boolean(summary)) ?? [];
-      const priorTakeaways = priorNoteRows.flatMap((note) => asTextList(note.takeaways));
-      const priorFollowups = priorNoteRows.flatMap((note) => asTextList(note.followups));
-      const allPriorItems = [...priorSummaries, ...priorTakeaways, ...priorFollowups];
-      const medTerms = [
-        "dose",
-        "gabapentin",
-        "med",
-        "medication",
-        "prescription",
-        "supplement",
-      ];
-      const watchTerms = [
-        "breath",
-        "change",
-        "energy",
-        "eating",
-        "fatigue",
-        "lethargy",
-        "pain",
-        "symptom",
-        "weight",
-      ];
-
-      const sinceLastVisit = uniqueItems([...priorSummaries, ...priorTakeaways], 5);
-      const medReview = uniqueItems(
-        allPriorItems.filter((item) => includesAny(item, medTerms)),
-        5
-      );
-      const watchouts = uniqueItems(
-        allPriorItems.filter((item) => includesAny(item, watchTerms)),
-        5
-      );
-      const nextSteps = uniqueItems(priorFollowups, 5);
-      const keyQuestions = uniqueItems(
-        [
-          ...priorFollowups.map((followup) => `What is the status of: ${followup}`),
-          ...priorTakeaways.map((takeaway) => `Should we revisit: ${takeaway}`),
-          appointment.reason
-            ? `What should we know about ${appointment.reason}?`
-            : "What has changed since the last visit?",
-        ],
-        5
-      );
-      const bringList = uniqueItems(
-        [
-          "Current medication list",
-          "Recent test results or portal messages",
-          medReview.length > 0 ? "Medication or supplement details" : "",
-          nextSteps.length > 0 ? "Notes on open follow-ups" : "",
-        ],
-        4
-      );
-      const careVipName = appointment.care_subject_id
-        ? subjectsById.get(appointment.care_subject_id)?.display_name
-        : null;
-      const summary =
-        sinceLastVisit.length > 0
-          ? `CarePrep for ${careVipName ?? "this Care VIP"}: review ${sinceLastVisit
-              .slice(0, 2)
-              .join("; ")}. Bring key records and ask about open follow-ups.`
-          : `CarePrep for ${careVipName ?? "this Care VIP"}: no prior notes were found yet. Use this visit to capture concerns, questions, and follow-ups.`;
-      const inputContextSnapshot = {
-        future_appointment: {
-          care_subject_id: appointment.care_subject_id,
-          id: appointment.id,
-          reason: appointment.reason,
-          starts_at: appointment.starts_at,
-          status: appointment.status,
-          title: appointment.title,
+      const response = await fetch("/api/careprep", {
+        body: JSON.stringify({ appointmentId: appointment.id }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
         },
-        generator: "local-rule-based",
-        past_appointments:
-          priorAppointments?.map((priorAppointment) => ({
-            id: priorAppointment.id,
-            note:
-              priorNoteRows.find(
-                (note) => note.appointment_id === priorAppointment.id
-              ) ?? null,
-            reason: priorAppointment.reason,
-            starts_at: priorAppointment.starts_at,
-            title: priorAppointment.title,
-          })) ?? [],
-      };
-      const promptVersion = instructionVersion
-        ? `careprep_generation:v${instructionVersion.version_number}`
-        : "careprep-mvp-1";
-      const existingGuidance = guidanceByAppointment.get(appointment.id);
+        method: "POST",
+      });
+      const result = await response.json();
 
-      const guidancePayload = {
-        appointment_id: appointment.id,
-        bring_list: bringList,
-        care_circle_id: careCircleId,
-        generated_at: new Date().toISOString(),
-        input_context_snapshot: inputContextSnapshot,
-        instruction_content_hash: instructionVersion?.content_hash ?? null,
-        instruction_set_id: instructionSet?.id ?? null,
-        instruction_version_id: instructionVersion?.id ?? null,
-        is_current: true,
-        key_questions: keyQuestions,
-        med_review: medReview,
-        model: instructionVersion?.model ?? "local-rule-based",
-        next_steps: nextSteps,
-        prompt_version: promptVersion,
-        since_last_visit: sinceLastVisit,
-        status: "succeeded",
-        summary,
-        user_id: userId,
-        version_number: existingGuidance ? existingGuidance.version_number + 1 : 1,
-        watchouts,
-      };
-
-      const { data: newGuidance, error: guidanceError } = await supabase
-        .from("careprep_guidance")
-        .insert(guidancePayload)
-        .select("id")
-        .single();
-
-      if (guidanceError) {
-        throw guidanceError;
-      }
-
-      if (existingGuidance) {
-        const { error: archiveError } = await supabase
-          .from("careprep_guidance")
-          .update({
-            is_current: false,
-            superseded_at: new Date().toISOString(),
-            superseded_by_guidance_id: newGuidance.id,
-          })
-          .eq("id", existingGuidance.id);
-
-        if (archiveError) {
-          throw archiveError;
-        }
+      if (!response.ok) {
+        throw new Error(result.error ?? "CarePrep generation failed.");
       }
 
       await loadAppointments();
-      setMessage(
-        existingGuidance
-          ? "CarePrep refreshed. Previous version archived."
-          : "CarePrep generated."
-      );
+      setMessage(result.message ?? "CarePrep generated with AI.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
