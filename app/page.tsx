@@ -1352,12 +1352,13 @@ export default function Home() {
   function updateCarePrepDraft(
     appointmentId: string,
     field: keyof typeof emptyCarePrepDraft,
-    value: string
+    value: string,
+    baseValues: typeof emptyCarePrepDraft
   ) {
     setCarePrepDrafts((currentDrafts) => ({
       ...currentDrafts,
       [appointmentId]: {
-        ...emptyCarePrepDraft,
+        ...baseValues,
         ...currentDrafts[appointmentId],
         [field]: value,
       },
@@ -2254,7 +2255,8 @@ export default function Home() {
                                 updateCarePrepDraft(
                                   appointment.id,
                                   "summary",
-                                  event.target.value
+                                  event.target.value,
+                                  draftValues
                                 )
                               }
                               value={draftValues.summary}
@@ -2270,7 +2272,8 @@ export default function Home() {
                                   updateCarePrepDraft(
                                     appointment.id,
                                     "bringList",
-                                    event.target.value
+                                    event.target.value,
+                                    draftValues
                                   )
                                 }
                                 value={draftValues.bringList}
@@ -2284,7 +2287,8 @@ export default function Home() {
                                   updateCarePrepDraft(
                                     appointment.id,
                                     "keyQuestions",
-                                    event.target.value
+                                    event.target.value,
+                                    draftValues
                                   )
                                 }
                                 value={draftValues.keyQuestions}
@@ -2298,7 +2302,8 @@ export default function Home() {
                                   updateCarePrepDraft(
                                     appointment.id,
                                     "watchouts",
-                                    event.target.value
+                                    event.target.value,
+                                    draftValues
                                   )
                                 }
                                 value={draftValues.watchouts}
@@ -2312,7 +2317,8 @@ export default function Home() {
                                   updateCarePrepDraft(
                                     appointment.id,
                                     "medReview",
-                                    event.target.value
+                                    event.target.value,
+                                    draftValues
                                   )
                                 }
                                 value={draftValues.medReview}
@@ -2326,7 +2332,8 @@ export default function Home() {
                                   updateCarePrepDraft(
                                     appointment.id,
                                     "sinceLastVisit",
-                                    event.target.value
+                                    event.target.value,
+                                    draftValues
                                   )
                                 }
                                 value={draftValues.sinceLastVisit}
@@ -2340,7 +2347,8 @@ export default function Home() {
                                   updateCarePrepDraft(
                                     appointment.id,
                                     "nextSteps",
-                                    event.target.value
+                                    event.target.value,
+                                    draftValues
                                   )
                                 }
                                 value={draftValues.nextSteps}
