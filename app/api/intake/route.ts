@@ -170,7 +170,12 @@ export async function POST(request: NextRequest) {
         appointment_title: { type: "string" },
         confidence: { type: "number" },
         followups: { items: { type: "string" }, type: "array" },
+        location_address: { type: "string" },
+        location_name: { type: "string" },
+        location_phone: { type: "string" },
         notes_summary: { type: "string" },
+        provider_name: { type: "string" },
+        provider_organization: { type: "string" },
         starts_at_local: { type: "string" },
         suggested_action: { type: "string" },
         takeaways: { items: { type: "string" }, type: "array" },
@@ -179,6 +184,11 @@ export async function POST(request: NextRequest) {
         "appointment_title",
         "appointment_reason",
         "starts_at_local",
+        "provider_name",
+        "provider_organization",
+        "location_name",
+        "location_address",
+        "location_phone",
         "notes_summary",
         "takeaways",
         "followups",
@@ -192,7 +202,7 @@ export async function POST(request: NextRequest) {
         input: [
           {
             content:
-              "You interpret pasted appointment-related text for CarePland Personal. Use only supplied text. Extract a reviewable draft for an appointment and optional notes. If a value is unknown, return an empty string or empty array. starts_at_local must be suitable for an HTML datetime-local input as YYYY-MM-DDTHH:mm when a date/time is explicit; otherwise return an empty string. Do not invent dates, providers, or outcomes.",
+              "You interpret pasted appointment-related text for CarePland Personal. Use only supplied text. Extract a reviewable draft for an appointment and optional notes. Extract provider_name, provider_organization, location_name, location_address, and location_phone only when directly supported by the text. If a value is unknown, return an empty string or empty array. starts_at_local must be suitable for an HTML datetime-local input as YYYY-MM-DDTHH:mm when a date/time is explicit; otherwise return an empty string. Do not invent dates, providers, locations, or outcomes.",
             role: "system",
           },
           {

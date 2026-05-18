@@ -7,6 +7,11 @@ type Appointment = {
   id: string;
   care_subject_id: string | null;
   current_note_id: string | null;
+  location_address: string | null;
+  location_name: string | null;
+  location_phone: string | null;
+  provider_name: string | null;
+  provider_organization: string | null;
   title: string | null;
   reason: string | null;
   starts_at: string | null;
@@ -115,7 +120,12 @@ type TextIntakeDraft = {
   appointmentTitle: string;
   confidence: number;
   followups: string;
+  locationAddress: string;
+  locationName: string;
+  locationPhone: string;
   notesSummary: string;
+  providerName: string;
+  providerOrganization: string;
   startsAt: string;
   suggestedAction: string;
   takeaways: string;
@@ -163,6 +173,11 @@ const emptyNoteDraft = {
 };
 
 const emptyAppointmentDraft = {
+  locationAddress: "",
+  locationName: "",
+  locationPhone: "",
+  providerName: "",
+  providerOrganization: "",
   reason: "",
   startsAt: "",
   status: "scheduled",
@@ -174,7 +189,12 @@ const emptyTextIntakeDraft: TextIntakeDraft = {
   appointmentTitle: "",
   confidence: 0,
   followups: "",
+  locationAddress: "",
+  locationName: "",
+  locationPhone: "",
   notesSummary: "",
+  providerName: "",
+  providerOrganization: "",
   startsAt: "",
   suggestedAction: "",
   takeaways: "",
@@ -293,6 +313,55 @@ function dayDifference(left: string | null, right: string): number | null {
   );
 }
 
+function googleMapsUrl(address: string | null): string | null {
+  if (!address?.trim()) {
+    return null;
+  }
+
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    address.trim()
+  )}`;
+}
+
+function agicalUrl(appointment: Appointment): string | null {
+  if (!appointment.starts_at || !appointment.title?.trim()) {
+    return null;
+  }
+
+  const startsAt = new Date(appointment.starts_at);
+
+  if (Number.isNaN(startsAt.getTime())) {
+    return null;
+  }
+
+  const endsAt = new Date(startsAt.getTime() + 60 * 60 * 1000);
+  const description = [
+    appointment.provider_name ? `Provider: ${appointment.provider_name}` : "",
+    appointment.provider_organization
+      ? `Practice: ${appointment.provider_organization}`
+      : "",
+    appointment.reason ? `Reason: ${appointment.reason}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const params = new URLSearchParams({
+    dtend: endsAt.toISOString(),
+    dtstart: startsAt.toISOString(),
+    reminder: "30",
+    subject: appointment.title.trim(),
+  });
+
+  if (appointment.location_address?.trim()) {
+    params.set("location", appointment.location_address.trim());
+  }
+
+  if (description) {
+    params.set("description", description);
+  }
+
+  return `https://ics.agical.io/?${params.toString()}`;
+}
+
 async function hashInstructionContent({
   model,
   outputSchema,
@@ -395,7 +464,12 @@ function intakeDraftFromResult(value: unknown): TextIntakeDraft {
     confidence:
       typeof draft.confidence === "number" ? draft.confidence : Number(draft.confidence) || 0,
     followups: asTextList(draft.followups).join("\n"),
+    locationAddress: String(draft.location_address ?? ""),
+    locationName: String(draft.location_name ?? ""),
+    locationPhone: String(draft.location_phone ?? ""),
     notesSummary: String(draft.notes_summary ?? ""),
+    providerName: String(draft.provider_name ?? ""),
+    providerOrganization: String(draft.provider_organization ?? ""),
     startsAt: String(draft.starts_at_local ?? ""),
     suggestedAction: String(draft.suggested_action ?? ""),
     takeaways: asTextList(draft.takeaways).join("\n"),
@@ -408,6 +482,18 @@ export default function Home() {
   const [newAppointmentTitle, setNewAppointmentTitle] = useState("");
   const [newAppointmentReason, setNewAppointmentReason] = useState("");
   const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState("");
+  const [newAppointmentProviderName, setNewAppointmentProviderName] =
+    useState("");
+  const [
+    newAppointmentProviderOrganization,
+    setNewAppointmentProviderOrganization,
+  ] = useState("");
+  const [newAppointmentLocationName, setNewAppointmentLocationName] =
+    useState("");
+  const [newAppointmentLocationAddress, setNewAppointmentLocationAddress] =
+    useState("");
+  const [newAppointmentLocationPhone, setNewAppointmentLocationPhone] =
+    useState("");
   const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState("");
   const [textIntakeSubjectId, setTextIntakeSubjectId] = useState("");
   const [textIntakeValue, setTextIntakeValue] = useState("");
@@ -727,7 +813,7 @@ export default function Home() {
 
     let appointmentQuery = supabase
       .from("appointments")
-      .select("id,care_subject_id,current_note_id,title,reason,starts_at,status")
+      .select("id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone")
       .in("care_circle_id", circleIds)
       .order("starts_at", { ascending: true });
 
@@ -737,7 +823,7 @@ export default function Home() {
 
     let notesReminderQuery = supabase
       .from("appointments")
-      .select("id,care_circle_id,care_subject_id,current_note_id,title,reason,starts_at,status")
+      .select("id,care_circle_id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone")
       .in("care_circle_id", circleIds)
       .neq("status", "archived")
       .is("current_note_id", null)
@@ -1265,6 +1351,11 @@ export default function Home() {
     setHistoryAppointmentId("");
     setAppointmentView("upcoming");
     setSelectedSubjectId(ALL_SUBJECTS);
+    setNewAppointmentProviderName("");
+    setNewAppointmentProviderOrganization("");
+    setNewAppointmentLocationName("");
+    setNewAppointmentLocationAddress("");
+    setNewAppointmentLocationPhone("");
     setNewAppointmentSubjectId("");
     setTextIntakeSubjectId("");
     setTextIntakeValue("");
@@ -1419,7 +1510,7 @@ export default function Home() {
     const { data: appointmentRows, error: appointmentError } = await supabase
       .from("appointments")
       .select(
-        "id,care_subject_id,current_note_id,title,reason,starts_at,status,archived_at"
+            "id,care_subject_id,current_note_id,title,reason,starts_at,status,archived_at,provider_name,provider_organization,location_name,location_address,location_phone"
       )
       .eq("care_circle_id", careCircleId)
       .eq("care_subject_id", careSubjectId)
@@ -1454,6 +1545,10 @@ export default function Home() {
     const draftText = [
       draft.appointmentTitle,
       draft.appointmentReason,
+      draft.providerName,
+      draft.providerOrganization,
+      draft.locationName,
+      draft.locationAddress,
       draft.notesSummary,
       draft.takeaways,
       draft.followups,
@@ -1465,6 +1560,10 @@ export default function Home() {
         const appointmentText = [
           appointment.title ?? "",
           appointment.reason ?? "",
+          appointment.provider_name ?? "",
+          appointment.provider_organization ?? "",
+          appointment.location_name ?? "",
+          appointment.location_address ?? "",
         ].join(" ");
         const appointmentTokens = textTokens(appointmentText);
         const sharedTokens = sharedTokenCount(draftTokens, appointmentTokens);
@@ -1558,7 +1657,12 @@ export default function Home() {
         appointment_title: textIntakeDraft.appointmentTitle,
         confidence: textIntakeDraft.confidence,
         followups,
+        location_address: textIntakeDraft.locationAddress,
+        location_name: textIntakeDraft.locationName,
+        location_phone: textIntakeDraft.locationPhone,
         notes_summary: textIntakeDraft.notesSummary,
+        provider_name: textIntakeDraft.providerName,
+        provider_organization: textIntakeDraft.providerOrganization,
         starts_at_local: textIntakeDraft.startsAt,
         suggested_action: textIntakeDraft.suggestedAction,
         takeaways,
@@ -1592,7 +1696,13 @@ export default function Home() {
           .insert({
             care_circle_id: careCircleId,
             care_subject_id: careSubjectId,
+            location_address: textIntakeDraft.locationAddress.trim() || null,
+            location_name: textIntakeDraft.locationName.trim() || null,
+            location_phone: textIntakeDraft.locationPhone.trim() || null,
             owner_user_id: userId,
+            provider_name: textIntakeDraft.providerName.trim() || null,
+            provider_organization:
+              textIntakeDraft.providerOrganization.trim() || null,
             reason: textIntakeDraft.appointmentReason.trim() || null,
             source: "manual",
             starts_at: startsAt,
@@ -1728,6 +1838,8 @@ export default function Home() {
               score: match.score,
               status: match.appointment.status,
               title: match.appointment.title,
+              provider_name: match.appointment.provider_name,
+              provider_organization: match.appointment.provider_organization,
             })),
             match_status: selectedMatch
               ? "user_selected_existing"
@@ -1789,7 +1901,13 @@ export default function Home() {
       const { error } = await supabase.from("appointments").insert({
         care_circle_id: careCircleId,
         care_subject_id: careSubjectId,
+        location_address: newAppointmentLocationAddress.trim() || null,
+        location_name: newAppointmentLocationName.trim() || null,
+        location_phone: newAppointmentLocationPhone.trim() || null,
         owner_user_id: userId,
+        provider_name: newAppointmentProviderName.trim() || null,
+        provider_organization:
+          newAppointmentProviderOrganization.trim() || null,
         title: newAppointmentTitle.trim(),
         reason: newAppointmentReason.trim() || null,
         starts_at: startsAt,
@@ -1804,6 +1922,11 @@ export default function Home() {
       setNewAppointmentTitle("");
       setNewAppointmentReason("");
       setNewAppointmentStartsAt("");
+      setNewAppointmentProviderName("");
+      setNewAppointmentProviderOrganization("");
+      setNewAppointmentLocationName("");
+      setNewAppointmentLocationAddress("");
+      setNewAppointmentLocationPhone("");
       setNewAppointmentSubjectId(careSubjectId);
       await loadAppointments();
       setMessage("Appointment added.");
@@ -1818,6 +1941,11 @@ export default function Home() {
     setAppointmentDrafts((currentDrafts) => ({
       ...currentDrafts,
       [appointment.id]: {
+        locationAddress: appointment.location_address ?? "",
+        locationName: appointment.location_name ?? "",
+        locationPhone: appointment.location_phone ?? "",
+        providerName: appointment.provider_name ?? "",
+        providerOrganization: appointment.provider_organization ?? "",
         reason: appointment.reason ?? "",
         startsAt: toDatetimeLocalValue(appointment.starts_at),
         status: appointment.status,
@@ -1843,7 +1971,7 @@ export default function Home() {
 
   function updateAppointmentDraft(
     appointmentId: string,
-    field: "reason" | "startsAt" | "status" | "title",
+    field: keyof typeof emptyAppointmentDraft,
     value: string
   ) {
     setAppointmentDrafts((currentDrafts) => ({
@@ -1879,6 +2007,11 @@ export default function Home() {
         .from("appointments")
         .update({
           reason: draft.reason.trim() || null,
+          location_address: draft.locationAddress.trim() || null,
+          location_name: draft.locationName.trim() || null,
+          location_phone: draft.locationPhone.trim() || null,
+          provider_name: draft.providerName.trim() || null,
+          provider_organization: draft.providerOrganization.trim() || null,
           starts_at: startsAt,
           status: draft.status,
           title: draft.title.trim(),
@@ -2678,6 +2811,62 @@ export default function Home() {
                       />
                     </label>
                     <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Provider
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft("providerName", event.target.value)
+                        }
+                        value={textIntakeDraft.providerName}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Practice
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft(
+                            "providerOrganization",
+                            event.target.value
+                          )
+                        }
+                        value={textIntakeDraft.providerOrganization}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Location name
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft("locationName", event.target.value)
+                        }
+                        value={textIntakeDraft.locationName}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Address
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft(
+                            "locationAddress",
+                            event.target.value
+                          )
+                        }
+                        value={textIntakeDraft.locationAddress}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Phone
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          updateTextIntakeDraft("locationPhone", event.target.value)
+                        }
+                        value={textIntakeDraft.locationPhone}
+                      />
+                    </label>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
                       Reason
                       <textarea
                         className="mt-2 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
@@ -2794,6 +2983,42 @@ export default function Home() {
                     }
                     type="datetime-local"
                     value={newAppointmentStartsAt}
+                  />
+                </label>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Provider
+                  <input
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    onChange={(event) =>
+                      setNewAppointmentProviderName(event.target.value)
+                    }
+                    placeholder="e.g. Dr. Smith"
+                    type="text"
+                    value={newAppointmentProviderName}
+                  />
+                </label>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Practice
+                  <input
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    onChange={(event) =>
+                      setNewAppointmentProviderOrganization(event.target.value)
+                    }
+                    placeholder="e.g. Main Street Clinic"
+                    type="text"
+                    value={newAppointmentProviderOrganization}
+                  />
+                </label>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Address
+                  <input
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    onChange={(event) =>
+                      setNewAppointmentLocationAddress(event.target.value)
+                    }
+                    placeholder="Street, city, state"
+                    type="text"
+                    value={newAppointmentLocationAddress}
                   />
                 </label>
                 <label className="mt-4 block text-sm font-medium text-slate-700">
@@ -3329,6 +3554,14 @@ export default function Home() {
                   !appointment.starts_at || new Date(appointment.starts_at) >= new Date();
                 const canGenerateCarePrep =
                   !isArchived && !isLogged && isFutureOrUndated;
+                const mapsLink = googleMapsUrl(appointment.location_address);
+                const calendarLink = agicalUrl(appointment);
+                const providerLine = [
+                  appointment.provider_name,
+                  appointment.provider_organization,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
 
                 return (
                   <article
@@ -3343,10 +3576,30 @@ export default function Home() {
                         <p className="mt-1 text-slate-600">
                           {formatDate(appointment.starts_at)}
                         </p>
+                        {providerLine ? (
+                          <p className="mt-1 text-sm font-medium text-slate-700">
+                            {providerLine}
+                          </p>
+                        ) : null}
                         {appointmentSubject ? (
                           <p className="mt-1 text-sm font-medium text-slate-500">
                             For {appointmentSubject.display_name}
                           </p>
+                        ) : null}
+                        {appointment.location_name ||
+                        appointment.location_address ||
+                        appointment.location_phone ? (
+                          <div className="mt-2 text-sm text-slate-600">
+                            {appointment.location_name ? (
+                              <p>{appointment.location_name}</p>
+                            ) : null}
+                            {appointment.location_address ? (
+                              <p>{appointment.location_address}</p>
+                            ) : null}
+                            {appointment.location_phone ? (
+                              <p>{appointment.location_phone}</p>
+                            ) : null}
+                          </div>
                         ) : null}
                       </div>
                       <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
@@ -3356,6 +3609,58 @@ export default function Home() {
 
                     {!isEditingAppointment && !isArchived ? (
                       <div className="mt-4 flex flex-wrap gap-3">
+                        {mapsLink ? (
+                          <a
+                            aria-label="Open in Google Maps"
+                            className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                            href={mapsLink}
+                            rel="noreferrer"
+                            target="_blank"
+                            title="Open in Google Maps"
+                          >
+                            <svg
+                              aria-hidden="true"
+                              className="h-4 w-4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              viewBox="0 0 24 24"
+                            >
+                              <path d="M20 10c0 4.5-8 11-8 11s-8-6.5-8-11a8 8 0 1 1 16 0Z" />
+                              <circle cx="12" cy="10" r="3" />
+                            </svg>
+                            Maps
+                          </a>
+                        ) : null}
+                        {calendarLink ? (
+                          <a
+                            aria-label="Add to calendar"
+                            className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                            href={calendarLink}
+                            rel="noreferrer"
+                            target="_blank"
+                            title="Add to calendar"
+                          >
+                            <svg
+                              aria-hidden="true"
+                              className="h-4 w-4"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              viewBox="0 0 24 24"
+                            >
+                              <path d="M8 2v4" />
+                              <path d="M16 2v4" />
+                              <rect height="18" rx="2" width="18" x="3" y="4" />
+                              <path d="M3 10h18" />
+                            </svg>
+                            Calendar
+                          </a>
+                        ) : null}
                         <button
                           className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
                           onClick={() => startEditingAppointment(appointment)}
@@ -3465,6 +3770,81 @@ export default function Home() {
                               <option value="cancelled">Cancelled</option>
                               <option value="draft">Draft</option>
                             </select>
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Provider
+                            <input
+                              className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateAppointmentDraft(
+                                  appointment.id,
+                                  "providerName",
+                                  event.target.value
+                                )
+                              }
+                              type="text"
+                              value={appointmentDraft.providerName}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Practice
+                            <input
+                              className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateAppointmentDraft(
+                                  appointment.id,
+                                  "providerOrganization",
+                                  event.target.value
+                                )
+                              }
+                              type="text"
+                              value={appointmentDraft.providerOrganization}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Location name
+                            <input
+                              className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateAppointmentDraft(
+                                  appointment.id,
+                                  "locationName",
+                                  event.target.value
+                                )
+                              }
+                              type="text"
+                              value={appointmentDraft.locationName}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Address
+                            <input
+                              className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateAppointmentDraft(
+                                  appointment.id,
+                                  "locationAddress",
+                                  event.target.value
+                                )
+                              }
+                              type="text"
+                              value={appointmentDraft.locationAddress}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Phone
+                            <input
+                              className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateAppointmentDraft(
+                                  appointment.id,
+                                  "locationPhone",
+                                  event.target.value
+                                )
+                              }
+                              type="text"
+                              value={appointmentDraft.locationPhone}
+                            />
                           </label>
                           <label className="block text-sm font-medium text-slate-700 md:col-span-2">
                             Reason
