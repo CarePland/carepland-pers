@@ -112,7 +112,11 @@ function DetailList({
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newAppointmentTitle, setNewAppointmentTitle] = useState("");
+  const [newAppointmentReason, setNewAppointmentReason] = useState("");
+  const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [message, setMessage] = useState("");
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -140,6 +144,51 @@ export default function Home() {
 
     restoreSession();
   }, []);
+
+  async function getPrimaryCareContext() {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+
+    if (userError) {
+      throw userError;
+    }
+
+    const userId = userData.user?.id;
+
+    if (!userId) {
+      throw new Error("Please sign in before adding an appointment.");
+    }
+
+    const { data: memberships, error: membershipsError } = await supabase
+      .from("care_circle_memberships")
+      .select("care_circle_id")
+      .limit(1);
+
+    if (membershipsError) {
+      throw membershipsError;
+    }
+
+    const careCircleId = memberships?.[0]?.care_circle_id;
+
+    if (!careCircleId) {
+      throw new Error("No care circle membership found for this user.");
+    }
+
+    const { data: subjects, error: subjectsError } = await supabase
+      .from("care_subjects")
+      .select("id")
+      .eq("care_circle_id", careCircleId)
+      .limit(1);
+
+    if (subjectsError) {
+      throw subjectsError;
+    }
+
+    return {
+      careCircleId,
+      careSubjectId: subjects?.[0]?.id ?? null,
+      userId,
+    };
+  }
 
   async function loadAppointments() {
     const { data: memberships, error: membershipsError } = await supabase
@@ -260,6 +309,49 @@ export default function Home() {
     setMessage("Signed out.");
   }
 
+  async function handleCreateAppointment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreatingAppointment(true);
+    setMessage("");
+
+    try {
+      if (!newAppointmentTitle.trim()) {
+        throw new Error("Please enter an appointment title.");
+      }
+
+      const { careCircleId, careSubjectId, userId } = await getPrimaryCareContext();
+
+      const startsAt = newAppointmentStartsAt
+        ? new Date(newAppointmentStartsAt).toISOString()
+        : null;
+
+      const { error } = await supabase.from("appointments").insert({
+        care_circle_id: careCircleId,
+        care_subject_id: careSubjectId,
+        owner_user_id: userId,
+        title: newAppointmentTitle.trim(),
+        reason: newAppointmentReason.trim() || null,
+        starts_at: startsAt,
+        status: "scheduled",
+        source: "manual",
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setNewAppointmentTitle("");
+      setNewAppointmentReason("");
+      setNewAppointmentStartsAt("");
+      await loadAppointments();
+      setMessage("Appointment added.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setCreatingAppointment(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
       <section className="mx-auto max-w-6xl">
@@ -334,10 +426,56 @@ export default function Home() {
             <div className="mt-6 rounded-md bg-slate-100 p-4 text-sm text-slate-700">
               <p className="font-semibold">Current slice</p>
               <p className="mt-1">
-                Read-only view of appointment records, note synthesis, and
-                CarePrep guidance.
+                Create appointments and view note synthesis plus CarePrep
+                guidance.
               </p>
             </div>
+
+            {signedInEmail ? (
+              <form
+                className="mt-6 border-t border-slate-200 pt-6"
+                onSubmit={handleCreateAppointment}
+              >
+                <h2 className="text-xl font-semibold">Add appointment</h2>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Title
+                  <input
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    onChange={(event) => setNewAppointmentTitle(event.target.value)}
+                    placeholder="e.g. Follow-up with Dr. Smith"
+                    type="text"
+                    value={newAppointmentTitle}
+                  />
+                </label>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Date & time
+                  <input
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    onChange={(event) =>
+                      setNewAppointmentStartsAt(event.target.value)
+                    }
+                    type="datetime-local"
+                    value={newAppointmentStartsAt}
+                  />
+                </label>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Reason
+                  <textarea
+                    className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    onChange={(event) => setNewAppointmentReason(event.target.value)}
+                    placeholder="What is this appointment for?"
+                    value={newAppointmentReason}
+                  />
+                </label>
+                <button
+                  className="mt-4 w-full rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                  disabled={creatingAppointment}
+                  type="submit"
+                >
+                  {creatingAppointment ? "Adding..." : "+ Add appointment"}
+                </button>
+              </form>
+            ) : null}
 
             {message ? (
               <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
