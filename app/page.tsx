@@ -229,10 +229,21 @@ export default function Home() {
       if (sessionEmail) {
         setSignedInEmail(sessionEmail);
         setEmail(sessionEmail);
+        setLoading(true);
+
+        try {
+          await loadAppointments();
+        } catch (error) {
+          setMessage(getErrorMessage(error));
+        } finally {
+          setLoading(false);
+        }
       }
     }
 
     restoreSession();
+    // This runs once on page load to restore Supabase session state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function getPrimaryCareContext(preferredSubjectId?: string) {
