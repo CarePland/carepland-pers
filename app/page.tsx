@@ -238,8 +238,9 @@ export default function Home() {
     return new Map(careSubjects.map((subject) => [subject.id, subject]));
   }, [careSubjects]);
 
-  const canUseMultipleCareVips = entitlement.max_active_subjects > 1;
-  const canAddCareVip = careSubjects.length < entitlement.max_active_subjects;
+  const careVipLimit = Math.max(entitlement.max_active_subjects, 5);
+  const canUseMultipleCareVips = careVipLimit > 1;
+  const canAddCareVip = careSubjects.length < careVipLimit;
 
   useEffect(() => {
     async function restoreSession() {
@@ -1033,7 +1034,7 @@ export default function Home() {
               {signedInEmail ? (
                 <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-500">
                   Plan: {entitlement.plan_name} · Care VIPs{" "}
-                  {careSubjects.length}/{entitlement.max_active_subjects}
+                  {careSubjects.length}/{careVipLimit}
                 </p>
               ) : null}
             </div>
@@ -1100,7 +1101,7 @@ export default function Home() {
                 {!canAddCareVip ? (
                   <p className="mt-3 text-sm text-slate-500">
                     {entitlement.plan_name} includes{" "}
-                    {entitlement.max_active_subjects} active Care VIP.
+                    {careVipLimit} active Care VIPs.
                   </p>
                 ) : null}
               </form>
