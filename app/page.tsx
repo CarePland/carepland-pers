@@ -905,6 +905,11 @@ export default function Home() {
   const canUseMultipleCareVips = careVipLimit > 1;
   const canAddCareVip = careSubjects.length < careVipLimit;
   const needsOnboarding = signedInEmail && !onboardingCompletedAt;
+  const passwordsMismatch =
+    authMode === "signUp" &&
+    confirmPassword.length > 0 &&
+    password !== confirmPassword;
+  const canSubmitAuth = !loading && !passwordsMismatch;
 
   useEffect(() => {
     async function restoreSession() {
@@ -3484,7 +3489,10 @@ export default function Home() {
                     <input
                       className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
                       minLength={8}
-                      onChange={(event) => setPassword(event.target.value)}
+                      onChange={(event) => {
+                        setPassword(event.target.value);
+                        setMessage("");
+                      }}
                       required
                       type="password"
                       value={password}
@@ -3496,21 +3504,32 @@ export default function Home() {
                   <label className="mt-4 block text-sm font-medium text-slate-700">
                     Confirm password
                     <input
-                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      aria-invalid={passwordsMismatch}
+                      className={`mt-2 w-full rounded-md border px-3 py-2 text-base ${
+                        passwordsMismatch
+                          ? "border-red-500"
+                          : "border-slate-300"
+                      }`}
                       minLength={8}
-                      onChange={(event) =>
-                        setConfirmPassword(event.target.value)
-                      }
+                      onChange={(event) => {
+                        setConfirmPassword(event.target.value);
+                        setMessage("");
+                      }}
                       required
                       type="password"
                       value={confirmPassword}
                     />
+                    {passwordsMismatch ? (
+                      <span className="mt-2 block text-sm font-semibold text-red-700">
+                        Passwords do not match.
+                      </span>
+                    ) : null}
                   </label>
                 ) : null}
 
                 <button
                   className="mt-5 w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                  disabled={loading}
+                  disabled={!canSubmitAuth}
                   type="submit"
                 >
                   {loading
