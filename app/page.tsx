@@ -183,7 +183,7 @@ export default function Home() {
   const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState("");
   const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState("");
   const [newCareVipName, setNewCareVipName] = useState("");
-  const [newCareVipType, setNewCareVipType] = useState("person");
+  const [managingCareVips, setManagingCareVips] = useState(false);
   const [noteDrafts, setNoteDrafts] = useState<
     Record<
       string,
@@ -570,7 +570,7 @@ export default function Home() {
     setSelectedSubjectId(ALL_SUBJECTS);
     setNewAppointmentSubjectId("");
     setNewCareVipName("");
-    setNewCareVipType("person");
+    setManagingCareVips(false);
     setMessage("Signed out.");
   }
 
@@ -602,7 +602,7 @@ export default function Home() {
           display_name: displayName,
           is_active: true,
           is_default: isFirstCareVip,
-          subject_type: newCareVipType,
+          subject_type: "other",
         })
         .select("id")
         .single();
@@ -612,9 +612,9 @@ export default function Home() {
       }
 
       setNewCareVipName("");
-      setNewCareVipType("person");
       setSelectedSubjectId(newSubject.id);
       setNewAppointmentSubjectId(newSubject.id);
+      setManagingCareVips(false);
       await loadAppointments(appointmentView, newSubject.id);
       setMessage("Care VIP added.");
     } catch (error) {
@@ -1041,7 +1041,18 @@ export default function Home() {
 
             {signedInEmail && canUseMultipleCareVips ? (
               <div className="mt-6 border-t border-slate-200 pt-6">
-                <h2 className="text-xl font-semibold">View Care VIP</h2>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-xl font-semibold">View Care VIP</h2>
+                  <button
+                    className="text-sm font-semibold italic text-amber-800"
+                    onClick={() =>
+                      setManagingCareVips((isManaging) => !isManaging)
+                    }
+                    type="button"
+                  >
+                    {managingCareVips ? "Done" : "Manage"}
+                  </button>
+                </div>
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Showing
                   <select
@@ -1058,53 +1069,40 @@ export default function Home() {
                     ))}
                   </select>
                 </label>
-              </div>
-            ) : null}
 
-            {signedInEmail && (canUseMultipleCareVips || careSubjects.length === 0) ? (
-              <form
-                className="mt-6 border-t border-slate-200 pt-6"
-                onSubmit={handleCreateCareVip}
-              >
-                <h2 className="text-xl font-semibold">Add Care VIP</h2>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  Name
-                  <input
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                    disabled={!canAddCareVip}
-                    onChange={(event) => setNewCareVipName(event.target.value)}
-                    placeholder="e.g. Dixie"
-                    type="text"
-                    value={newCareVipName}
-                  />
-                </label>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  Type
-                  <select
-                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                    disabled={!canAddCareVip}
-                    onChange={(event) => setNewCareVipType(event.target.value)}
-                    value={newCareVipType}
+                {managingCareVips ? (
+                  <form
+                    className="mt-5 rounded-md bg-slate-50 p-4"
+                    onSubmit={handleCreateCareVip}
                   >
-                    <option value="person">Person</option>
-                    <option value="pet">Pet</option>
-                    <option value="other">Other</option>
-                  </select>
-                </label>
-                <button
-                  className="mt-4 w-full rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                  disabled={creatingCareVip || !canAddCareVip}
-                  type="submit"
-                >
-                  {creatingCareVip ? "Adding..." : "+ Add Care VIP"}
-                </button>
-                {!canAddCareVip ? (
-                  <p className="mt-3 text-sm text-slate-500">
-                    {entitlement.plan_name} includes{" "}
-                    {careVipLimit} active Care VIPs.
-                  </p>
+                    <h3 className="font-semibold text-slate-900">Add Care VIP</h3>
+                    <label className="mt-3 block text-sm font-medium text-slate-700">
+                      Name
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        disabled={!canAddCareVip}
+                        onChange={(event) => setNewCareVipName(event.target.value)}
+                        placeholder="e.g. Dixie"
+                        type="text"
+                        value={newCareVipName}
+                      />
+                    </label>
+                    <button
+                      className="mt-4 w-full rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                      disabled={creatingCareVip || !canAddCareVip}
+                      type="submit"
+                    >
+                      {creatingCareVip ? "Adding..." : "+ Add Care VIP"}
+                    </button>
+                    {!canAddCareVip ? (
+                      <p className="mt-3 text-sm text-slate-500">
+                        {entitlement.plan_name} includes {careVipLimit} active
+                        Care VIPs.
+                      </p>
+                    ) : null}
+                  </form>
                 ) : null}
-              </form>
+              </div>
             ) : null}
 
             {signedInEmail ? (
