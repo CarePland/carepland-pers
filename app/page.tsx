@@ -158,6 +158,8 @@ type ProfileDraft = {
   country: string;
   displayName: string;
   email: string;
+  familyName: string;
+  givenName: string;
   phone: string;
   postalCode: string;
   region: string;
@@ -179,6 +181,8 @@ const emptyProfileDraft: ProfileDraft = {
   country: "US",
   displayName: "",
   email: "",
+  familyName: "",
+  givenName: "",
   phone: "",
   postalCode: "",
   region: "",
@@ -1027,6 +1031,8 @@ export default function Home() {
       country: String(row?.country ?? "US"),
       displayName: String(row?.display_name ?? ""),
       email: String(row?.email ?? fallbackEmail),
+      familyName: String(row?.family_name ?? ""),
+      givenName: String(row?.given_name ?? ""),
       phone: String(
         row?.phone ??
           (typeof row?.phone_e164 === "string"
@@ -1069,7 +1075,7 @@ export default function Home() {
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
       .select(
-        "id,email,display_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,onboarding_completed_at,is_admin"
+        "id,email,display_name,given_name,family_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,onboarding_completed_at,is_admin"
       )
       .eq("id", user.id)
       .maybeSingle();
@@ -1915,8 +1921,12 @@ export default function Home() {
         throw new Error("Enter a valid email address.");
       }
 
-      if (!profileDraft.displayName.trim()) {
-        throw new Error("Display name is required.");
+      if (!profileDraft.givenName.trim()) {
+        throw new Error("First name is required.");
+      }
+
+      if (!profileDraft.familyName.trim()) {
+        throw new Error("Last name is required.");
       }
 
       if (!profileDraft.timezone.trim()) {
@@ -1943,8 +1953,10 @@ export default function Home() {
         address_line2: profileDraft.addressLine2.trim() || null,
         city: profileDraft.city.trim() || null,
         country: profileDraft.country.trim() || null,
-        display_name: profileDraft.displayName.trim(),
+        display_name: profileDraft.displayName.trim() || profileDraft.givenName.trim(),
         email: profileEmail,
+        family_name: profileDraft.familyName.trim(),
+        given_name: profileDraft.givenName.trim(),
         id: user.id,
         onboarding_completed_at: completedAt,
         phone: normalizedPhone?.display ?? null,
@@ -3323,13 +3335,23 @@ export default function Home() {
               onSubmit={handleSaveProfile}
             >
               <label className="block text-sm font-medium text-slate-700">
-                Email
+                <span className="flex items-center justify-between gap-3">
+                  <span>Email</span>
+                  <span className="text-xs font-normal text-slate-400">
+                    required
+                  </span>
+                </span>
                 <div className="mt-2 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-base text-slate-700">
                   {verifiedAccountEmail || "Verified account email"}
                 </div>
               </label>
               <label className="block text-sm font-medium text-slate-700">
-                Phone
+                <span className="flex items-center justify-between gap-3">
+                  <span>Phone</span>
+                  <span className="text-xs font-normal text-slate-400">
+                    required
+                  </span>
+                </span>
                 <input
                   className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
                   onChange={(event) =>
@@ -3346,20 +3368,58 @@ export default function Home() {
                 />
               </label>
               <label className="block text-sm font-medium text-slate-700">
-                Your name
+                <span className="flex items-center justify-between gap-3">
+                  <span>First name</span>
+                  <span className="text-xs font-normal text-slate-400">
+                    required
+                  </span>
+                </span>
+                <input
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                  onChange={(event) =>
+                    updateProfileDraft("givenName", event.target.value)
+                  }
+                  required
+                  type="text"
+                  value={profileDraft.givenName}
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                <span className="flex items-center justify-between gap-3">
+                  <span>Last name</span>
+                  <span className="text-xs font-normal text-slate-400">
+                    required
+                  </span>
+                </span>
+                <input
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                  onChange={(event) =>
+                    updateProfileDraft("familyName", event.target.value)
+                  }
+                  required
+                  type="text"
+                  value={profileDraft.familyName}
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                Display name
                 <input
                   className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
                   onChange={(event) =>
                     updateProfileDraft("displayName", event.target.value)
                   }
-                  placeholder="What should we call you?"
-                  required
+                  placeholder="Optional, if different"
                   type="text"
                   value={profileDraft.displayName}
                 />
               </label>
               <label className="block text-sm font-medium text-slate-700">
-                Time zone
+                <span className="flex items-center justify-between gap-3">
+                  <span>Time zone</span>
+                  <span className="text-xs font-normal text-slate-400">
+                    required
+                  </span>
+                </span>
                 <select
                   className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                   onChange={(event) =>
@@ -3426,7 +3486,12 @@ export default function Home() {
                 />
               </label>
               <label className="block text-sm font-medium text-slate-700">
-                Postal code
+                <span className="flex items-center justify-between gap-3">
+                  <span>ZIP code</span>
+                  <span className="text-xs font-normal text-slate-400">
+                    required
+                  </span>
+                </span>
                 <input
                   className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
                   onChange={(event) =>
