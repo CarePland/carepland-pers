@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@supabase/supabase-js";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Appointment = {
   id: string;
@@ -26,6 +26,9 @@ type CarePrepGuidance = {
   key_questions: unknown;
   bring_list: unknown;
   watchouts: unknown;
+  med_review?: unknown;
+  since_last_visit?: unknown;
+  next_steps?: unknown;
 };
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -83,11 +86,35 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
+function DetailList({
+  emptyLabel,
+  items,
+}: {
+  emptyLabel: string;
+  items: string[];
+}) {
+  if (items.length === 0) {
+    return <p className="mt-2 text-sm text-slate-500">{emptyLabel}</p>;
+  }
+
+  return (
+    <ul className="mt-2 space-y-2 text-slate-700">
+      {items.map((item) => (
+        <li className="flex gap-2" key={item}>
+          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [notes, setNotes] = useState<AppointmentNote[]>([]);
   const [guidance, setGuidance] = useState<CarePrepGuidance[]>([]);
@@ -99,6 +126,20 @@ export default function Home() {
   const guidanceByAppointment = useMemo(() => {
     return new Map(guidance.map((item) => [item.appointment_id, item]));
   }, [guidance]);
+
+  useEffect(() => {
+    async function restoreSession() {
+      const { data } = await supabase.auth.getSession();
+      const sessionEmail = data.session?.user.email ?? null;
+
+      if (sessionEmail) {
+        setSignedInEmail(sessionEmail);
+        setEmail(sessionEmail);
+      }
+    }
+
+    restoreSession();
+  }, []);
 
   async function loadAppointments() {
     const { data: memberships, error: membershipsError } = await supabase
@@ -147,7 +188,9 @@ export default function Home() {
           .in("appointment_id", appointmentIds),
         supabase
           .from("careprep_guidance")
-          .select("id,appointment_id,summary,key_questions,bring_list,watchouts")
+          .select(
+            "id,appointment_id,summary,key_questions,bring_list,watchouts,med_review,since_last_visit,next_steps"
+          )
           .in("appointment_id", appointmentIds),
       ]);
 
@@ -185,6 +228,7 @@ export default function Home() {
         throw error;
       }
 
+      setSignedInEmail(email);
       await loadAppointments();
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -193,60 +237,114 @@ export default function Home() {
     }
   }
 
+  async function handleRefresh() {
+    setLoading(true);
+    setMessage("");
+
+    try {
+      await loadAppointments();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    setSignedInEmail(null);
+    setPassword("");
+    setAppointments([]);
+    setNotes([]);
+    setGuidance([]);
+    setMessage("Signed out.");
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
-      <section className="mx-auto max-w-4xl">
+      <section className="mx-auto max-w-6xl">
         <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
           CarePland Personal
         </p>
 
-        <h1 className="mt-3 text-4xl font-bold">
-          Appointment memory, now reading from Supabase.
+        <h1 className="mt-3 max-w-4xl text-4xl font-bold">
+          Appointment memory, rebuilt cleanly.
         </h1>
 
-        <p className="mt-4 text-lg text-slate-700">
-          Sign in with your test user to load appointments, notes, and CarePrep
-          from the clean rebuild schema.
+        <p className="mt-4 max-w-3xl text-lg text-slate-700">
+          A first live dashboard for the new CP Pers data spine: appointments,
+          visit notes, and CarePrep from Supabase.
         </p>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[320px_1fr]">
-          <form
-            onSubmit={handleSignIn}
-            className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <h2 className="text-xl font-semibold">Test sign in</h2>
-            <label className="mt-5 block text-sm font-medium text-slate-700">
-              Email
-              <input
-                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                onChange={(event) => setEmail(event.target.value)}
-                type="email"
-                value={email}
-              />
-            </label>
-            <label className="mt-4 block text-sm font-medium text-slate-700">
-              Password
-              <input
-                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                onChange={(event) => setPassword(event.target.value)}
-                type="password"
-                value={password}
-              />
-            </label>
-            <button
-              className="mt-5 w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-              disabled={loading}
-              type="submit"
-            >
-              {loading ? "Loading..." : "Load appointments"}
-            </button>
+          <aside className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            {signedInEmail ? (
+              <div>
+                <h2 className="text-xl font-semibold">Signed in</h2>
+                <p className="mt-2 break-words text-slate-600">{signedInEmail}</p>
+                <div className="mt-5 space-y-3">
+                  <button
+                    className="w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                    disabled={loading}
+                    onClick={handleRefresh}
+                    type="button"
+                  >
+                    {loading ? "Refreshing..." : "Refresh appointments"}
+                  </button>
+                  <button
+                    className="w-full rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
+                    onClick={handleSignOut}
+                    type="button"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleSignIn}>
+                <h2 className="text-xl font-semibold">Test sign in</h2>
+                <label className="mt-5 block text-sm font-medium text-slate-700">
+                  Email
+                  <input
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    onChange={(event) => setEmail(event.target.value)}
+                    type="email"
+                    value={email}
+                  />
+                </label>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Password
+                  <input
+                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    onChange={(event) => setPassword(event.target.value)}
+                    type="password"
+                    value={password}
+                  />
+                </label>
+                <button
+                  className="mt-5 w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                  disabled={loading}
+                  type="submit"
+                >
+                  {loading ? "Loading..." : "Load appointments"}
+                </button>
+              </form>
+            )}
+
+            <div className="mt-6 rounded-md bg-slate-100 p-4 text-sm text-slate-700">
+              <p className="font-semibold">Current slice</p>
+              <p className="mt-1">
+                Read-only view of appointment records, note synthesis, and
+                CarePrep guidance.
+              </p>
+            </div>
 
             {message ? (
               <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
                 {message}
               </p>
             ) : null}
-          </form>
+          </aside>
 
           <div className="space-y-4">
             {appointments.length === 0 ? (
@@ -258,7 +356,12 @@ export default function Home() {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
                 const takeaways = asTextList(note?.takeaways);
+                const followups = asTextList(note?.followups);
+                const bringList = asTextList(prep?.bring_list);
                 const questions = asTextList(prep?.key_questions);
+                const watchouts = asTextList(prep?.watchouts);
+                const medReview = asTextList(prep?.med_review);
+                const sinceLastVisit = asTextList(prep?.since_last_visit);
 
                 return (
                   <article
@@ -280,7 +383,10 @@ export default function Home() {
                     </div>
 
                     {appointment.reason ? (
-                      <p className="mt-4 text-slate-700">{appointment.reason}</p>
+                      <section className="mt-5">
+                        <h3 className="font-semibold text-slate-900">Reason</h3>
+                        <p className="mt-1 text-slate-700">{appointment.reason}</p>
+                      </section>
                     ) : null}
 
                     {note?.summary_short ? (
@@ -290,28 +396,87 @@ export default function Home() {
                       </section>
                     ) : null}
 
-                    {takeaways.length > 0 ? (
-                      <section className="mt-5">
+                    <div className="mt-5 grid gap-4 md:grid-cols-2">
+                      <section className="rounded-md border border-slate-200 p-4">
                         <h3 className="font-semibold text-blue-800">Takeaways</h3>
-                        <ol className="mt-2 list-decimal space-y-1 pl-5 text-slate-700">
-                          {takeaways.map((takeaway) => (
-                            <li key={takeaway}>{takeaway}</li>
-                          ))}
-                        </ol>
+                        <DetailList
+                          emptyLabel="No takeaways saved yet."
+                          items={takeaways}
+                        />
                       </section>
-                    ) : null}
+
+                      <section className="rounded-md border border-slate-200 p-4">
+                        <h3 className="font-semibold text-blue-800">Follow-ups</h3>
+                        <DetailList
+                          emptyLabel="No follow-ups saved yet."
+                          items={followups}
+                        />
+                      </section>
+                    </div>
 
                     {prep?.summary ? (
                       <section className="mt-5 rounded-md bg-blue-50 p-4">
-                        <h3 className="font-semibold text-blue-900">CarePrep</h3>
-                        <p className="mt-1 text-slate-700">{prep.summary}</p>
-                        {questions.length > 0 ? (
-                          <ul className="mt-3 list-disc space-y-1 pl-5 text-slate-700">
-                            {questions.map((question) => (
-                              <li key={question}>{question}</li>
-                            ))}
-                          </ul>
-                        ) : null}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-lg font-semibold text-blue-900">
+                            CarePrep
+                          </h3>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                            Prep for visit
+                          </span>
+                        </div>
+                        <p className="mt-2 text-slate-700">{prep.summary}</p>
+
+                        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                          <section className="rounded-md bg-white p-4">
+                            <h4 className="font-semibold text-slate-900">Bring</h4>
+                            <DetailList
+                              emptyLabel="No bring-list items saved yet."
+                              items={bringList}
+                            />
+                          </section>
+
+                          <section className="rounded-md bg-white p-4">
+                            <h4 className="font-semibold text-slate-900">Ask</h4>
+                            <DetailList
+                              emptyLabel="No questions saved yet."
+                              items={questions}
+                            />
+                          </section>
+
+                          <section className="rounded-md bg-white p-4">
+                            <h4 className="font-semibold text-slate-900">
+                              Watch for
+                            </h4>
+                            <DetailList
+                              emptyLabel="No watchouts saved yet."
+                              items={watchouts}
+                            />
+                          </section>
+                        </div>
+
+                        {(medReview.length > 0 || sinceLastVisit.length > 0) && (
+                          <div className="mt-4 grid gap-4 md:grid-cols-2">
+                            <section className="rounded-md bg-white p-4">
+                              <h4 className="font-semibold text-slate-900">
+                                Medication review
+                              </h4>
+                              <DetailList
+                                emptyLabel="No medication review items saved yet."
+                                items={medReview}
+                              />
+                            </section>
+
+                            <section className="rounded-md bg-white p-4">
+                              <h4 className="font-semibold text-slate-900">
+                                Since last visit
+                              </h4>
+                              <DetailList
+                                emptyLabel="No prior-visit context saved yet."
+                                items={sinceLastVisit}
+                              />
+                            </section>
+                          </div>
+                        )}
                       </section>
                     ) : null}
                   </article>
