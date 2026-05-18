@@ -50,6 +50,10 @@ type CarePrepGuidance = {
   med_review?: unknown;
   since_last_visit?: unknown;
   next_steps?: unknown;
+  is_current: boolean;
+  version_number: number;
+  superseded_at: string | null;
+  superseded_by_guidance_id: string | null;
 };
 
 type AiInstructionSet = {
@@ -595,9 +599,10 @@ export default function Home() {
         supabase
           .from("careprep_guidance")
           .select(
-            "id,appointment_id,summary,key_questions,bring_list,watchouts,med_review,since_last_visit,next_steps"
+            "id,appointment_id,summary,key_questions,bring_list,watchouts,med_review,since_last_visit,next_steps,is_current,version_number,superseded_at,superseded_by_guidance_id"
           )
-          .in("appointment_id", appointmentIds),
+          .in("appointment_id", appointmentIds)
+          .eq("is_current", true),
       ]);
 
     if (notesError) {
@@ -1454,6 +1459,7 @@ export default function Home() {
       const promptVersion = instructionVersion
         ? `careprep_generation:v${instructionVersion.version_number}`
         : "careprep-mvp-1";
+      const existingGuidance = guidanceByAppointment.get(appointment.id);
 
       const guidancePayload = {
         appointment_id: appointment.id,
@@ -1464,6 +1470,7 @@ export default function Home() {
         instruction_content_hash: instructionVersion?.content_hash ?? null,
         instruction_set_id: instructionSet?.id ?? null,
         instruction_version_id: instructionVersion?.id ?? null,
+        is_current: true,
         key_questions: keyQuestions,
         med_review: medReview,
         model: instructionVersion?.model ?? "local-rule-based",
@@ -1473,23 +1480,41 @@ export default function Home() {
         status: "succeeded",
         summary,
         user_id: userId,
+        version_number: existingGuidance ? existingGuidance.version_number + 1 : 1,
         watchouts,
       };
 
-      const existingGuidance = guidanceByAppointment.get(appointment.id);
-      const { error: guidanceError } = existingGuidance
-        ? await supabase
-            .from("careprep_guidance")
-            .update(guidancePayload)
-            .eq("id", existingGuidance.id)
-        : await supabase.from("careprep_guidance").insert(guidancePayload);
+      const { data: newGuidance, error: guidanceError } = await supabase
+        .from("careprep_guidance")
+        .insert(guidancePayload)
+        .select("id")
+        .single();
 
       if (guidanceError) {
         throw guidanceError;
       }
 
+      if (existingGuidance) {
+        const { error: archiveError } = await supabase
+          .from("careprep_guidance")
+          .update({
+            is_current: false,
+            superseded_at: new Date().toISOString(),
+            superseded_by_guidance_id: newGuidance.id,
+          })
+          .eq("id", existingGuidance.id);
+
+        if (archiveError) {
+          throw archiveError;
+        }
+      }
+
       await loadAppointments();
-      setMessage(existingGuidance ? "CarePrep refreshed." : "CarePrep generated.");
+      setMessage(
+        existingGuidance
+          ? "CarePrep refreshed. Previous version archived."
+          : "CarePrep generated."
+      );
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -2311,9 +2336,14 @@ export default function Home() {
                     {prep?.summary ? (
                       <section className="mt-5 rounded-md bg-blue-50 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <h3 className="text-lg font-semibold text-blue-900">
-                            CarePrep
-                          </h3>
+                          <div>
+                            <h3 className="text-lg font-semibold text-blue-900">
+                              CarePrep
+                            </h3>
+                            <p className="mt-1 text-xs font-medium text-blue-700">
+                              Current version {prep.version_number}
+                            </p>
+                          </div>
                           <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
                             Prep for visit
                           </span>
