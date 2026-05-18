@@ -817,6 +817,7 @@ export default function Home() {
   const [onboardingCompletedAt, setOnboardingCompletedAt] = useState<
     string | null
   >(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [restoringAppointmentForId, setRestoringAppointmentForId] = useState<
     string | null
@@ -993,7 +994,7 @@ export default function Home() {
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
       .select(
-        "id,email,display_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,onboarding_completed_at"
+        "id,email,display_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,onboarding_completed_at,is_admin"
       )
       .eq("id", user.id)
       .maybeSingle();
@@ -1003,6 +1004,10 @@ export default function Home() {
     }
 
     setProfileDraft(profileDraftFromRow(profileRow, profileEmail));
+    setIsAdmin(profileRow?.is_admin === true);
+    if (profileRow?.is_admin !== true) {
+      setShowAiAdmin(false);
+    }
     setOnboardingCompletedAt(
       typeof profileRow?.onboarding_completed_at === "string"
         ? profileRow.onboarding_completed_at
@@ -1413,6 +1418,12 @@ export default function Home() {
   }
 
   async function handleToggleAiAdmin() {
+    if (!isAdmin) {
+      setShowAiAdmin(false);
+      setMessage("Admin access is not enabled for this account.");
+      return;
+    }
+
     const nextState = !showAiAdmin;
     setShowAiAdmin(nextState);
 
@@ -1656,6 +1667,8 @@ export default function Home() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     setSignedInEmail(null);
+    setIsAdmin(false);
+    setShowAiAdmin(false);
     setOnboardingCompletedAt(null);
     setProfileDraft(emptyProfileDraft);
     setPassword("");
@@ -3277,13 +3290,15 @@ export default function Home() {
                   >
                     Sign out
                   </button>
-                  <button
-                    className="w-full rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
-                    onClick={handleToggleAiAdmin}
-                    type="button"
-                  >
-                    {showAiAdmin ? "Close AI admin" : "AI admin"}
-                  </button>
+                  {isAdmin ? (
+                    <button
+                      className="w-full rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
+                      onClick={handleToggleAiAdmin}
+                      type="button"
+                    >
+                      {showAiAdmin ? "Close AI admin" : "AI admin"}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : (
@@ -3794,7 +3809,7 @@ export default function Home() {
           </aside>
 
           <div className="space-y-4">
-            {showAiAdmin ? (
+            {showAiAdmin && isAdmin ? (
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
