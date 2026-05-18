@@ -998,7 +998,7 @@ export default function Home() {
         next_steps: nextSteps,
         prompt_version: "careprep-mvp-1",
         since_last_visit: sinceLastVisit,
-        status: "completed",
+        status: "succeeded",
         summary,
         user_id: userId,
         watchouts,
