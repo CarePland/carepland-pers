@@ -592,7 +592,16 @@ function startOfToday(): Date {
 }
 
 function browserTimezone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
+  const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  if (
+    detectedTimezone &&
+    timeZoneOptions.some((option) => option.value === detectedTimezone)
+  ) {
+    return detectedTimezone;
+  }
+
+  return "";
 }
 
 function formatUsPhoneFromDigits(digits: string): string {
@@ -1026,7 +1035,10 @@ export default function Home() {
       ),
       postalCode: String(row?.postal_code ?? ""),
       region: String(row?.region ?? ""),
-      timezone: String(row?.timezone ?? browserTimezone()),
+      timezone:
+        typeof row?.timezone === "string" && row.timezone
+          ? row.timezone
+          : browserTimezone(),
     };
   }
 
@@ -3339,8 +3351,10 @@ export default function Home() {
                   onChange={(event) =>
                     updateProfileDraft("timezone", event.target.value)
                   }
+                  required
                   value={profileDraft.timezone}
                 >
+                  <option value="">Select time zone</option>
                   {!timeZoneOptions.some(
                     (option) => option.value === profileDraft.timezone
                   ) && profileDraft.timezone ? (
