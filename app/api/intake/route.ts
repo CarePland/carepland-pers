@@ -239,6 +239,7 @@ export async function POST(request: NextRequest) {
     const { error: updateError } = await supabase
       .from("intake_items")
       .update({
+        ai_interpretation: draft,
         interpretation: draft,
         processed_at: new Date().toISOString(),
         status: "processed",

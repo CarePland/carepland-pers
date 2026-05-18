@@ -1352,6 +1352,16 @@ export default function Home() {
       const startsAt = startsAtDate ? startsAtDate.toISOString() : null;
       const takeaways = linesToList(textIntakeDraft.takeaways);
       const followups = linesToList(textIntakeDraft.followups);
+      const acceptedInterpretation = {
+        appointment_reason: textIntakeDraft.appointmentReason,
+        appointment_title: textIntakeDraft.appointmentTitle,
+        confidence: textIntakeDraft.confidence,
+        followups,
+        notes_summary: textIntakeDraft.notesSummary,
+        starts_at_local: textIntakeDraft.startsAt,
+        suggested_action: textIntakeDraft.suggestedAction,
+        takeaways,
+      };
       const hasNotes =
         Boolean(textIntakeDraft.notesSummary.trim()) ||
         takeaways.length > 0 ||
@@ -1417,17 +1427,10 @@ export default function Home() {
           .from("intake_items")
           .update({
             accepted_at: new Date().toISOString(),
+            accepted_by_user_id: userId,
+            accepted_interpretation: acceptedInterpretation,
             appointment_id: appointment.id,
-            interpretation: {
-              appointment_reason: textIntakeDraft.appointmentReason,
-              appointment_title: textIntakeDraft.appointmentTitle,
-              confidence: textIntakeDraft.confidence,
-              followups,
-              notes_summary: textIntakeDraft.notesSummary,
-              starts_at_local: textIntakeDraft.startsAt,
-              suggested_action: textIntakeDraft.suggestedAction,
-              takeaways,
-            },
+            interpretation: acceptedInterpretation,
             status: "accepted",
           })
           .eq("id", textIntakeItemId);
