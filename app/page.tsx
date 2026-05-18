@@ -52,6 +52,25 @@ type CarePrepGuidance = {
   next_steps?: unknown;
 };
 
+type AiInstructionSet = {
+  id: string;
+  instruction_key: string;
+  name: string;
+  description: string | null;
+};
+
+type AiInstructionVersion = {
+  id: string;
+  version_number: number;
+  system_prompt: string;
+  user_prompt_template: string;
+  output_schema: unknown;
+  model: string | null;
+  temperature: number | null;
+  is_current: boolean;
+  change_note: string | null;
+};
+
 type AppointmentView = "active" | "archived";
 
 const ALL_SUBJECTS = "all";
@@ -60,6 +79,21 @@ const defaultEntitlement: CareCircleEntitlement = {
   max_active_subjects: 1,
   plan_id: "personal",
   plan_name: "Personal",
+};
+
+const defaultCarePrepOutputSchema = {
+  additionalProperties: false,
+  properties: {
+    bring_list: { items: { type: "string" }, type: "array" },
+    key_questions: { items: { type: "string" }, type: "array" },
+    med_review: { items: { type: "string" }, type: "array" },
+    next_steps: { items: { type: "string" }, type: "array" },
+    since_last_visit: { items: { type: "string" }, type: "array" },
+    summary: { type: "string" },
+    watchouts: { items: { type: "string" }, type: "array" },
+  },
+  required: ["summary", "key_questions", "bring_list"],
+  type: "object",
 };
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -203,6 +237,19 @@ function DetailList({
   );
 }
 
+function resetInstructionDraft(version: AiInstructionVersion | null) {
+  return {
+    model: version?.model ?? "gpt-4.1-mini",
+    outputSchema: JSON.stringify(
+      version?.output_schema ?? defaultCarePrepOutputSchema,
+      null,
+      2
+    ),
+    systemPrompt: version?.system_prompt ?? "",
+    userPrompt: version?.user_prompt_template ?? "",
+  };
+}
+
 export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -212,6 +259,20 @@ export default function Home() {
   const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState("");
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
+  const [showAiAdmin, setShowAiAdmin] = useState(false);
+  const [loadingInstructions, setLoadingInstructions] = useState(false);
+  const [savingInstructions, setSavingInstructions] = useState(false);
+  const [aiInstructionSet, setAiInstructionSet] =
+    useState<AiInstructionSet | null>(null);
+  const [aiInstructionVersion, setAiInstructionVersion] =
+    useState<AiInstructionVersion | null>(null);
+  const [instructionSystemPrompt, setInstructionSystemPrompt] = useState("");
+  const [instructionUserPrompt, setInstructionUserPrompt] = useState("");
+  const [instructionOutputSchema, setInstructionOutputSchema] = useState(
+    JSON.stringify(defaultCarePrepOutputSchema, null, 2)
+  );
+  const [instructionModel, setInstructionModel] = useState("gpt-4.1-mini");
+  const [instructionChangeNote, setInstructionChangeNote] = useState("");
   const [noteDrafts, setNoteDrafts] = useState<
     Record<
       string,
@@ -586,6 +647,179 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadCarePrepInstructions() {
+    setLoadingInstructions(true);
+    setMessage("");
+
+    try {
+      const { careCircleId } = await getPrimaryCareContext();
+
+      const { data: instructionSets, error: instructionSetError } =
+        await supabase
+          .from("ai_instruction_sets")
+          .select("id,instruction_key,name,description")
+          .eq("care_circle_id", careCircleId)
+          .eq("instruction_key", "careprep_generation")
+          .limit(1);
+
+      if (instructionSetError) {
+        throw instructionSetError;
+      }
+
+      const instructionSet = instructionSets?.[0] ?? null;
+      setAiInstructionSet(instructionSet);
+
+      if (!instructionSet) {
+        setAiInstructionVersion(null);
+        const draft = resetInstructionDraft(null);
+        setInstructionSystemPrompt(draft.systemPrompt);
+        setInstructionUserPrompt(draft.userPrompt);
+        setInstructionOutputSchema(draft.outputSchema);
+        setInstructionModel(draft.model);
+        setInstructionChangeNote("Initial CarePrep instruction set");
+        setMessage("No CarePrep instruction set exists yet. Paste instructions and save version 1.");
+        return;
+      }
+
+      const { data: versions, error: versionError } = await supabase
+        .from("ai_instruction_versions")
+        .select(
+          "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,is_current,change_note"
+        )
+        .eq("instruction_set_id", instructionSet.id)
+        .eq("is_current", true)
+        .limit(1);
+
+      if (versionError) {
+        throw versionError;
+      }
+
+      const version = versions?.[0] ?? null;
+      setAiInstructionVersion(version);
+      const draft = resetInstructionDraft(version);
+      setInstructionSystemPrompt(draft.systemPrompt);
+      setInstructionUserPrompt(draft.userPrompt);
+      setInstructionOutputSchema(draft.outputSchema);
+      setInstructionModel(draft.model);
+      setInstructionChangeNote("");
+      setMessage(
+        version
+          ? `Loaded CarePrep instructions v${version.version_number}.`
+          : "No current CarePrep instruction version exists yet."
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingInstructions(false);
+    }
+  }
+
+  async function handleToggleAiAdmin() {
+    const nextState = !showAiAdmin;
+    setShowAiAdmin(nextState);
+
+    if (nextState) {
+      await loadCarePrepInstructions();
+    }
+  }
+
+  async function handleSaveCarePrepInstructions(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingInstructions(true);
+    setMessage("");
+
+    try {
+      const { careCircleId, userId } = await getPrimaryCareContext();
+      const parsedSchema = JSON.parse(instructionOutputSchema);
+      let instructionSet = aiInstructionSet;
+
+      if (!instructionSet) {
+        const { data: newSet, error: setError } = await supabase
+          .from("ai_instruction_sets")
+          .insert({
+            care_circle_id: careCircleId,
+            description:
+              "Instructions used to generate appointment preparation guidance.",
+            instruction_key: "careprep_generation",
+            name: "CarePrep generation",
+          })
+          .select("id,instruction_key,name,description")
+          .single();
+
+        if (setError) {
+          throw setError;
+        }
+
+        instructionSet = newSet;
+        setAiInstructionSet(newSet);
+      }
+
+      const { data: latestVersions, error: latestVersionError } = await supabase
+        .from("ai_instruction_versions")
+        .select("version_number")
+        .eq("instruction_set_id", instructionSet.id)
+        .order("version_number", { ascending: false })
+        .limit(1);
+
+      if (latestVersionError) {
+        throw latestVersionError;
+      }
+
+      const nextVersionNumber = (latestVersions?.[0]?.version_number ?? 0) + 1;
+
+      if (aiInstructionVersion) {
+        const { error: supersedeError } = await supabase
+          .from("ai_instruction_versions")
+          .update({
+            is_current: false,
+            superseded_at: new Date().toISOString(),
+          })
+          .eq("id", aiInstructionVersion.id);
+
+        if (supersedeError) {
+          throw supersedeError;
+        }
+      }
+
+      const { data: newVersion, error: versionError } = await supabase
+        .from("ai_instruction_versions")
+        .insert({
+          change_note: instructionChangeNote.trim() || null,
+          copied_from_version_id: aiInstructionVersion?.id ?? null,
+          created_by_user_id: userId,
+          instruction_set_id: instructionSet.id,
+          is_current: true,
+          model: instructionModel.trim() || null,
+          output_schema: parsedSchema,
+          system_prompt: instructionSystemPrompt,
+          temperature: 0.2,
+          user_prompt_template: instructionUserPrompt,
+          version_number: nextVersionNumber,
+        })
+        .select(
+          "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,is_current,change_note"
+        )
+        .single();
+
+      if (versionError) {
+        throw versionError;
+      }
+
+      setAiInstructionVersion(newVersion);
+      const draft = resetInstructionDraft(newVersion);
+      setInstructionSystemPrompt(draft.systemPrompt);
+      setInstructionUserPrompt(draft.userPrompt);
+      setInstructionOutputSchema(draft.outputSchema);
+      setInstructionModel(draft.model);
+      setInstructionChangeNote("");
+      setMessage(`Saved CarePrep instructions v${newVersion.version_number}.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingInstructions(false);
     }
   }
 
@@ -1180,6 +1414,13 @@ export default function Home() {
                   >
                     Sign out
                   </button>
+                  <button
+                    className="w-full rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
+                    onClick={handleToggleAiAdmin}
+                    type="button"
+                  >
+                    {showAiAdmin ? "Close AI admin" : "AI admin"}
+                  </button>
                 </div>
               </div>
             ) : (
@@ -1370,6 +1611,96 @@ export default function Home() {
           </aside>
 
           <div className="space-y-4">
+            {showAiAdmin ? (
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">AI instructions</h2>
+                    <p className="mt-1 text-slate-600">
+                      CarePrep generation
+                      {aiInstructionVersion
+                        ? ` · current v${aiInstructionVersion.version_number}`
+                        : " · no current version"}
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                    disabled={loadingInstructions}
+                    onClick={loadCarePrepInstructions}
+                    type="button"
+                  >
+                    {loadingInstructions ? "Loading..." : "Reload"}
+                  </button>
+                </div>
+
+                <form className="mt-5 space-y-4" onSubmit={handleSaveCarePrepInstructions}>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Model
+                    <input
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      onChange={(event) => setInstructionModel(event.target.value)}
+                      value={instructionModel}
+                    />
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700">
+                    System prompt
+                    <textarea
+                      className="mt-2 min-h-40 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
+                      onChange={(event) =>
+                        setInstructionSystemPrompt(event.target.value)
+                      }
+                      placeholder="Paste the CarePrep system instructions here."
+                      value={instructionSystemPrompt}
+                    />
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700">
+                    User prompt template
+                    <textarea
+                      className="mt-2 min-h-40 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
+                      onChange={(event) =>
+                        setInstructionUserPrompt(event.target.value)
+                      }
+                      placeholder="Paste the user/context prompt template here."
+                      value={instructionUserPrompt}
+                    />
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700">
+                    Output schema JSON
+                    <textarea
+                      className="mt-2 min-h-40 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
+                      onChange={(event) =>
+                        setInstructionOutputSchema(event.target.value)
+                      }
+                      value={instructionOutputSchema}
+                    />
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700">
+                    Change note
+                    <input
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      onChange={(event) =>
+                        setInstructionChangeNote(event.target.value)
+                      }
+                      placeholder="What changed in this version?"
+                      value={instructionChangeNote}
+                    />
+                  </label>
+
+                  <button
+                    className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                    disabled={savingInstructions}
+                    type="submit"
+                  >
+                    {savingInstructions ? "Saving..." : "Save new version"}
+                  </button>
+                </form>
+              </section>
+            ) : null}
+
             {signedInEmail ? (
               <div className="flex flex-wrap gap-2">
                 <button
