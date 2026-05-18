@@ -1691,26 +1691,15 @@ export default function Home() {
   }
 
   async function handleStartReminderNotes(appointment: NotesReminderAppointment) {
-    setAppointmentView("upcoming");
-    setLoading(true);
     setMessage("");
-
-    try {
-      await loadAppointments("upcoming");
-      setNoteDrafts((currentDrafts) => ({
-        ...currentDrafts,
-        [appointment.id]: emptyNoteDraft,
-      }));
-      setEditingNoteIds((currentIds) => ({
-        ...currentIds,
-        [appointment.id]: true,
-      }));
-      setMessage(`Add notes for ${appointment.title || "this appointment"}.`);
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
+    setNoteDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointment.id]: emptyNoteDraft,
+    }));
+    setEditingNoteIds((currentIds) => ({
+      ...currentIds,
+      [appointment.id]: true,
+    }));
   }
 
   async function handleSaveNote(
@@ -2408,6 +2397,90 @@ export default function Home() {
                     Add notes
                   </button>
                 </div>
+                {editingNoteIds[notesReminderAppointment.id] ? (
+                  <form
+                    className="mt-4 rounded-md border border-blue-100 bg-white p-4"
+                    onSubmit={(event) =>
+                      handleSaveNote(event, notesReminderAppointment)
+                    }
+                  >
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                        Visit summary
+                        <textarea
+                          className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          onChange={(event) =>
+                            updateNoteDraft(
+                              notesReminderAppointment.id,
+                              "summary",
+                              event.target.value
+                            )
+                          }
+                          placeholder="What happened in the visit?"
+                          value={
+                            noteDrafts[notesReminderAppointment.id]?.summary ?? ""
+                          }
+                        />
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Takeaways
+                        <textarea
+                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          onChange={(event) =>
+                            updateNoteDraft(
+                              notesReminderAppointment.id,
+                              "takeaways",
+                              event.target.value
+                            )
+                          }
+                          placeholder={"One per line\nExample: Medication changed"}
+                          value={
+                            noteDrafts[notesReminderAppointment.id]?.takeaways ??
+                            ""
+                          }
+                        />
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Follow-ups
+                        <textarea
+                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          onChange={(event) =>
+                            updateNoteDraft(
+                              notesReminderAppointment.id,
+                              "followups",
+                              event.target.value
+                            )
+                          }
+                          placeholder={"One per line\nExample: Schedule labs"}
+                          value={
+                            noteDrafts[notesReminderAppointment.id]?.followups ??
+                            ""
+                          }
+                        />
+                      </label>
+                      <div className="flex items-end gap-3">
+                        <button
+                          className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                          disabled={savingNoteForId === notesReminderAppointment.id}
+                          type="submit"
+                        >
+                          {savingNoteForId === notesReminderAppointment.id
+                            ? "Saving..."
+                            : "Save notes"}
+                        </button>
+                        <button
+                          className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                          onClick={() =>
+                            cancelEditingNote(notesReminderAppointment.id)
+                          }
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                ) : null}
               </section>
             ) : null}
 
