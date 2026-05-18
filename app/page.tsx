@@ -5,11 +5,21 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Appointment = {
   id: string;
+  care_subject_id: string | null;
   title: string | null;
   reason: string | null;
   starts_at: string | null;
   status: string;
   archived_at?: string | null;
+};
+
+type CareSubject = {
+  id: string;
+  care_circle_id: string;
+  display_name: string;
+  subject_type: string;
+  is_default: boolean;
+  is_active: boolean;
 };
 
 type AppointmentNote = {
@@ -37,6 +47,8 @@ type CarePrepGuidance = {
 };
 
 type AppointmentView = "active" | "archived";
+
+const ALL_SUBJECTS = "all";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -157,6 +169,7 @@ export default function Home() {
   const [newAppointmentTitle, setNewAppointmentTitle] = useState("");
   const [newAppointmentReason, setNewAppointmentReason] = useState("");
   const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState("");
+  const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState("");
   const [noteDrafts, setNoteDrafts] = useState<
     Record<
       string,
@@ -178,6 +191,7 @@ export default function Home() {
   const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [appointmentView, setAppointmentView] =
     useState<AppointmentView>("active");
+  const [selectedSubjectId, setSelectedSubjectId] = useState(ALL_SUBJECTS);
   const [savingAppointmentForId, setSavingAppointmentForId] = useState<
     string | null
   >(null);
@@ -191,6 +205,7 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
   const [notes, setNotes] = useState<AppointmentNote[]>([]);
   const [guidance, setGuidance] = useState<CarePrepGuidance[]>([]);
 
@@ -201,6 +216,10 @@ export default function Home() {
   const guidanceByAppointment = useMemo(() => {
     return new Map(guidance.map((item) => [item.appointment_id, item]));
   }, [guidance]);
+
+  const subjectsById = useMemo(() => {
+    return new Map(careSubjects.map((subject) => [subject.id, subject]));
+  }, [careSubjects]);
 
   useEffect(() => {
     async function restoreSession() {
@@ -216,7 +235,7 @@ export default function Home() {
     restoreSession();
   }, []);
 
-  async function getPrimaryCareContext() {
+  async function getPrimaryCareContext(preferredSubjectId?: string) {
     const { data: userData, error: userError } = await supabase.auth.getUser();
 
     if (userError) {
@@ -246,22 +265,33 @@ export default function Home() {
 
     const { data: subjects, error: subjectsError } = await supabase
       .from("care_subjects")
-      .select("id")
+      .select("id,is_default")
       .eq("care_circle_id", careCircleId)
-      .limit(1);
+      .eq("is_active", true)
+      .order("is_default", { ascending: false });
 
     if (subjectsError) {
       throw subjectsError;
     }
 
+    const careSubjectId =
+      preferredSubjectId && preferredSubjectId !== ALL_SUBJECTS
+        ? preferredSubjectId
+        : subjects?.find((subject) => subject.is_default)?.id ??
+          subjects?.[0]?.id ??
+          null;
+
     return {
       careCircleId,
-      careSubjectId: subjects?.[0]?.id ?? null,
+      careSubjectId,
       userId,
     };
   }
 
-  async function loadAppointments(view: AppointmentView = appointmentView) {
+  async function loadAppointments(
+    view: AppointmentView = appointmentView,
+    subjectId: string = selectedSubjectId
+  ) {
     const { data: memberships, error: membershipsError } = await supabase
       .from("care_circle_memberships")
       .select("care_circle_id");
@@ -274,17 +304,58 @@ export default function Home() {
 
     if (circleIds.length === 0) {
       setAppointments([]);
+      setCareSubjects([]);
       setNotes([]);
       setGuidance([]);
       setMessage("Signed in, but no care circle membership was found.");
       return;
     }
 
-    const { data: appointmentRows, error: appointmentsError } = await supabase
+    const { data: subjectRows, error: subjectsError } = await supabase
+      .from("care_subjects")
+      .select("id,care_circle_id,display_name,subject_type,is_default,is_active")
+      .in("care_circle_id", circleIds)
+      .eq("is_active", true)
+      .order("is_default", { ascending: false })
+      .order("display_name", { ascending: true });
+
+    if (subjectsError) {
+      throw subjectsError;
+    }
+
+    const subjects = subjectRows ?? [];
+    const defaultSubjectId =
+      subjects.find((subject) => subject.is_default)?.id ?? subjects[0]?.id ?? "";
+    const effectiveSubjectId =
+      subjectId === ALL_SUBJECTS ||
+      subjects.some((subject) => subject.id === subjectId)
+        ? subjectId
+        : ALL_SUBJECTS;
+
+    setCareSubjects(subjects);
+    setSelectedSubjectId(effectiveSubjectId);
+    setNewAppointmentSubjectId((currentSubjectId) => {
+      if (currentSubjectId && subjects.some((subject) => subject.id === currentSubjectId)) {
+        return currentSubjectId;
+      }
+
+      return effectiveSubjectId !== ALL_SUBJECTS
+        ? effectiveSubjectId
+        : defaultSubjectId;
+    });
+
+    let appointmentQuery = supabase
       .from("appointments")
-      .select("id,title,reason,starts_at,status")
+      .select("id,care_subject_id,title,reason,starts_at,status")
       .in("care_circle_id", circleIds)
       .order("starts_at", { ascending: true });
+
+    if (effectiveSubjectId !== ALL_SUBJECTS) {
+      appointmentQuery = appointmentQuery.eq("care_subject_id", effectiveSubjectId);
+    }
+
+    const { data: appointmentRows, error: appointmentsError } =
+      await appointmentQuery;
 
     if (appointmentsError) {
       throw appointmentsError;
@@ -397,13 +468,35 @@ export default function Home() {
     }
   }
 
+  async function handleChangeSubject(subjectId: string) {
+    setSelectedSubjectId(subjectId);
+
+    if (subjectId !== ALL_SUBJECTS) {
+      setNewAppointmentSubjectId(subjectId);
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      await loadAppointments(appointmentView, subjectId);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleSignOut() {
     await supabase.auth.signOut();
     setSignedInEmail(null);
     setPassword("");
     setAppointments([]);
+    setCareSubjects([]);
     setNotes([]);
     setGuidance([]);
+    setSelectedSubjectId(ALL_SUBJECTS);
+    setNewAppointmentSubjectId("");
     setMessage("Signed out.");
   }
 
@@ -417,7 +510,16 @@ export default function Home() {
         throw new Error("Please enter an appointment title.");
       }
 
-      const { careCircleId, careSubjectId, userId } = await getPrimaryCareContext();
+      const targetSubjectId =
+        newAppointmentSubjectId ||
+        (selectedSubjectId !== ALL_SUBJECTS ? selectedSubjectId : "");
+
+      const { careCircleId, careSubjectId, userId } =
+        await getPrimaryCareContext(targetSubjectId);
+
+      if (!careSubjectId) {
+        throw new Error("Please choose who this appointment is for.");
+      }
 
       const startsAt = newAppointmentStartsAt
         ? new Date(newAppointmentStartsAt).toISOString()
@@ -441,6 +543,7 @@ export default function Home() {
       setNewAppointmentTitle("");
       setNewAppointmentReason("");
       setNewAppointmentStartsAt("");
+      setNewAppointmentSubjectId(careSubjectId);
       await loadAppointments();
       setMessage("Appointment added.");
     } catch (error) {
@@ -807,11 +910,53 @@ export default function Home() {
             </div>
 
             {signedInEmail ? (
+              <div className="mt-6 border-t border-slate-200 pt-6">
+                <h2 className="text-xl font-semibold">View subject</h2>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  Showing
+                  <select
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                    disabled={loading || careSubjects.length === 0}
+                    onChange={(event) => handleChangeSubject(event.target.value)}
+                    value={selectedSubjectId}
+                  >
+                    <option value={ALL_SUBJECTS}>All subjects</option>
+                    {careSubjects.map((subject) => (
+                      <option key={subject.id} value={subject.id}>
+                        {subject.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
+            {signedInEmail ? (
               <form
                 className="mt-6 border-t border-slate-200 pt-6"
                 onSubmit={handleCreateAppointment}
               >
                 <h2 className="text-xl font-semibold">Add appointment</h2>
+                <label className="mt-4 block text-sm font-medium text-slate-700">
+                  For
+                  <select
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                    disabled={careSubjects.length === 0}
+                    onChange={(event) =>
+                      setNewAppointmentSubjectId(event.target.value)
+                    }
+                    value={newAppointmentSubjectId}
+                  >
+                    {careSubjects.length === 0 ? (
+                      <option value="">No subjects found</option>
+                    ) : null}
+                    {careSubjects.map((subject) => (
+                      <option key={subject.id} value={subject.id}>
+                        {subject.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Title
                   <input
@@ -900,6 +1045,9 @@ export default function Home() {
               appointments.map((appointment) => {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
+                const appointmentSubject = appointment.care_subject_id
+                  ? subjectsById.get(appointment.care_subject_id)
+                  : null;
                 const appointmentDraft =
                   appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
                 const isEditingAppointment =
@@ -928,6 +1076,11 @@ export default function Home() {
                         <p className="mt-1 text-slate-600">
                           {formatDate(appointment.starts_at)}
                         </p>
+                        {appointmentSubject ? (
+                          <p className="mt-1 text-sm font-medium text-slate-500">
+                            For {appointmentSubject.display_name}
+                          </p>
+                        ) : null}
                       </div>
                       <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
                         {appointment.status}
