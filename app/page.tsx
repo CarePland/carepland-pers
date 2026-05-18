@@ -533,6 +533,10 @@ export default function Home() {
   );
   const [selectedTextIntakeMatchId, setSelectedTextIntakeMatchId] =
     useState("new");
+  const [textIntakeTargetAppointmentId, setTextIntakeTargetAppointmentId] =
+    useState<string | null>(null);
+  const [contextualTextIntakeValue, setContextualTextIntakeValue] =
+    useState("");
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
   const [showAiAdmin, setShowAiAdmin] = useState(false);
@@ -1390,6 +1394,8 @@ export default function Home() {
     setTextIntakeItemId(null);
     setTextIntakeMatches([]);
     setSelectedTextIntakeMatchId("new");
+    setTextIntakeTargetAppointmentId(null);
+    setContextualTextIntakeValue("");
     setNewCareVipName("");
     setManagingCareVips(false);
     setMessage("Signed out.");
@@ -1451,7 +1457,17 @@ export default function Home() {
     setMessage("");
 
     try {
-      const rawText = textIntakeValue.trim();
+      const targetAppointment = textIntakeTargetAppointmentId
+        ? (appointments.find(
+            (appointment) => appointment.id === textIntakeTargetAppointmentId
+          ) ??
+          (notesReminderAppointment?.id === textIntakeTargetAppointmentId
+            ? notesReminderAppointment
+            : null))
+        : null;
+      const rawText = targetAppointment
+        ? contextualTextIntakeValue.trim()
+        : textIntakeValue.trim();
 
       if (!rawText) {
         throw new Error("Paste some text before running intake.");
@@ -1473,8 +1489,21 @@ export default function Home() {
       const response = await fetch("/api/intake", {
         body: JSON.stringify({
           careSubjectId:
+            targetAppointment?.care_subject_id ||
             textIntakeSubjectId ||
             (selectedSubjectId !== ALL_SUBJECTS ? selectedSubjectId : ""),
+          appointmentContext: targetAppointment
+            ? {
+                location_address: targetAppointment.location_address,
+                location_name: targetAppointment.location_name,
+                location_phone: targetAppointment.location_phone,
+                provider_name: targetAppointment.provider_name,
+                provider_organization: targetAppointment.provider_organization,
+                reason: targetAppointment.reason,
+                starts_at: targetAppointment.starts_at,
+                title: targetAppointment.title,
+              }
+            : null,
           rawText,
         }),
         headers: {
@@ -1489,11 +1518,40 @@ export default function Home() {
         throw new Error(result.error ?? "Text intake failed.");
       }
 
-      const interpretedDraft = intakeDraftFromResult(result.draft);
-      const interpretedSubjectId = result.careSubjectId ?? textIntakeSubjectId;
+      const baseDraft = intakeDraftFromResult(result.draft);
+      const interpretedDraft = targetAppointment
+        ? {
+            ...baseDraft,
+            appointmentReason:
+              baseDraft.appointmentReason || targetAppointment.reason || "",
+            appointmentTitle:
+              baseDraft.appointmentTitle || targetAppointment.title || "",
+            locationAddress:
+              baseDraft.locationAddress ||
+              targetAppointment.location_address ||
+              "",
+            locationName:
+              baseDraft.locationName || targetAppointment.location_name || "",
+            locationPhone:
+              baseDraft.locationPhone || targetAppointment.location_phone || "",
+            providerName:
+              baseDraft.providerName || targetAppointment.provider_name || "",
+            providerOrganization:
+              baseDraft.providerOrganization ||
+              targetAppointment.provider_organization ||
+              "",
+            startsAt:
+              baseDraft.startsAt ||
+              toDatetimeLocalValue(targetAppointment.starts_at),
+          }
+        : baseDraft;
+      const interpretedSubjectId =
+        result.careSubjectId ??
+        targetAppointment?.care_subject_id ??
+        textIntakeSubjectId;
       const { careCircleId, careSubjectId } =
         await getPrimaryCareContext(interpretedSubjectId);
-      const matches = careSubjectId
+      const matches = careSubjectId && !targetAppointment
         ? await findTextIntakeMatches(
             interpretedDraft,
             careCircleId,
@@ -1504,10 +1562,12 @@ export default function Home() {
       setTextIntakeAiDraft(interpretedDraft);
       setTextIntakeItemId(result.intakeItemId ?? null);
       setTextIntakeMatches(matches);
-      setSelectedTextIntakeMatchId("new");
+      setSelectedTextIntakeMatchId(targetAppointment?.id ?? "new");
       setTextIntakeSubjectId(interpretedSubjectId);
       setMessage(
-        matches.length > 0
+        targetAppointment
+          ? "Text interpreted for this appointment. Review before saving."
+          : matches.length > 0
           ? "Text interpreted. Possible appointment match found."
           : "Text interpreted. Review before saving."
       );
@@ -1526,6 +1586,33 @@ export default function Home() {
       ...(currentDraft ?? emptyTextIntakeDraft),
       [field]: value,
     }));
+  }
+
+  function startContextualTextIntake(appointment: Appointment) {
+    setEditingNoteIds((currentIds) => ({
+      ...currentIds,
+      [appointment.id]: false,
+    }));
+    setTextIntakeTargetAppointmentId(appointment.id);
+    setContextualTextIntakeValue("");
+    setTextIntakeValue("");
+    setTextIntakeDraft(null);
+    setTextIntakeAiDraft(null);
+    setTextIntakeItemId(null);
+    setTextIntakeMatches([]);
+    setSelectedTextIntakeMatchId(appointment.id);
+    setTextIntakeSubjectId(appointment.care_subject_id ?? "");
+    setMessage("");
+  }
+
+  function cancelTextIntake() {
+    setTextIntakeDraft(null);
+    setTextIntakeAiDraft(null);
+    setTextIntakeItemId(null);
+    setTextIntakeMatches([]);
+    setSelectedTextIntakeMatchId("new");
+    setTextIntakeTargetAppointmentId(null);
+    setContextualTextIntakeValue("");
   }
 
   async function findTextIntakeMatches(
@@ -1758,12 +1845,27 @@ export default function Home() {
             aiTakeaways.length > 0 ||
             aiFollowups.length > 0)
       );
+      const targetAppointment = textIntakeTargetAppointmentId
+        ? (appointments.find(
+            (appointment) => appointment.id === textIntakeTargetAppointmentId
+          ) ??
+          (notesReminderAppointment?.id === textIntakeTargetAppointmentId
+            ? notesReminderAppointment
+            : null))
+        : null;
       const selectedMatch =
-        selectedTextIntakeMatchId === "new"
-          ? null
-          : textIntakeMatches.find(
+        targetAppointment
+          ? {
+              appointment: targetAppointment,
+              currentNote: notesByAppointment.get(targetAppointment.id) ?? null,
+              reasons: ["selected appointment"],
+              score: 100,
+            }
+          : selectedTextIntakeMatchId === "new"
+            ? null
+            : textIntakeMatches.find(
               (match) => match.appointment.id === selectedTextIntakeMatchId
-            ) ?? null;
+              ) ?? null;
 
       if (selectedMatch && !hasNotes) {
         throw new Error("Add notes before updating an existing appointment.");
@@ -1816,7 +1918,11 @@ export default function Home() {
               care_circle_id: careCircleId,
               followups: aiFollowups,
               generated_by_ai: true,
-              input_text: textIntakeValue.trim() || null,
+              input_text:
+                (targetAppointment
+                  ? contextualTextIntakeValue
+                  : textIntakeValue
+                ).trim() || null,
               is_current: false,
               source: "intake_ai_draft",
               summary_short: textIntakeAiDraft.notesSummary.trim() || null,
@@ -1842,7 +1948,9 @@ export default function Home() {
             care_circle_id: careCircleId,
             followups,
             generated_by_ai: false,
-            input_text: textIntakeValue.trim() || null,
+            input_text:
+              (targetAppointment ? contextualTextIntakeValue : textIntakeValue)
+                .trim() || null,
             is_current: true,
             source: textIntakeItemId ? "intake_user_accepted" : "manual",
             summary_short: textIntakeDraft.notesSummary.trim() || null,
@@ -1923,12 +2031,18 @@ export default function Home() {
               provider_organization: match.appointment.provider_organization,
             })),
             match_status: selectedMatch
-              ? "user_selected_existing"
+              ? targetAppointment
+                ? "targeted_existing"
+                : "user_selected_existing"
               : textIntakeMatches.length > 0
                 ? "user_created_new_despite_matches"
                 : "no_match",
             suggested_appointment_id: textIntakeMatches[0]?.appointment.id ?? null,
-            user_match_decision: selectedMatch ? "attach_existing" : "create_new",
+            user_match_decision: selectedMatch
+              ? targetAppointment
+                ? "targeted_attach"
+                : "attach_existing"
+              : "create_new",
             status: "accepted",
           })
           .eq("id", textIntakeItemId);
@@ -1944,6 +2058,8 @@ export default function Home() {
       setTextIntakeItemId(null);
       setTextIntakeMatches([]);
       setSelectedTextIntakeMatchId("new");
+      setTextIntakeTargetAppointmentId(null);
+      setContextualTextIntakeValue("");
       setAppointmentView(hasNotes ? "logged" : "upcoming");
       await loadAppointments(hasNotes ? "logged" : "upcoming");
       setMessage("Intake saved.");
@@ -2474,6 +2590,7 @@ export default function Home() {
 
   async function handleStartReminderNotes(appointment: NotesReminderAppointment) {
     setMessage("");
+    cancelTextIntake();
     setNoteDrafts((currentDrafts) => ({
       ...currentDrafts,
       [appointment.id]: emptyNoteDraft,
@@ -2773,7 +2890,7 @@ export default function Home() {
                   </button>
                 </form>
 
-                {textIntakeDraft ? (
+                {textIntakeDraft && !textIntakeTargetAppointmentId ? (
                   <form
                     className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-4"
                     onSubmit={handleSaveTextIntakeDraft}
@@ -3001,11 +3118,7 @@ export default function Home() {
                       <button
                         className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
                         onClick={() => {
-                          setTextIntakeDraft(null);
-                          setTextIntakeAiDraft(null);
-                          setTextIntakeItemId(null);
-                          setTextIntakeMatches([]);
-                          setSelectedTextIntakeMatchId("new");
+                          cancelTextIntake();
                         }}
                         type="button"
                       >
@@ -3502,6 +3615,16 @@ export default function Home() {
                   >
                     Add notes
                   </button>
+                  <button
+                    className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
+                    disabled={loading}
+                    onClick={() =>
+                      startContextualTextIntake(notesReminderAppointment)
+                    }
+                    type="button"
+                  >
+                    Paste notes
+                  </button>
                 </div>
                 {editingNoteIds[notesReminderAppointment.id] ? (
                   <form
@@ -3587,6 +3710,111 @@ export default function Home() {
                     </div>
                   </form>
                 ) : null}
+                {textIntakeTargetAppointmentId ===
+                notesReminderAppointment.id ? (
+                  <form
+                    className="mt-4 rounded-md border border-blue-100 bg-white p-4"
+                    onSubmit={
+                      textIntakeDraft
+                        ? handleSaveTextIntakeDraft
+                        : handleInterpretTextIntake
+                    }
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-semibold text-blue-950">
+                          Paste notes for this appointment
+                        </h3>
+                        <p className="mt-1 text-sm text-blue-800">
+                          The interpreted notes will be attached here.
+                        </p>
+                      </div>
+                      <button
+                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                        onClick={cancelTextIntake}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    {!textIntakeDraft ? (
+                      <>
+                        <label className="mt-4 block text-sm font-medium text-slate-700">
+                          Text
+                          <textarea
+                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              setContextualTextIntakeValue(event.target.value)
+                            }
+                            placeholder="Paste portal notes, after-visit summaries, or visit details."
+                            value={contextualTextIntakeValue}
+                          />
+                        </label>
+                        <button
+                          className="mt-4 rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                          disabled={processingTextIntake}
+                          type="submit"
+                        >
+                          {processingTextIntake
+                            ? "Interpreting..."
+                            : "Interpret notes"}
+                        </button>
+                      </>
+                    ) : (
+                      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                        <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                          Visit summary
+                          <textarea
+                            className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "notesSummary",
+                                event.target.value
+                              )
+                            }
+                            value={textIntakeDraft.notesSummary}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Takeaways
+                          <textarea
+                            className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "takeaways",
+                                event.target.value
+                              )
+                            }
+                            value={textIntakeDraft.takeaways}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Follow-ups
+                          <textarea
+                            className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "followups",
+                                event.target.value
+                              )
+                            }
+                            value={textIntakeDraft.followups}
+                          />
+                        </label>
+                        <div className="flex items-end">
+                          <button
+                            className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                            disabled={savingTextIntake}
+                            type="submit"
+                          >
+                            {savingTextIntake ? "Saving..." : "Save notes"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </form>
+                ) : null}
               </section>
             ) : null}
 
@@ -3635,6 +3863,9 @@ export default function Home() {
                   !appointment.starts_at || new Date(appointment.starts_at) >= new Date();
                 const canGenerateCarePrep =
                   !isArchived && !isLogged && isFutureOrUndated;
+                const canPasteContextualNotes = !isArchived && !isLogged;
+                const isContextualTextIntake =
+                  textIntakeTargetAppointmentId === appointment.id;
                 const mapsLink = googleMapsUrl(appointment.location_address);
                 const calendarLink = agicalUrl(appointment);
                 const providerLine = [
@@ -3742,6 +3973,15 @@ export default function Home() {
                             Calendar
                           </a>
                         ) : null}
+                        {canPasteContextualNotes ? (
+                          <button
+                            className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700"
+                            onClick={() => startContextualTextIntake(appointment)}
+                            type="button"
+                          >
+                            Paste notes
+                          </button>
+                        ) : null}
                         <button
                           className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
                           onClick={() => startEditingAppointment(appointment)}
@@ -3760,6 +4000,120 @@ export default function Home() {
                             : "Archive appointment"}
                         </button>
                       </div>
+                    ) : null}
+
+                    {isContextualTextIntake && canPasteContextualNotes ? (
+                      <form
+                        className="mt-5 rounded-md border border-blue-200 bg-blue-50 p-4"
+                        onSubmit={
+                          textIntakeDraft
+                            ? handleSaveTextIntakeDraft
+                            : handleInterpretTextIntake
+                        }
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-semibold text-blue-950">
+                              Paste notes for this appointment
+                            </h3>
+                            <p className="mt-1 text-sm text-blue-800">
+                              The notes will be attached here and versioned.
+                            </p>
+                          </div>
+                          <button
+                            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                            onClick={cancelTextIntake}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+
+                        {!textIntakeDraft ? (
+                          <>
+                            <label className="mt-4 block text-sm font-medium text-slate-700">
+                              Text
+                              <textarea
+                                className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                onChange={(event) =>
+                                  setContextualTextIntakeValue(event.target.value)
+                                }
+                                placeholder="Paste portal notes, after-visit summaries, or visit details."
+                                value={contextualTextIntakeValue}
+                              />
+                            </label>
+                            <button
+                              className="mt-4 rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                              disabled={processingTextIntake}
+                              type="submit"
+                            >
+                              {processingTextIntake
+                                ? "Interpreting..."
+                                : "Interpret notes"}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <p className="mt-3 text-xs text-blue-800">
+                              Confidence{" "}
+                              {Math.round(textIntakeDraft.confidence * 100)}%
+                              {textIntakeDraft.suggestedAction
+                                ? ` · ${textIntakeDraft.suggestedAction}`
+                                : ""}
+                            </p>
+                            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                              <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                                Visit summary
+                                <textarea
+                                  className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateTextIntakeDraft(
+                                      "notesSummary",
+                                      event.target.value
+                                    )
+                                  }
+                                  value={textIntakeDraft.notesSummary}
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Takeaways
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateTextIntakeDraft(
+                                      "takeaways",
+                                      event.target.value
+                                    )
+                                  }
+                                  value={textIntakeDraft.takeaways}
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Follow-ups
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateTextIntakeDraft(
+                                      "followups",
+                                      event.target.value
+                                    )
+                                  }
+                                  value={textIntakeDraft.followups}
+                                />
+                              </label>
+                              <div className="flex items-end gap-3">
+                                <button
+                                  className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                                  disabled={savingTextIntake}
+                                  type="submit"
+                                >
+                                  {savingTextIntake ? "Saving..." : "Save notes"}
+                                </button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </form>
                     ) : null}
 
                     {isArchived ? (
@@ -4434,7 +4788,9 @@ export default function Home() {
                       </section>
                     ) : null}
 
-                    {!isArchived && (note && !isEditingNote ? null : (
+                    {!isArchived &&
+                    !isContextualTextIntake &&
+                    (note && !isEditingNote ? null : (
                       <form
                         className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
                         onSubmit={(event) => handleSaveNote(event, appointment)}

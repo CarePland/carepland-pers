@@ -72,6 +72,12 @@ export async function POST(request: NextRequest) {
     const rawText = typeof body.rawText === "string" ? body.rawText.trim() : "";
     const requestedCareSubjectId =
       typeof body.careSubjectId === "string" ? body.careSubjectId : "";
+    const appointmentContext =
+      body.appointmentContext &&
+      typeof body.appointmentContext === "object" &&
+      !Array.isArray(body.appointmentContext)
+        ? (body.appointmentContext as JsonObject)
+        : null;
 
     if (!rawText) {
       throw new Error("Paste some text before running intake.");
@@ -202,11 +208,19 @@ export async function POST(request: NextRequest) {
         input: [
           {
             content:
-              "You interpret pasted appointment-related text for CarePland Personal. Use only supplied text. Extract a reviewable draft for an appointment and optional notes. Extract provider_name, provider_organization, location_name, location_address, and location_phone only when directly supported by the text. If a value is unknown, return an empty string or empty array. starts_at_local must be suitable for an HTML datetime-local input as YYYY-MM-DDTHH:mm when a date/time is explicit; otherwise return an empty string. Do not invent dates, providers, locations, or outcomes.",
+              "You interpret pasted appointment-related text for CarePland Personal. Use only supplied text. Extract a reviewable draft for an appointment and optional notes. Extract provider_name, provider_organization, location_name, location_address, and location_phone only when directly supported by the text. If existing appointment context is supplied, use it as the target appointment context and focus on extracting visit notes, takeaways, and follow-ups from the pasted text. If a value is unknown, return an empty string or empty array. starts_at_local must be suitable for an HTML datetime-local input as YYYY-MM-DDTHH:mm when a date/time is explicit; otherwise return an empty string. Do not invent dates, providers, locations, or outcomes.",
             role: "system",
           },
           {
-            content: `Care VIP: ${careSubject.display_name}\nCurrent date: ${new Date().toISOString()}\n\nPasted text:\n${rawText}`,
+            content: `Care VIP: ${careSubject.display_name}\nCurrent date: ${new Date().toISOString()}${
+              appointmentContext
+                ? `\nExisting appointment context:\n${JSON.stringify(
+                    appointmentContext,
+                    null,
+                    2
+                  )}`
+                : ""
+            }\n\nPasted text:\n${rawText}`,
             role: "user",
           },
         ],
