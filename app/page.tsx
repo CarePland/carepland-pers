@@ -95,6 +95,7 @@ type AiInstructionVersion = {
 
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
+type AuthMode = "reset" | "signIn" | "signUp";
 
 type CarePrepHistoryRow = {
   id: string;
@@ -276,6 +277,43 @@ function getErrorMessage(error: unknown): string {
   }
 
   return String(error || "Something went wrong.");
+}
+
+function getAuthErrorMessage(error: unknown): string {
+  const rawMessage = getErrorMessage(error).toLowerCase();
+
+  if (rawMessage.includes("invalid login credentials")) {
+    return "That email and password did not match. Try again or reset your password.";
+  }
+
+  if (rawMessage.includes("email not confirmed")) {
+    return "This account exists, but the email address still needs to be confirmed. Check your inbox for the Supabase confirmation email.";
+  }
+
+  if (
+    rawMessage.includes("user already registered") ||
+    rawMessage.includes("already been registered") ||
+    rawMessage.includes("already exists")
+  ) {
+    return "An account already exists for this email. Sign in instead, or reset the password.";
+  }
+
+  if (rawMessage.includes("password")) {
+    return "The password was not accepted. Use at least 8 characters and try again.";
+  }
+
+  if (rawMessage.includes("rate limit") || rawMessage.includes("too many")) {
+    return "Too many attempts. Please wait a little while before trying again.";
+  }
+
+  return getErrorMessage(error);
+}
+
+function logAuthError(action: string, error: unknown) {
+  console.error("Supabase auth error", {
+    action,
+    error,
+  });
 }
 
 function asTextList(value: unknown): string[] {
@@ -701,8 +739,10 @@ function intakeDraftFromResult(value: unknown): TextIntakeDraft {
 }
 
 export default function Home() {
+  const [authMode, setAuthMode] = useState<AuthMode>("signIn");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [newAppointmentTitle, setNewAppointmentTitle] = useState("");
   const [newAppointmentReason, setNewAppointmentReason] = useState("");
   const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState("");
@@ -1244,8 +1284,12 @@ export default function Home() {
         );
       }
 
+      if (!isLikelyEmail(email)) {
+        throw new Error("Enter a valid email address.");
+      }
+
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       });
 
@@ -1253,10 +1297,113 @@ export default function Home() {
         throw error;
       }
 
-      setSignedInEmail(email);
+      setSignedInEmail(email.trim());
       await loadAppointments();
     } catch (error) {
-      setMessage(getErrorMessage(error));
+      logAuthError("signIn", error);
+      setMessage(getAuthErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSignUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    try {
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error(
+          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel."
+        );
+      }
+
+      const trimmedEmail = email.trim();
+
+      if (!isLikelyEmail(trimmedEmail)) {
+        throw new Error("Enter a valid email address.");
+      }
+
+      if (password.length < 8) {
+        throw new Error("Use a password with at least 8 characters.");
+      }
+
+      if (password !== confirmPassword) {
+        throw new Error("The passwords do not match.");
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: trimmedEmail,
+        password,
+        options: {
+          emailRedirectTo:
+            typeof window === "undefined" ? undefined : window.location.origin,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data.session) {
+        setSignedInEmail(trimmedEmail);
+        setMessage("Account created and signed in. Finish profile setup to continue.");
+        await loadAppointments();
+        return;
+      }
+
+      setAuthMode("signIn");
+      setPassword("");
+      setConfirmPassword("");
+      setMessage(
+        "Account created. Check your email to confirm the account, then sign in."
+      );
+    } catch (error) {
+      logAuthError("signUp", error);
+      setMessage(getAuthErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handlePasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    try {
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error(
+          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel."
+        );
+      }
+
+      const trimmedEmail = email.trim();
+
+      if (!isLikelyEmail(trimmedEmail)) {
+        throw new Error("Enter a valid email address.");
+      }
+
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        trimmedEmail,
+        {
+          redirectTo:
+            typeof window === "undefined" ? undefined : window.location.origin,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      setAuthMode("signIn");
+      setPassword("");
+      setConfirmPassword("");
+      setMessage("If this email has an account, a password reset link has been sent.");
+    } catch (error) {
+      logAuthError("passwordReset", error);
+      setMessage(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -1671,7 +1818,9 @@ export default function Home() {
     setShowAiAdmin(false);
     setOnboardingCompletedAt(null);
     setProfileDraft(emptyProfileDraft);
+    setAuthMode("signIn");
     setPassword("");
+    setConfirmPassword("");
     setAppointments([]);
     setNotesReminderAppointment(null);
     setCareSubjects([]);
@@ -3302,33 +3451,113 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <form onSubmit={handleSignIn}>
-                <h2 className="text-xl font-semibold">Test sign in</h2>
+              <form
+                onSubmit={
+                  authMode === "signUp"
+                    ? handleSignUp
+                    : authMode === "reset"
+                      ? handlePasswordReset
+                      : handleSignIn
+                }
+              >
+                <h2 className="text-xl font-semibold">
+                  {authMode === "signUp"
+                    ? "Create account"
+                    : authMode === "reset"
+                      ? "Reset password"
+                      : "Sign in"}
+                </h2>
                 <label className="mt-5 block text-sm font-medium text-slate-700">
                   Email
                   <input
                     className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
                     onChange={(event) => setEmail(event.target.value)}
+                    required
                     type="email"
                     value={email}
                   />
                 </label>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  Password
-                  <input
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                    onChange={(event) => setPassword(event.target.value)}
-                    type="password"
-                    value={password}
-                  />
-                </label>
+
+                {authMode !== "reset" ? (
+                  <label className="mt-4 block text-sm font-medium text-slate-700">
+                    Password
+                    <input
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      minLength={8}
+                      onChange={(event) => setPassword(event.target.value)}
+                      required
+                      type="password"
+                      value={password}
+                    />
+                  </label>
+                ) : null}
+
+                {authMode === "signUp" ? (
+                  <label className="mt-4 block text-sm font-medium text-slate-700">
+                    Confirm password
+                    <input
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      minLength={8}
+                      onChange={(event) =>
+                        setConfirmPassword(event.target.value)
+                      }
+                      required
+                      type="password"
+                      value={confirmPassword}
+                    />
+                  </label>
+                ) : null}
+
                 <button
                   className="mt-5 w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
                   disabled={loading}
                   type="submit"
                 >
-                  {loading ? "Loading..." : "Load appointments"}
+                  {loading
+                    ? "Working..."
+                    : authMode === "signUp"
+                      ? "Create account"
+                      : authMode === "reset"
+                        ? "Send reset email"
+                        : "Sign in"}
                 </button>
+                <div className="mt-4 space-y-2 text-sm">
+                  {authMode !== "signIn" ? (
+                    <button
+                      className="font-semibold text-blue-700"
+                      onClick={() => {
+                        setAuthMode("signIn");
+                        setMessage("");
+                      }}
+                      type="button"
+                    >
+                      Back to sign in
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        className="block font-semibold text-blue-700"
+                        onClick={() => {
+                          setAuthMode("signUp");
+                          setMessage("");
+                        }}
+                        type="button"
+                      >
+                        Create a new account
+                      </button>
+                      <button
+                        className="block font-semibold text-blue-700"
+                        onClick={() => {
+                          setAuthMode("reset");
+                          setMessage("");
+                        }}
+                        type="button"
+                      >
+                        Forgot password?
+                      </button>
+                    </>
+                  )}
+                </div>
               </form>
             )}
 
