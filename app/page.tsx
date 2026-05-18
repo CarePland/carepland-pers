@@ -922,6 +922,7 @@ export default function Home() {
   const canUseMultipleCareVips = careVipLimit > 1;
   const canAddCareVip = careSubjects.length < careVipLimit;
   const needsOnboarding = signedInEmail && !onboardingCompletedAt;
+  const verifiedAccountEmail = signedInEmail ?? profileDraft.email;
   const passwordsMismatch =
     authMode === "signUp" &&
     confirmPassword.length > 0 &&
@@ -1890,11 +1891,13 @@ export default function Home() {
         throw new Error("Please sign in before saving your profile.");
       }
 
-      if (!profileDraft.email.trim()) {
+      const profileEmail = user.email ?? profileDraft.email.trim();
+
+      if (!profileEmail) {
         throw new Error("Email is required.");
       }
 
-      if (!isLikelyEmail(profileDraft.email)) {
+      if (!isLikelyEmail(profileEmail)) {
         throw new Error("Enter a valid email address.");
       }
 
@@ -1917,7 +1920,7 @@ export default function Home() {
         city: profileDraft.city.trim() || null,
         country: profileDraft.country.trim() || null,
         display_name: profileDraft.displayName.trim() || null,
-        email: profileDraft.email.trim(),
+        email: profileEmail,
         id: user.id,
         onboarding_completed_at: completedAt,
         phone: normalizedPhone?.display ?? null,
@@ -3297,14 +3300,9 @@ export default function Home() {
             >
               <label className="block text-sm font-medium text-slate-700">
                 Email
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("email", event.target.value)
-                  }
-                  type="email"
-                  value={profileDraft.email}
-                />
+                <div className="mt-2 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-base text-slate-700">
+                  {verifiedAccountEmail || "Verified account email"}
+                </div>
               </label>
               <label className="block text-sm font-medium text-slate-700">
                 Phone
