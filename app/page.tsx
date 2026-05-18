@@ -392,12 +392,15 @@ export default function Home() {
     const canUseMultipleSubjects = currentEntitlement.max_active_subjects > 1;
     const defaultSubjectId =
       subjects.find((subject) => subject.is_default)?.id ?? subjects[0]?.id ?? "";
-    const effectiveSubjectId = !canUseMultipleSubjects
-      ? defaultSubjectId || ALL_SUBJECTS
-      : subjectId === ALL_SUBJECTS ||
-          subjects.some((subject) => subject.id === subjectId)
-        ? subjectId
-        : ALL_SUBJECTS;
+    let effectiveSubjectId = defaultSubjectId || ALL_SUBJECTS;
+
+    if (canUseMultipleSubjects) {
+      effectiveSubjectId =
+        subjectId === ALL_SUBJECTS ||
+        subjects.some((subject) => subject.id === subjectId)
+          ? subjectId
+          : ALL_SUBJECTS;
+    }
 
     setCareSubjects(subjects);
     setSelectedSubjectId(effectiveSubjectId);
@@ -1027,6 +1030,12 @@ export default function Home() {
                 Create appointments and view note synthesis plus CarePrep
                 guidance.
               </p>
+              {signedInEmail ? (
+                <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Plan: {entitlement.plan_name} · Care VIPs{" "}
+                  {careSubjects.length}/{entitlement.max_active_subjects}
+                </p>
+              ) : null}
             </div>
 
             {signedInEmail && canUseMultipleCareVips ? (
