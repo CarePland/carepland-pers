@@ -9,6 +9,7 @@ type Appointment = {
   reason: string | null;
   starts_at: string | null;
   status: string;
+  archived_at?: string | null;
 };
 
 type AppointmentNote = {
@@ -44,6 +45,13 @@ const emptyNoteDraft = {
   followups: "",
   summary: "",
   takeaways: "",
+};
+
+const emptyAppointmentDraft = {
+  reason: "",
+  startsAt: "",
+  status: "scheduled",
+  title: "",
 };
 
 function getErrorMessage(error: unknown): string {
@@ -103,6 +111,21 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
+function toDatetimeLocalValue(value: string | null): string {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 16);
+}
+
 function DetailList({
   emptyLabel,
   items,
@@ -142,9 +165,21 @@ export default function Home() {
       }
     >
   >({});
+  const [appointmentDrafts, setAppointmentDrafts] = useState<
+    Record<string, typeof emptyAppointmentDraft>
+  >({});
+  const [editingAppointmentIds, setEditingAppointmentIds] = useState<
+    Record<string, boolean>
+  >({});
   const [editingNoteIds, setEditingNoteIds] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
+  const [savingAppointmentForId, setSavingAppointmentForId] = useState<
+    string | null
+  >(null);
+  const [archivingAppointmentForId, setArchivingAppointmentForId] = useState<
+    string | null
+  >(null);
   const [savingNoteForId, setSavingNoteForId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
@@ -248,8 +283,10 @@ export default function Home() {
       throw appointmentsError;
     }
 
-    const appointmentIds = appointmentRows?.map((item) => item.id) ?? [];
-    setAppointments(appointmentRows ?? []);
+    const activeAppointments =
+      appointmentRows?.filter((item) => item.status !== "archived") ?? [];
+    const appointmentIds = activeAppointments.map((item) => item.id);
+    setAppointments(activeAppointments);
 
     if (appointmentIds.length === 0) {
       setNotes([]);
@@ -285,7 +322,7 @@ export default function Home() {
 
     setNotes(noteRows ?? []);
     setGuidance(guidanceRows ?? []);
-    setMessage(`Loaded ${appointmentRows?.length ?? 0} appointment(s).`);
+    setMessage(`Loaded ${activeAppointments.length} appointment(s).`);
   }
 
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
@@ -381,6 +418,132 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setCreatingAppointment(false);
+    }
+  }
+
+  function startEditingAppointment(appointment: Appointment) {
+    setAppointmentDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointment.id]: {
+        reason: appointment.reason ?? "",
+        startsAt: toDatetimeLocalValue(appointment.starts_at),
+        status: appointment.status,
+        title: appointment.title ?? "",
+      },
+    }));
+    setEditingAppointmentIds((currentIds) => ({
+      ...currentIds,
+      [appointment.id]: true,
+    }));
+  }
+
+  function cancelEditingAppointment(appointmentId: string) {
+    setEditingAppointmentIds((currentIds) => ({
+      ...currentIds,
+      [appointmentId]: false,
+    }));
+    setAppointmentDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointmentId]: emptyAppointmentDraft,
+    }));
+  }
+
+  function updateAppointmentDraft(
+    appointmentId: string,
+    field: "reason" | "startsAt" | "status" | "title",
+    value: string
+  ) {
+    setAppointmentDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [appointmentId]: {
+        ...emptyAppointmentDraft,
+        ...currentDrafts[appointmentId],
+        [field]: value,
+      },
+    }));
+  }
+
+  async function handleSaveAppointment(
+    event: FormEvent<HTMLFormElement>,
+    appointment: Appointment
+  ) {
+    event.preventDefault();
+    setSavingAppointmentForId(appointment.id);
+    setMessage("");
+
+    try {
+      const draft = appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
+
+      if (!draft.title.trim()) {
+        throw new Error("Please enter an appointment title.");
+      }
+
+      const startsAt = draft.startsAt
+        ? new Date(draft.startsAt).toISOString()
+        : null;
+
+      const { error } = await supabase
+        .from("appointments")
+        .update({
+          reason: draft.reason.trim() || null,
+          starts_at: startsAt,
+          status: draft.status,
+          title: draft.title.trim(),
+        })
+        .eq("id", appointment.id);
+
+      if (error) {
+        throw error;
+      }
+
+      setAppointmentDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [appointment.id]: emptyAppointmentDraft,
+      }));
+      setEditingAppointmentIds((currentIds) => ({
+        ...currentIds,
+        [appointment.id]: false,
+      }));
+      await loadAppointments();
+      setMessage("Appointment updated.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAppointmentForId(null);
+    }
+  }
+
+  async function handleArchiveAppointment(appointment: Appointment) {
+    const shouldArchive = window.confirm(
+      "Archive this appointment? It will disappear from the active dashboard, but the data will stay available for history and recovery."
+    );
+
+    if (!shouldArchive) {
+      return;
+    }
+
+    setArchivingAppointmentForId(appointment.id);
+    setMessage("");
+
+    try {
+      const { error } = await supabase
+        .from("appointments")
+        .update({
+          archived_at: new Date().toISOString(),
+          status: "archived",
+        })
+        .eq("id", appointment.id);
+
+      if (error) {
+        throw error;
+      }
+
+      await loadAppointments();
+      setMessage("Appointment archived.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setArchivingAppointmentForId(null);
     }
   }
 
@@ -642,6 +805,10 @@ export default function Home() {
               appointments.map((appointment) => {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
+                const appointmentDraft =
+                  appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
+                const isEditingAppointment =
+                  editingAppointmentIds[appointment.id] ?? false;
                 const noteDraft = noteDrafts[appointment.id] ?? emptyNoteDraft;
                 const isEditingNote = editingNoteIds[appointment.id] ?? false;
                 const takeaways = asTextList(note?.takeaways);
@@ -670,6 +837,134 @@ export default function Home() {
                         {appointment.status}
                       </span>
                     </div>
+
+                    {!isEditingAppointment ? (
+                      <div className="mt-4">
+                        <button
+                          className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                          onClick={() => startEditingAppointment(appointment)}
+                          type="button"
+                        >
+                          Edit appointment
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {isEditingAppointment ? (
+                      <form
+                        className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
+                        onSubmit={(event) =>
+                          handleSaveAppointment(event, appointment)
+                        }
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-semibold text-slate-900">
+                              Edit appointment
+                            </h3>
+                            <p className="mt-1 text-sm text-slate-500">
+                              Archive keeps the appointment for history, but
+                              removes it from this active view.
+                            </p>
+                          </div>
+                          <button
+                            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                            onClick={() => cancelEditingAppointment(appointment.id)}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid gap-4 md:grid-cols-2">
+                          <label className="block text-sm font-medium text-slate-700">
+                            Title
+                            <input
+                              className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateAppointmentDraft(
+                                  appointment.id,
+                                  "title",
+                                  event.target.value
+                                )
+                              }
+                              type="text"
+                              value={appointmentDraft.title}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Date & time
+                            <input
+                              className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateAppointmentDraft(
+                                  appointment.id,
+                                  "startsAt",
+                                  event.target.value
+                                )
+                              }
+                              type="datetime-local"
+                              value={appointmentDraft.startsAt}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Status
+                            <select
+                              className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateAppointmentDraft(
+                                  appointment.id,
+                                  "status",
+                                  event.target.value
+                                )
+                              }
+                              value={appointmentDraft.status}
+                            >
+                              <option value="scheduled">Scheduled</option>
+                              <option value="completed">Completed</option>
+                              <option value="cancelled">Cancelled</option>
+                              <option value="draft">Draft</option>
+                            </select>
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+                            Reason
+                            <textarea
+                              className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateAppointmentDraft(
+                                  appointment.id,
+                                  "reason",
+                                  event.target.value
+                                )
+                              }
+                              value={appointmentDraft.reason}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-3">
+                          <button
+                            className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                            disabled={savingAppointmentForId === appointment.id}
+                            type="submit"
+                          >
+                            {savingAppointmentForId === appointment.id
+                              ? "Saving..."
+                              : "Save appointment"}
+                          </button>
+                          <button
+                            className="rounded-md border border-rose-300 px-4 py-2 font-semibold text-rose-700 disabled:text-slate-400"
+                            disabled={archivingAppointmentForId === appointment.id}
+                            onClick={() => handleArchiveAppointment(appointment)}
+                            type="button"
+                          >
+                            {archivingAppointmentForId === appointment.id
+                              ? "Archiving..."
+                              : "Archive appointment"}
+                          </button>
+                        </div>
+                      </form>
+                    ) : null}
 
                     {appointment.reason ? (
                       <section className="mt-5">
