@@ -36,6 +36,15 @@ type CarePrepGuidance = {
   next_steps?: unknown;
 };
 
+type AppointmentView = "active" | "archived";
+
+type UndoArchive = {
+  appointmentId: string;
+  expiresAt: number;
+  previousStatus: string;
+  title: string;
+};
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
@@ -174,6 +183,8 @@ export default function Home() {
   const [editingNoteIds, setEditingNoteIds] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
+  const [appointmentView, setAppointmentView] =
+    useState<AppointmentView>("active");
   const [savingAppointmentForId, setSavingAppointmentForId] = useState<
     string | null
   >(null);
@@ -181,7 +192,11 @@ export default function Home() {
     string | null
   >(null);
   const [savingNoteForId, setSavingNoteForId] = useState<string | null>(null);
+  const [restoringAppointmentForId, setRestoringAppointmentForId] = useState<
+    string | null
+  >(null);
   const [message, setMessage] = useState("");
+  const [undoArchive, setUndoArchive] = useState<UndoArchive | null>(null);
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [notes, setNotes] = useState<AppointmentNote[]>([]);
@@ -208,6 +223,18 @@ export default function Home() {
 
     restoreSession();
   }, []);
+
+  useEffect(() => {
+    if (!undoArchive) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setUndoArchive(null);
+    }, Math.max(undoArchive.expiresAt - Date.now(), 0));
+
+    return () => window.clearTimeout(timeoutId);
+  }, [undoArchive]);
 
   async function getPrimaryCareContext() {
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -254,7 +281,7 @@ export default function Home() {
     };
   }
 
-  async function loadAppointments() {
+  async function loadAppointments(view: AppointmentView = appointmentView) {
     const { data: memberships, error: membershipsError } = await supabase
       .from("care_circle_memberships")
       .select("care_circle_id");
@@ -283,15 +310,23 @@ export default function Home() {
       throw appointmentsError;
     }
 
-    const activeAppointments =
-      appointmentRows?.filter((item) => item.status !== "archived") ?? [];
-    const appointmentIds = activeAppointments.map((item) => item.id);
-    setAppointments(activeAppointments);
+    const visibleAppointments =
+      appointmentRows?.filter((item) =>
+        view === "archived"
+          ? item.status === "archived"
+          : item.status !== "archived"
+      ) ?? [];
+    const appointmentIds = visibleAppointments.map((item) => item.id);
+    setAppointments(visibleAppointments);
 
     if (appointmentIds.length === 0) {
       setNotes([]);
       setGuidance([]);
-      setMessage("Signed in. No appointments found yet.");
+      setMessage(
+        view === "archived"
+          ? "No archived appointments found."
+          : "Signed in. No appointments found yet."
+      );
       return;
     }
 
@@ -322,7 +357,7 @@ export default function Home() {
 
     setNotes(noteRows ?? []);
     setGuidance(guidanceRows ?? []);
-    setMessage(`Loaded ${activeAppointments.length} appointment(s).`);
+    setMessage(`Loaded ${visibleAppointments.length} appointment(s).`);
   }
 
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
@@ -361,6 +396,20 @@ export default function Home() {
 
     try {
       await loadAppointments();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleChangeAppointmentView(view: AppointmentView) {
+    setAppointmentView(view);
+    setLoading(true);
+    setMessage("");
+
+    try {
+      await loadAppointments(view);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -539,11 +588,47 @@ export default function Home() {
       }
 
       await loadAppointments();
-      setMessage("Appointment archived.");
+      setUndoArchive({
+        appointmentId: appointment.id,
+        expiresAt: Date.now() + 30000,
+        previousStatus: appointment.status,
+        title: appointment.title || "Untitled appointment",
+      });
+      setMessage("Appointment archived. Undo is available for 30 seconds.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
       setArchivingAppointmentForId(null);
+    }
+  }
+
+  async function restoreAppointment(
+    appointmentId: string,
+    status: string = "scheduled"
+  ) {
+    setRestoringAppointmentForId(appointmentId);
+    setMessage("");
+
+    try {
+      const { error } = await supabase
+        .from("appointments")
+        .update({
+          archived_at: null,
+          status,
+        })
+        .eq("id", appointmentId);
+
+      if (error) {
+        throw error;
+      }
+
+      setUndoArchive(null);
+      await loadAppointments();
+      setMessage("Appointment restored.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setRestoringAppointmentForId(null);
     }
   }
 
@@ -794,12 +879,68 @@ export default function Home() {
                 {message}
               </p>
             ) : null}
+
+            {undoArchive ? (
+              <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-slate-700">
+                <p>
+                  Archived {undoArchive.title}. Undo is available briefly.
+                </p>
+                <button
+                  className="mt-3 rounded-md bg-blue-700 px-3 py-2 font-semibold text-white disabled:bg-slate-400"
+                  disabled={
+                    restoringAppointmentForId === undoArchive.appointmentId
+                  }
+                  onClick={() =>
+                    restoreAppointment(
+                      undoArchive.appointmentId,
+                      undoArchive.previousStatus
+                    )
+                  }
+                  type="button"
+                >
+                  {restoringAppointmentForId === undoArchive.appointmentId
+                    ? "Restoring..."
+                    : "Undo archive"}
+                </button>
+              </div>
+            ) : null}
           </aside>
 
           <div className="space-y-4">
+            {signedInEmail ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                    appointmentView === "active"
+                      ? "bg-blue-700 text-white"
+                      : "border border-slate-300 bg-white text-slate-700"
+                  }`}
+                  disabled={loading}
+                  onClick={() => handleChangeAppointmentView("active")}
+                  type="button"
+                >
+                  Active
+                </button>
+                <button
+                  className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                    appointmentView === "archived"
+                      ? "bg-blue-700 text-white"
+                      : "border border-slate-300 bg-white text-slate-700"
+                  }`}
+                  disabled={loading}
+                  onClick={() => handleChangeAppointmentView("archived")}
+                  type="button"
+                >
+                  Archived
+                </button>
+              </div>
+            ) : null}
+
             {appointments.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600">
-                No appointments loaded yet.
+                {appointmentView === "archived"
+                  ? "No archived appointments found."
+                  : "No appointments loaded yet."}
               </div>
             ) : (
               appointments.map((appointment) => {
@@ -818,6 +959,7 @@ export default function Home() {
                 const watchouts = asTextList(prep?.watchouts);
                 const medReview = asTextList(prep?.med_review);
                 const sinceLastVisit = asTextList(prep?.since_last_visit);
+                const isArchived = appointment.status === "archived";
 
                 return (
                   <article
@@ -838,7 +980,7 @@ export default function Home() {
                       </span>
                     </div>
 
-                    {!isEditingAppointment ? (
+                    {!isEditingAppointment && !isArchived ? (
                       <div className="mt-4">
                         <button
                           className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
@@ -846,6 +988,21 @@ export default function Home() {
                           type="button"
                         >
                           Edit appointment
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {isArchived ? (
+                      <div className="mt-4">
+                        <button
+                          className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                          disabled={restoringAppointmentForId === appointment.id}
+                          onClick={() => restoreAppointment(appointment.id)}
+                          type="button"
+                        >
+                          {restoringAppointmentForId === appointment.id
+                            ? "Restoring..."
+                            : "Restore appointment"}
                         </button>
                       </div>
                     ) : null}
