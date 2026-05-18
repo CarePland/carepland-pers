@@ -259,14 +259,33 @@ function linesToList(value: string): string[] {
 const matchStopWords = new Set([
   "about",
   "after",
+  "assessment",
   "appointment",
+  "associated",
+  "clinic",
+  "continue",
   "current",
+  "discussed",
+  "followed",
   "follow",
   "followup",
+  "history",
+  "improved",
+  "intermittent",
+  "medication",
   "notes",
+  "orders",
   "patient",
+  "physical",
+  "placed",
+  "plan",
+  "prior",
   "review",
+  "reviewed",
   "scheduled",
+  "symptoms",
+  "today",
+  "treatment",
   "visit",
   "with",
 ]);
@@ -292,6 +311,13 @@ function sharedTokenCount(left: Set<string>, right: Set<string>): number {
   });
 
   return count;
+}
+
+function fieldTokenOverlap(
+  left: string | null | undefined,
+  right: string | null | undefined
+): number {
+  return sharedTokenCount(textTokens(left ?? ""), textTokens(right ?? ""));
 }
 
 function dayDifference(left: string | null, right: string): number | null {
@@ -1545,10 +1571,6 @@ export default function Home() {
     const draftText = [
       draft.appointmentTitle,
       draft.appointmentReason,
-      draft.providerName,
-      draft.providerOrganization,
-      draft.locationName,
-      draft.locationAddress,
       draft.notesSummary,
       draft.takeaways,
       draft.followups,
@@ -1560,33 +1582,86 @@ export default function Home() {
         const appointmentText = [
           appointment.title ?? "",
           appointment.reason ?? "",
-          appointment.provider_name ?? "",
-          appointment.provider_organization ?? "",
-          appointment.location_name ?? "",
-          appointment.location_address ?? "",
         ].join(" ");
         const appointmentTokens = textTokens(appointmentText);
-        const sharedTokens = sharedTokenCount(draftTokens, appointmentTokens);
+        const genericTextMatches = sharedTokenCount(
+          draftTokens,
+          appointmentTokens
+        );
         const daysApart = dayDifference(appointment.starts_at, draft.startsAt);
+        const providerMatches = fieldTokenOverlap(
+          draft.providerName,
+          appointment.provider_name
+        );
+        const practiceMatches = fieldTokenOverlap(
+          draft.providerOrganization,
+          appointment.provider_organization
+        );
+        const locationNameMatches = fieldTokenOverlap(
+          draft.locationName,
+          appointment.location_name
+        );
+        const addressMatches = fieldTokenOverlap(
+          draft.locationAddress,
+          appointment.location_address
+        );
+        const titleReasonMatches = sharedTokenCount(
+          textTokens(`${draft.appointmentTitle} ${draft.appointmentReason}`),
+          appointmentTokens
+        );
+        const sameDate = daysApart === 0;
+        const nearDate = daysApart !== null && daysApart <= 7;
+        const hardSignalCount = [
+          sameDate,
+          providerMatches >= 2,
+          practiceMatches >= 1,
+          locationNameMatches >= 2,
+          addressMatches >= 2,
+        ].filter(Boolean).length;
         const reasons: string[] = [];
         let score = 0;
 
         if (daysApart !== null) {
-          if (daysApart === 0) {
-            score += 6;
+          if (sameDate) {
+            score += 10;
             reasons.push("same date");
-          } else if (daysApart <= 7) {
+          } else if (nearDate) {
             score += 4;
             reasons.push(`within ${daysApart} day${daysApart === 1 ? "" : "s"}`);
           } else if (daysApart <= 30) {
-            score += 2;
+            score += 1;
             reasons.push("nearby date");
           }
         }
 
-        if (sharedTokens > 0) {
-          score += Math.min(sharedTokens, 5);
-          reasons.push(`${sharedTokens} text match${sharedTokens === 1 ? "" : "es"}`);
+        if (providerMatches >= 2) {
+          score += 8;
+          reasons.push("provider match");
+        }
+
+        if (practiceMatches >= 1) {
+          score += 5;
+          reasons.push("practice match");
+        }
+
+        if (locationNameMatches >= 2) {
+          score += 5;
+          reasons.push("location match");
+        }
+
+        if (addressMatches >= 2) {
+          score += 7;
+          reasons.push("address match");
+        }
+
+        if (titleReasonMatches >= 2) {
+          score += Math.min(titleReasonMatches, 4);
+          reasons.push("title/reason match");
+        }
+
+        if (genericTextMatches >= 4) {
+          score += 1;
+          reasons.push("supporting text overlap");
         }
 
         if (!appointment.current_note_id) {
@@ -1599,16 +1674,22 @@ export default function Home() {
           reasons.push("archived");
         }
 
+        const hasGuardrailSignal =
+          sameDate ||
+          hardSignalCount >= 1 ||
+          (nearDate && titleReasonMatches >= 2) ||
+          titleReasonMatches >= 4;
+
         return {
           appointment,
           currentNote: appointment.current_note_id
             ? noteMap.get(appointment.current_note_id) ?? null
             : null,
           reasons,
-          score,
+          score: hasGuardrailSignal ? score : 0,
         };
       })
-      .filter((match) => match.score >= 3 && match.reasons.length > 0)
+      .filter((match) => match.score >= 6 && match.reasons.length > 0)
       .sort((left, right) => right.score - left.score)
       .slice(0, 3);
   }
