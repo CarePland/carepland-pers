@@ -184,6 +184,17 @@ const emptyProfileDraft: ProfileDraft = {
   timezone: "",
 };
 
+const timeZoneOptions = [
+  { label: "Eastern", value: "America/New_York" },
+  { label: "Central", value: "America/Chicago" },
+  { label: "Mountain", value: "America/Denver" },
+  { label: "Arizona", value: "America/Phoenix" },
+  { label: "Pacific", value: "America/Los_Angeles" },
+  { label: "Alaska", value: "America/Anchorage" },
+  { label: "Hawaii", value: "Pacific/Honolulu" },
+  { label: "UTC", value: "UTC" },
+];
+
 const defaultCarePrepOutputSchema = {
   additionalProperties: false,
   properties: {
@@ -545,6 +556,51 @@ function browserTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
 }
 
+function formatUsPhoneFromDigits(digits: string): string {
+  const area = digits.slice(0, 3);
+  const prefix = digits.slice(3, 6);
+  const line = digits.slice(6, 10);
+
+  if (digits.length <= 3) {
+    return area ? `(${area}` : "";
+  }
+
+  if (digits.length <= 6) {
+    return `(${area}) ${prefix}`;
+  }
+
+  return `(${area}) ${prefix}-${line}`;
+}
+
+function phoneDigits(value: string): string {
+  let digits = value.replace(/\D/g, "");
+
+  if (digits.length > 10 && digits.startsWith("1")) {
+    digits = digits.slice(1);
+  }
+
+  return digits.slice(0, 10);
+}
+
+function normalizeUsPhone(value: string):
+  | { display: string; e164: string }
+  | null {
+  const digits = phoneDigits(value);
+
+  if (digits.length !== 10) {
+    return null;
+  }
+
+  return {
+    display: formatUsPhoneFromDigits(digits),
+    e164: `+1${digits}`,
+  };
+}
+
+function isLikelyEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 function DetailList({
   emptyLabel,
   items,
@@ -898,7 +954,12 @@ export default function Home() {
       country: String(row?.country ?? "US"),
       displayName: String(row?.display_name ?? ""),
       email: String(row?.email ?? fallbackEmail),
-      phone: String(row?.phone ?? ""),
+      phone: String(
+        row?.phone ??
+          (typeof row?.phone_e164 === "string"
+            ? formatUsPhoneFromDigits(phoneDigits(row.phone_e164))
+            : "")
+      ),
       postalCode: String(row?.postal_code ?? ""),
       region: String(row?.region ?? ""),
       timezone: String(row?.timezone ?? browserTimezone()),
@@ -932,7 +993,7 @@ export default function Home() {
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
       .select(
-        "id,email,display_name,phone,timezone,address_line1,address_line2,city,region,postal_code,country,onboarding_completed_at"
+        "id,email,display_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,onboarding_completed_at"
       )
       .eq("id", user.id)
       .maybeSingle();
@@ -1651,8 +1712,20 @@ export default function Home() {
         throw new Error("Email is required.");
       }
 
+      if (!isLikelyEmail(profileDraft.email)) {
+        throw new Error("Enter a valid email address.");
+      }
+
       if (!profileDraft.timezone.trim()) {
         throw new Error("Time zone is required.");
+      }
+
+      const normalizedPhone = profileDraft.phone.trim()
+        ? normalizeUsPhone(profileDraft.phone)
+        : null;
+
+      if (profileDraft.phone.trim() && !normalizedPhone) {
+        throw new Error("Enter a valid 10-digit U.S. phone number.");
       }
 
       const completedAt = new Date().toISOString();
@@ -1665,7 +1738,8 @@ export default function Home() {
         email: profileDraft.email.trim(),
         id: user.id,
         onboarding_completed_at: completedAt,
-        phone: profileDraft.phone.trim() || null,
+        phone: normalizedPhone?.display ?? null,
+        phone_e164: normalizedPhone?.e164 ?? null,
         postal_code: profileDraft.postalCode.trim() || null,
         region: profileDraft.region.trim() || null,
         timezone: profileDraft.timezone.trim(),
@@ -3055,9 +3129,13 @@ export default function Home() {
                 <input
                   className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
                   onChange={(event) =>
-                    updateProfileDraft("phone", event.target.value)
+                    updateProfileDraft(
+                      "phone",
+                      formatUsPhoneFromDigits(phoneDigits(event.target.value))
+                    )
                   }
-                  placeholder="Optional"
+                  inputMode="numeric"
+                  placeholder="(___) ___-____"
                   type="tel"
                   value={profileDraft.phone}
                 />
@@ -3076,13 +3154,26 @@ export default function Home() {
               </label>
               <label className="block text-sm font-medium text-slate-700">
                 Time zone
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                <select
+                  className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                   onChange={(event) =>
                     updateProfileDraft("timezone", event.target.value)
                   }
                   value={profileDraft.timezone}
-                />
+                >
+                  {!timeZoneOptions.some(
+                    (option) => option.value === profileDraft.timezone
+                  ) && profileDraft.timezone ? (
+                    <option value={profileDraft.timezone}>
+                      {profileDraft.timezone}
+                    </option>
+                  ) : null}
+                  {timeZoneOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label} · {option.value}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="block text-sm font-medium text-slate-700 md:col-span-2">
                 Address line 1
