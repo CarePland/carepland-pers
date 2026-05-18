@@ -2930,6 +2930,11 @@ export default function Home() {
                   ? carePrepFormValues(appointment.id, prep)
                   : emptyCarePrepDraft;
                 const isArchived = appointment.status === "archived";
+                const isLogged = Boolean(appointment.current_note_id);
+                const isFutureOrUndated =
+                  !appointment.starts_at || new Date(appointment.starts_at) >= new Date();
+                const canGenerateCarePrep =
+                  !isArchived && !isLogged && isFutureOrUndated;
 
                 return (
                   <article
@@ -3104,7 +3109,7 @@ export default function Home() {
                       </section>
                     ) : null}
 
-                    {!isArchived ? (
+                    {canGenerateCarePrep ? (
                       <div className="mt-5">
                         <button
                           className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
