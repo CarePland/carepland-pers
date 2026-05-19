@@ -6181,26 +6181,28 @@ export default function Home() {
                       {formatDate(notesReminderAppointment.starts_at)}
                     </p>
                   </div>
-                  <button
-                    className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
-                    disabled={loading}
-                    onClick={() =>
-                      handleStartReminderNotes(notesReminderAppointment)
-                    }
-                    type="button"
-                  >
-                    Type
-                  </button>
-                  <button
-                    className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
-                    disabled={loading}
-                    onClick={() =>
-                      startContextualTextIntake(notesReminderAppointment)
-                    }
-                    type="button"
-                  >
-                    Paste
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                      disabled={loading}
+                      onClick={() =>
+                        handleStartReminderNotes(notesReminderAppointment)
+                      }
+                      type="button"
+                    >
+                      Type
+                    </button>
+                    <button
+                      className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
+                      disabled={loading}
+                      onClick={() =>
+                        startContextualTextIntake(notesReminderAppointment)
+                      }
+                      type="button"
+                    >
+                      Paste
+                    </button>
+                  </div>
                 </div>
                 {editingNoteIds[notesReminderAppointment.id] ? (
                   <form
