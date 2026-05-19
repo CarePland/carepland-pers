@@ -2492,7 +2492,10 @@ export default function Home() {
     }
   }
 
-  async function handleExtractImageText(files: FileList | null) {
+  async function handleExtractImageText(
+    files: FileList | null,
+    target: "appointmentNotes" | "quickAdd" = "quickAdd"
+  ) {
     const images = files ? Array.from(files) : [];
 
     if (images.length === 0) {
@@ -2544,13 +2547,23 @@ export default function Home() {
         throw new Error("No text was found in that image.");
       }
 
-      setTextIntakeValue((currentValue) =>
-        [currentValue.trim(), extractedText].filter(Boolean).join("\n\n")
-      );
+      if (target === "appointmentNotes") {
+        setContextualTextIntakeValue((currentValue) =>
+          [currentValue.trim(), extractedText].filter(Boolean).join("\n\n")
+        );
+      } else {
+        setTextIntakeValue((currentValue) =>
+          [currentValue.trim(), extractedText].filter(Boolean).join("\n\n")
+        );
+      }
       setMessage(
         `Text extracted from ${images.length} image${
           images.length === 1 ? "" : "s"
-        }. Review the text before preparing drafts.`
+        }. Review the text before ${
+          target === "appointmentNotes"
+            ? "interpreting notes"
+            : "reviewing appointments"
+        }.`
       );
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -6265,6 +6278,30 @@ export default function Home() {
 
                     {!textIntakeDraft ? (
                       <>
+                        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+                          <label className="block text-sm font-medium text-slate-700">
+                            Image to text
+                            <input
+                              accept="image/gif,image/jpeg,image/png,image/webp"
+                              className="mt-2 block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
+                              disabled={extractingImageText}
+                              multiple
+                              onChange={(event) => {
+                                void handleExtractImageText(
+                                  event.target.files,
+                                  "appointmentNotes"
+                                );
+                                event.target.value = "";
+                              }}
+                              type="file"
+                            />
+                          </label>
+                          <p className="mt-2 text-xs text-slate-500">
+                            {extractingImageText
+                              ? "Extracting text..."
+                              : "Up to 10 images are converted to text only and are not stored."}
+                          </p>
+                        </div>
                         <label className="mt-4 block text-sm font-medium text-slate-700">
                           Text
                           <textarea
@@ -6577,6 +6614,30 @@ export default function Home() {
 
                         {!textIntakeDraft ? (
                           <>
+                            <div className="mt-4 rounded-md border border-blue-100 bg-white p-3">
+                              <label className="block text-sm font-medium text-slate-700">
+                                Image to text
+                                <input
+                                  accept="image/gif,image/jpeg,image/png,image/webp"
+                                  className="mt-2 block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
+                                  disabled={extractingImageText}
+                                  multiple
+                                  onChange={(event) => {
+                                    void handleExtractImageText(
+                                      event.target.files,
+                                      "appointmentNotes"
+                                    );
+                                    event.target.value = "";
+                                  }}
+                                  type="file"
+                                />
+                              </label>
+                              <p className="mt-2 text-xs text-slate-500">
+                                {extractingImageText
+                                  ? "Extracting text..."
+                                  : "Up to 10 images are converted to text only and are not stored."}
+                              </p>
+                            </div>
                             <label className="mt-4 block text-sm font-medium text-slate-700">
                               Text
                               <textarea
