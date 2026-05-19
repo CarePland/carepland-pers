@@ -14,6 +14,9 @@ Supabase SQL editor history.
 - `2026-05-19_remove_sample_data_for_user.sql`  
   Admin utility: remove seeded sample rows for one user and reset sample flags.
 
+- `2026-05-19_remove_demo_data_function.sql`
+  Migration/admin utility: lets a signed-in user remove their own demo data.
+
 ## Supabase SQL History Triage
 
 Recommended categories for the visible Supabase SQL editor history.

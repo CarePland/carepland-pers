@@ -1300,6 +1300,7 @@ export default function Home() {
   >(null);
   const [seedingSampleData, setSeedingSampleData] = useState(false);
   const [decliningSampleData, setDecliningSampleData] = useState(false);
+  const [removingSampleData, setRemovingSampleData] = useState(false);
   const [adminSampleEmail, setAdminSampleEmail] = useState("");
   const [adminSampleStatus, setAdminSampleStatus] =
     useState<SampleDataStatus | null>(null);
@@ -1908,6 +1909,28 @@ export default function Home() {
               (!item.starts_at ||
                 new Date(item.starts_at) >= upcomingStart)
       ) ?? [];
+    visibleAppointments.sort((firstAppointment, secondAppointment) => {
+      if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
+        return 0;
+      }
+
+      if (!firstAppointment.starts_at) {
+        return 1;
+      }
+
+      if (!secondAppointment.starts_at) {
+        return -1;
+      }
+
+      const firstTime = new Date(firstAppointment.starts_at).getTime();
+      const secondTime = new Date(secondAppointment.starts_at).getTime();
+
+      if (view === "upcoming") {
+        return firstTime - secondTime;
+      }
+
+      return secondTime - firstTime;
+    });
     const appointmentIds = visibleAppointments.map((item) => item.id);
     setAppointments(visibleAppointments);
 
@@ -2931,11 +2954,58 @@ export default function Home() {
 
       const status = sampleDataStatusFromValue(data);
       setSampleDataDeclinedAt(status.declined_at ?? new Date().toISOString());
-      showToast("Sample data skipped.", { type: "success" });
+      showToast("Demo data skipped.", { type: "success" });
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
       setDecliningSampleData(false);
+    }
+  }
+
+  async function handleRemoveSampleData() {
+    const confirmed = window.confirm(
+      "Remove demo data? This deletes only appointments, notes, and CarePrep marked as demo data. Your real information will stay."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setRemovingSampleData(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "remove_demo_data_for_current_user"
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      const result =
+        data && typeof data === "object" && !Array.isArray(data)
+          ? (data as Record<string, unknown>)
+          : {};
+      const removedCount =
+        typeof result.appointments_removed === "number"
+          ? result.appointments_removed
+          : 0;
+
+      setSampleDataSeededAt(null);
+      setSampleDataDeclinedAt(null);
+      setSampleDataSeedVersion(null);
+      await loadAppointments(appointmentView, selectedSubjectId);
+      showToast(
+        removedCount > 0
+          ? `Demo data removed: ${removedCount} appointments deleted.`
+          : "Demo data removed.",
+        { durationMs: 7000, type: "success" }
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setRemovingSampleData(false);
     }
   }
 
@@ -5086,7 +5156,7 @@ export default function Home() {
                 </p>
                 {sampleDataSeededAt ? (
                   <p className="mt-2 text-xs text-slate-500">
-                    Sample data: {sampleDataSeedVersion ?? "added"}
+                    Demo data: {sampleDataSeedVersion ?? "added"}
                   </p>
                 ) : null}
               </div>
@@ -5123,6 +5193,31 @@ export default function Home() {
                 </button>
               </div>
             </div>
+
+            {sampleDataSeededAt ? (
+              <section className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-amber-950">
+                      Demo data
+                    </h3>
+                    <p className="mt-1 max-w-3xl text-sm text-amber-900">
+                      Demo appointments are not real appointments. Removing demo
+                      data deletes only items marked as demo data and keeps your
+                      real information.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 disabled:text-slate-400"
+                    disabled={removingSampleData}
+                    onClick={handleRemoveSampleData}
+                    type="button"
+                  >
+                    {removingSampleData ? "Removing..." : "Remove demo data"}
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
             {canUseMultipleCareVips ? (
               <section className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4">
