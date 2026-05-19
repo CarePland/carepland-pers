@@ -214,6 +214,16 @@ type ProfileDraft = {
   timezone: string;
 };
 
+type SampleDataStatus = {
+  appointments_created?: number;
+  declined_at?: string | null;
+  email?: string | null;
+  seed_version?: string | null;
+  seeded_at?: string | null;
+  status: string;
+  user_id?: string | null;
+};
+
 const ALL_SUBJECTS = "all";
 
 const defaultEntitlement: CareCircleEntitlement = {
@@ -858,6 +868,69 @@ function isValidUsZip(value: string): boolean {
   return /^\d{5}(-\d{4})?$/.test(value.trim());
 }
 
+function sampleDataStatusFromValue(value: unknown): SampleDataStatus {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { status: "unknown" };
+  }
+
+  const row = value as Record<string, unknown>;
+
+  return {
+    appointments_created:
+      typeof row.appointments_created === "number"
+        ? row.appointments_created
+        : undefined,
+    declined_at:
+      typeof row.declined_at === "string" ? row.declined_at : null,
+    email: typeof row.email === "string" ? row.email : null,
+    seed_version:
+      typeof row.seed_version === "string" ? row.seed_version : null,
+    seeded_at: typeof row.seeded_at === "string" ? row.seeded_at : null,
+    status: typeof row.status === "string" ? row.status : "unknown",
+    user_id: typeof row.user_id === "string" ? row.user_id : null,
+  };
+}
+
+function sampleDataStatusText(status: SampleDataStatus | null): string {
+  if (!status) {
+    return "Enter a user email to check sample data status.";
+  }
+
+  if (status.status === "already_seeded") {
+    return `Sample data was already added${
+      status.seeded_at ? ` on ${formatDate(status.seeded_at)}` : ""
+    }.`;
+  }
+
+  if (status.status === "declined") {
+    return `This user declined sample data${
+      status.declined_at ? ` on ${formatDate(status.declined_at)}` : ""
+    }.`;
+  }
+
+  if (status.status === "available") {
+    return "Sample data can be added for this user.";
+  }
+
+  if (status.status === "seeded") {
+    return `Sample data added${
+      status.appointments_created
+        ? `: ${status.appointments_created} appointments created`
+        : ""
+    }.`;
+  }
+
+  if (status.status === "missing_care_circle") {
+    return "This user needs to finish account setup before sample data can be added.";
+  }
+
+  if (status.status === "no_profile") {
+    return "No profile was found for that email.";
+  }
+
+  return `Sample data status: ${status.status}`;
+}
+
 function authRedirectUrl(): string | undefined {
   if (appUrl) {
     return appUrl;
@@ -1215,6 +1288,25 @@ export default function Home() {
   >(null);
   const [profileDraft, setProfileDraft] =
     useState<ProfileDraft>(emptyProfileDraft);
+  const [sampleDataSeededAt, setSampleDataSeededAt] = useState<string | null>(
+    null
+  );
+  const [sampleDataDeclinedAt, setSampleDataDeclinedAt] = useState<
+    string | null
+  >(null);
+  const [sampleDataSeedVersion, setSampleDataSeedVersion] = useState<
+    string | null
+  >(null);
+  const [seedingSampleData, setSeedingSampleData] = useState(false);
+  const [decliningSampleData, setDecliningSampleData] = useState(false);
+  const [adminSampleEmail, setAdminSampleEmail] = useState("");
+  const [adminSampleStatus, setAdminSampleStatus] =
+    useState<SampleDataStatus | null>(null);
+  const [adminSampleForceDeclined, setAdminSampleForceDeclined] =
+    useState(false);
+  const [loadingAdminSampleStatus, setLoadingAdminSampleStatus] =
+    useState(false);
+  const [seedingAdminSampleData, setSeedingAdminSampleData] = useState(false);
   const [acceptBetaDisclaimer, setAcceptBetaDisclaimer] = useState(false);
   const [acceptBetaPrivacy, setAcceptBetaPrivacy] = useState(false);
   const [acceptBetaTerms, setAcceptBetaTerms] = useState(false);
@@ -1304,6 +1396,12 @@ export default function Home() {
     !needsOnboarding &&
     mainTab === "appointments" &&
     !welcomeGuideDismissed;
+  const shouldOfferSampleData =
+    Boolean(signedInEmail) &&
+    !needsBetaAgreement &&
+    !needsOnboarding &&
+    !sampleDataSeededAt &&
+    !sampleDataDeclinedAt;
 
   async function establishPasswordRecoverySession(): Promise<string | null> {
     if (typeof window === "undefined") {
@@ -1570,7 +1668,7 @@ export default function Home() {
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
       .select(
-        "id,email,display_name,given_name,family_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,beta_terms_acknowledged_at,beta_privacy_acknowledged_at,beta_disclaimer_acknowledged_at,beta_agreement_version,onboarding_completed_at,is_admin"
+        "id,email,display_name,given_name,family_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,beta_terms_acknowledged_at,beta_privacy_acknowledged_at,beta_disclaimer_acknowledged_at,beta_agreement_version,onboarding_completed_at,is_admin,sample_data_seeded_at,sample_data_declined_at,sample_data_seed_version"
       )
       .eq("id", user.id)
       .maybeSingle();
@@ -1589,6 +1687,21 @@ export default function Home() {
     setOnboardingCompletedAt(
       typeof profileRow?.onboarding_completed_at === "string"
         ? profileRow.onboarding_completed_at
+        : null
+    );
+    setSampleDataSeededAt(
+      typeof profileRow?.sample_data_seeded_at === "string"
+        ? profileRow.sample_data_seeded_at
+        : null
+    );
+    setSampleDataDeclinedAt(
+      typeof profileRow?.sample_data_declined_at === "string"
+        ? profileRow.sample_data_declined_at
+        : null
+    );
+    setSampleDataSeedVersion(
+      typeof profileRow?.sample_data_seed_version === "string"
+        ? profileRow.sample_data_seed_version
         : null
     );
     setBetaDisclaimerAcknowledgedAt(
@@ -2558,6 +2671,12 @@ export default function Home() {
     setBetaDisclaimerAcknowledgedAt(null);
     setBetaPrivacyAcknowledgedAt(null);
     setBetaTermsAcknowledgedAt(null);
+    setSampleDataSeededAt(null);
+    setSampleDataDeclinedAt(null);
+    setSampleDataSeedVersion(null);
+    setAdminSampleEmail("");
+    setAdminSampleStatus(null);
+    setAdminSampleForceDeclined(false);
     setWelcomeGuideDismissed(false);
     setIsAdmin(false);
     setOnboardingCompletedAt(null);
@@ -2749,6 +2868,146 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setSavingProfile(false);
+    }
+  }
+
+  async function handleSeedSampleDataForCurrentUser() {
+    setSeedingSampleData(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "seed_sample_data_for_current_user",
+        {
+          force_if_declined: false,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      const status = sampleDataStatusFromValue(data);
+
+      if (status.status === "seeded" || status.status === "already_seeded") {
+        setSampleDataSeededAt(
+          status.seeded_at ?? new Date().toISOString()
+        );
+        setSampleDataDeclinedAt(null);
+        setSampleDataSeedVersion(status.seed_version ?? null);
+        await loadAppointments("upcoming", ALL_SUBJECTS);
+        showToast(sampleDataStatusText(status), {
+          durationMs: 7000,
+          type: "success",
+        });
+        return;
+      }
+
+      if (status.status === "declined") {
+        setSampleDataDeclinedAt(status.declined_at ?? new Date().toISOString());
+      }
+
+      setMessage(sampleDataStatusText(status));
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSeedingSampleData(false);
+    }
+  }
+
+  async function handleDeclineSampleData() {
+    setDecliningSampleData(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "decline_sample_data_for_current_user"
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      const status = sampleDataStatusFromValue(data);
+      setSampleDataDeclinedAt(status.declined_at ?? new Date().toISOString());
+      showToast("Sample data skipped.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setDecliningSampleData(false);
+    }
+  }
+
+  async function handleLoadAdminSampleStatus(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoadingAdminSampleStatus(true);
+    setMessage("");
+
+    try {
+      const emailForLookup = adminSampleEmail.trim();
+
+      if (!isLikelyEmail(emailForLookup)) {
+        throw new Error("Enter a valid user email.");
+      }
+
+      const { data, error } = await supabase.rpc("admin_sample_data_status", {
+        target_email: emailForLookup,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const status = sampleDataStatusFromValue(data);
+      setAdminSampleStatus(status);
+      setAdminSampleForceDeclined(false);
+      setMessage(sampleDataStatusText(status));
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAdminSampleStatus(false);
+    }
+  }
+
+  async function handleSeedAdminSampleData() {
+    setSeedingAdminSampleData(true);
+    setMessage("");
+
+    try {
+      const emailForSeed = adminSampleEmail.trim();
+
+      if (!isLikelyEmail(emailForSeed)) {
+        throw new Error("Enter a valid user email.");
+      }
+
+      if (
+        adminSampleStatus?.status === "declined" &&
+        !adminSampleForceDeclined
+      ) {
+        throw new Error(
+          "This user declined sample data. Check the override box before adding it."
+        );
+      }
+
+      const { data, error } = await supabase.rpc("admin_seed_sample_data", {
+        force_if_declined: adminSampleForceDeclined,
+        target_email: emailForSeed,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const status = sampleDataStatusFromValue(data);
+      setAdminSampleStatus(status);
+      showToast(sampleDataStatusText(status), {
+        durationMs: 7000,
+        type: status.status === "seeded" ? "success" : "info",
+      });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSeedingAdminSampleData(false);
     }
   }
 
@@ -4824,6 +5083,11 @@ export default function Home() {
                   {entitlement.plan_name} · Care VIPs {careSubjects.length}/
                   {careVipLimit}
                 </p>
+                {sampleDataSeededAt ? (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Sample data: {sampleDataSeedVersion ?? "added"}
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Plan changes</p>
@@ -5824,6 +6088,35 @@ export default function Home() {
                     Contact support
                   </a>
                 </div>
+                {shouldOfferSampleData ? (
+                  <div className="mt-4 rounded-md border border-blue-100 bg-white p-3">
+                    <p className="text-sm font-semibold text-blue-950">
+                      Want a sample workspace to explore?
+                    </p>
+                    <p className="mt-1 text-sm text-blue-900">
+                      Add a few sample appointments, notes, and CarePrep examples.
+                      You can skip this if you want to start clean.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                        disabled={seedingSampleData || decliningSampleData}
+                        onClick={handleSeedSampleDataForCurrentUser}
+                        type="button"
+                      >
+                        {seedingSampleData ? "Adding..." : "Add sample data"}
+                      </button>
+                      <button
+                        className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                        disabled={seedingSampleData || decliningSampleData}
+                        onClick={handleDeclineSampleData}
+                        type="button"
+                      >
+                        {decliningSampleData ? "Skipping..." : "Skip sample data"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
@@ -6419,6 +6712,83 @@ export default function Home() {
             ) : null}
 
             {mainTab === "admin" && isAdmin ? (
+              <>
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Admin tools</h2>
+                    <p className="mt-1 text-slate-600">
+                      Add sample data for beta testers and review account setup
+                      state.
+                    </p>
+                  </div>
+                </div>
+
+                <form
+                  className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]"
+                  onSubmit={handleLoadAdminSampleStatus}
+                >
+                  <label className="block text-sm font-medium text-slate-700">
+                    User email
+                    <input
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      onChange={(event) => {
+                        setAdminSampleEmail(event.target.value);
+                        setAdminSampleStatus(null);
+                        setAdminSampleForceDeclined(false);
+                      }}
+                      placeholder="tester@example.com"
+                      type="email"
+                      value={adminSampleEmail}
+                    />
+                  </label>
+                  <button
+                    className="self-end rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
+                    disabled={loadingAdminSampleStatus}
+                    type="submit"
+                  >
+                    {loadingAdminSampleStatus ? "Checking..." : "Check status"}
+                  </button>
+                </form>
+
+                <div className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
+                  {sampleDataStatusText(adminSampleStatus)}
+                </div>
+
+                {adminSampleStatus?.status === "declined" ? (
+                  <label className="mt-4 flex gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <input
+                      checked={adminSampleForceDeclined}
+                      className="mt-1"
+                      onChange={(event) =>
+                        setAdminSampleForceDeclined(event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span>
+                      This user previously declined sample data. Add it anyway.
+                    </span>
+                  </label>
+                ) : null}
+
+                <button
+                  className="mt-4 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                  disabled={
+                    seedingAdminSampleData ||
+                    !adminSampleStatus ||
+                    adminSampleStatus.status === "already_seeded" ||
+                    adminSampleStatus.status === "no_profile" ||
+                    adminSampleStatus.status === "missing_care_circle" ||
+                    (adminSampleStatus.status === "declined" &&
+                      !adminSampleForceDeclined)
+                  }
+                  onClick={handleSeedAdminSampleData}
+                  type="button"
+                >
+                  {seedingAdminSampleData ? "Adding..." : "Add sample data"}
+                </button>
+              </section>
+
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -6831,6 +7201,7 @@ export default function Home() {
                   </section>
                 )}
               </section>
+              </>
             ) : null}
 
             {signedInEmail ? (
