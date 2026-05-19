@@ -848,6 +848,52 @@ function authRedirectUrl(): string | undefined {
   return window.location.origin;
 }
 
+function passwordResetRedirectUrl(): string | undefined {
+  const baseUrl = authRedirectUrl();
+
+  if (!baseUrl) {
+    return undefined;
+  }
+
+  try {
+    const resetUrl = new URL(baseUrl);
+    resetUrl.searchParams.set("auth_action", "password_recovery");
+    return resetUrl.toString();
+  } catch {
+    const separator = baseUrl.includes("?") ? "&" : "?";
+    return `${baseUrl}${separator}auth_action=password_recovery`;
+  }
+}
+
+function isPasswordRecoveryRedirect(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+
+  return (
+    searchParams.get("auth_action") === "password_recovery" ||
+    searchParams.get("type") === "recovery" ||
+    hashParams.get("auth_action") === "password_recovery" ||
+    hashParams.get("type") === "recovery"
+  );
+}
+
+function clearPasswordRecoveryUrl() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const cleanedUrl = new URL(window.location.href);
+  cleanedUrl.searchParams.delete("auth_action");
+  cleanedUrl.searchParams.delete("type");
+  cleanedUrl.hash = "";
+
+  window.history.replaceState({}, document.title, cleanedUrl.toString());
+}
+
 function DetailList({
   emptyLabel,
   items,
@@ -1235,6 +1281,7 @@ export default function Home() {
 
   useEffect(() => {
     async function restoreSession() {
+      const isRecoveryRedirect = isPasswordRecoveryRedirect();
       const { data } = await supabase.auth.getSession();
       const sessionEmail = data.session?.user.email ?? null;
 
@@ -1242,6 +1289,15 @@ export default function Home() {
         setSignedInEmail(sessionEmail);
         setWelcomeGuideDismissed(welcomeGuideWasDismissed(sessionEmail));
         setEmail(sessionEmail);
+
+        if (isRecoveryRedirect) {
+          setAuthMode("updatePassword");
+          setPassword("");
+          setConfirmPassword("");
+          setMessage("Enter a new password to finish resetting your password.");
+          return;
+        }
+
         setLoading(true);
 
         try {
@@ -1251,6 +1307,13 @@ export default function Home() {
         } finally {
           setLoading(false);
         }
+      } else if (isRecoveryRedirect) {
+        setAuthMode("updatePassword");
+        setPassword("");
+        setConfirmPassword("");
+        setMessage(
+          "Enter a new password to finish resetting your password. If this screen cannot save, request a fresh reset link."
+        );
       }
     }
 
@@ -1816,7 +1879,7 @@ export default function Home() {
       const { error } = await supabase.auth.resetPasswordForEmail(
         trimmedEmail,
         {
-          redirectTo: authRedirectUrl(),
+          redirectTo: passwordResetRedirectUrl(),
         }
       );
 
@@ -1868,6 +1931,7 @@ export default function Home() {
       setAuthMode("signIn");
       setPassword("");
       setConfirmPassword("");
+      clearPasswordRecoveryUrl();
       showToast("Password updated.", { type: "success" });
       setMessage("Password updated. You can continue using CarePland.");
 
@@ -1900,7 +1964,7 @@ export default function Home() {
       }
 
       const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-        redirectTo: authRedirectUrl(),
+        redirectTo: passwordResetRedirectUrl(),
       });
 
       if (error) {
@@ -4275,6 +4339,7 @@ export default function Home() {
                   setAuthMode("signIn");
                   setPassword("");
                   setConfirmPassword("");
+                  clearPasswordRecoveryUrl();
                   setMessage("");
                 }}
                 type="button"
