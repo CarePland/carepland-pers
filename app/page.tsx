@@ -448,6 +448,13 @@ function getErrorMessage(error: unknown): string {
 function getAuthErrorMessage(error: unknown): string {
   const rawMessage = getErrorMessage(error).toLowerCase();
 
+  if (
+    rawMessage.includes("auth session missing") ||
+    rawMessage.includes("missing an active recovery session")
+  ) {
+    return "This reset link is missing an active recovery session. Please request a fresh password reset email and use the newest link.";
+  }
+
   if (rawMessage.includes("invalid login credentials")) {
     return "Incorrect email or password. Please try again or reset your password.";
   }
@@ -464,8 +471,26 @@ function getAuthErrorMessage(error: unknown): string {
     return "An account already exists for this email. Sign in instead, or reset the password.";
   }
 
+  if (
+    rawMessage.includes("same password") ||
+    rawMessage.includes("different from the old") ||
+    rawMessage.includes("different from your old") ||
+    rawMessage.includes("should be different")
+  ) {
+    return "Choose a new password that is different from your current password.";
+  }
+
+  if (
+    rawMessage.includes("weak password") ||
+    rawMessage.includes("at least") ||
+    rawMessage.includes("minimum") ||
+    rawMessage.includes("characters")
+  ) {
+    return "Use a password with at least 8 characters and try again.";
+  }
+
   if (rawMessage.includes("password")) {
-    return "The password was not accepted. Use at least 8 characters and try again.";
+    return "The password was not accepted. Try a different password.";
   }
 
   if (rawMessage.includes("rate limit") || rawMessage.includes("too many")) {
