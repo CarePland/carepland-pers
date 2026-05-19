@@ -5257,7 +5257,7 @@ export default function Home() {
                           {processingTextIntake
                             ? "Interpreting..."
                             : textIntakeMode === "bulkAppointments"
-                              ? "Find appointments"
+                              ? "Prepare drafts"
                               : "Interpret text"}
                         </button>
                         <button
