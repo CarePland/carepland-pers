@@ -17,6 +17,9 @@ Supabase SQL editor history.
 - `2026-05-19_remove_demo_data_function.sql`
   Migration/admin utility: lets a signed-in user remove their own demo data.
 
+- `2026-05-19_app_content_versions.sql`
+  Migration/admin utility: versioned dynamic app text for beta/legal/support copy.
+
 ## Supabase SQL History Triage
 
 Recommended categories for the visible Supabase SQL editor history.

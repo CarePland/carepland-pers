@@ -96,6 +96,22 @@ type AiInstructionVersion = {
   created_at: string;
 };
 
+type AppContentVersion = {
+  id: string;
+  body: string;
+  change_note: string | null;
+  content_hash: string | null;
+  content_key: string;
+  copied_from_version_id: string | null;
+  created_at: string;
+  description: string | null;
+  is_current: boolean;
+  label: string;
+  superseded_at: string | null;
+  superseded_by_version_id: string | null;
+  version_number: number;
+};
+
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
 type AiWorkflowKey =
@@ -232,6 +248,47 @@ const defaultEntitlement: CareCircleEntitlement = {
   plan_id: "personal",
   plan_name: "Personal",
 };
+
+const appContentDefaults = {
+  beta_disclaimer_ack:
+    "I understand this beta is not for emergencies or critical medical decisions.",
+  beta_notice_intro:
+    "CarePland Personal is currently in testing. Formal Terms of Service and Privacy Policy pages are not enabled yet.",
+  beta_privacy_ack:
+    "I understand formal Privacy Policy review is not currently enabled for this testing version.",
+  beta_terms_ack:
+    "I understand formal Terms of Service are not currently enabled for this testing version.",
+  support_contact_note:
+    "Need help or want to report an issue? Contact support from the app and include what you were trying to do.",
+};
+
+const appContentOptions = [
+  {
+    contentKey: "beta_notice_intro",
+    description: "Introductory text shown before beta acknowledgement checkboxes.",
+    label: "Beta testing notice intro",
+  },
+  {
+    contentKey: "beta_terms_ack",
+    description: "Checkbox text confirming Terms of Service status during beta.",
+    label: "Beta terms acknowledgement",
+  },
+  {
+    contentKey: "beta_privacy_ack",
+    description: "Checkbox text confirming Privacy Policy status during beta.",
+    label: "Beta privacy acknowledgement",
+  },
+  {
+    contentKey: "beta_disclaimer_ack",
+    description: "Checkbox text confirming beta safety limitations.",
+    label: "Beta safety acknowledgement",
+  },
+  {
+    contentKey: "support_contact_note",
+    description: "General support context for beta users.",
+    label: "Support contact note",
+  },
+];
 
 const betaAgreementVersion = "beta-2026-05-19";
 const welcomeGuideStoragePrefix = "carepland-welcome-guide-dismissed:";
@@ -1249,6 +1306,27 @@ export default function Home() {
   const [revertingInstructionForId, setRevertingInstructionForId] = useState<
     string | null
   >(null);
+  const [appContentVersions, setAppContentVersions] = useState<
+    AppContentVersion[]
+  >([]);
+  const [selectedAppContentKey, setSelectedAppContentKey] = useState(
+    appContentOptions[0].contentKey
+  );
+  const [loadingAppContent, setLoadingAppContent] = useState(false);
+  const [savingAppContent, setSavingAppContent] = useState(false);
+  const [revertingAppContentForId, setRevertingAppContentForId] = useState<
+    string | null
+  >(null);
+  const [appContentLabel, setAppContentLabel] = useState(
+    appContentOptions[0].label
+  );
+  const [appContentDescription, setAppContentDescription] = useState(
+    appContentOptions[0].description
+  );
+  const [appContentBody, setAppContentBody] = useState(
+    appContentDefaults.beta_notice_intro
+  );
+  const [appContentChangeNote, setAppContentChangeNote] = useState("");
   const [noteDrafts, setNoteDrafts] = useState<
     Record<
       string,
@@ -1361,6 +1439,19 @@ export default function Home() {
   const [historyAppointmentId, setHistoryAppointmentId] = useState("");
 
   const selectedAiWorkflowConfig = aiWorkflows[selectedAiWorkflow];
+  const currentAppContentByKey = useMemo(() => {
+    return new Map(
+      appContentVersions
+        .filter((version) => version.is_current)
+        .map((version) => [version.content_key, version])
+    );
+  }, [appContentVersions]);
+  const selectedAppContent =
+    currentAppContentByKey.get(selectedAppContentKey) ?? null;
+
+  function appContentText(key: keyof typeof appContentDefaults) {
+    return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
+  }
 
   const notesByAppointment = useMemo(() => {
     return new Map(notes.map((note) => [note.appointment_id, note]));
@@ -1500,6 +1591,7 @@ export default function Home() {
         setLoading(true);
 
         try {
+          await loadAppContent();
           await loadAppointments();
         } catch (error) {
           setMessage(getErrorMessage(error));
@@ -2020,6 +2112,7 @@ export default function Home() {
       const trimmedEmail = email.trim();
       setSignedInEmail(trimmedEmail);
       setWelcomeGuideDismissed(welcomeGuideWasDismissed(trimmedEmail));
+      await loadAppContent();
       await loadAppointments();
     } catch (error) {
       logAuthError("signIn", error);
@@ -2071,6 +2164,7 @@ export default function Home() {
         setSignedInEmail(trimmedEmail);
         setWelcomeGuideDismissed(welcomeGuideWasDismissed(trimmedEmail));
         setMessage("Account created and signed in. Finish profile setup to continue.");
+        await loadAppContent();
         await loadAppointments();
         return;
       }
@@ -2350,6 +2444,149 @@ export default function Home() {
     }
   }
 
+  function resetAppContentEditor(version: AppContentVersion | null) {
+    const option =
+      appContentOptions.find(
+        (item) => item.contentKey === (version?.content_key ?? selectedAppContentKey)
+      ) ?? appContentOptions[0];
+
+    setAppContentLabel(version?.label ?? option.label);
+    setAppContentDescription(version?.description ?? option.description);
+    setAppContentBody(
+      version?.body ??
+        appContentDefaults[
+          option.contentKey as keyof typeof appContentDefaults
+        ] ??
+        ""
+    );
+    setAppContentChangeNote("");
+  }
+
+  async function loadAppContent(contentKey = selectedAppContentKey) {
+    setLoadingAppContent(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("app_content_versions")
+        .select(
+          "id,content_key,label,description,body,version_number,is_current,change_note,content_hash,created_at,superseded_at,superseded_by_version_id,copied_from_version_id"
+        )
+        .order("content_key", { ascending: true })
+        .order("version_number", { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      const versions = data ?? [];
+      setAppContentVersions(versions);
+
+      const currentVersion =
+        versions.find(
+          (version) => version.content_key === contentKey && version.is_current
+        ) ?? null;
+      resetAppContentEditor(currentVersion);
+    } catch (error) {
+      if (isAdmin) {
+        setMessage(getErrorMessage(error));
+      }
+    } finally {
+      setLoadingAppContent(false);
+    }
+  }
+
+  async function handleChangeAppContentKey(contentKey: string) {
+    setSelectedAppContentKey(contentKey);
+    const currentVersion =
+      appContentVersions.find(
+        (version) => version.content_key === contentKey && version.is_current
+      ) ?? null;
+
+    if (currentVersion) {
+      resetAppContentEditor(currentVersion);
+      return;
+    }
+
+    const option =
+      appContentOptions.find((item) => item.contentKey === contentKey) ??
+      appContentOptions[0];
+    setAppContentLabel(option.label);
+    setAppContentDescription(option.description);
+    setAppContentBody(
+      appContentDefaults[contentKey as keyof typeof appContentDefaults] ?? ""
+    );
+    setAppContentChangeNote("");
+    await loadAppContent(contentKey);
+  }
+
+  async function handleSaveAppContent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingAppContent(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase.rpc("save_app_content_version", {
+        p_body: appContentBody,
+        p_change_note: appContentChangeNote.trim(),
+        p_content_key: selectedAppContentKey,
+        p_description: appContentDescription,
+        p_label: appContentLabel,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const newVersion = data as AppContentVersion;
+      setAppContentVersions((currentVersions) => [
+        newVersion,
+        ...currentVersions.map((version) =>
+          version.content_key === newVersion.content_key
+            ? { ...version, is_current: false }
+            : version
+        ),
+      ]);
+      resetAppContentEditor(newVersion);
+      showToast("Content saved as a new version.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAppContent(false);
+    }
+  }
+
+  async function handleRevertAppContent(version: AppContentVersion) {
+    setRevertingAppContentForId(version.id);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase.rpc("revert_app_content_version", {
+        p_change_note: `Reverted from v${version.version_number}`,
+        p_version_id: version.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const newVersion = data as AppContentVersion;
+      setAppContentVersions((currentVersions) => [
+        newVersion,
+        ...currentVersions.map((item) =>
+          item.content_key === newVersion.content_key
+            ? { ...item, is_current: false }
+            : item
+        ),
+      ]);
+      resetAppContentEditor(newVersion);
+      showToast("Content reverted as a new version.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setRevertingAppContentForId(null);
+    }
+  }
+
   async function loadCarePrepHistory(appointmentId = historyAppointmentId) {
     setLoadingCarePrepHistory(true);
     setMessage("");
@@ -2447,7 +2684,7 @@ export default function Home() {
 
     if (tab === "admin") {
       setAiAdminTab("instructions");
-      await loadAiInstructions();
+      await Promise.all([loadAiInstructions(), loadAppContent()]);
     }
   }
 
@@ -4872,8 +5109,7 @@ export default function Home() {
               <div>
                 <h2 className="text-2xl font-semibold">Beta testing notice</h2>
                 <p className="mt-1 max-w-3xl text-slate-600">
-                  CarePland Personal is currently in testing. Formal Terms of
-                  Service and Privacy Policy pages are not enabled yet.
+                  {appContentText("beta_notice_intro")}
                 </p>
               </div>
               <button
@@ -4894,8 +5130,7 @@ export default function Home() {
                   type="checkbox"
                 />
                 <span>
-                  I understand formal Terms of Service are not currently enabled
-                  for this testing version.
+                  {appContentText("beta_terms_ack")}
                 </span>
               </label>
               <label className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -4906,8 +5141,7 @@ export default function Home() {
                   type="checkbox"
                 />
                 <span>
-                  I understand formal Privacy Policy review is not currently
-                  enabled for this testing version.
+                  {appContentText("beta_privacy_ack")}
                 </span>
               </label>
               <label className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -4920,8 +5154,7 @@ export default function Home() {
                   type="checkbox"
                 />
                 <span>
-                  I understand this beta is not for emergencies or critical
-                  medical decisions.
+                  {appContentText("beta_disclaimer_ack")}
                 </span>
               </label>
               <button
@@ -6939,6 +7172,169 @@ export default function Home() {
                 >
                   {seedingAdminSampleData ? "Adding..." : "Add sample data"}
                 </button>
+              </section>
+
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Content admin</h2>
+                    <p className="mt-1 text-slate-600">
+                      Edit beta, legal, support, and other app text without a
+                      code change.
+                      {selectedAppContent
+                        ? ` · current v${selectedAppContent.version_number}`
+                        : " · no current version"}
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                    disabled={loadingAppContent}
+                    onClick={() => loadAppContent()}
+                    type="button"
+                  >
+                    {loadingAppContent ? "Loading..." : "Reload"}
+                  </button>
+                </div>
+
+                <label className="mt-5 block max-w-xl text-sm font-medium text-slate-700">
+                  Content block
+                  <select
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                    disabled={loadingAppContent}
+                    onChange={(event) =>
+                      handleChangeAppContentKey(event.target.value)
+                    }
+                    value={selectedAppContentKey}
+                  >
+                    {appContentOptions.map((item) => (
+                      <option key={item.contentKey} value={item.contentKey}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <form className="mt-5 space-y-4" onSubmit={handleSaveAppContent}>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Label
+                    <input
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      onChange={(event) => setAppContentLabel(event.target.value)}
+                      value={appContentLabel}
+                    />
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700">
+                    Admin description
+                    <input
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      onChange={(event) =>
+                        setAppContentDescription(event.target.value)
+                      }
+                      value={appContentDescription}
+                    />
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700">
+                    Text shown in the app
+                    <textarea
+                      className="mt-2 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      onChange={(event) => setAppContentBody(event.target.value)}
+                      value={appContentBody}
+                    />
+                  </label>
+
+                  <label className="block text-sm font-medium text-slate-700">
+                    Change note
+                    <input
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      onChange={(event) =>
+                        setAppContentChangeNote(event.target.value)
+                      }
+                      placeholder="What changed and why?"
+                      value={appContentChangeNote}
+                    />
+                  </label>
+
+                  <button
+                    className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                    disabled={savingAppContent}
+                    type="submit"
+                  >
+                    {savingAppContent ? "Saving..." : "Save new version"}
+                  </button>
+                </form>
+
+                <section className="mt-6 border-t border-slate-200 pt-5">
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    Version history
+                  </h3>
+                  <div className="mt-3 space-y-3">
+                    {appContentVersions
+                      .filter(
+                        (version) =>
+                          version.content_key === selectedAppContentKey
+                      )
+                      .map((version) => (
+                        <article
+                          className="rounded-md border border-slate-200 p-4"
+                          key={version.id}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="font-semibold text-slate-900">
+                                v{version.version_number}
+                                {version.is_current ? " · current" : ""}
+                              </p>
+                              <p className="mt-1 text-sm text-slate-500">
+                                {formatDate(version.created_at)}
+                              </p>
+                              {version.content_hash ? (
+                                <p className="mt-1 font-mono text-xs text-slate-500">
+                                  {version.content_hash}
+                                </p>
+                              ) : null}
+                              {version.change_note ? (
+                                <p className="mt-2 text-sm text-slate-700">
+                                  {version.change_note}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                                onClick={() => resetAppContentEditor(version)}
+                                type="button"
+                              >
+                                View
+                              </button>
+                              {!version.is_current ? (
+                                <button
+                                  className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
+                                  disabled={
+                                    revertingAppContentForId === version.id
+                                  }
+                                  onClick={() => handleRevertAppContent(version)}
+                                  type="button"
+                                >
+                                  {revertingAppContentForId === version.id
+                                    ? "Reverting..."
+                                    : "Revert"}
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    {appContentVersions.filter(
+                      (version) => version.content_key === selectedAppContentKey
+                    ).length === 0 ? (
+                      <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">
+                        No saved versions found yet. Saving will create version 1.
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
               </section>
 
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
