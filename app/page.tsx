@@ -655,6 +655,10 @@ function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function isValidUsZip(value: string): boolean {
+  return /^\d{5}(-\d{4})?$/.test(value.trim());
+}
+
 function authRedirectUrl(): string | undefined {
   if (appUrl) {
     return appUrl;
@@ -1946,6 +1950,10 @@ export default function Home() {
 
       if (!profileDraft.postalCode.trim()) {
         throw new Error("ZIP code is required.");
+      }
+
+      if (!isValidUsZip(profileDraft.postalCode)) {
+        throw new Error("Enter a valid ZIP code, like 12345 or 12345-6789.");
       }
 
       const normalizedPhone = normalizeUsPhone(profileDraft.phone);
@@ -3538,9 +3546,11 @@ export default function Home() {
                 </span>
                 <input
                   className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                  inputMode="numeric"
                   onChange={(event) =>
                     updateProfileDraft("postalCode", event.target.value)
                   }
+                  placeholder="12345 or 12345-6789"
                   required
                   value={profileDraft.postalCode}
                 />
@@ -3776,9 +3786,11 @@ export default function Home() {
                 </span>
                 <input
                   className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                  inputMode="numeric"
                   onChange={(event) =>
                     updateProfileDraft("postalCode", event.target.value)
                   }
+                  placeholder="12345 or 12345-6789"
                   required
                   value={profileDraft.postalCode}
                 />
