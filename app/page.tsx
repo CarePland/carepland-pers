@@ -5441,6 +5441,9 @@ export default function Home() {
               </div>
               <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Beta support</p>
+                <p className="mt-2 text-slate-600">
+                  {appContentText("support_contact_note")}
+                </p>
                 <a
                   className="mt-2 inline-block rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
                   href={supportMailtoHref(signedInEmail, "profile")}
