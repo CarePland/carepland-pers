@@ -2895,7 +2895,7 @@ export default function Home() {
     }
   }
 
-  async function handleSeedSampleDataForCurrentUser() {
+  async function handleSeedSampleDataForCurrentUser(forceIfDeclined = false) {
     setSeedingSampleData(true);
     setMessage("");
 
@@ -2903,7 +2903,7 @@ export default function Home() {
       const { data, error } = await supabase.rpc(
         "seed_sample_data_for_current_user",
         {
-          force_if_declined: false,
+          force_if_declined: forceIfDeclined,
         }
       );
 
@@ -2991,9 +2991,13 @@ export default function Home() {
         typeof result.appointments_removed === "number"
           ? result.appointments_removed
           : 0;
+      const declinedAt =
+        typeof result.declined_at === "string"
+          ? result.declined_at
+          : new Date().toISOString();
 
       setSampleDataSeededAt(null);
-      setSampleDataDeclinedAt(null);
+      setSampleDataDeclinedAt(declinedAt);
       setSampleDataSeedVersion(null);
       await loadAppointments(appointmentView, selectedSubjectId);
       showToast(
@@ -5217,7 +5221,29 @@ export default function Home() {
                   </button>
                 </div>
               </section>
-            ) : null}
+            ) : (
+              <section className="mt-5 rounded-md border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900">
+                      Demo data
+                    </h3>
+                    <p className="mt-1 max-w-3xl text-sm text-slate-600">
+                      Add a few fictional appointments, notes, and CarePrep
+                      examples if you want a guided workspace to explore.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                    disabled={seedingSampleData}
+                    onClick={() => handleSeedSampleDataForCurrentUser(true)}
+                    type="button"
+                  >
+                    {seedingSampleData ? "Adding..." : "Add demo data"}
+                  </button>
+                </div>
+              </section>
+            )}
 
             {canUseMultipleCareVips ? (
               <section className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4">
@@ -6187,20 +6213,20 @@ export default function Home() {
                 {shouldOfferSampleData ? (
                   <div className="mt-4 rounded-md border border-blue-100 bg-white p-3">
                     <p className="text-sm font-semibold text-blue-950">
-                      Want a sample workspace to explore?
+                      Want demo data to explore?
                     </p>
                     <p className="mt-1 text-sm text-blue-900">
-                      Add a few sample appointments, notes, and CarePrep examples.
+                      Add a few demo appointments, notes, and CarePrep examples.
                       You can skip this if you want to start clean.
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
                         disabled={seedingSampleData || decliningSampleData}
-                        onClick={handleSeedSampleDataForCurrentUser}
+                        onClick={() => handleSeedSampleDataForCurrentUser()}
                         type="button"
                       >
-                        {seedingSampleData ? "Adding..." : "Add sample data"}
+                        {seedingSampleData ? "Adding..." : "Add demo data"}
                       </button>
                       <button
                         className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
@@ -6208,7 +6234,7 @@ export default function Home() {
                         onClick={handleDeclineSampleData}
                         type="button"
                       >
-                        {decliningSampleData ? "Skipping..." : "Skip sample data"}
+                        {decliningSampleData ? "Skipping..." : "Skip demo data"}
                       </button>
                     </div>
                   </div>
@@ -7679,8 +7705,8 @@ export default function Home() {
                     className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
                     key={appointment.id}
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
+                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+                      <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <h2
                             className={`text-2xl font-semibold ${
@@ -7702,19 +7728,6 @@ export default function Home() {
                             Note: This is not an actual appointment.
                           </p>
                         ) : null}
-                        <p className="mt-1 text-slate-600">
-                          {formatDate(appointment.starts_at)}
-                        </p>
-                        {providerLine ? (
-                          <p className="mt-1 text-sm font-medium text-slate-700">
-                            {providerLine}
-                          </p>
-                        ) : null}
-                        {appointmentSubject ? (
-                          <p className="mt-1 text-sm font-medium text-slate-500">
-                            For {appointmentSubject.display_name}
-                          </p>
-                        ) : null}
                         {appointment.location_name ||
                         appointment.location_address ||
                         appointment.location_phone ? (
@@ -7730,103 +7743,134 @@ export default function Home() {
                             ) : null}
                           </div>
                         ) : null}
-                      </div>
-                      <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
-                        {appointment.status}
-                      </span>
-                    </div>
 
-                    {!isEditingAppointment && !isArchived ? (
-                      <div className="mt-4 flex flex-wrap gap-3">
-                        {mapsLink ? (
-                          <a
-                            aria-label="Open in Google Maps"
-                            className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                            href={mapsLink}
-                            rel="noreferrer"
-                            target="_blank"
-                            title="Open in Google Maps"
-                          >
-                            <svg
-                              aria-hidden="true"
-                              className="h-4 w-4"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              viewBox="0 0 24 24"
+                        {!isEditingAppointment && !isArchived ? (
+                          <div className="mt-4 flex flex-wrap gap-3">
+                            {mapsLink ? (
+                              <a
+                                aria-label="Open in Google Maps"
+                                className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                                href={mapsLink}
+                                rel="noreferrer"
+                                target="_blank"
+                                title="Open in Google Maps"
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  className="h-4 w-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path d="M20 10c0 4.5-8 11-8 11s-8-6.5-8-11a8 8 0 1 1 16 0Z" />
+                                  <circle cx="12" cy="10" r="3" />
+                                </svg>
+                                Maps
+                              </a>
+                            ) : null}
+                            {calendarLink ? (
+                              <a
+                                aria-label="Add to calendar"
+                                className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                                href={calendarLink}
+                                rel="noreferrer"
+                                target="_blank"
+                                title="Add to calendar"
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  className="h-4 w-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path d="M8 2v4" />
+                                  <path d="M16 2v4" />
+                                  <rect
+                                    height="18"
+                                    rx="2"
+                                    width="18"
+                                    x="3"
+                                    y="4"
+                                  />
+                                  <path d="M3 10h18" />
+                                </svg>
+                                Calendar
+                              </a>
+                            ) : null}
+                            {canPasteContextualNotes ? (
+                              <button
+                                className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700"
+                                onClick={() => startTypingNote(appointment.id)}
+                                type="button"
+                              >
+                                Type
+                              </button>
+                            ) : null}
+                            {canPasteContextualNotes ? (
+                              <button
+                                className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700"
+                                onClick={() =>
+                                  startContextualTextIntake(appointment)
+                                }
+                                type="button"
+                              >
+                                Paste
+                              </button>
+                            ) : null}
+                            <button
+                              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                              onClick={() =>
+                                startEditingAppointment(appointment)
+                              }
+                              type="button"
                             >
-                              <path d="M20 10c0 4.5-8 11-8 11s-8-6.5-8-11a8 8 0 1 1 16 0Z" />
-                              <circle cx="12" cy="10" r="3" />
-                            </svg>
-                            Maps
-                          </a>
-                        ) : null}
-                        {calendarLink ? (
-                          <a
-                            aria-label="Add to calendar"
-                            className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                            href={calendarLink}
-                            rel="noreferrer"
-                            target="_blank"
-                            title="Add to calendar"
-                          >
-                            <svg
-                              aria-hidden="true"
-                              className="h-4 w-4"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              viewBox="0 0 24 24"
+                              Edit appointment
+                            </button>
+                            <button
+                              className="rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 disabled:text-slate-400"
+                              disabled={
+                                archivingAppointmentForId === appointment.id
+                              }
+                              onClick={() =>
+                                handleArchiveAppointment(appointment)
+                              }
+                              type="button"
                             >
-                              <path d="M8 2v4" />
-                              <path d="M16 2v4" />
-                              <rect height="18" rx="2" width="18" x="3" y="4" />
-                              <path d="M3 10h18" />
-                            </svg>
-                            Calendar
-                          </a>
+                              {archivingAppointmentForId === appointment.id
+                                ? "Archiving..."
+                                : "Archive appointment"}
+                            </button>
+                          </div>
                         ) : null}
-                        {canPasteContextualNotes ? (
-                          <button
-                            className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700"
-                            onClick={() => startTypingNote(appointment.id)}
-                            type="button"
-                          >
-                            Type
-                          </button>
-                        ) : null}
-                        {canPasteContextualNotes ? (
-                          <button
-                            className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700"
-                            onClick={() => startContextualTextIntake(appointment)}
-                            type="button"
-                          >
-                            Paste
-                          </button>
-                        ) : null}
-                        <button
-                          className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                          onClick={() => startEditingAppointment(appointment)}
-                          type="button"
-                        >
-                          Edit appointment
-                        </button>
-                        <button
-                          className="rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 disabled:text-slate-400"
-                          disabled={archivingAppointmentForId === appointment.id}
-                          onClick={() => handleArchiveAppointment(appointment)}
-                          type="button"
-                        >
-                          {archivingAppointmentForId === appointment.id
-                            ? "Archiving..."
-                            : "Archive appointment"}
-                        </button>
                       </div>
-                    ) : null}
+                      <div className="text-left md:min-w-64 md:text-right">
+                        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
+                            {appointment.status}
+                          </span>
+                          {appointmentSubject ? (
+                            <span className="text-sm font-medium text-slate-500">
+                              for {appointmentSubject.display_name}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-2 text-lg font-medium text-slate-700">
+                          {formatDate(appointment.starts_at)}
+                        </p>
+                        {providerLine ? (
+                          <p className="mt-1 text-sm font-medium text-slate-700">
+                            {providerLine}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
 
                     {isContextualTextIntake && canPasteContextualNotes ? (
                       <form

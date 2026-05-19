@@ -6,6 +6,7 @@ set search_path = public
 as $$
 declare
   caller_user_id uuid := auth.uid();
+  declined_at timestamptz := now();
   target_care_circle_id uuid;
   removed_count integer := 0;
 begin
@@ -52,14 +53,15 @@ begin
 
   update public.profiles
     set sample_data_seeded_at = null,
-        sample_data_declined_at = null,
+        sample_data_declined_at = declined_at,
         sample_data_seed_version = null,
         sample_data_seeded_by_user_id = null
   where id = caller_user_id;
 
   return jsonb_build_object(
     'status', 'removed',
-    'appointments_removed', removed_count
+    'appointments_removed', removed_count,
+    'declined_at', declined_at
   );
 end;
 $$;
