@@ -3976,24 +3976,34 @@ export default function Home() {
                 </button>
               ) : null}
             </div>
-            <div className="text-right text-sm text-slate-600">
-              <p className="font-semibold text-slate-900">
-                Welcome,{" "}
-                {profileDraft.displayName ||
-                  profileDraft.givenName ||
-                  signedInEmail}
-              </p>
-              <p className="mt-1 break-all">{signedInEmail}</p>
-              <p className="mt-1 text-xs font-medium text-slate-500">
-                {entitlement.plan_name} · Care VIPs {careSubjects.length}/
-                {careVipLimit}
-              </p>
-              <a
-                className="mt-2 inline-block font-semibold text-blue-700"
-                href={supportMailtoHref(signedInEmail, mainTab)}
-              >
-                Contact support
-              </a>
+            <div className="flex flex-col items-start gap-1 text-sm text-slate-600 sm:items-end lg:flex-row lg:flex-wrap lg:items-center lg:justify-end lg:gap-x-2 lg:gap-y-1 lg:text-right">
+              <span>
+                <span className="font-semibold text-slate-900">
+                  Welcome,{" "}
+                  {profileDraft.displayName ||
+                    profileDraft.givenName ||
+                    signedInEmail}
+                </span>
+                <span className="mx-2 text-slate-300">·</span>
+                <span className="break-all">{signedInEmail}</span>
+              </span>
+              <span className="hidden text-slate-300 lg:inline">·</span>
+              <span>
+                <span className="font-medium text-slate-500">
+                  {entitlement.plan_name}
+                </span>
+                <span className="mx-2 text-slate-300">·</span>
+                <span className="font-medium text-slate-500">
+                  Care VIPs {careSubjects.length}/{careVipLimit}
+                </span>
+                <span className="mx-2 text-slate-300">·</span>
+                <a
+                  className="font-semibold text-blue-700"
+                  href={supportMailtoHref(signedInEmail, mainTab)}
+                >
+                  Support
+                </a>
+              </span>
             </div>
           </div>
         ) : null}
