@@ -22,6 +22,8 @@ create unique index if not exists app_content_versions_one_current_per_key
 
 alter table public.app_content_versions enable row level security;
 
+grant select on public.app_content_versions to authenticated;
+
 drop policy if exists "Authenticated users can read current app content" on public.app_content_versions;
 create policy "Authenticated users can read current app content"
   on public.app_content_versions
