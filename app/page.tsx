@@ -1299,6 +1299,7 @@ export default function Home() {
   >(null);
   const [profileDraft, setProfileDraft] =
     useState<ProfileDraft>(emptyProfileDraft);
+  const [savedProfileLabel, setSavedProfileLabel] = useState("");
   const [sampleDataSeededAt, setSampleDataSeededAt] = useState<string | null>(
     null
   );
@@ -1689,7 +1690,9 @@ export default function Home() {
       throw profileError;
     }
 
-    setProfileDraft(profileDraftFromRow(profileRow, profileEmail));
+    const loadedProfileDraft = profileDraftFromRow(profileRow, profileEmail);
+    setProfileDraft(loadedProfileDraft);
+    setSavedProfileLabel(profileDisplayName(loadedProfileDraft));
     setIsAdmin(profileRow?.is_admin === true);
     if (profileRow?.is_admin !== true) {
       setMainTab((currentTab) =>
@@ -2715,6 +2718,7 @@ export default function Home() {
     setIsAdmin(false);
     setOnboardingCompletedAt(null);
     setProfileDraft(emptyProfileDraft);
+    setSavedProfileLabel("");
     setAuthMode("signIn");
     setActiveAppointmentPanel(null);
     setMainTab("appointments");
@@ -2914,6 +2918,7 @@ export default function Home() {
       }
 
       setOnboardingCompletedAt(completedAt);
+      setSavedProfileLabel(visibleDisplayName);
       await loadAppointments();
       setMessage("Profile saved.");
     } catch (error) {
@@ -4761,11 +4766,7 @@ export default function Home() {
             !needsOnboarding ? (
               <span>
                 <span className="font-semibold text-slate-900">
-                  Welcome,{" "}
-                  {profileDisplayName({
-                    ...profileDraft,
-                    email: signedInEmail,
-                  })}
+                  Welcome, {savedProfileLabel || signedInEmail}
                 </span>
                 <span className="mx-2 text-slate-300">·</span>
                 <span className="break-all">{signedInEmail}</span>
