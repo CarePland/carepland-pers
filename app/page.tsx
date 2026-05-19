@@ -103,6 +103,14 @@ type AiWorkflowKey =
 type AuthMode = "reset" | "signIn" | "signUp";
 type AppointmentPanel = "add" | "quickAdd";
 type MainTab = "admin" | "appointments" | "profile";
+type ToastState = {
+  actionLabel?: string;
+  durationMs?: number;
+  id: number;
+  message: string;
+  onAction?: () => void;
+  type?: "error" | "info" | "success" | "warning";
+};
 
 type CarePrepHistoryRow = {
   id: string;
@@ -1145,6 +1153,7 @@ export default function Home() {
   >(null);
   const [message, setMessage] = useState("");
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [notesReminderAppointment, setNotesReminderAppointment] =
     useState<NotesReminderAppointment | null>(null);
@@ -1226,6 +1235,33 @@ export default function Home() {
     // This runs once on page load to restore Supabase session state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!toast?.durationMs) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setToast((currentToast) =>
+        currentToast?.id === toast.id ? null : currentToast
+      );
+    }, toast.durationMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [toast]);
+
+  function showToast(
+    messageText: string,
+    options: Omit<ToastState, "id" | "message"> = {}
+  ) {
+    setToast({
+      durationMs: options.type === "error" ? undefined : 5000,
+      id: Date.now(),
+      message: messageText,
+      type: "info",
+      ...options,
+    });
+  }
 
   function dismissWelcomeGuide() {
     if (signedInEmail) {
@@ -3478,14 +3514,6 @@ export default function Home() {
   }
 
   async function handleArchiveAppointment(appointment: Appointment) {
-    const shouldArchive = window.confirm(
-      "Archive this appointment? It will disappear from the active dashboard, but the data will stay available for history and recovery."
-    );
-
-    if (!shouldArchive) {
-      return;
-    }
-
     setArchivingAppointmentForId(appointment.id);
     setMessage("");
 
@@ -3511,7 +3539,14 @@ export default function Home() {
         [appointment.id]: false,
       }));
       await loadAppointments();
-      setMessage("Appointment archived.");
+      showToast("Appointment archived.", {
+        actionLabel: "View Archived",
+        durationMs: 10000,
+        onAction: () => {
+          void handleChangeAppointmentView("archived");
+        },
+        type: "success",
+      });
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -5155,6 +5190,44 @@ export default function Home() {
           </aside>
 
           <div className="space-y-4">
+            {toast ? (
+              <div
+                className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm shadow-sm ${
+                  toast.type === "success"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                    : toast.type === "warning"
+                      ? "border-amber-200 bg-amber-50 text-amber-950"
+                      : toast.type === "error"
+                        ? "border-rose-200 bg-rose-50 text-rose-950"
+                        : "border-blue-200 bg-blue-50 text-blue-950"
+                }`}
+              >
+                <span className="font-medium">{toast.message}</span>
+                <span className="flex flex-wrap gap-2">
+                  {toast.actionLabel && toast.onAction ? (
+                    <button
+                      className="rounded-md bg-white px-3 py-1 font-semibold text-slate-700 ring-1 ring-slate-200"
+                      onClick={() => {
+                        toast.onAction?.();
+                        setToast(null);
+                      }}
+                      type="button"
+                    >
+                      {toast.actionLabel}
+                    </button>
+                  ) : null}
+                  <button
+                    aria-label="Dismiss message"
+                    className="rounded-md bg-white px-3 py-1 font-semibold text-slate-500 ring-1 ring-slate-200"
+                    onClick={() => setToast(null)}
+                    type="button"
+                  >
+                    Dismiss
+                  </button>
+                </span>
+              </div>
+            ) : null}
+
             {signedInEmail && message ? (
               <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-700">
                 {message}
