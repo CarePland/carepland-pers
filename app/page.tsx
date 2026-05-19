@@ -2538,14 +2538,7 @@ export default function Home() {
       }
 
       const newVersion = data as AppContentVersion;
-      setAppContentVersions((currentVersions) => [
-        newVersion,
-        ...currentVersions.map((version) =>
-          version.content_key === newVersion.content_key
-            ? { ...version, is_current: false }
-            : version
-        ),
-      ]);
+      await loadAppContent(newVersion.content_key);
       resetAppContentEditor(newVersion);
       showToast("Content saved as a new version.", { type: "success" });
     } catch (error) {
@@ -2570,14 +2563,7 @@ export default function Home() {
       }
 
       const newVersion = data as AppContentVersion;
-      setAppContentVersions((currentVersions) => [
-        newVersion,
-        ...currentVersions.map((item) =>
-          item.content_key === newVersion.content_key
-            ? { ...item, is_current: false }
-            : item
-        ),
-      ]);
+      await loadAppContent(newVersion.content_key);
       resetAppContentEditor(newVersion);
       showToast("Content reverted as a new version.", { type: "success" });
     } catch (error) {
