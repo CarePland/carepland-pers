@@ -95,6 +95,7 @@ type AiInstructionVersion = {
 
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
+type AiWorkflowKey = "careprep_generation" | "note_intake_interpretation";
 type AuthMode = "reset" | "signIn" | "signUp";
 type AppointmentPanel = "add" | "quickAdd";
 type MainTab = "admin" | "appointments" | "profile";
@@ -116,6 +117,23 @@ type CarePrepHistoryRow = {
   ai_generated_guidance_id: string | null;
   superseded_at: string | null;
   superseded_by_guidance_id: string | null;
+};
+
+type IntakeHistoryRow = {
+  id: string;
+  accepted_at?: string | null;
+  accepted_interpretation?: unknown;
+  ai_interpretation?: unknown;
+  created_at: string | null;
+  error_message?: string | null;
+  instruction_content_hash?: string | null;
+  interpretation?: unknown;
+  match_status?: string | null;
+  model?: string | null;
+  prompt_version?: string | null;
+  raw_text: string | null;
+  source_type: string | null;
+  status: string | null;
 };
 
 type TextIntakeDraft = {
@@ -215,6 +233,68 @@ const defaultCarePrepOutputSchema = {
   },
   required: ["summary", "key_questions", "bring_list"],
   type: "object",
+};
+
+const defaultTextIntakeOutputSchema = {
+  additionalProperties: false,
+  properties: {
+    appointment_reason: { type: "string" },
+    appointment_title: { type: "string" },
+    confidence: { type: "number" },
+    followups: { items: { type: "string" }, type: "array" },
+    location_address: { type: "string" },
+    location_name: { type: "string" },
+    location_phone: { type: "string" },
+    notes_summary: { type: "string" },
+    provider_name: { type: "string" },
+    provider_organization: { type: "string" },
+    starts_at_local: { type: "string" },
+    suggested_action: { type: "string" },
+    takeaways: { items: { type: "string" }, type: "array" },
+  },
+  required: [
+    "appointment_title",
+    "appointment_reason",
+    "starts_at_local",
+    "provider_name",
+    "provider_organization",
+    "location_name",
+    "location_address",
+    "location_phone",
+    "notes_summary",
+    "takeaways",
+    "followups",
+    "confidence",
+    "suggested_action",
+  ],
+  type: "object",
+};
+
+const aiWorkflows: Record<
+  AiWorkflowKey,
+  {
+    defaultChangeNote: string;
+    defaultSchema: unknown;
+    description: string;
+    historyLabel: string;
+    label: string;
+  }
+> = {
+  careprep_generation: {
+    defaultChangeNote: "Initial CarePrep instruction set",
+    defaultSchema: defaultCarePrepOutputSchema,
+    description: "Instructions used to generate appointment preparation guidance.",
+    historyLabel: "CarePrep History",
+    label: "CarePrep generation",
+  },
+  note_intake_interpretation: {
+    defaultChangeNote: "Initial note intake instruction set",
+    defaultSchema: defaultTextIntakeOutputSchema,
+    description:
+      "Instructions used to interpret pasted appointment notes and appointment details.",
+    historyLabel: "Intake History",
+    label: "Note intake interpretation",
+  },
 };
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -737,11 +817,14 @@ function AppointmentDetailUpdateOption({
   );
 }
 
-function resetInstructionDraft(version: AiInstructionVersion | null) {
+function resetInstructionDraft(
+  version: AiInstructionVersion | null,
+  workflowKey: AiWorkflowKey
+) {
   return {
     model: version?.model ?? "gpt-4.1-mini",
     outputSchema: JSON.stringify(
-      version?.output_schema ?? defaultCarePrepOutputSchema,
+      version?.output_schema ?? aiWorkflows[workflowKey].defaultSchema,
       null,
       2
     ),
@@ -820,6 +903,8 @@ export default function Home() {
   ] = useState(false);
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
+  const [selectedAiWorkflow, setSelectedAiWorkflow] =
+    useState<AiWorkflowKey>("careprep_generation");
   const [aiAdminTab, setAiAdminTab] = useState<AiAdminTab>("instructions");
   const [loadingInstructions, setLoadingInstructions] = useState(false);
   const [loadingCarePrepHistory, setLoadingCarePrepHistory] = useState(false);
@@ -913,7 +998,10 @@ export default function Home() {
   const [carePrepHistory, setCarePrepHistory] = useState<CarePrepHistoryRow[]>(
     []
   );
+  const [intakeHistory, setIntakeHistory] = useState<IntakeHistoryRow[]>([]);
   const [historyAppointmentId, setHistoryAppointmentId] = useState("");
+
+  const selectedAiWorkflowConfig = aiWorkflows[selectedAiWorkflow];
 
   const notesByAppointment = useMemo(() => {
     return new Map(notes.map((note) => [note.appointment_id, note]));
@@ -1506,11 +1594,12 @@ export default function Home() {
     }
   }
 
-  async function loadCarePrepInstructions() {
+  async function loadAiInstructions(workflowKey = selectedAiWorkflow) {
     setLoadingInstructions(true);
     setMessage("");
 
     try {
+      const workflow = aiWorkflows[workflowKey];
       const { careCircleId } = await getPrimaryCareContext();
 
       const { data: instructionSets, error: instructionSetError } =
@@ -1518,7 +1607,7 @@ export default function Home() {
           .from("ai_instruction_sets")
           .select("id,instruction_key,name,description")
           .eq("care_circle_id", careCircleId)
-          .eq("instruction_key", "careprep_generation")
+          .eq("instruction_key", workflowKey)
           .limit(1);
 
       if (instructionSetError) {
@@ -1532,13 +1621,15 @@ export default function Home() {
         setAiInstructionVersion(null);
         setAiInstructionVersions([]);
         setDraftSourceVersion(null);
-        const draft = resetInstructionDraft(null);
+        const draft = resetInstructionDraft(null, workflowKey);
         setInstructionSystemPrompt(draft.systemPrompt);
         setInstructionUserPrompt(draft.userPrompt);
         setInstructionOutputSchema(draft.outputSchema);
         setInstructionModel(draft.model);
-        setInstructionChangeNote("Initial CarePrep instruction set");
-        setMessage("No CarePrep instruction set exists yet. Paste instructions and save version 1.");
+        setInstructionChangeNote(workflow.defaultChangeNote);
+        setMessage(
+          `No ${workflow.label} instruction set exists yet. Paste instructions and save version 1.`
+        );
         return;
       }
 
@@ -1561,7 +1652,7 @@ export default function Home() {
       setAiInstructionVersions(allVersions);
       setAiInstructionVersion(version);
       setDraftSourceVersion(version);
-      const draft = resetInstructionDraft(version);
+      const draft = resetInstructionDraft(version, workflowKey);
       setInstructionSystemPrompt(draft.systemPrompt);
       setInstructionUserPrompt(draft.userPrompt);
       setInstructionOutputSchema(draft.outputSchema);
@@ -1569,8 +1660,8 @@ export default function Home() {
       setInstructionChangeNote("");
       setMessage(
         version
-          ? `Loaded CarePrep instructions v${version.version_number}.`
-          : "No current CarePrep instruction version exists yet."
+          ? `Loaded ${workflow.label} instructions v${version.version_number}.`
+          : `No current ${workflow.label} instruction version exists yet.`
       );
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -1615,6 +1706,57 @@ export default function Home() {
     }
   }
 
+  async function loadIntakeHistory() {
+    setLoadingCarePrepHistory(true);
+    setMessage("");
+
+    try {
+      const { careCircleId } = await getPrimaryCareContext();
+      const coreColumns =
+        "id,created_at,source_type,raw_text,status,error_message,ai_interpretation,interpretation,accepted_interpretation,accepted_at,match_status";
+      const auditColumns = `${coreColumns},model,prompt_version,instruction_content_hash`;
+      let historyRows: IntakeHistoryRow[] | null = null;
+
+      const { data, error } = await supabase
+        .from("intake_items")
+        .select(auditColumns)
+        .eq("care_circle_id", careCircleId)
+        .order("created_at", { ascending: false })
+        .limit(25);
+
+      if (error) {
+        const missingAuditColumn =
+          "code" in error && error.code === "42703";
+
+        if (!missingAuditColumn) {
+          throw error;
+        }
+
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from("intake_items")
+          .select(coreColumns)
+          .eq("care_circle_id", careCircleId)
+          .order("created_at", { ascending: false })
+          .limit(25);
+
+        if (fallbackError) {
+          throw fallbackError;
+        }
+
+        historyRows = fallbackData ?? [];
+      } else {
+        historyRows = data ?? [];
+      }
+
+      setIntakeHistory(historyRows);
+      setMessage(`Loaded ${historyRows.length} intake history row(s).`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingCarePrepHistory(false);
+    }
+  }
+
   async function handleChangeMainTab(tab: MainTab) {
     if (tab === "admin" && !isAdmin) {
       setMessage("Admin access is not enabled for this account.");
@@ -1625,7 +1767,7 @@ export default function Home() {
 
     if (tab === "admin") {
       setAiAdminTab("instructions");
-      await loadCarePrepInstructions();
+      await loadAiInstructions();
     }
   }
 
@@ -1633,9 +1775,11 @@ export default function Home() {
     setAiAdminTab(tab);
 
     if (tab === "instructions") {
-      await loadCarePrepInstructions();
-    } else {
+      await loadAiInstructions();
+    } else if (selectedAiWorkflow === "careprep_generation") {
       await loadCarePrepHistory();
+    } else {
+      await loadIntakeHistory();
     }
   }
 
@@ -1644,9 +1788,23 @@ export default function Home() {
     await loadCarePrepHistory(appointmentId);
   }
 
+  async function handleChangeAiWorkflow(workflowKey: AiWorkflowKey) {
+    setSelectedAiWorkflow(workflowKey);
+    setCarePrepHistory([]);
+    setIntakeHistory([]);
+
+    if (aiAdminTab === "instructions") {
+      await loadAiInstructions(workflowKey);
+    } else if (workflowKey === "careprep_generation") {
+      await loadCarePrepHistory();
+    } else {
+      await loadIntakeHistory();
+    }
+  }
+
   function loadInstructionVersionIntoEditor(version: AiInstructionVersion) {
     setDraftSourceVersion(version);
-    const draft = resetInstructionDraft(version);
+    const draft = resetInstructionDraft(version, selectedAiWorkflow);
     setInstructionSystemPrompt(draft.systemPrompt);
     setInstructionUserPrompt(draft.userPrompt);
     setInstructionOutputSchema(draft.outputSchema);
@@ -1657,13 +1815,14 @@ export default function Home() {
     setMessage(`Loaded v${version.version_number} into the editor.`);
   }
 
-  async function handleSaveCarePrepInstructions(event: FormEvent<HTMLFormElement>) {
+  async function handleSaveAiInstructions(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSavingInstructions(true);
     setMessage("");
 
     try {
       const { careCircleId, userId } = await getPrimaryCareContext();
+      const workflow = selectedAiWorkflowConfig;
       const parsedSchema = JSON.parse(instructionOutputSchema);
       const temperature = 0.2;
       const contentHash = await hashInstructionContent({
@@ -1680,10 +1839,10 @@ export default function Home() {
           .from("ai_instruction_sets")
           .insert({
             care_circle_id: careCircleId,
-            description:
-              "Instructions used to generate appointment preparation guidance.",
-            instruction_key: "careprep_generation",
-            name: "CarePrep generation",
+            description: workflow.description,
+            instruction_key: selectedAiWorkflow,
+            is_active: true,
+            name: workflow.label,
           })
           .select("id,instruction_key,name,description")
           .single();
@@ -1757,13 +1916,13 @@ export default function Home() {
           is_current: false,
         })),
       ]);
-      const draft = resetInstructionDraft(newVersion);
+      const draft = resetInstructionDraft(newVersion, selectedAiWorkflow);
       setInstructionSystemPrompt(draft.systemPrompt);
       setInstructionUserPrompt(draft.userPrompt);
       setInstructionOutputSchema(draft.outputSchema);
       setInstructionModel(draft.model);
       setInstructionChangeNote("");
-      setMessage(`Saved CarePrep instructions v${newVersion.version_number}.`);
+      setMessage(`Saved ${workflow.label} instructions v${newVersion.version_number}.`);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -1844,14 +2003,14 @@ export default function Home() {
         })),
       ]);
 
-      const draft = resetInstructionDraft(revertedVersion);
+      const draft = resetInstructionDraft(revertedVersion, selectedAiWorkflow);
       setInstructionSystemPrompt(draft.systemPrompt);
       setInstructionUserPrompt(draft.userPrompt);
       setInstructionOutputSchema(draft.outputSchema);
       setInstructionModel(draft.model);
       setInstructionChangeNote("");
       setMessage(
-        `Reverted v${version.version_number} into new current v${revertedVersion.version_number}.`
+        `Reverted ${selectedAiWorkflowConfig.label} v${version.version_number} into new current v${revertedVersion.version_number}.`
       );
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -4849,9 +5008,8 @@ export default function Home() {
                   <div>
                     <h2 className="text-2xl font-semibold">AI admin</h2>
                     <p className="mt-1 text-slate-600">
-                      {aiAdminTab === "instructions"
-                        ? "CarePrep generation"
-                        : "CarePrep output audit trail"}
+                      {selectedAiWorkflowConfig.label}
+                      {aiAdminTab === "history" ? " audit trail" : ""}
                       {aiAdminTab === "instructions" && aiInstructionVersion
                         ? ` · current v${aiInstructionVersion.version_number}`
                         : ""}
@@ -4865,8 +5023,10 @@ export default function Home() {
                     disabled={loadingInstructions || loadingCarePrepHistory}
                     onClick={() =>
                       aiAdminTab === "instructions"
-                        ? loadCarePrepInstructions()
-                        : loadCarePrepHistory()
+                        ? loadAiInstructions()
+                        : selectedAiWorkflow === "careprep_generation"
+                          ? loadCarePrepHistory()
+                          : loadIntakeHistory()
                     }
                     type="button"
                   >
@@ -4875,6 +5035,24 @@ export default function Home() {
                       : "Reload"}
                   </button>
                 </div>
+
+                <label className="mt-5 block max-w-xl text-sm font-medium text-slate-700">
+                  AI workflow
+                  <select
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                    disabled={loadingInstructions || loadingCarePrepHistory}
+                    onChange={(event) =>
+                      handleChangeAiWorkflow(event.target.value as AiWorkflowKey)
+                    }
+                    value={selectedAiWorkflow}
+                  >
+                    {Object.entries(aiWorkflows).map(([workflowKey, workflow]) => (
+                      <option key={workflowKey} value={workflowKey}>
+                        {workflow.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
                 <div className="mt-5 flex flex-wrap gap-2">
                   <button
@@ -4899,13 +5077,13 @@ export default function Home() {
                     onClick={() => handleChangeAiAdminTab("history")}
                     type="button"
                   >
-                    CarePrep History
+                    {selectedAiWorkflowConfig.historyLabel}
                   </button>
                 </div>
 
                 {aiAdminTab === "instructions" ? (
                   <>
-                <form className="mt-5 space-y-4" onSubmit={handleSaveCarePrepInstructions}>
+                <form className="mt-5 space-y-4" onSubmit={handleSaveAiInstructions}>
                   {draftSourceVersion ? (
                     <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">
                       Editing from v{draftSourceVersion.version_number}
@@ -4931,7 +5109,7 @@ export default function Home() {
                       onChange={(event) =>
                         setInstructionSystemPrompt(event.target.value)
                       }
-                      placeholder="Paste the CarePrep system instructions here."
+                      placeholder={`Paste the ${selectedAiWorkflowConfig.label} system instructions here.`}
                       value={instructionSystemPrompt}
                     />
                   </label>
@@ -4943,7 +5121,7 @@ export default function Home() {
                       onChange={(event) =>
                         setInstructionUserPrompt(event.target.value)
                       }
-                      placeholder="Paste the user/context prompt template here."
+                      placeholder="Optional context template for the user message."
                       value={instructionUserPrompt}
                     />
                   </label>
@@ -5046,7 +5224,7 @@ export default function Home() {
                   </section>
                 ) : null}
                   </>
-                ) : (
+                ) : selectedAiWorkflow === "careprep_generation" ? (
                   <section className="mt-5 space-y-4">
                     <div className="flex flex-wrap items-end gap-3">
                       <label className="block min-w-64 text-sm font-medium text-slate-700">
@@ -5143,6 +5321,95 @@ export default function Home() {
                             </div>
                           </article>
                         ))}
+                      </div>
+                    )}
+                  </section>
+                ) : (
+                  <section className="mt-5 space-y-4">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <button
+                        className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                        disabled={loadingCarePrepHistory}
+                        onClick={() => loadIntakeHistory()}
+                        type="button"
+                      >
+                        {loadingCarePrepHistory ? "Loading..." : "Load history"}
+                      </button>
+                    </div>
+
+                    {intakeHistory.length === 0 ? (
+                      <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-600">
+                        No note intake history loaded yet.
+                      </p>
+                    ) : (
+                      <div className="space-y-3">
+                        {intakeHistory.map((row) => {
+                          const accepted =
+                            row.accepted_interpretation &&
+                            typeof row.accepted_interpretation === "object"
+                              ? (row.accepted_interpretation as Record<
+                                  string,
+                                  unknown
+                                >)
+                              : null;
+                          const aiDraft =
+                            row.ai_interpretation &&
+                            typeof row.ai_interpretation === "object"
+                              ? (row.ai_interpretation as Record<string, unknown>)
+                              : null;
+                          const title = String(
+                            accepted?.appointment_title ??
+                              aiDraft?.appointment_title ??
+                              "Untitled intake"
+                          );
+                          const summary = String(
+                            accepted?.notes_summary ??
+                              aiDraft?.notes_summary ??
+                              row.raw_text ??
+                              ""
+                          );
+
+                          return (
+                            <article
+                              className="rounded-md border border-slate-200 p-4"
+                              key={row.id}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <p className="font-semibold text-slate-900">
+                                    {title}
+                                    {row.status ? ` · ${row.status}` : ""}
+                                    {row.match_status
+                                      ? ` · ${row.match_status}`
+                                      : ""}
+                                  </p>
+                                  <p className="mt-1 text-sm text-slate-500">
+                                    {formatDate(row.created_at)}
+                                    {row.model ? ` · ${row.model}` : ""}
+                                    {row.prompt_version
+                                      ? ` · ${row.prompt_version}`
+                                      : ""}
+                                  </p>
+                                  {row.instruction_content_hash ? (
+                                    <p className="mt-1 font-mono text-xs text-slate-500">
+                                      {row.instruction_content_hash}
+                                    </p>
+                                  ) : null}
+                                  {summary ? (
+                                    <p className="mt-2 max-h-20 overflow-hidden text-sm text-slate-700">
+                                      {summary}
+                                    </p>
+                                  ) : null}
+                                  {row.error_message ? (
+                                    <p className="mt-2 text-sm text-red-700">
+                                      {row.error_message}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
                       </div>
                     )}
                   </section>

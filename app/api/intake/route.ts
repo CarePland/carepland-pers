@@ -7,6 +7,44 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const openAiApiKey = process.env.OPENAI_API_KEY ?? "";
 
+const defaultTextIntakeOutputSchema = {
+  additionalProperties: false,
+  properties: {
+    appointment_reason: { type: "string" },
+    appointment_title: { type: "string" },
+    confidence: { type: "number" },
+    followups: { items: { type: "string" }, type: "array" },
+    location_address: { type: "string" },
+    location_name: { type: "string" },
+    location_phone: { type: "string" },
+    notes_summary: { type: "string" },
+    provider_name: { type: "string" },
+    provider_organization: { type: "string" },
+    starts_at_local: { type: "string" },
+    suggested_action: { type: "string" },
+    takeaways: { items: { type: "string" }, type: "array" },
+  },
+  required: [
+    "appointment_title",
+    "appointment_reason",
+    "starts_at_local",
+    "provider_name",
+    "provider_organization",
+    "location_name",
+    "location_address",
+    "location_phone",
+    "notes_summary",
+    "takeaways",
+    "followups",
+    "confidence",
+    "suggested_action",
+  ],
+  type: "object",
+};
+
+const fallbackTextIntakeSystemPrompt =
+  "You interpret pasted appointment-related text for CarePland Personal. Use only supplied text. Extract a reviewable draft for an appointment and optional notes. Extract provider_name, provider_organization, location_name, location_address, and location_phone only when directly supported by the text. If existing appointment context is supplied, use it as the target appointment context and focus on extracting visit notes, takeaways, and follow-ups from the pasted text. If a value is unknown, return an empty string or empty array. starts_at_local must be suitable for an HTML datetime-local input as YYYY-MM-DDTHH:mm when a date/time is explicit; otherwise return an empty string. Do not invent dates, providers, locations, or outcomes.";
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -169,63 +207,79 @@ export async function POST(request: NextRequest) {
 
     intakeItemId = intakeItem.id;
 
-    const schema = {
-      additionalProperties: false,
-      properties: {
-        appointment_reason: { type: "string" },
-        appointment_title: { type: "string" },
-        confidence: { type: "number" },
-        followups: { items: { type: "string" }, type: "array" },
-        location_address: { type: "string" },
-        location_name: { type: "string" },
-        location_phone: { type: "string" },
-        notes_summary: { type: "string" },
-        provider_name: { type: "string" },
-        provider_organization: { type: "string" },
-        starts_at_local: { type: "string" },
-        suggested_action: { type: "string" },
-        takeaways: { items: { type: "string" }, type: "array" },
-      },
-      required: [
-        "appointment_title",
-        "appointment_reason",
-        "starts_at_local",
-        "provider_name",
-        "provider_organization",
-        "location_name",
-        "location_address",
-        "location_phone",
-        "notes_summary",
-        "takeaways",
-        "followups",
-        "confidence",
-        "suggested_action",
-      ],
-      type: "object",
-    };
+    const { data: instructionSets, error: instructionSetError } = await supabase
+      .from("ai_instruction_sets")
+      .select("id,instruction_key,name,description")
+      .eq("care_circle_id", careCircleId)
+      .eq("instruction_key", "note_intake_interpretation")
+      .eq("is_active", true)
+      .limit(1);
+
+    if (instructionSetError) {
+      throw instructionSetError;
+    }
+
+    const instructionSet = instructionSets?.[0] ?? null;
+    const { data: instructionVersions, error: instructionVersionError } =
+      instructionSet
+        ? await supabase
+            .from("ai_instruction_versions")
+            .select(
+              "id,version_number,system_prompt,user_prompt_template,output_schema,model,temperature,content_hash"
+            )
+            .eq("instruction_set_id", instructionSet.id)
+            .eq("is_current", true)
+            .limit(1)
+        : { data: [], error: null };
+
+    if (instructionVersionError) {
+      throw instructionVersionError;
+    }
+
+    const instructionVersion = instructionVersions?.[0] ?? null;
+    const schema =
+      instructionVersion?.output_schema &&
+      typeof instructionVersion.output_schema === "object"
+        ? instructionVersion.output_schema
+        : defaultTextIntakeOutputSchema;
+    const systemPrompt =
+      instructionVersion?.system_prompt ?? fallbackTextIntakeSystemPrompt;
+    const userPrompt = [
+      instructionVersion?.user_prompt_template
+        ? `Instruction template:\n${instructionVersion.user_prompt_template}`
+        : "",
+      `Care VIP: ${careSubject.display_name}`,
+      `Current date: ${new Date().toISOString()}`,
+      appointmentContext
+        ? `Existing appointment context:\n${JSON.stringify(
+            appointmentContext,
+            null,
+            2
+          )}`
+        : "",
+      `Pasted text:\n${rawText}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const model = instructionVersion?.model ?? "gpt-4.1-mini";
+    const promptVersion = instructionVersion
+      ? `note_intake_interpretation:v${instructionVersion.version_number}`
+      : "note_intake_interpretation:fallback";
+
     const openAiResponse = await fetch("https://api.openai.com/v1/responses", {
       body: JSON.stringify({
         input: [
           {
-            content:
-              "You interpret pasted appointment-related text for CarePland Personal. Use only supplied text. Extract a reviewable draft for an appointment and optional notes. Extract provider_name, provider_organization, location_name, location_address, and location_phone only when directly supported by the text. If existing appointment context is supplied, use it as the target appointment context and focus on extracting visit notes, takeaways, and follow-ups from the pasted text. If a value is unknown, return an empty string or empty array. starts_at_local must be suitable for an HTML datetime-local input as YYYY-MM-DDTHH:mm when a date/time is explicit; otherwise return an empty string. Do not invent dates, providers, locations, or outcomes.",
+            content: systemPrompt,
             role: "system",
           },
           {
-            content: `Care VIP: ${careSubject.display_name}\nCurrent date: ${new Date().toISOString()}${
-              appointmentContext
-                ? `\nExisting appointment context:\n${JSON.stringify(
-                    appointmentContext,
-                    null,
-                    2
-                  )}`
-                : ""
-            }\n\nPasted text:\n${rawText}`,
+            content: userPrompt,
             role: "user",
           },
         ],
-        model: "gpt-4.1-mini",
-        temperature: 0.1,
+        model,
+        temperature: instructionVersion?.temperature ?? 0.1,
         text: {
           format: {
             name: "carepland_text_intake",
@@ -260,18 +314,42 @@ export async function POST(request: NextRequest) {
 
     const draft = JSON.parse(text) as JsonObject;
 
+    const processedPayload = {
+      ai_interpretation: draft,
+      interpretation: draft,
+      processed_at: new Date().toISOString(),
+      status: "processed",
+    };
+    const processedPayloadWithAudit = {
+      ...processedPayload,
+      instruction_content_hash: instructionVersion?.content_hash ?? null,
+      instruction_set_id: instructionSet?.id ?? null,
+      instruction_version_id: instructionVersion?.id ?? null,
+      model,
+      prompt_version: promptVersion,
+    };
+
     const { error: updateError } = await supabase
       .from("intake_items")
-      .update({
-        ai_interpretation: draft,
-        interpretation: draft,
-        processed_at: new Date().toISOString(),
-        status: "processed",
-      })
+      .update(processedPayloadWithAudit)
       .eq("id", intakeItem.id);
 
     if (updateError) {
-      throw updateError;
+      const missingAuditColumn =
+        "code" in updateError && updateError.code === "42703";
+
+      if (!missingAuditColumn) {
+        throw updateError;
+      }
+
+      const { error: fallbackUpdateError } = await supabase
+        .from("intake_items")
+        .update(processedPayload)
+        .eq("id", intakeItem.id);
+
+      if (fallbackUpdateError) {
+        throw fallbackUpdateError;
+      }
     }
 
     return NextResponse.json({
