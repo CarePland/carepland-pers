@@ -14,6 +14,7 @@ type Appointment = {
   location_phone: string | null;
   provider_name: string | null;
   provider_organization: string | null;
+  is_sample_data?: boolean | null;
   title: string | null;
   reason: string | null;
   starts_at: string | null;
@@ -1855,7 +1856,7 @@ export default function Home() {
 
     let appointmentQuery = supabase
       .from("appointments")
-      .select("id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone")
+      .select("id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data")
       .in("care_circle_id", circleIds)
       .order("starts_at", { ascending: true });
 
@@ -1865,7 +1866,7 @@ export default function Home() {
 
     let notesReminderQuery = supabase
       .from("appointments")
-      .select("id,care_circle_id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone")
+      .select("id,care_circle_id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data")
       .in("care_circle_id", circleIds)
       .neq("status", "archived")
       .is("current_note_id", null)
@@ -7258,7 +7259,17 @@ export default function Home() {
                     <p className="mt-1 text-sm text-blue-900">
                       {notesReminderAppointment.title || "Untitled appointment"} ·{" "}
                       {formatDate(notesReminderAppointment.starts_at)}
+                      {notesReminderAppointment.is_sample_data ? (
+                        <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
+                          Demo
+                        </span>
+                      ) : null}
                     </p>
+                    {notesReminderAppointment.is_sample_data ? (
+                      <p className="mt-1 text-xs italic text-blue-800">
+                        Note: This is not an actual appointment.
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -7575,9 +7586,27 @@ export default function Home() {
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <h2 className="text-2xl font-semibold">
-                          {appointment.title || "Untitled appointment"}
-                        </h2>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2
+                            className={`text-2xl font-semibold ${
+                              appointment.is_sample_data
+                                ? "text-slate-500"
+                                : "text-slate-900"
+                            }`}
+                          >
+                            {appointment.title || "Untitled appointment"}
+                          </h2>
+                          {appointment.is_sample_data ? (
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500 ring-1 ring-slate-200">
+                              Demo
+                            </span>
+                          ) : null}
+                        </div>
+                        {appointment.is_sample_data ? (
+                          <p className="mt-1 text-sm italic text-slate-500">
+                            Note: This is not an actual appointment.
+                          </p>
+                        ) : null}
                         <p className="mt-1 text-slate-600">
                           {formatDate(appointment.starts_at)}
                         </p>
