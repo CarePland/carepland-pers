@@ -114,6 +114,7 @@ type AppContentVersion = {
 
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
+type AdminTab = "ai" | "content" | "messages" | "tools";
 type AiWorkflowKey =
   | "bulk_appointment_intake"
   | "careprep_generation"
@@ -1284,6 +1285,7 @@ export default function Home() {
   const [selectedAiWorkflow, setSelectedAiWorkflow] =
     useState<AiWorkflowKey>("careprep_generation");
   const [aiAdminTab, setAiAdminTab] = useState<AiAdminTab>("instructions");
+  const [adminTab, setAdminTab] = useState<AdminTab>("tools");
   const [loadingInstructions, setLoadingInstructions] = useState(false);
   const [loadingCarePrepHistory, setLoadingCarePrepHistory] = useState(false);
   const [savingInstructions, setSavingInstructions] = useState(false);
@@ -2669,8 +2671,20 @@ export default function Home() {
     setMainTab(tab);
 
     if (tab === "admin") {
-      setAiAdminTab("instructions");
       await Promise.all([loadAiInstructions(), loadAppContent()]);
+    }
+  }
+
+  async function handleChangeAdminTab(tab: AdminTab) {
+    setAdminTab(tab);
+    setMessage("");
+
+    if (tab === "ai") {
+      await loadAiInstructions();
+    }
+
+    if (tab === "content" || tab === "messages") {
+      await loadAppContent();
     }
   }
 
@@ -7087,6 +7101,31 @@ export default function Home() {
 
             {mainTab === "admin" && isAdmin ? (
               <>
+              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    ["tools", "Tools"],
+                    ["content", "Content"],
+                    ["ai", "AI Prompts"],
+                    ["messages", "Messages"],
+                  ].map(([tab, label]) => (
+                    <button
+                      className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                        adminTab === tab
+                          ? "bg-blue-700 text-white"
+                          : "border border-slate-300 bg-white text-slate-700"
+                      }`}
+                      key={tab}
+                      onClick={() => handleChangeAdminTab(tab as AdminTab)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {adminTab === "tools" ? (
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -7162,7 +7201,9 @@ export default function Home() {
                   {seedingAdminSampleData ? "Adding..." : "Add sample data"}
                 </button>
               </section>
+              ) : null}
 
+              {adminTab === "content" ? (
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -7325,7 +7366,9 @@ export default function Home() {
                   </div>
                 </section>
               </section>
+              ) : null}
 
+              {adminTab === "ai" ? (
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -7738,6 +7781,19 @@ export default function Home() {
                   </section>
                 )}
               </section>
+              ) : null}
+
+              {adminTab === "messages" ? (
+                <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <h2 className="text-2xl font-semibold">Messages</h2>
+                  <p className="mt-1 max-w-3xl text-slate-600">
+                    Short app messages will live here: success notices, warning
+                    text, validation messages, and toast wording. This tab is
+                    ready for the message catalog once we promote those strings
+                    into managed content.
+                  </p>
+                </section>
+              ) : null}
               </>
             ) : null}
 
