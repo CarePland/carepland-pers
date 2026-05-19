@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@supabase/supabase-js";
+import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AIReviewBadge } from "./components/AIReviewBadge";
 
@@ -4331,24 +4332,45 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
       <section className="mx-auto max-w-6xl">
-        <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
-          CarePland Personal
-        </p>
+        <header className="flex flex-col gap-5 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <Image
+                alt="CarePland"
+                className="h-auto w-28"
+                height={100}
+                priority
+                src="/carepland-logo.png"
+                width={160}
+              />
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                Personal
+              </span>
+            </div>
 
-        <h1 className="mt-3 max-w-4xl text-4xl font-bold">
-          Appointment memory, rebuilt cleanly.
-        </h1>
+            <h1 className="mt-5 max-w-4xl text-4xl font-bold">
+              Your appointment memory, organized.
+            </h1>
 
-        <p className="mt-4 max-w-3xl text-lg text-slate-700">
-          A first live dashboard for the new CP Pers data spine: appointments,
-          visit notes, and CarePrep from Supabase.
-        </p>
+            <p className="mt-3 max-w-3xl text-lg text-slate-700">
+              Track visits, save notes, and bring the right context forward when
+              it matters.
+            </p>
+          </div>
+
+          <a
+            className="text-sm font-semibold text-blue-700"
+            href={supportMailtoHref(signedInEmail, mainTab)}
+          >
+            Support
+          </a>
+        </header>
 
         {signedInEmail &&
         authMode !== "updatePassword" &&
         !needsBetaAgreement &&
         !needsOnboarding ? (
-          <div className="mt-8 flex flex-wrap items-start justify-between gap-4">
+          <div className="mt-6 flex flex-wrap items-start justify-between gap-4">
             <div className="flex flex-wrap gap-2">
               <button
                 className={`rounded-md px-4 py-2 font-semibold ${
@@ -4406,13 +4428,6 @@ export default function Home() {
                 <span className="font-medium text-slate-500">
                   Care VIPs {careSubjects.length}/{careVipLimit}
                 </span>
-                <span className="mx-2 text-slate-300">·</span>
-                <a
-                  className="font-semibold text-blue-700"
-                  href={supportMailtoHref(signedInEmail, mainTab)}
-                >
-                  Support
-                </a>
               </span>
             </div>
           </div>
