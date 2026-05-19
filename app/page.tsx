@@ -95,9 +95,13 @@ type AiInstructionVersion = {
 
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
-type AiWorkflowKey = "careprep_generation" | "note_intake_interpretation";
+type AiWorkflowKey =
+  | "bulk_appointment_intake"
+  | "careprep_generation"
+  | "note_intake_interpretation";
 type AuthMode = "reset" | "signIn" | "signUp";
 type AppointmentPanel = "add" | "quickAdd";
+type TextIntakeMode = "bulkAppointments" | "single";
 type MainTab = "admin" | "appointments" | "profile";
 
 type CarePrepHistoryRow = {
@@ -150,6 +154,21 @@ type TextIntakeDraft = {
   startsAt: string;
   suggestedAction: string;
   takeaways: string;
+};
+
+type BulkAppointmentDraft = {
+  appointmentReason: string;
+  appointmentTitle: string;
+  confidence: number;
+  importId: string;
+  isSelected: boolean;
+  locationAddress: string;
+  locationName: string;
+  locationPhone: string;
+  providerName: string;
+  providerOrganization: string;
+  startsAt: string;
+  suggestedAction: string;
 };
 
 type TextIntakeMatch = {
@@ -270,6 +289,47 @@ const defaultTextIntakeOutputSchema = {
   type: "object",
 };
 
+const defaultBulkAppointmentOutputSchema = {
+  additionalProperties: false,
+  properties: {
+    appointments: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          appointment_reason: { type: "string" },
+          appointment_title: { type: "string" },
+          confidence: { type: "number" },
+          location_address: { type: "string" },
+          location_name: { type: "string" },
+          location_phone: { type: "string" },
+          provider_name: { type: "string" },
+          provider_organization: { type: "string" },
+          starts_at_local: { type: "string" },
+          suggested_action: { type: "string" },
+        },
+        required: [
+          "appointment_title",
+          "appointment_reason",
+          "starts_at_local",
+          "provider_name",
+          "provider_organization",
+          "location_name",
+          "location_address",
+          "location_phone",
+          "confidence",
+          "suggested_action",
+        ],
+        type: "object",
+      },
+      maxItems: 10,
+      type: "array",
+    },
+    import_summary: { type: "string" },
+  },
+  required: ["appointments", "import_summary"],
+  type: "object",
+};
+
 const aiWorkflows: Record<
   AiWorkflowKey,
   {
@@ -286,6 +346,14 @@ const aiWorkflows: Record<
     description: "Instructions used to generate appointment preparation guidance.",
     historyLabel: "CarePrep History",
     label: "CarePrep generation",
+  },
+  bulk_appointment_intake: {
+    defaultChangeNote: "Initial bulk appointment intake instruction set",
+    defaultSchema: defaultBulkAppointmentOutputSchema,
+    description:
+      "Instructions used to extract multiple appointment drafts from pasted text.",
+    historyLabel: "Intake History",
+    label: "Bulk appointment intake",
   },
   note_intake_interpretation: {
     defaultChangeNote: "Initial note intake instruction set",
@@ -871,6 +939,41 @@ function intakeDraftFromResult(value: unknown): TextIntakeDraft {
   };
 }
 
+function bulkAppointmentDraftsFromResult(value: unknown): BulkAppointmentDraft[] {
+  const result =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const appointments = Array.isArray(result.appointments)
+    ? result.appointments
+    : [];
+
+  return appointments.slice(0, 10).map((item, index) => {
+    const draft =
+      item && typeof item === "object" && !Array.isArray(item)
+        ? (item as Record<string, unknown>)
+        : {};
+
+    return {
+      appointmentReason: String(draft.appointment_reason ?? ""),
+      appointmentTitle: String(draft.appointment_title ?? ""),
+      confidence:
+        typeof draft.confidence === "number"
+          ? draft.confidence
+          : Number(draft.confidence) || 0,
+      importId: `bulk-${index}`,
+      isSelected: true,
+      locationAddress: String(draft.location_address ?? ""),
+      locationName: String(draft.location_name ?? ""),
+      locationPhone: String(draft.location_phone ?? ""),
+      providerName: String(draft.provider_name ?? ""),
+      providerOrganization: String(draft.provider_organization ?? ""),
+      startsAt: String(draft.starts_at_local ?? ""),
+      suggestedAction: String(draft.suggested_action ?? ""),
+    };
+  });
+}
+
 export default function Home() {
   const [authMode, setAuthMode] = useState<AuthMode>("signIn");
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
@@ -896,6 +999,8 @@ export default function Home() {
     useState("");
   const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState("");
   const [textIntakeSubjectId, setTextIntakeSubjectId] = useState("");
+  const [textIntakeMode, setTextIntakeMode] =
+    useState<TextIntakeMode>("single");
   const [textIntakeValue, setTextIntakeValue] = useState("");
   const [textIntakeDraft, setTextIntakeDraft] =
     useState<TextIntakeDraft | null>(null);
@@ -915,6 +1020,10 @@ export default function Home() {
     applyTextIntakeAppointmentDetails,
     setApplyTextIntakeAppointmentDetails,
   ] = useState(false);
+  const [bulkAppointmentDrafts, setBulkAppointmentDrafts] = useState<
+    BulkAppointmentDraft[]
+  >([]);
+  const [bulkAppointmentSummary, setBulkAppointmentSummary] = useState("");
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
   const [selectedAiWorkflow, setSelectedAiWorkflow] =
@@ -2277,6 +2386,10 @@ export default function Home() {
                 title: targetAppointment.title,
               }
             : null,
+          mode:
+            !targetAppointment && textIntakeMode === "bulkAppointments"
+              ? "bulk_appointments"
+              : "single",
           rawText,
         }),
         headers: {
@@ -2289,6 +2402,24 @@ export default function Home() {
 
       if (!response.ok) {
         throw new Error(result.error ?? "Text intake failed.");
+      }
+
+      if (!targetAppointment && textIntakeMode === "bulkAppointments") {
+        const drafts = bulkAppointmentDraftsFromResult(result.draft);
+
+        if (drafts.length === 0) {
+          throw new Error("No appointments were found in that text.");
+        }
+
+        setBulkAppointmentDrafts(drafts);
+        setBulkAppointmentSummary(String(result.draft?.import_summary ?? ""));
+        setTextIntakeDraft(null);
+        setTextIntakeAiDraft(null);
+        setTextIntakeItemId(result.intakeItemId ?? null);
+        setTextIntakeMatches([]);
+        setSelectedTextIntakeMatchId("new");
+        setMessage(`Found ${drafts.length} appointment draft(s). Review before saving.`);
+        return;
       }
 
       const baseDraft = intakeDraftFromResult(result.draft);
@@ -2345,6 +2476,8 @@ export default function Home() {
       setTextIntakeDraft(interpretedDraft);
       setTextIntakeAiDraft(interpretedDraft);
       setTextIntakeItemId(result.intakeItemId ?? null);
+      setBulkAppointmentDrafts([]);
+      setBulkAppointmentSummary("");
       setTextIntakeMatches(matches);
       setSelectedTextIntakeMatchId(targetAppointment?.id ?? "new");
       setTextIntakeSubjectId(interpretedSubjectId);
@@ -2384,6 +2517,8 @@ export default function Home() {
     setTextIntakeAiDraft(null);
     setTextIntakeItemId(null);
     setTextIntakeMatches([]);
+    setBulkAppointmentDrafts([]);
+    setBulkAppointmentSummary("");
     setSelectedTextIntakeMatchId(appointment.id);
     setTextIntakeSubjectId(appointment.care_subject_id ?? "");
     setApplyTextIntakeAppointmentDetails(false);
@@ -2407,6 +2542,8 @@ export default function Home() {
     setTextIntakeAiDraft(null);
     setTextIntakeItemId(null);
     setTextIntakeMatches([]);
+    setBulkAppointmentDrafts([]);
+    setBulkAppointmentSummary("");
     setSelectedTextIntakeMatchId("new");
     setTextIntakeTargetAppointmentId(null);
     setContextualTextIntakeValue("");
@@ -2890,6 +3027,148 @@ export default function Home() {
       setAppointmentView(shouldSaveNotes ? "logged" : "upcoming");
       await loadAppointments(shouldSaveNotes ? "logged" : "upcoming");
       setMessage("Intake saved.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingTextIntake(false);
+    }
+  }
+
+  function updateBulkAppointmentDraft(
+    importId: string,
+    field: keyof Omit<BulkAppointmentDraft, "importId" | "isSelected">,
+    value: string | number
+  ) {
+    setBulkAppointmentDrafts((currentDrafts) =>
+      currentDrafts.map((draft) =>
+        draft.importId === importId ? { ...draft, [field]: value } : draft
+      )
+    );
+  }
+
+  function toggleBulkAppointmentDraft(importId: string, isSelected: boolean) {
+    setBulkAppointmentDrafts((currentDrafts) =>
+      currentDrafts.map((draft) =>
+        draft.importId === importId ? { ...draft, isSelected } : draft
+      )
+    );
+  }
+
+  async function handleSaveBulkAppointments(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingTextIntake(true);
+    setMessage("");
+
+    try {
+      const selectedDrafts = bulkAppointmentDrafts.filter(
+        (draft) => draft.isSelected
+      );
+
+      if (selectedDrafts.length === 0) {
+        throw new Error("Choose at least one appointment to save.");
+      }
+
+      if (selectedDrafts.length > 10) {
+        throw new Error("Save up to 10 appointments per import.");
+      }
+
+      const { careCircleId, careSubjectId, userId } =
+        await getPrimaryCareContext(textIntakeSubjectId);
+
+      if (!careSubjectId) {
+        throw new Error("Please choose who these appointments are for.");
+      }
+
+      const appointmentRows = selectedDrafts.map((draft) => {
+        if (!draft.appointmentTitle.trim()) {
+          throw new Error("Each selected appointment needs a title.");
+        }
+
+        const startsAtDate = draft.startsAt ? new Date(draft.startsAt) : null;
+
+        if (startsAtDate && Number.isNaN(startsAtDate.getTime())) {
+          throw new Error(`Check the date and time for ${draft.appointmentTitle}.`);
+        }
+
+        return {
+          care_circle_id: careCircleId,
+          care_subject_id: careSubjectId,
+          location_address: draft.locationAddress.trim() || null,
+          location_name: draft.locationName.trim() || null,
+          location_phone: draft.locationPhone.trim() || null,
+          owner_user_id: userId,
+          provider_name: draft.providerName.trim() || null,
+          provider_organization: draft.providerOrganization.trim() || null,
+          reason: draft.appointmentReason.trim() || null,
+          source: "manual",
+          starts_at: startsAtDate ? startsAtDate.toISOString() : null,
+          status: "scheduled",
+          title: draft.appointmentTitle.trim(),
+        };
+      });
+
+      const { data: savedAppointments, error: appointmentError } = await supabase
+        .from("appointments")
+        .insert(appointmentRows)
+        .select("id");
+
+      if (appointmentError) {
+        throw appointmentError;
+      }
+
+      const savedAppointmentIds =
+        savedAppointments?.map((appointment) => appointment.id) ?? [];
+
+      if (textIntakeItemId) {
+        const acceptedAppointments = selectedDrafts.map((draft, index) => ({
+          appointment_id: savedAppointmentIds[index] ?? null,
+          appointment_reason: draft.appointmentReason,
+          appointment_title: draft.appointmentTitle,
+          confidence: draft.confidence,
+          location_address: draft.locationAddress,
+          location_name: draft.locationName,
+          location_phone: draft.locationPhone,
+          provider_name: draft.providerName,
+          provider_organization: draft.providerOrganization,
+          starts_at_local: draft.startsAt,
+          suggested_action: draft.suggestedAction,
+        }));
+
+        const { error: intakeUpdateError } = await supabase
+          .from("intake_items")
+          .update({
+            accepted_at: new Date().toISOString(),
+            accepted_by_user_id: userId,
+            accepted_interpretation: {
+              appointments: acceptedAppointments,
+              saved_appointment_ids: savedAppointmentIds,
+            },
+            appointment_id: savedAppointmentIds[0] ?? null,
+            interpretation: {
+              appointments: acceptedAppointments,
+              saved_appointment_ids: savedAppointmentIds,
+            },
+            status: "accepted",
+          })
+          .eq("id", textIntakeItemId);
+
+        if (intakeUpdateError) {
+          throw intakeUpdateError;
+        }
+      }
+
+      setTextIntakeValue("");
+      setTextIntakeDraft(null);
+      setTextIntakeAiDraft(null);
+      setTextIntakeItemId(null);
+      setTextIntakeMatches([]);
+      setBulkAppointmentDrafts([]);
+      setBulkAppointmentSummary("");
+      setSelectedTextIntakeMatchId("new");
+      setActiveAppointmentPanel(null);
+      setAppointmentView("upcoming");
+      await loadAppointments("upcoming");
+      setMessage(`Saved ${savedAppointmentIds.length} appointment(s).`);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -4870,6 +5149,52 @@ export default function Home() {
                           </select>
                         </label>
                       ) : null}
+                      <fieldset className="mt-3 flex flex-wrap gap-2">
+                        <legend className="mb-2 text-sm font-medium text-slate-700">
+                          What are you importing?
+                        </legend>
+                        <label
+                          className={`rounded-md border px-3 py-2 text-sm font-semibold ${
+                            textIntakeMode === "single"
+                              ? "border-blue-700 bg-blue-50 text-blue-700"
+                              : "border-slate-300 bg-white text-slate-700"
+                          }`}
+                        >
+                          <input
+                            checked={textIntakeMode === "single"}
+                            className="sr-only"
+                            name="text-intake-mode"
+                            onChange={() => {
+                              setTextIntakeMode("single");
+                              setBulkAppointmentDrafts([]);
+                              setBulkAppointmentSummary("");
+                            }}
+                            type="radio"
+                          />
+                          One item
+                        </label>
+                        <label
+                          className={`rounded-md border px-3 py-2 text-sm font-semibold ${
+                            textIntakeMode === "bulkAppointments"
+                              ? "border-blue-700 bg-blue-50 text-blue-700"
+                              : "border-slate-300 bg-white text-slate-700"
+                          }`}
+                        >
+                          <input
+                            checked={textIntakeMode === "bulkAppointments"}
+                            className="sr-only"
+                            name="text-intake-mode"
+                            onChange={() => {
+                              setTextIntakeMode("bulkAppointments");
+                              setTextIntakeDraft(null);
+                              setTextIntakeAiDraft(null);
+                              setTextIntakeMatches([]);
+                            }}
+                            type="radio"
+                          />
+                          Multiple appointments
+                        </label>
+                      </fieldset>
                       <label className="mt-3 block text-sm font-medium text-slate-700">
                         Text
                         <textarea
@@ -4889,7 +5214,9 @@ export default function Home() {
                         >
                           {processingTextIntake
                             ? "Interpreting..."
-                            : "Interpret text"}
+                            : textIntakeMode === "bulkAppointments"
+                              ? "Find appointments"
+                              : "Interpret text"}
                         </button>
                         <button
                           className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
@@ -5017,6 +5344,193 @@ export default function Home() {
                             type="submit"
                           >
                             {savingTextIntake ? "Saving..." : "Save intake"}
+                          </button>
+                          <button
+                            className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                            onClick={cancelTextIntake}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : null}
+
+                    {bulkAppointmentDrafts.length > 0 ? (
+                      <form
+                        className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-4"
+                        onSubmit={handleSaveBulkAppointments}
+                      >
+                        <div>
+                          <h3 className="font-semibold text-blue-950">
+                            Review appointment drafts
+                          </h3>
+                          <p className="mt-1 text-sm text-blue-800">
+                            {bulkAppointmentSummary ||
+                              `Found ${bulkAppointmentDrafts.length} appointment draft(s).`}
+                          </p>
+                          <p className="mt-1 text-xs text-blue-700">
+                            Up to 10 appointments can be imported at once.
+                          </p>
+                        </div>
+
+                        <div className="mt-4 space-y-4">
+                          {bulkAppointmentDrafts.map((draft, index) => (
+                            <article
+                              className="rounded-md border border-blue-100 bg-white p-4"
+                              key={draft.importId}
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <label className="flex items-center gap-2 font-semibold text-slate-900">
+                                  <input
+                                    checked={draft.isSelected}
+                                    onChange={(event) =>
+                                      toggleBulkAppointmentDraft(
+                                        draft.importId,
+                                        event.target.checked
+                                      )
+                                    }
+                                    type="checkbox"
+                                  />
+                                  Appointment {index + 1}
+                                </label>
+                                <span className="text-xs text-slate-500">
+                                  Confidence {Math.round(draft.confidence * 100)}%
+                                </span>
+                              </div>
+                              {draft.suggestedAction ? (
+                                <p className="mt-2 text-xs text-blue-800">
+                                  {draft.suggestedAction}
+                                </p>
+                              ) : null}
+                              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                <label className="block text-sm font-medium text-slate-700">
+                                  Title
+                                  <input
+                                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                                    onChange={(event) =>
+                                      updateBulkAppointmentDraft(
+                                        draft.importId,
+                                        "appointmentTitle",
+                                        event.target.value
+                                      )
+                                    }
+                                    value={draft.appointmentTitle}
+                                  />
+                                </label>
+                                <label className="block text-sm font-medium text-slate-700">
+                                  Date & time
+                                  <input
+                                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                                    onChange={(event) =>
+                                      updateBulkAppointmentDraft(
+                                        draft.importId,
+                                        "startsAt",
+                                        event.target.value
+                                      )
+                                    }
+                                    type="datetime-local"
+                                    value={draft.startsAt}
+                                  />
+                                </label>
+                                <label className="block text-sm font-medium text-slate-700">
+                                  Provider
+                                  <input
+                                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                                    onChange={(event) =>
+                                      updateBulkAppointmentDraft(
+                                        draft.importId,
+                                        "providerName",
+                                        event.target.value
+                                      )
+                                    }
+                                    value={draft.providerName}
+                                  />
+                                </label>
+                                <label className="block text-sm font-medium text-slate-700">
+                                  Practice
+                                  <input
+                                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                                    onChange={(event) =>
+                                      updateBulkAppointmentDraft(
+                                        draft.importId,
+                                        "providerOrganization",
+                                        event.target.value
+                                      )
+                                    }
+                                    value={draft.providerOrganization}
+                                  />
+                                </label>
+                                <label className="block text-sm font-medium text-slate-700">
+                                  Location
+                                  <input
+                                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                                    onChange={(event) =>
+                                      updateBulkAppointmentDraft(
+                                        draft.importId,
+                                        "locationName",
+                                        event.target.value
+                                      )
+                                    }
+                                    value={draft.locationName}
+                                  />
+                                </label>
+                                <label className="block text-sm font-medium text-slate-700">
+                                  Address
+                                  <input
+                                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                                    onChange={(event) =>
+                                      updateBulkAppointmentDraft(
+                                        draft.importId,
+                                        "locationAddress",
+                                        event.target.value
+                                      )
+                                    }
+                                    value={draft.locationAddress}
+                                  />
+                                </label>
+                                <label className="block text-sm font-medium text-slate-700">
+                                  Phone
+                                  <input
+                                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                                    onChange={(event) =>
+                                      updateBulkAppointmentDraft(
+                                        draft.importId,
+                                        "locationPhone",
+                                        event.target.value
+                                      )
+                                    }
+                                    value={draft.locationPhone}
+                                  />
+                                </label>
+                                <label className="block text-sm font-medium text-slate-700">
+                                  Reason
+                                  <textarea
+                                    className="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                                    onChange={(event) =>
+                                      updateBulkAppointmentDraft(
+                                        draft.importId,
+                                        "appointmentReason",
+                                        event.target.value
+                                      )
+                                    }
+                                    value={draft.appointmentReason}
+                                  />
+                                </label>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-3">
+                          <button
+                            className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                            disabled={savingTextIntake}
+                            type="submit"
+                          >
+                            {savingTextIntake
+                              ? "Saving..."
+                              : "Save selected appointments"}
                           </button>
                           <button
                             className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
