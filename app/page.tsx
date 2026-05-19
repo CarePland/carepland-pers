@@ -7693,13 +7693,6 @@ export default function Home() {
                   textIntakeTargetAppointmentId === appointment.id;
                 const mapsLink = googleMapsUrl(appointment.location_address);
                 const calendarLink = agicalUrl(appointment);
-                const providerLine = [
-                  appointment.provider_name,
-                  appointment.provider_organization,
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
-
                 return (
                   <article
                     className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
@@ -7851,22 +7844,22 @@ export default function Home() {
                         ) : null}
                       </div>
                       <div className="text-left md:min-w-64 md:text-right">
-                        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                        <p className="text-lg font-medium text-slate-700">
+                          {formatDate(appointment.starts_at)}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 md:justify-end">
+                          {appointmentSubject ? (
+                            <span className="text-sm font-medium text-slate-500">
+                              {appointmentSubject.display_name}
+                            </span>
+                          ) : null}
                           <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
                             {appointment.status}
                           </span>
-                          {appointmentSubject ? (
-                            <span className="text-sm font-medium text-slate-500">
-                              for {appointmentSubject.display_name}
-                            </span>
-                          ) : null}
                         </div>
-                        <p className="mt-2 text-lg font-medium text-slate-700">
-                          {formatDate(appointment.starts_at)}
-                        </p>
-                        {providerLine ? (
+                        {appointment.provider_name ? (
                           <p className="mt-1 text-sm font-medium text-slate-700">
-                            {providerLine}
+                            {appointment.provider_name}
                           </p>
                         ) : null}
                       </div>
