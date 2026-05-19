@@ -221,6 +221,7 @@ const defaultEntitlement: CareCircleEntitlement = {
   plan_name: "Personal",
 };
 
+const betaAgreementVersion = "beta-2026-05-19";
 const welcomeGuideStoragePrefix = "carepland-welcome-guide-dismissed:";
 
 const emptyProfileDraft: ProfileDraft = {
@@ -1142,6 +1143,19 @@ export default function Home() {
   >(null);
   const [profileDraft, setProfileDraft] =
     useState<ProfileDraft>(emptyProfileDraft);
+  const [acceptBetaDisclaimer, setAcceptBetaDisclaimer] = useState(false);
+  const [acceptBetaPrivacy, setAcceptBetaPrivacy] = useState(false);
+  const [acceptBetaTerms, setAcceptBetaTerms] = useState(false);
+  const [
+    betaDisclaimerAcknowledgedAt,
+    setBetaDisclaimerAcknowledgedAt,
+  ] = useState<string | null>(null);
+  const [betaPrivacyAcknowledgedAt, setBetaPrivacyAcknowledgedAt] = useState<
+    string | null
+  >(null);
+  const [betaTermsAcknowledgedAt, setBetaTermsAcknowledgedAt] = useState<
+    string | null
+  >(null);
   const [onboardingCompletedAt, setOnboardingCompletedAt] = useState<
     string | null
   >(null);
@@ -1197,7 +1211,14 @@ export default function Home() {
   const careVipLimit = Math.max(entitlement.max_active_subjects || 1, 1);
   const canUseMultipleCareVips = careVipLimit > 1;
   const canAddCareVip = careSubjects.length < careVipLimit;
-  const needsOnboarding = signedInEmail && !onboardingCompletedAt;
+  const hasAcceptedBetaAgreement =
+    Boolean(betaDisclaimerAcknowledgedAt) &&
+    Boolean(betaPrivacyAcknowledgedAt) &&
+    Boolean(betaTermsAcknowledgedAt);
+  const needsBetaAgreement =
+    Boolean(signedInEmail) && !hasAcceptedBetaAgreement;
+  const needsOnboarding =
+    Boolean(signedInEmail) && hasAcceptedBetaAgreement && !onboardingCompletedAt;
   const verifiedAccountEmail = signedInEmail ?? profileDraft.email;
   const passwordsMismatch =
     authMode === "signUp" &&
@@ -1206,6 +1227,7 @@ export default function Home() {
   const canSubmitAuth = !loading && !passwordsMismatch;
   const showWelcomeGuide =
     Boolean(signedInEmail) &&
+    !needsBetaAgreement &&
     !needsOnboarding &&
     mainTab === "appointments" &&
     !welcomeGuideDismissed;
@@ -1382,7 +1404,7 @@ export default function Home() {
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
       .select(
-        "id,email,display_name,given_name,family_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,onboarding_completed_at,is_admin"
+        "id,email,display_name,given_name,family_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,beta_terms_acknowledged_at,beta_privacy_acknowledged_at,beta_disclaimer_acknowledged_at,beta_agreement_version,onboarding_completed_at,is_admin"
       )
       .eq("id", user.id)
       .maybeSingle();
@@ -1403,6 +1425,38 @@ export default function Home() {
         ? profileRow.onboarding_completed_at
         : null
     );
+    setBetaDisclaimerAcknowledgedAt(
+      typeof profileRow?.beta_disclaimer_acknowledged_at === "string"
+        ? profileRow.beta_disclaimer_acknowledged_at
+        : null
+    );
+    setBetaPrivacyAcknowledgedAt(
+      typeof profileRow?.beta_privacy_acknowledged_at === "string"
+        ? profileRow.beta_privacy_acknowledged_at
+        : null
+    );
+    setBetaTermsAcknowledgedAt(
+      typeof profileRow?.beta_terms_acknowledged_at === "string"
+        ? profileRow.beta_terms_acknowledged_at
+        : null
+    );
+
+    if (
+      !profileRow?.beta_disclaimer_acknowledged_at ||
+      !profileRow?.beta_privacy_acknowledged_at ||
+      !profileRow?.beta_terms_acknowledged_at
+    ) {
+      setAppointments([]);
+      setNotesReminderAppointment(null);
+      setCareSubjects([]);
+      setEntitlement(defaultEntitlement);
+      setNotes([]);
+      setGuidance([]);
+      setCarePrepHistory([]);
+      setHistoryAppointmentId("");
+      setMessage("Review the beta testing notice to continue.");
+      return;
+    }
 
     if (!profileRow?.onboarding_completed_at) {
       setAppointments([]);
@@ -2236,6 +2290,12 @@ export default function Home() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     setSignedInEmail(null);
+    setAcceptBetaDisclaimer(false);
+    setAcceptBetaPrivacy(false);
+    setAcceptBetaTerms(false);
+    setBetaDisclaimerAcknowledgedAt(null);
+    setBetaPrivacyAcknowledgedAt(null);
+    setBetaTermsAcknowledgedAt(null);
     setWelcomeGuideDismissed(false);
     setIsAdmin(false);
     setOnboardingCompletedAt(null);
@@ -2274,6 +2334,61 @@ export default function Home() {
     setNewCareVipName("");
     setManagingCareVips(false);
     setMessage("Signed out.");
+  }
+
+  async function handleAcceptBetaAgreement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError) {
+        throw userError;
+      }
+
+      const user = userData.user;
+
+      if (!user) {
+        throw new Error("Please sign in before continuing.");
+      }
+
+      if (!acceptBetaDisclaimer || !acceptBetaPrivacy || !acceptBetaTerms) {
+        throw new Error("Please acknowledge each beta testing item to continue.");
+      }
+
+      const acknowledgedAt = new Date().toISOString();
+      const profileEmail = user.email ?? profileDraft.email.trim();
+      const { error } = await supabase.from("profiles").upsert({
+        beta_agreement_version: betaAgreementVersion,
+        beta_disclaimer_acknowledged_at: acknowledgedAt,
+        beta_privacy_acknowledged_at: acknowledgedAt,
+        beta_terms_acknowledged_at: acknowledgedAt,
+        email: profileEmail,
+        id: user.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setBetaDisclaimerAcknowledgedAt(acknowledgedAt);
+      setBetaPrivacyAcknowledgedAt(acknowledgedAt);
+      setBetaTermsAcknowledgedAt(acknowledgedAt);
+      setAcceptBetaDisclaimer(false);
+      setAcceptBetaPrivacy(false);
+      setAcceptBetaTerms(false);
+      await loadAppointments();
+      showToast("Beta acknowledgement saved.", {
+        durationMs: 5000,
+        type: "success",
+      });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleSaveProfile(event: FormEvent<HTMLFormElement>) {
@@ -3968,7 +4083,7 @@ export default function Home() {
           visit notes, and CarePrep from Supabase.
         </p>
 
-        {signedInEmail && !needsOnboarding ? (
+        {signedInEmail && !needsBetaAgreement && !needsOnboarding ? (
           <div className="mt-8 flex flex-wrap items-start justify-between gap-4">
             <div className="flex flex-wrap gap-2">
               <button
@@ -4039,7 +4154,85 @@ export default function Home() {
           </div>
         ) : null}
 
-        {needsOnboarding ? (
+        {needsBetaAgreement ? (
+          <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-semibold">Beta testing notice</h2>
+                <p className="mt-1 max-w-3xl text-slate-600">
+                  CarePland Personal is currently in testing. Formal Terms of
+                  Service and Privacy Policy pages are not enabled yet.
+                </p>
+              </div>
+              <button
+                className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
+                onClick={handleSignOut}
+                type="button"
+              >
+                Sign out
+              </button>
+            </div>
+
+            <form className="mt-5 space-y-4" onSubmit={handleAcceptBetaAgreement}>
+              <label className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                <input
+                  checked={acceptBetaTerms}
+                  className="mt-1"
+                  onChange={(event) => setAcceptBetaTerms(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>
+                  I understand formal Terms of Service are not currently enabled
+                  for this testing version.
+                </span>
+              </label>
+              <label className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                <input
+                  checked={acceptBetaPrivacy}
+                  className="mt-1"
+                  onChange={(event) => setAcceptBetaPrivacy(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>
+                  I understand formal Privacy Policy review is not currently
+                  enabled for this testing version.
+                </span>
+              </label>
+              <label className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                <input
+                  checked={acceptBetaDisclaimer}
+                  className="mt-1"
+                  onChange={(event) =>
+                    setAcceptBetaDisclaimer(event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                <span>
+                  I understand this beta is not for emergencies or critical
+                  medical decisions.
+                </span>
+              </label>
+              <button
+                className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                disabled={
+                  loading ||
+                  !acceptBetaTerms ||
+                  !acceptBetaPrivacy ||
+                  !acceptBetaDisclaimer
+                }
+                type="submit"
+              >
+                {loading ? "Saving..." : "Continue"}
+              </button>
+            </form>
+
+            {message ? (
+              <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
+                {message}
+              </p>
+            ) : null}
+          </section>
+        ) : needsOnboarding ? (
           <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
