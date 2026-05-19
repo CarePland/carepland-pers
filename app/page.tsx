@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { AIReviewBadge } from "./components/AIReviewBadge";
 
 type Appointment = {
   id: string;
@@ -683,46 +684,6 @@ function agicalUrl(appointment: Appointment): string | null {
   }
 
   return `https://ics.agical.io/?${params.toString()}`;
-}
-
-function confidenceBadge(confidence: number) {
-  if (confidence >= 0.8) {
-    return {
-      className: "border-emerald-200 bg-emerald-50 text-emerald-800",
-      label: "High confidence",
-    };
-  }
-
-  if (confidence >= 0.5) {
-    return {
-      className: "border-amber-200 bg-amber-50 text-amber-800",
-      label: "Medium confidence",
-    };
-  }
-
-  if (confidence > 0) {
-    return {
-      className: "border-rose-200 bg-rose-50 text-rose-800",
-      label: "Low confidence",
-    };
-  }
-
-  return {
-    className: "border-slate-900 bg-slate-900 text-white",
-    label: "Needs review",
-  };
-}
-
-function ConfidenceBadge({ confidence }: { confidence: number }) {
-  const badge = confidenceBadge(confidence);
-
-  return (
-    <span
-      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${badge.className}`}
-    >
-      {badge.label}
-    </span>
-  );
 }
 
 async function hashInstructionContent({
@@ -4626,7 +4587,7 @@ export default function Home() {
                       Review intake draft
                     </h3>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <ConfidenceBadge confidence={textIntakeDraft.confidence} />
+                      <AIReviewBadge confidence={textIntakeDraft.confidence} />
                       {textIntakeDraft.suggestedAction ? (
                         <p className="text-xs text-blue-800">
                           {textIntakeDraft.suggestedAction}
@@ -5280,7 +5241,7 @@ export default function Home() {
                             Review intake draft
                           </h3>
                           <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <ConfidenceBadge
+                            <AIReviewBadge
                               confidence={textIntakeDraft.confidence}
                             />
                             {textIntakeDraft.suggestedAction ? (
@@ -5439,7 +5400,7 @@ export default function Home() {
                                   />
                                   Appointment {index + 1}
                                 </label>
-                                <ConfidenceBadge confidence={draft.confidence} />
+                                <AIReviewBadge confidence={draft.confidence} />
                               </div>
                               {draft.suggestedAction ? (
                                 <p className="mt-2 text-xs text-blue-800">
@@ -6532,7 +6493,7 @@ export default function Home() {
                         ) : (
                           <>
                             <div className="mt-3 flex flex-wrap items-center gap-2">
-                              <ConfidenceBadge
+                              <AIReviewBadge
                                 confidence={textIntakeDraft.confidence}
                               />
                               {textIntakeDraft.suggestedAction ? (
