@@ -936,7 +936,7 @@ export default function Home() {
     return new Map(careSubjects.map((subject) => [subject.id, subject]));
   }, [careSubjects]);
 
-  const careVipLimit = Math.max(entitlement.max_active_subjects, 5);
+  const careVipLimit = Math.max(entitlement.max_active_subjects || 1, 1);
   const canUseMultipleCareVips = careVipLimit > 1;
   const canAddCareVip = careSubjects.length < careVipLimit;
   const needsOnboarding = signedInEmail && !onboardingCompletedAt;
@@ -4437,7 +4437,7 @@ export default function Home() {
                   <div className="min-w-60 flex-1">
                     {canUseMultipleCareVips ? (
                       <label className="block text-sm font-medium text-slate-700">
-                        Showing
+                        Showing appointments
                         <select
                           className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                           disabled={loading || careSubjects.length === 0}
@@ -4457,7 +4457,7 @@ export default function Home() {
                     ) : (
                       <div>
                         <p className="text-sm font-medium text-slate-700">
-                          Showing
+                          Showing appointments
                         </p>
                         <p className="mt-2 rounded-md bg-slate-100 px-3 py-2 text-base text-slate-700">
                           All appointments
@@ -4514,7 +4514,7 @@ export default function Home() {
                   >
                     {canUseMultipleCareVips ? (
                       <label className="block text-sm font-medium text-slate-700">
-                        For
+                        For this appointment
                         <select
                           className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                           disabled={careSubjects.length === 0}
@@ -4630,7 +4630,7 @@ export default function Home() {
                     <form onSubmit={handleInterpretTextIntake}>
                       {canUseMultipleCareVips ? (
                         <label className="block text-sm font-medium text-slate-700">
-                          For
+                          For this import
                           <select
                             className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                             disabled={careSubjects.length === 0}
