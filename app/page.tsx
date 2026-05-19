@@ -3540,11 +3540,7 @@ export default function Home() {
       }));
       await loadAppointments();
       showToast("Appointment archived.", {
-        actionLabel: "View Archived",
-        durationMs: 10000,
-        onAction: () => {
-          void handleChangeAppointmentView("archived");
-        },
+        durationMs: 8000,
         type: "success",
       });
     } catch (error) {
