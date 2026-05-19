@@ -213,6 +213,8 @@ const defaultEntitlement: CareCircleEntitlement = {
   plan_name: "Personal",
 };
 
+const welcomeGuideStoragePrefix = "carepland-welcome-guide-dismissed:";
+
 const emptyProfileDraft: ProfileDraft = {
   addressLine1: "",
   addressLine2: "",
@@ -915,6 +917,39 @@ function resetInstructionDraft(
   };
 }
 
+function supportMailtoHref(userEmail: string | null, area = "CarePland beta") {
+  const timestamp = new Date().toISOString();
+  const timezone = browserTimezone() || "unknown";
+  const subject = `CarePland beta support: ${area}`;
+  const body = [
+    "Hi CarePland support,",
+    "",
+    "I need help with:",
+    "",
+    "",
+    "---",
+    `User email: ${userEmail ?? "not signed in"}`,
+    `Timestamp: ${timestamp}`,
+    `Time zone: ${timezone}`,
+    `Area: ${area}`,
+  ].join("\n");
+
+  return `mailto:support@carepland.com?subject=${encodeURIComponent(
+    subject
+  )}&body=${encodeURIComponent(body)}`;
+}
+
+function welcomeGuideWasDismissed(email: string | null) {
+  if (!email || typeof window === "undefined") {
+    return false;
+  }
+
+  return (
+    window.localStorage.getItem(`${welcomeGuideStoragePrefix}${email}`) ===
+    "true"
+  );
+}
+
 function intakeDraftFromResult(value: unknown): TextIntakeDraft {
   const draft =
     value && typeof value === "object" && !Array.isArray(value)
@@ -1104,6 +1139,7 @@ export default function Home() {
   >(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [welcomeGuideDismissed, setWelcomeGuideDismissed] = useState(false);
   const [restoringAppointmentForId, setRestoringAppointmentForId] = useState<
     string | null
   >(null);
@@ -1159,6 +1195,11 @@ export default function Home() {
     confirmPassword.length > 0 &&
     password !== confirmPassword;
   const canSubmitAuth = !loading && !passwordsMismatch;
+  const showWelcomeGuide =
+    Boolean(signedInEmail) &&
+    !needsOnboarding &&
+    mainTab === "appointments" &&
+    !welcomeGuideDismissed;
 
   useEffect(() => {
     async function restoreSession() {
@@ -1167,6 +1208,7 @@ export default function Home() {
 
       if (sessionEmail) {
         setSignedInEmail(sessionEmail);
+        setWelcomeGuideDismissed(welcomeGuideWasDismissed(sessionEmail));
         setEmail(sessionEmail);
         setLoading(true);
 
@@ -1184,6 +1226,17 @@ export default function Home() {
     // This runs once on page load to restore Supabase session state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function dismissWelcomeGuide() {
+    if (signedInEmail) {
+      window.localStorage.setItem(
+        `${welcomeGuideStoragePrefix}${signedInEmail}`,
+        "true"
+      );
+    }
+
+    setWelcomeGuideDismissed(true);
+  }
 
   async function getPrimaryCareContext(preferredSubjectId?: string) {
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -1558,7 +1611,9 @@ export default function Home() {
         throw error;
       }
 
-      setSignedInEmail(email.trim());
+      const trimmedEmail = email.trim();
+      setSignedInEmail(trimmedEmail);
+      setWelcomeGuideDismissed(welcomeGuideWasDismissed(trimmedEmail));
       await loadAppointments();
     } catch (error) {
       logAuthError("signIn", error);
@@ -1608,6 +1663,7 @@ export default function Home() {
 
       if (data.session) {
         setSignedInEmail(trimmedEmail);
+        setWelcomeGuideDismissed(welcomeGuideWasDismissed(trimmedEmail));
         setMessage("Account created and signed in. Finish profile setup to continue.");
         await loadAppointments();
         return;
@@ -2144,6 +2200,7 @@ export default function Home() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     setSignedInEmail(null);
+    setWelcomeGuideDismissed(false);
     setIsAdmin(false);
     setOnboardingCompletedAt(null);
     setProfileDraft(emptyProfileDraft);
@@ -3927,10 +3984,16 @@ export default function Home() {
                   signedInEmail}
               </p>
               <p className="mt-1 break-all">{signedInEmail}</p>
-              <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">
+              <p className="mt-1 text-xs font-medium text-slate-500">
                 {entitlement.plan_name} · Care VIPs {careSubjects.length}/
                 {careVipLimit}
               </p>
+              <a
+                className="mt-2 inline-block font-semibold text-blue-700"
+                href={supportMailtoHref(signedInEmail, mainTab)}
+              >
+                Contact support
+              </a>
             </div>
           </div>
         ) : null}
@@ -4172,7 +4235,7 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Current plan</p>
                 <p className="mt-2">
@@ -4191,6 +4254,15 @@ export default function Home() {
                 >
                   Change plan
                 </button>
+              </div>
+              <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
+                <p className="font-semibold text-slate-900">Beta support</p>
+                <a
+                  className="mt-2 inline-block rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                  href={supportMailtoHref(signedInEmail, "profile")}
+                >
+                  Contact support
+                </a>
               </div>
             </div>
 
@@ -5077,6 +5149,51 @@ export default function Home() {
               <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-700">
                 {message}
               </p>
+            ) : null}
+
+            {showWelcomeGuide ? (
+              <section className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold text-blue-950">
+                      Welcome to the CarePland beta
+                    </h2>
+                    <p className="mt-1 max-w-3xl text-sm text-blue-900">
+                      Start with an appointment, import appointment text or
+                      images, or contact support if something feels off.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-700"
+                    onClick={dismissWelcomeGuide}
+                    type="button"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white"
+                    onClick={() => setActiveAppointmentPanel("add")}
+                    type="button"
+                  >
+                    + Add appointment
+                  </button>
+                  <button
+                    className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
+                    onClick={() => setActiveAppointmentPanel("quickAdd")}
+                    type="button"
+                  >
+                    Quick Add
+                  </button>
+                  <a
+                    className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
+                    href={supportMailtoHref(signedInEmail, "appointments")}
+                  >
+                    Contact support
+                  </a>
+                </div>
+              </section>
             ) : null}
 
             {signedInEmail && mainTab === "appointments" ? (
