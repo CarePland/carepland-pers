@@ -251,6 +251,16 @@ const emptyProfileDraft: ProfileDraft = {
   timezone: "",
 };
 
+function profileDisplayName(
+  profile: Pick<ProfileDraft, "displayName" | "email" | "familyName" | "givenName">
+) {
+  const fullName = [profile.givenName.trim(), profile.familyName.trim()]
+    .filter(Boolean)
+    .join(" ");
+
+  return profile.displayName.trim() || fullName || profile.email.trim();
+}
+
 const timeZoneOptions = [
   { label: "Eastern", value: "America/New_York" },
   { label: "Central", value: "America/Chicago" },
@@ -2855,12 +2865,18 @@ export default function Home() {
       }
 
       const completedAt = new Date().toISOString();
+      const savedDisplayName = profileDisplayName({
+        displayName: profileDraft.displayName,
+        email: profileEmail,
+        familyName: profileDraft.familyName,
+        givenName: profileDraft.givenName,
+      });
       const { error } = await supabase.from("profiles").upsert({
         address_line1: profileDraft.addressLine1.trim() || null,
         address_line2: profileDraft.addressLine2.trim() || null,
         city: profileDraft.city.trim() || null,
         country: profileDraft.country.trim() || null,
-        display_name: profileDraft.displayName.trim() || profileDraft.givenName.trim(),
+        display_name: savedDisplayName,
         email: profileEmail,
         family_name: profileDraft.familyName.trim(),
         given_name: profileDraft.givenName.trim(),
@@ -2883,6 +2899,17 @@ export default function Home() {
 
       if (setupError) {
         throw setupError;
+      }
+
+      const { careCircleId } = await getPrimaryCareContext();
+      const { error: subjectSyncError } = await supabase
+        .from("care_subjects")
+        .update({ display_name: savedDisplayName })
+        .eq("care_circle_id", careCircleId)
+        .eq("is_default", true);
+
+      if (subjectSyncError) {
+        throw subjectSyncError;
       }
 
       setOnboardingCompletedAt(completedAt);
@@ -7715,6 +7742,9 @@ export default function Home() {
                               Demo
                             </span>
                           ) : null}
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
+                            {appointment.status}
+                          </span>
                         </div>
                         {appointment.is_sample_data ? (
                           <p className="mt-1 text-sm italic text-slate-500">
@@ -7847,19 +7877,14 @@ export default function Home() {
                         <p className="text-lg font-medium text-slate-700">
                           {formatDate(appointment.starts_at)}
                         </p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 md:justify-end">
-                          {appointmentSubject ? (
-                            <span className="text-sm font-medium text-slate-500">
-                              {appointmentSubject.display_name}
-                            </span>
-                          ) : null}
-                          <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
-                            {appointment.status}
-                          </span>
-                        </div>
                         {appointment.provider_name ? (
                           <p className="mt-1 text-sm font-medium text-slate-700">
                             {appointment.provider_name}
+                          </p>
+                        ) : null}
+                        {appointmentSubject ? (
+                          <p className="mt-1 text-sm font-medium text-slate-500">
+                            for {appointmentSubject.display_name}
                           </p>
                         ) : null}
                       </div>
