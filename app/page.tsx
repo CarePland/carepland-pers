@@ -2497,8 +2497,10 @@ export default function Home() {
     }
   }
 
-  async function handleExtractImageText(file: File | null) {
-    if (!file) {
+  async function handleExtractImageText(files: FileList | null) {
+    const images = files ? Array.from(files) : [];
+
+    if (images.length === 0) {
       return;
     }
 
@@ -2520,7 +2522,10 @@ export default function Home() {
       }
 
       const formData = new FormData();
-      formData.append("image", file);
+
+      images.forEach((image) => {
+        formData.append("images", image);
+      });
 
       const response = await fetch("/api/ocr", {
         body: formData,
@@ -2547,7 +2552,11 @@ export default function Home() {
       setTextIntakeValue((currentValue) =>
         [currentValue.trim(), extractedText].filter(Boolean).join("\n\n")
       );
-      setMessage("Image text extracted. Review the text before preparing drafts.");
+      setMessage(
+        `Text extracted from ${images.length} image${
+          images.length === 1 ? "" : "s"
+        }. Review the text before preparing drafts.`
+      );
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -5264,9 +5273,9 @@ export default function Home() {
                             accept="image/gif,image/jpeg,image/png,image/webp"
                             className="mt-2 block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
                             disabled={extractingImageText}
+                            multiple
                             onChange={(event) => {
-                              const file = event.target.files?.[0] ?? null;
-                              void handleExtractImageText(file);
+                              void handleExtractImageText(event.target.files);
                               event.target.value = "";
                             }}
                             type="file"
@@ -5275,7 +5284,7 @@ export default function Home() {
                         <p className="mt-2 text-xs text-slate-500">
                           {extractingImageText
                             ? "Extracting text..."
-                            : "Images are converted to text only and are not stored."}
+                            : "Up to 10 images are converted to text only and are not stored."}
                         </p>
                       </div>
                       <label className="mt-3 block text-sm font-medium text-slate-700">

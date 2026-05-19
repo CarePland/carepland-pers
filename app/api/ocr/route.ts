@@ -6,6 +6,7 @@ type JsonObject = Record<string, unknown>;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const openAiApiKey = process.env.OPENAI_API_KEY ?? "";
+const maxImageCount = 10;
 const maxImageSizeBytes = 8 * 1024 * 1024;
 const supportedImageTypes = new Set([
   "image/gif",
@@ -93,36 +94,54 @@ export async function POST(request: NextRequest) {
     }
 
     const formData = await request.formData();
-    const image = formData.get("image");
+    const images = formData
+      .getAll("images")
+      .filter((item): item is File => item instanceof File);
 
-    if (!(image instanceof File)) {
-      throw new Error("Choose an image before extracting text.");
+    if (images.length === 0) {
+      throw new Error("Choose one or more images before extracting text.");
     }
 
-    if (!supportedImageTypes.has(image.type)) {
-      throw new Error("Use a PNG, JPG, GIF, or WebP image.");
+    if (images.length > maxImageCount) {
+      throw new Error(`Use up to ${maxImageCount} images at a time.`);
     }
 
-    if (image.size > maxImageSizeBytes) {
-      throw new Error("Use an image smaller than 8 MB.");
+    for (const image of images) {
+      if (!supportedImageTypes.has(image.type)) {
+        throw new Error("Use PNG, JPG, GIF, or WebP images.");
+      }
+
+      if (image.size > maxImageSizeBytes) {
+        throw new Error("Each image must be smaller than 8 MB.");
+      }
     }
 
-    const bytes = Buffer.from(await image.arrayBuffer());
-    const dataUrl = `data:${image.type};base64,${bytes.toString("base64")}`;
+    const content: JsonObject[] = [
+      {
+        text: "Extract all visible appointment-related text from these images. Preserve line breaks, dates, times, provider names, locations, addresses, phone numbers, and labels. Process images in the order provided. Do not summarize, classify, infer, or add commentary. Return only the extracted text. Use page markers like --- Image 1 --- before each image's extracted text.",
+        type: "input_text",
+      },
+    ];
+
+    for (const [index, image] of images.entries()) {
+      const bytes = Buffer.from(await image.arrayBuffer());
+      const dataUrl = `data:${image.type};base64,${bytes.toString("base64")}`;
+
+      content.push({
+        text: `Image ${index + 1}`,
+        type: "input_text",
+      });
+      content.push({
+        image_url: dataUrl,
+        type: "input_image",
+      });
+    }
+
     const openAiResponse = await fetch("https://api.openai.com/v1/responses", {
       body: JSON.stringify({
         input: [
           {
-            content: [
-              {
-                text: "Extract all visible appointment-related text from this image. Preserve line breaks, dates, times, provider names, locations, addresses, phone numbers, and labels. Do not summarize, classify, infer, or add commentary. Return only the extracted text.",
-                type: "input_text",
-              },
-              {
-                image_url: dataUrl,
-                type: "input_image",
-              },
-            ],
+            content,
             role: "user",
           },
         ],
