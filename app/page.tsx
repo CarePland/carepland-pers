@@ -1279,9 +1279,79 @@ export default function Home() {
     mainTab === "appointments" &&
     !welcomeGuideDismissed;
 
+  async function establishPasswordRecoverySession(): Promise<string | null> {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    const currentUrl = new URL(window.location.href);
+    const hashParams = new URLSearchParams(
+      currentUrl.hash.replace(/^#/, "")
+    );
+    const accessToken = hashParams.get("access_token");
+    const refreshToken = hashParams.get("refresh_token");
+
+    if (accessToken && refreshToken) {
+      const { data, error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      return data.session?.user.email ?? null;
+    }
+
+    const code = currentUrl.searchParams.get("code");
+
+    if (code) {
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+      if (error) {
+        throw error;
+      }
+
+      return data.session?.user.email ?? null;
+    }
+
+    return null;
+  }
+
   useEffect(() => {
     async function restoreSession() {
       const isRecoveryRedirect = isPasswordRecoveryRedirect();
+
+      if (isRecoveryRedirect) {
+        setLoading(true);
+
+        try {
+          const recoveryEmail = await establishPasswordRecoverySession();
+
+          if (recoveryEmail) {
+            setSignedInEmail(recoveryEmail);
+            setWelcomeGuideDismissed(welcomeGuideWasDismissed(recoveryEmail));
+            setEmail(recoveryEmail);
+          }
+
+          setAuthMode("updatePassword");
+          setPassword("");
+          setConfirmPassword("");
+          setMessage("Enter a new password to finish resetting your password.");
+        } catch (error) {
+          logAuthError("passwordRecoverySession", error);
+          setAuthMode("reset");
+          setMessage(
+            "This password reset link could not be opened. Please request a fresh reset email and use the newest link."
+          );
+        } finally {
+          setLoading(false);
+        }
+
+        return;
+      }
+
       const { data } = await supabase.auth.getSession();
       const sessionEmail = data.session?.user.email ?? null;
 
@@ -1289,14 +1359,6 @@ export default function Home() {
         setSignedInEmail(sessionEmail);
         setWelcomeGuideDismissed(welcomeGuideWasDismissed(sessionEmail));
         setEmail(sessionEmail);
-
-        if (isRecoveryRedirect) {
-          setAuthMode("updatePassword");
-          setPassword("");
-          setConfirmPassword("");
-          setMessage("Enter a new password to finish resetting your password.");
-          return;
-        }
 
         setLoading(true);
 
@@ -1307,13 +1369,6 @@ export default function Home() {
         } finally {
           setLoading(false);
         }
-      } else if (isRecoveryRedirect) {
-        setAuthMode("updatePassword");
-        setPassword("");
-        setConfirmPassword("");
-        setMessage(
-          "Enter a new password to finish resetting your password. If this screen cannot save, request a fresh reset link."
-        );
       }
     }
 
@@ -1920,6 +1975,20 @@ export default function Home() {
 
       if (password !== confirmPassword) {
         throw new Error("The passwords do not match.");
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+
+      if (!sessionData.session && isPasswordRecoveryRedirect()) {
+        await establishPasswordRecoverySession();
+      }
+
+      const { data: refreshedSessionData } = await supabase.auth.getSession();
+
+      if (!refreshedSessionData.session) {
+        throw new Error(
+          "This reset link is missing an active recovery session. Please request a fresh password reset email and use the newest link."
+        );
       }
 
       const { error } = await supabase.auth.updateUser({ password });
