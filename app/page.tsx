@@ -102,7 +102,6 @@ type AiWorkflowKey =
   | "note_intake_interpretation";
 type AuthMode = "reset" | "signIn" | "signUp";
 type AppointmentPanel = "add" | "quickAdd";
-type TextIntakeMode = "bulkAppointments" | "single";
 type MainTab = "admin" | "appointments" | "profile";
 
 type CarePrepHistoryRow = {
@@ -1000,8 +999,6 @@ export default function Home() {
     useState("");
   const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState("");
   const [textIntakeSubjectId, setTextIntakeSubjectId] = useState("");
-  const [textIntakeMode, setTextIntakeMode] =
-    useState<TextIntakeMode>("single");
   const [textIntakeValue, setTextIntakeValue] = useState("");
   const [textIntakeDraft, setTextIntakeDraft] =
     useState<TextIntakeDraft | null>(null);
@@ -2352,6 +2349,7 @@ export default function Home() {
       const rawText = targetAppointment
         ? contextualTextIntakeValue.trim()
         : textIntakeValue.trim();
+      const shouldUseBulkAppointmentIntake = !targetAppointment;
 
       if (!rawText) {
         throw new Error("Paste some text before running intake.");
@@ -2388,10 +2386,7 @@ export default function Home() {
                 title: targetAppointment.title,
               }
             : null,
-          mode:
-            !targetAppointment && textIntakeMode === "bulkAppointments"
-              ? "bulk_appointments"
-              : "single",
+          mode: shouldUseBulkAppointmentIntake ? "bulk_appointments" : "single",
           rawText,
         }),
         headers: {
@@ -2406,7 +2401,7 @@ export default function Home() {
         throw new Error(result.error ?? "Text intake failed.");
       }
 
-      if (!targetAppointment && textIntakeMode === "bulkAppointments") {
+      if (shouldUseBulkAppointmentIntake) {
         const drafts = bulkAppointmentDraftsFromResult(result.draft);
 
         if (drafts.length === 0) {
@@ -5290,52 +5285,6 @@ export default function Home() {
                           </select>
                         </label>
                       ) : null}
-                      <fieldset className="mt-3 flex flex-wrap gap-2">
-                        <legend className="mb-2 text-sm font-medium text-slate-700">
-                          What are you importing?
-                        </legend>
-                        <label
-                          className={`rounded-md border px-3 py-2 text-sm font-semibold ${
-                            textIntakeMode === "single"
-                              ? "border-blue-700 bg-blue-50 text-blue-700"
-                              : "border-slate-300 bg-white text-slate-700"
-                          }`}
-                        >
-                          <input
-                            checked={textIntakeMode === "single"}
-                            className="sr-only"
-                            name="text-intake-mode"
-                            onChange={() => {
-                              setTextIntakeMode("single");
-                              setBulkAppointmentDrafts([]);
-                              setBulkAppointmentSummary("");
-                            }}
-                            type="radio"
-                          />
-                          One item
-                        </label>
-                        <label
-                          className={`rounded-md border px-3 py-2 text-sm font-semibold ${
-                            textIntakeMode === "bulkAppointments"
-                              ? "border-blue-700 bg-blue-50 text-blue-700"
-                              : "border-slate-300 bg-white text-slate-700"
-                          }`}
-                        >
-                          <input
-                            checked={textIntakeMode === "bulkAppointments"}
-                            className="sr-only"
-                            name="text-intake-mode"
-                            onChange={() => {
-                              setTextIntakeMode("bulkAppointments");
-                              setTextIntakeDraft(null);
-                              setTextIntakeAiDraft(null);
-                              setTextIntakeMatches([]);
-                            }}
-                            type="radio"
-                          />
-                          Multiple appointments
-                        </label>
-                      </fieldset>
                       <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
                         <label className="block text-sm font-medium text-slate-700">
                           Image to text
@@ -5376,9 +5325,7 @@ export default function Home() {
                         >
                           {processingTextIntake
                             ? "Interpreting..."
-                            : textIntakeMode === "bulkAppointments"
-                              ? "Prepare drafts"
-                              : "Interpret text"}
+                            : "Review appointments"}
                         </button>
                         <button
                           className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
