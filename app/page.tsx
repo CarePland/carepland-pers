@@ -685,6 +685,46 @@ function agicalUrl(appointment: Appointment): string | null {
   return `https://ics.agical.io/?${params.toString()}`;
 }
 
+function confidenceBadge(confidence: number) {
+  if (confidence >= 0.8) {
+    return {
+      className: "border-emerald-200 bg-emerald-50 text-emerald-800",
+      label: "High confidence",
+    };
+  }
+
+  if (confidence >= 0.5) {
+    return {
+      className: "border-amber-200 bg-amber-50 text-amber-800",
+      label: "Medium confidence",
+    };
+  }
+
+  if (confidence > 0) {
+    return {
+      className: "border-rose-200 bg-rose-50 text-rose-800",
+      label: "Low confidence",
+    };
+  }
+
+  return {
+    className: "border-slate-900 bg-slate-900 text-white",
+    label: "Needs review",
+  };
+}
+
+function ConfidenceBadge({ confidence }: { confidence: number }) {
+  const badge = confidenceBadge(confidence);
+
+  return (
+    <span
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${badge.className}`}
+    >
+      {badge.label}
+    </span>
+  );
+}
+
 async function hashInstructionContent({
   model,
   outputSchema,
@@ -4585,12 +4625,14 @@ export default function Home() {
                     <h3 className="font-semibold text-blue-950">
                       Review intake draft
                     </h3>
-                    <p className="mt-1 text-xs text-blue-800">
-                      Confidence {Math.round(textIntakeDraft.confidence * 100)}%
-                      {textIntakeDraft.suggestedAction
-                        ? ` · ${textIntakeDraft.suggestedAction}`
-                        : ""}
-                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <ConfidenceBadge confidence={textIntakeDraft.confidence} />
+                      {textIntakeDraft.suggestedAction ? (
+                        <p className="text-xs text-blue-800">
+                          {textIntakeDraft.suggestedAction}
+                        </p>
+                      ) : null}
+                    </div>
                     {textIntakeMatches.length > 0 ? (
                       <div className="mt-4 rounded-md border border-blue-200 bg-white p-3">
                         <h4 className="font-semibold text-slate-900">
@@ -5237,13 +5279,16 @@ export default function Home() {
                           <h3 className="font-semibold text-blue-950">
                             Review intake draft
                           </h3>
-                          <p className="mt-1 text-xs text-blue-800">
-                            Confidence{" "}
-                            {Math.round(textIntakeDraft.confidence * 100)}%
-                            {textIntakeDraft.suggestedAction
-                              ? ` · ${textIntakeDraft.suggestedAction}`
-                              : ""}
-                          </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <ConfidenceBadge
+                              confidence={textIntakeDraft.confidence}
+                            />
+                            {textIntakeDraft.suggestedAction ? (
+                              <p className="text-xs text-blue-800">
+                                {textIntakeDraft.suggestedAction}
+                              </p>
+                            ) : null}
+                          </div>
                         </div>
                         <label className="block text-sm font-medium text-slate-700">
                           Title
@@ -5394,9 +5439,7 @@ export default function Home() {
                                   />
                                   Appointment {index + 1}
                                 </label>
-                                <span className="text-xs text-slate-500">
-                                  Confidence {Math.round(draft.confidence * 100)}%
-                                </span>
+                                <ConfidenceBadge confidence={draft.confidence} />
                               </div>
                               {draft.suggestedAction ? (
                                 <p className="mt-2 text-xs text-blue-800">
@@ -6488,13 +6531,16 @@ export default function Home() {
                           </>
                         ) : (
                           <>
-                            <p className="mt-3 text-xs text-blue-800">
-                              Confidence{" "}
-                              {Math.round(textIntakeDraft.confidence * 100)}%
-                              {textIntakeDraft.suggestedAction
-                                ? ` · ${textIntakeDraft.suggestedAction}`
-                                : ""}
-                            </p>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <ConfidenceBadge
+                                confidence={textIntakeDraft.confidence}
+                              />
+                              {textIntakeDraft.suggestedAction ? (
+                                <p className="text-xs text-blue-800">
+                                  {textIntakeDraft.suggestedAction}
+                                </p>
+                              ) : null}
+                            </div>
                             <AppointmentDetailUpdateOption
                               checked={applyTextIntakeAppointmentDetails}
                               changes={appointmentDetailChanges(
