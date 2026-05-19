@@ -1977,6 +1977,14 @@ export default function Home() {
         throw error;
       }
 
+      const { error: setupError } = await supabase.rpc(
+        "ensure_personal_account_setup"
+      );
+
+      if (setupError) {
+        throw setupError;
+      }
+
       setOnboardingCompletedAt(completedAt);
       await loadAppointments();
       setMessage("Profile saved.");
