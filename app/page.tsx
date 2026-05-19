@@ -677,6 +677,20 @@ function startOfToday(): Date {
   return start;
 }
 
+function isTodayOrFutureDate(value: string): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return false;
+  }
+
+  return date >= startOfToday();
+}
+
 function browserTimezone(): string {
   const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -2278,6 +2292,8 @@ export default function Home() {
       }
 
       const baseDraft = intakeDraftFromResult(result.draft);
+      const isFutureStandaloneAppointment =
+        !targetAppointment && isTodayOrFutureDate(baseDraft.startsAt);
       const interpretedDraft = targetAppointment
         ? {
             ...baseDraft,
@@ -2303,6 +2319,15 @@ export default function Home() {
               baseDraft.startsAt ||
               toDatetimeLocalValue(targetAppointment.starts_at),
           }
+        : isFutureStandaloneAppointment
+          ? {
+              ...baseDraft,
+              appointmentReason:
+                baseDraft.appointmentReason || baseDraft.notesSummary,
+              followups: "",
+              notesSummary: "",
+              takeaways: "",
+            }
         : baseDraft;
       const interpretedSubjectId =
         result.careSubjectId ??
@@ -2612,8 +2637,14 @@ export default function Home() {
         Boolean(textIntakeDraft.notesSummary.trim()) ||
         takeaways.length > 0 ||
         followups.length > 0;
+      const isStandaloneFutureAppointment =
+        !textIntakeTargetAppointmentId &&
+        Boolean(startsAtDate) &&
+        isTodayOrFutureDate(textIntakeDraft.startsAt);
+      const shouldSaveNotes = hasNotes && !isStandaloneFutureAppointment;
       const hasAiNoteDraft = Boolean(
         textIntakeAiDraft &&
+          shouldSaveNotes &&
           (textIntakeAiDraft.notesSummary.trim() ||
             aiTakeaways.length > 0 ||
             aiFollowups.length > 0)
@@ -2640,7 +2671,7 @@ export default function Home() {
               (match) => match.appointment.id === selectedTextIntakeMatchId
               ) ?? null;
 
-      if (selectedMatch && !hasNotes) {
+      if (selectedMatch && !shouldSaveNotes) {
         throw new Error("Add notes before updating an existing appointment.");
       }
 
@@ -2679,7 +2710,7 @@ export default function Home() {
         appointmentId = appointment.id;
       }
 
-      if (hasNotes) {
+      if (shouldSaveNotes) {
         let aiNoteId: string | null = null;
         const existingNote = selectedMatch?.currentNote ?? null;
         const nextVersionNumber = existingNote
@@ -2856,8 +2887,8 @@ export default function Home() {
       setContextualTextIntakeValue("");
       setApplyTextIntakeAppointmentDetails(false);
       setActiveAppointmentPanel(null);
-      setAppointmentView(hasNotes ? "logged" : "upcoming");
-      await loadAppointments(hasNotes ? "logged" : "upcoming");
+      setAppointmentView(shouldSaveNotes ? "logged" : "upcoming");
+      await loadAppointments(shouldSaveNotes ? "logged" : "upcoming");
       setMessage("Intake saved.");
     } catch (error) {
       setMessage(getErrorMessage(error));
