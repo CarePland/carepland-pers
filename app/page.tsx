@@ -1827,8 +1827,9 @@ export default function Home() {
       setAuthMode("signIn");
       setPassword("");
       setConfirmPassword("");
-      setMessage(
-        "If this email has an account, a password reset link has been sent. Check your inbox and junk folder."
+      showToast(
+        "If this email has an account, a password reset link has been sent. Check your inbox and junk folder.",
+        { type: "success", durationMs: 8000 }
       );
     } catch (error) {
       logAuthError("passwordReset", error);
@@ -1906,9 +1907,9 @@ export default function Home() {
         throw error;
       }
 
-      showToast("Password reset email sent.", { type: "success" });
-      setMessage(
-        "Password reset email sent. Check your inbox and junk folder."
+      showToast(
+        "If this email has an account, a password reset link has been sent. Check your inbox and junk folder.",
+        { type: "success", durationMs: 8000 }
       );
     } catch (error) {
       logAuthError("profilePasswordReset", error);
