@@ -1078,6 +1078,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [processingTextIntake, setProcessingTextIntake] = useState(false);
+  const [extractingImageText, setExtractingImageText] = useState(false);
   const [savingTextIntake, setSavingTextIntake] = useState(false);
   const [creatingCareVip, setCreatingCareVip] = useState(false);
   const [appointmentView, setAppointmentView] =
@@ -2493,6 +2494,64 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setProcessingTextIntake(false);
+    }
+  }
+
+  async function handleExtractImageText(file: File | null) {
+    if (!file) {
+      return;
+    }
+
+    setExtractingImageText(true);
+    setMessage("");
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before extracting text.");
+      }
+
+      const formData = new FormData();
+      formData.append("image", file);
+
+      const response = await fetch("/api/ocr", {
+        body: formData,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Image text extraction failed.");
+      }
+
+      const extractedText =
+        typeof result.extractedText === "string"
+          ? result.extractedText.trim()
+          : "";
+
+      if (!extractedText) {
+        throw new Error("No text was found in that image.");
+      }
+
+      setTextIntakeValue((currentValue) =>
+        [currentValue.trim(), extractedText].filter(Boolean).join("\n\n")
+      );
+      setMessage("Image text extracted. Review the text before preparing drafts.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setExtractingImageText(false);
     }
   }
 
@@ -5198,6 +5257,27 @@ export default function Home() {
                           Multiple appointments
                         </label>
                       </fieldset>
+                      <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+                        <label className="block text-sm font-medium text-slate-700">
+                          Image to text
+                          <input
+                            accept="image/gif,image/jpeg,image/png,image/webp"
+                            className="mt-2 block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
+                            disabled={extractingImageText}
+                            onChange={(event) => {
+                              const file = event.target.files?.[0] ?? null;
+                              void handleExtractImageText(file);
+                              event.target.value = "";
+                            }}
+                            type="file"
+                          />
+                        </label>
+                        <p className="mt-2 text-xs text-slate-500">
+                          {extractingImageText
+                            ? "Extracting text..."
+                            : "Images are converted to text only and are not stored."}
+                        </p>
+                      </div>
                       <label className="mt-3 block text-sm font-medium text-slate-700">
                         Text
                         <textarea
