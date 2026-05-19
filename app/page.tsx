@@ -100,7 +100,7 @@ type AiWorkflowKey =
   | "bulk_appointment_intake"
   | "careprep_generation"
   | "note_intake_interpretation";
-type AuthMode = "reset" | "signIn" | "signUp";
+type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
 type MainTab = "admin" | "appointments" | "profile";
 type ToastState = {
@@ -1161,6 +1161,7 @@ export default function Home() {
   >(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [sendingPasswordReset, setSendingPasswordReset] = useState(false);
   const [welcomeGuideDismissed, setWelcomeGuideDismissed] = useState(false);
   const [restoringAppointmentForId, setRestoringAppointmentForId] = useState<
     string | null
@@ -1221,7 +1222,7 @@ export default function Home() {
     Boolean(signedInEmail) && hasAcceptedBetaAgreement && !onboardingCompletedAt;
   const verifiedAccountEmail = signedInEmail ?? profileDraft.email;
   const passwordsMismatch =
-    authMode === "signUp" &&
+    (authMode === "signUp" || authMode === "updatePassword") &&
     confirmPassword.length > 0 &&
     password !== confirmPassword;
   const canSubmitAuth = !loading && !passwordsMismatch;
@@ -1256,6 +1257,27 @@ export default function Home() {
     restoreSession();
     // This runs once on page load to restore Supabase session state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event !== "PASSWORD_RECOVERY") {
+        return;
+      }
+
+      const recoveryEmail = session?.user.email ?? "";
+
+      setAuthMode("updatePassword");
+      setSignedInEmail(recoveryEmail || null);
+      setEmail(recoveryEmail);
+      setPassword("");
+      setConfirmPassword("");
+      setMessage("Enter a new password to finish resetting your password.");
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -1813,6 +1835,86 @@ export default function Home() {
       setMessage(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleUpdatePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    try {
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error(
+          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel."
+        );
+      }
+
+      if (password.length < 8) {
+        throw new Error("Use a password with at least 8 characters.");
+      }
+
+      if (password !== confirmPassword) {
+        throw new Error("The passwords do not match.");
+      }
+
+      const { error } = await supabase.auth.updateUser({ password });
+
+      if (error) {
+        throw error;
+      }
+
+      setAuthMode("signIn");
+      setPassword("");
+      setConfirmPassword("");
+      showToast("Password updated.", { type: "success" });
+      setMessage("Password updated. You can continue using CarePland.");
+
+      if (signedInEmail) {
+        await loadAppointments();
+      }
+    } catch (error) {
+      logAuthError("updatePassword", error);
+      setMessage(getAuthErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSendProfilePasswordReset() {
+    setSendingPasswordReset(true);
+    setMessage("");
+
+    try {
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error(
+          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel."
+        );
+      }
+
+      const resetEmail = (signedInEmail ?? profileDraft.email).trim();
+
+      if (!isLikelyEmail(resetEmail)) {
+        throw new Error("Your profile needs a valid email before resetting a password.");
+      }
+
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: authRedirectUrl(),
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      showToast("Password reset email sent.", { type: "success" });
+      setMessage(
+        "Password reset email sent. Check your inbox and junk folder."
+      );
+    } catch (error) {
+      logAuthError("profilePasswordReset", error);
+      setMessage(getAuthErrorMessage(error));
+    } finally {
+      setSendingPasswordReset(false);
     }
   }
 
@@ -4083,7 +4185,10 @@ export default function Home() {
           visit notes, and CarePrep from Supabase.
         </p>
 
-        {signedInEmail && !needsBetaAgreement && !needsOnboarding ? (
+        {signedInEmail &&
+        authMode !== "updatePassword" &&
+        !needsBetaAgreement &&
+        !needsOnboarding ? (
           <div className="mt-8 flex flex-wrap items-start justify-between gap-4">
             <div className="flex flex-wrap gap-2">
               <button
@@ -4154,7 +4259,85 @@ export default function Home() {
           </div>
         ) : null}
 
-        {needsBetaAgreement ? (
+        {authMode === "updatePassword" ? (
+          <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-semibold">Set a new password</h2>
+                <p className="mt-1 text-slate-600">
+                  Enter and confirm a new password for your CarePland account.
+                </p>
+              </div>
+              <button
+                className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
+                onClick={() => {
+                  setAuthMode("signIn");
+                  setPassword("");
+                  setConfirmPassword("");
+                  setMessage("");
+                }}
+                type="button"
+              >
+                Back to sign in
+              </button>
+            </div>
+
+            <form
+              className="mt-5 max-w-xl space-y-4"
+              onSubmit={handleUpdatePassword}
+            >
+              <label className="block text-sm font-medium text-slate-700">
+                New password
+                <input
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                  minLength={8}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setMessage("");
+                  }}
+                  required
+                  type="password"
+                  value={password}
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                Confirm new password
+                <input
+                  aria-invalid={passwordsMismatch}
+                  className={`mt-2 w-full rounded-md border px-3 py-2 text-base ${
+                    passwordsMismatch ? "border-red-500" : "border-slate-300"
+                  }`}
+                  minLength={8}
+                  onChange={(event) => {
+                    setConfirmPassword(event.target.value);
+                    setMessage("");
+                  }}
+                  required
+                  type="password"
+                  value={confirmPassword}
+                />
+                {passwordsMismatch ? (
+                  <span className="mt-2 block text-sm font-semibold text-red-700">
+                    Passwords do not match.
+                  </span>
+                ) : null}
+              </label>
+              <button
+                className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                disabled={!canSubmitAuth}
+                type="submit"
+              >
+                {loading ? "Updating..." : "Update password"}
+              </button>
+            </form>
+
+            {message ? (
+              <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
+                {message}
+              </p>
+            ) : null}
+          </section>
+        ) : needsBetaAgreement ? (
           <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -4469,7 +4652,7 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Current plan</p>
                 <p className="mt-2">
@@ -4497,6 +4680,17 @@ export default function Home() {
                 >
                   Contact support
                 </a>
+              </div>
+              <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
+                <p className="font-semibold text-slate-900">Account security</p>
+                <button
+                  className="mt-2 rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 disabled:bg-slate-200"
+                  disabled={sendingPasswordReset}
+                  onClick={handleSendProfilePasswordReset}
+                  type="button"
+                >
+                  {sendingPasswordReset ? "Sending..." : "Send reset email"}
+                </button>
               </div>
             </div>
 
