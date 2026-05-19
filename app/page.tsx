@@ -96,6 +96,7 @@ type AiInstructionVersion = {
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
 type AuthMode = "reset" | "signIn" | "signUp";
+type AppointmentPanel = "add" | "quickAdd";
 type MainTab = "appointments" | "profile";
 
 type CarePrepHistoryRow = {
@@ -771,6 +772,8 @@ function intakeDraftFromResult(value: unknown): TextIntakeDraft {
 
 export default function Home() {
   const [authMode, setAuthMode] = useState<AuthMode>("signIn");
+  const [activeAppointmentPanel, setActiveAppointmentPanel] =
+    useState<AppointmentPanel | null>(null);
   const [mainTab, setMainTab] = useState<MainTab>("appointments");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -1862,6 +1865,7 @@ export default function Home() {
     setOnboardingCompletedAt(null);
     setProfileDraft(emptyProfileDraft);
     setAuthMode("signIn");
+    setActiveAppointmentPanel(null);
     setMainTab("appointments");
     setPassword("");
     setConfirmPassword("");
@@ -2678,6 +2682,7 @@ export default function Home() {
       setTextIntakeTargetAppointmentId(null);
       setContextualTextIntakeValue("");
       setApplyTextIntakeAppointmentDetails(false);
+      setActiveAppointmentPanel(null);
       setAppointmentView(hasNotes ? "logged" : "upcoming");
       await loadAppointments(hasNotes ? "logged" : "upcoming");
       setMessage("Intake saved.");
@@ -2743,6 +2748,7 @@ export default function Home() {
       setNewAppointmentLocationAddress("");
       setNewAppointmentLocationPhone("");
       setNewAppointmentSubjectId(careSubjectId);
+      setActiveAppointmentPanel(null);
       await loadAppointments();
       setMessage("Appointment added.");
     } catch (error) {
@@ -4425,6 +4431,388 @@ export default function Home() {
           </aside>
 
           <div className="space-y-4">
+            {signedInEmail ? (
+              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div className="min-w-60 flex-1">
+                    {canUseMultipleCareVips ? (
+                      <label className="block text-sm font-medium text-slate-700">
+                        Showing
+                        <select
+                          className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          disabled={loading || careSubjects.length === 0}
+                          onChange={(event) =>
+                            handleChangeSubject(event.target.value)
+                          }
+                          value={selectedSubjectId}
+                        >
+                          <option value={ALL_SUBJECTS}>All Care VIPs</option>
+                          {careSubjects.map((subject) => (
+                            <option key={subject.id} value={subject.id}>
+                              {subject.display_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <div>
+                        <p className="text-sm font-medium text-slate-700">
+                          Showing
+                        </p>
+                        <p className="mt-2 rounded-md bg-slate-100 px-3 py-2 text-base text-slate-700">
+                          All appointments
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                      disabled={loading}
+                      onClick={handleRefresh}
+                      type="button"
+                    >
+                      ↻ Refresh
+                    </button>
+                    <button
+                      className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                        activeAppointmentPanel === "add"
+                          ? "bg-blue-700 text-white"
+                          : "border border-slate-300 bg-white text-slate-700"
+                      }`}
+                      onClick={() =>
+                        setActiveAppointmentPanel((currentPanel) =>
+                          currentPanel === "add" ? null : "add"
+                        )
+                      }
+                      type="button"
+                    >
+                      + Add appointment
+                    </button>
+                    <button
+                      className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                        activeAppointmentPanel === "quickAdd"
+                          ? "bg-blue-700 text-white"
+                          : "border border-slate-300 bg-white text-slate-700"
+                      }`}
+                      onClick={() =>
+                        setActiveAppointmentPanel((currentPanel) =>
+                          currentPanel === "quickAdd" ? null : "quickAdd"
+                        )
+                      }
+                      type="button"
+                    >
+                      Quick Add
+                    </button>
+                  </div>
+                </div>
+
+                {activeAppointmentPanel === "add" ? (
+                  <form
+                    className="mt-4 grid gap-4 rounded-md bg-slate-50 p-4 md:grid-cols-2"
+                    onSubmit={handleCreateAppointment}
+                  >
+                    {canUseMultipleCareVips ? (
+                      <label className="block text-sm font-medium text-slate-700">
+                        For
+                        <select
+                          className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          disabled={careSubjects.length === 0}
+                          onChange={(event) =>
+                            setNewAppointmentSubjectId(event.target.value)
+                          }
+                          value={newAppointmentSubjectId}
+                        >
+                          {careSubjects.length === 0 ? (
+                            <option value="">No Care VIPs found</option>
+                          ) : null}
+                          {careSubjects.map((subject) => (
+                            <option key={subject.id} value={subject.id}>
+                              {subject.display_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label className="block text-sm font-medium text-slate-700">
+                      Title
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          setNewAppointmentTitle(event.target.value)
+                        }
+                        placeholder="e.g. Follow-up with Dr. Smith"
+                        type="text"
+                        value={newAppointmentTitle}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Date & time
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          setNewAppointmentStartsAt(event.target.value)
+                        }
+                        type="datetime-local"
+                        value={newAppointmentStartsAt}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Provider
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          setNewAppointmentProviderName(event.target.value)
+                        }
+                        placeholder="e.g. Dr. Smith"
+                        type="text"
+                        value={newAppointmentProviderName}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Practice
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          setNewAppointmentProviderOrganization(
+                            event.target.value
+                          )
+                        }
+                        placeholder="e.g. Main Street Clinic"
+                        type="text"
+                        value={newAppointmentProviderOrganization}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Address
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          setNewAppointmentLocationAddress(event.target.value)
+                        }
+                        placeholder="Street, city, state"
+                        type="text"
+                        value={newAppointmentLocationAddress}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+                      Reason
+                      <textarea
+                        className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) =>
+                          setNewAppointmentReason(event.target.value)
+                        }
+                        placeholder="What is this appointment for?"
+                        value={newAppointmentReason}
+                      />
+                    </label>
+                    <div className="flex flex-wrap gap-3 md:col-span-2">
+                      <button
+                        className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                        disabled={creatingAppointment}
+                        type="submit"
+                      >
+                        {creatingAppointment ? "Adding..." : "+ Add appointment"}
+                      </button>
+                      <button
+                        className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                        onClick={() => setActiveAppointmentPanel(null)}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+
+                {activeAppointmentPanel === "quickAdd" ? (
+                  <section className="mt-4 rounded-md bg-slate-50 p-4">
+                    <form onSubmit={handleInterpretTextIntake}>
+                      {canUseMultipleCareVips ? (
+                        <label className="block text-sm font-medium text-slate-700">
+                          For
+                          <select
+                            className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            disabled={careSubjects.length === 0}
+                            onChange={(event) =>
+                              setTextIntakeSubjectId(event.target.value)
+                            }
+                            value={textIntakeSubjectId}
+                          >
+                            {careSubjects.length === 0 ? (
+                              <option value="">No Care VIPs found</option>
+                            ) : null}
+                            {careSubjects.map((subject) => (
+                              <option key={subject.id} value={subject.id}>
+                                {subject.display_name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+                      <label className="mt-3 block text-sm font-medium text-slate-700">
+                        Text
+                        <textarea
+                          className="mt-2 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                          onChange={(event) =>
+                            setTextIntakeValue(event.target.value)
+                          }
+                          placeholder="Paste appointment details, portal text, or visit notes."
+                          value={textIntakeValue}
+                        />
+                      </label>
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <button
+                          className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                          disabled={processingTextIntake}
+                          type="submit"
+                        >
+                          {processingTextIntake
+                            ? "Interpreting..."
+                            : "Interpret text"}
+                        </button>
+                        <button
+                          className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                          onClick={() => setActiveAppointmentPanel(null)}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+
+                    {textIntakeDraft && !textIntakeTargetAppointmentId ? (
+                      <form
+                        className="mt-5 grid gap-4 rounded-md border border-blue-100 bg-blue-50 p-4 md:grid-cols-2"
+                        onSubmit={handleSaveTextIntakeDraft}
+                      >
+                        <div className="md:col-span-2">
+                          <h3 className="font-semibold text-blue-950">
+                            Review intake draft
+                          </h3>
+                          <p className="mt-1 text-xs text-blue-800">
+                            Confidence{" "}
+                            {Math.round(textIntakeDraft.confidence * 100)}%
+                            {textIntakeDraft.suggestedAction
+                              ? ` · ${textIntakeDraft.suggestedAction}`
+                              : ""}
+                          </p>
+                        </div>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Title
+                          <input
+                            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "appointmentTitle",
+                                event.target.value
+                              )
+                            }
+                            value={textIntakeDraft.appointmentTitle}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Date & time
+                          <input
+                            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "startsAt",
+                                event.target.value
+                              )
+                            }
+                            type="datetime-local"
+                            value={textIntakeDraft.startsAt}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Provider
+                          <input
+                            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "providerName",
+                                event.target.value
+                              )
+                            }
+                            value={textIntakeDraft.providerName}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Practice
+                          <input
+                            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "providerOrganization",
+                                event.target.value
+                              )
+                            }
+                            value={textIntakeDraft.providerOrganization}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+                          Notes summary
+                          <textarea
+                            className="mt-2 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "notesSummary",
+                                event.target.value
+                              )
+                            }
+                            value={textIntakeDraft.notesSummary}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Takeaways
+                          <textarea
+                            className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "takeaways",
+                                event.target.value
+                              )
+                            }
+                            value={textIntakeDraft.takeaways}
+                          />
+                        </label>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Follow-ups
+                          <textarea
+                            className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                            onChange={(event) =>
+                              updateTextIntakeDraft(
+                                "followups",
+                                event.target.value
+                              )
+                            }
+                            value={textIntakeDraft.followups}
+                          />
+                        </label>
+                        <div className="flex flex-wrap gap-3 md:col-span-2">
+                          <button
+                            className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                            disabled={savingTextIntake}
+                            type="submit"
+                          >
+                            {savingTextIntake ? "Saving..." : "Save intake"}
+                          </button>
+                          <button
+                            className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                            onClick={cancelTextIntake}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : null}
+                  </section>
+                ) : null}
+              </section>
+            ) : null}
+
             {showAiAdmin && isAdmin ? (
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
