@@ -8,6 +8,15 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-blue-50: #edf5fc;
+  --color-blue-100: #dcecf8;
+  --color-blue-200: #b6daff;
+  --color-blue-300: #85a9cc;
+  --color-blue-500: #6f95b8;
+  --color-blue-700: #567a9b;
+  --color-blue-800: #365b7d;
+  --color-blue-900: #264766;
+  --color-blue-950: #172f49;
   --font-sans: Arial, Helvetica, sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
