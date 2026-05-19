@@ -2865,7 +2865,8 @@ export default function Home() {
       }
 
       const completedAt = new Date().toISOString();
-      const savedDisplayName = profileDisplayName({
+      const storedDisplayName = profileDraft.displayName.trim() || null;
+      const visibleDisplayName = profileDisplayName({
         displayName: profileDraft.displayName,
         email: profileEmail,
         familyName: profileDraft.familyName,
@@ -2876,7 +2877,7 @@ export default function Home() {
         address_line2: profileDraft.addressLine2.trim() || null,
         city: profileDraft.city.trim() || null,
         country: profileDraft.country.trim() || null,
-        display_name: savedDisplayName,
+        display_name: storedDisplayName,
         email: profileEmail,
         family_name: profileDraft.familyName.trim(),
         given_name: profileDraft.givenName.trim(),
@@ -2904,7 +2905,7 @@ export default function Home() {
       const { careCircleId } = await getPrimaryCareContext();
       const { error: subjectSyncError } = await supabase
         .from("care_subjects")
-        .update({ display_name: savedDisplayName })
+        .update({ display_name: visibleDisplayName })
         .eq("care_circle_id", careCircleId)
         .eq("is_default", true);
 
@@ -4761,9 +4762,10 @@ export default function Home() {
               <span>
                 <span className="font-semibold text-slate-900">
                   Welcome,{" "}
-                  {profileDraft.displayName ||
-                    profileDraft.givenName ||
-                    signedInEmail}
+                  {profileDisplayName({
+                    ...profileDraft,
+                    email: signedInEmail,
+                  })}
                 </span>
                 <span className="mx-2 text-slate-300">·</span>
                 <span className="break-all">{signedInEmail}</span>
