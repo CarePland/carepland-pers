@@ -5261,8 +5261,8 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-6 py-10 text-slate-900">
-      <section className="mx-auto max-w-6xl">
+    <main className="min-h-screen overflow-x-hidden bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6 lg:py-8">
+      <section className="mx-auto w-full max-w-5xl 2xl:max-w-6xl">
         <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
