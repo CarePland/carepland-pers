@@ -320,8 +320,18 @@ const appContentDefaults = {
     "I understand formal Privacy Policy review is not currently enabled for this testing version.",
   beta_terms_ack:
     "I understand formal Terms of Service are not currently enabled for this testing version.",
+  demo_profile_add_body:
+    "Add a few fictional appointments, notes, and CarePrep examples if you want a guided workspace to explore.",
+  demo_profile_remove_body:
+    "Demo appointments are not real appointments. Removing demo data deletes only items marked as demo data and keeps your real information.",
+  demo_prompt_body:
+    "Add a few demo appointments, notes, and CarePrep examples. You can skip this if you want to start clean.",
+  demo_prompt_title: "Want demo data to explore?",
   support_contact_note:
     "Need help or want to report an issue? Contact support from the app and include what you were trying to do.",
+  welcome_guide_body:
+    "Start with an appointment, import appointment text or images, or contact support if something feels off.",
+  welcome_guide_title: "Welcome to the CarePland beta",
 };
 
 const appContentOptions = [
@@ -354,6 +364,42 @@ const appContentOptions = [
     contentKey: "support_contact_note",
     description: "General support context for beta users.",
     label: "Support contact note",
+  },
+  {
+    category: "onboarding",
+    contentKey: "welcome_guide_title",
+    description: "Headline for the first-run welcome card on the appointments screen.",
+    label: "Welcome guide title",
+  },
+  {
+    category: "onboarding",
+    contentKey: "welcome_guide_body",
+    description: "Introductory guidance shown in the first-run welcome card.",
+    label: "Welcome guide body",
+  },
+  {
+    category: "onboarding",
+    contentKey: "demo_prompt_title",
+    description: "Headline for the first-run demo data offer.",
+    label: "Demo data prompt title",
+  },
+  {
+    category: "onboarding",
+    contentKey: "demo_prompt_body",
+    description: "Body text explaining the first-run demo data offer.",
+    label: "Demo data prompt body",
+  },
+  {
+    category: "onboarding",
+    contentKey: "demo_profile_remove_body",
+    description: "Profile page explanation shown before removing demo data.",
+    label: "Demo data removal note",
+  },
+  {
+    category: "onboarding",
+    contentKey: "demo_profile_add_body",
+    description: "Profile page explanation shown before adding demo data.",
+    label: "Demo data add note",
   },
 ];
 
@@ -5753,9 +5799,7 @@ export default function Home() {
                       Demo data
                     </h3>
                     <p className="mt-1 max-w-3xl text-sm text-amber-900">
-                      Demo appointments are not real appointments. Removing demo
-                      data deletes only items marked as demo data and keeps your
-                      real information.
+                      {appContentText("demo_profile_remove_body")}
                     </p>
                   </div>
                   <button
@@ -5776,8 +5820,7 @@ export default function Home() {
                       Demo data
                     </h3>
                     <p className="mt-1 max-w-3xl text-sm text-slate-600">
-                      Add a few fictional appointments, notes, and CarePrep
-                      examples if you want a guided workspace to explore.
+                      {appContentText("demo_profile_add_body")}
                     </p>
                   </div>
                   <button
@@ -6720,11 +6763,10 @@ export default function Home() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-semibold text-blue-950">
-                      Welcome to the CarePland beta
+                      {appContentText("welcome_guide_title")}
                     </h2>
                     <p className="mt-1 max-w-3xl text-sm text-blue-900">
-                      Start with an appointment, import appointment text or
-                      images, or contact support if something feels off.
+                      {appContentText("welcome_guide_body")}
                     </p>
                   </div>
                   <button
@@ -6760,11 +6802,10 @@ export default function Home() {
                 {shouldOfferSampleData ? (
                   <div className="mt-4 rounded-md border border-blue-100 bg-white p-3">
                     <p className="text-sm font-semibold text-blue-950">
-                      Want demo data to explore?
+                      {appContentText("demo_prompt_title")}
                     </p>
                     <p className="mt-1 text-sm text-blue-900">
-                      Add a few demo appointments, notes, and CarePrep examples.
-                      You can skip this if you want to start clean.
+                      {appContentText("demo_prompt_body")}
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
