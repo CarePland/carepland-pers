@@ -112,6 +112,82 @@ type AppContentVersion = {
   version_number: number;
 };
 
+function ArchiveBoxIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M3 7h18" />
+      <path d="M5 7l1.5 13h11L19 7" />
+      <path d="M8 7V4h8v3" />
+      <path d="M10 12h4" />
+    </svg>
+  );
+}
+
+function CalendarIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M8 2v4" />
+      <path d="M16 2v4" />
+      <rect height="18" rx="2" width="18" x="3" y="4" />
+      <path d="M3 10h18" />
+    </svg>
+  );
+}
+
+function MapPinIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M20 10c0 4.5-8 11-8 11s-8-6.5-8-11a8 8 0 1 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
+}
+
+function PencilSquareIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L12 14l-4 1 1-4 7.5-7.5Z" />
+    </svg>
+  );
+}
+
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
 type AdminTab = "ai" | "content" | "messages" | "tools";
@@ -8216,103 +8292,82 @@ export default function Home() {
                             {mapsLink ? (
                               <a
                                 aria-label="Open in Google Maps"
-                                className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                                className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300"
                                 href={mapsLink}
                                 rel="noreferrer"
                                 target="_blank"
                                 title="Open in Google Maps"
                               >
-                                <svg
-                                  aria-hidden="true"
-                                  className="h-4 w-4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth="2"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path d="M20 10c0 4.5-8 11-8 11s-8-6.5-8-11a8 8 0 1 1 16 0Z" />
-                                  <circle cx="12" cy="10" r="3" />
-                                </svg>
-                                Maps
+                                <MapPinIcon className="h-5 w-5" />
                               </a>
                             ) : null}
                             {calendarLink ? (
                               <a
-                                aria-label="Add to calendar"
-                                className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                                aria-label="Add to Calendar"
+                                className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300"
                                 href={calendarLink}
                                 rel="noreferrer"
                                 target="_blank"
-                                title="Add to calendar"
+                                title="Add to Calendar"
                               >
-                                <svg
-                                  aria-hidden="true"
-                                  className="h-4 w-4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth="2"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path d="M8 2v4" />
-                                  <path d="M16 2v4" />
-                                  <rect
-                                    height="18"
-                                    rx="2"
-                                    width="18"
-                                    x="3"
-                                    y="4"
-                                  />
-                                  <path d="M3 10h18" />
-                                </svg>
-                                Calendar
+                                <CalendarIcon className="h-5 w-5" />
                               </a>
                             ) : null}
                             {canPasteContextualNotes ? (
-                              <button
-                                className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700"
-                                onClick={() => startTypingNote(appointment.id)}
-                                type="button"
+                              <div
+                                aria-label="Enter appointment notes"
+                                className="inline-flex h-11 overflow-hidden rounded-md border border-blue-300 bg-white"
+                                title="Enter appointment notes"
                               >
-                                Type
-                              </button>
-                            ) : null}
-                            {canPasteContextualNotes ? (
-                              <button
-                                className="rounded-md border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700"
-                                onClick={() =>
-                                  startContextualTextIntake(appointment)
-                                }
-                                type="button"
-                              >
-                                Paste
-                              </button>
+                                <button
+                                  className="px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-300"
+                                  onClick={() => startTypingNote(appointment.id)}
+                                  title="Type notes manually"
+                                  type="button"
+                                >
+                                  Type
+                                </button>
+                                <button
+                                  className="border-l border-blue-300 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-300"
+                                  onClick={() =>
+                                    startContextualTextIntake(appointment)
+                                  }
+                                  title="Paste notes or portal text"
+                                  type="button"
+                                >
+                                  Paste
+                                </button>
+                              </div>
                             ) : null}
                             <button
-                              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                              aria-label="Edit Appointment"
+                              className="inline-flex h-11 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300"
                               onClick={() =>
                                 startEditingAppointment(appointment)
                               }
+                              title="Edit Appointment"
                               type="button"
                             >
-                              Edit appointment
+                              <PencilSquareIcon className="h-5 w-5" />
+                              Edit
                             </button>
                             <button
-                              className="rounded-md border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 disabled:text-slate-400"
+                              aria-label="Archive Appointment"
+                              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:text-slate-400"
                               disabled={
                                 archivingAppointmentForId === appointment.id
                               }
                               onClick={() =>
                                 handleArchiveAppointment(appointment)
                               }
+                              title={
+                                archivingAppointmentForId === appointment.id
+                                  ? "Archiving..."
+                                  : "Archive Appointment"
+                              }
                               type="button"
                             >
-                              {archivingAppointmentForId === appointment.id
-                                ? "Archiving..."
-                                : "Archive appointment"}
+                              <ArchiveBoxIcon className="h-5 w-5" />
                             </button>
                           </div>
                         ) : null}
