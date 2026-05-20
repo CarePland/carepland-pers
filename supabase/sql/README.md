@@ -23,6 +23,9 @@ Supabase SQL editor history.
 - `2026-05-20_product_management.sql`
   Migration/admin utility: versioned product-management lanes, bugs, wishlist, and release notes.
 
+- `2026-05-20_seed_product_management_backlog.sql`
+  Admin utility: seeds the initial product-management backlog from running notes.
+
 ## Supabase SQL History Triage
 
 Recommended categories for the visible Supabase SQL editor history.
