@@ -134,6 +134,29 @@ type ProductMgmtItem = {
   resolved_at: string | null;
 };
 
+type SupportTicket = {
+  id: string;
+  category: string;
+  created_at: string;
+  current_page: string | null;
+  needs_admin_followup: boolean;
+  priority: SupportTicketPriority;
+  status: SupportTicketStatus;
+  subject: string;
+  updated_at: string;
+  user_has_unread_update: boolean;
+  user_id: string;
+};
+
+type SupportTicketMessage = {
+  id: string;
+  author_role: "admin" | "system" | "user";
+  created_at: string;
+  is_internal: boolean;
+  message_body: string;
+  ticket_id: string;
+};
+
 function CalendarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -204,6 +227,13 @@ type MainTab = "admin" | "appointments" | "profile";
 type ProductMgmtSection = string;
 type ProductMgmtStatus = "deferred" | "in_progress" | "open" | "resolved";
 type ProductMgmtPriority = "high" | "low" | "medium";
+type SupportTicketStatus =
+  | "closed"
+  | "in_progress"
+  | "open"
+  | "resolved"
+  | "waiting_on_user";
+type SupportTicketPriority = "high" | "low" | "medium" | "urgent";
 
 type ProductMgmtItemDraft = {
   areaId: string;
@@ -1680,6 +1710,17 @@ export default function Home() {
   const [retiringProductMgmtAreaId, setRetiringProductMgmtAreaId] = useState<
     string | null
   >(null);
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [supportTicketMessages, setSupportTicketMessages] = useState<
+    SupportTicketMessage[]
+  >([]);
+  const [supportQuestionExpanded, setSupportQuestionExpanded] = useState(false);
+  const [askingSupportQuestion, setAskingSupportQuestion] = useState(false);
+  const [savingSupportQuestion, setSavingSupportQuestion] = useState(false);
+  const [savingSupportReply, setSavingSupportReply] = useState(false);
+  const [supportQuestionSubject, setSupportQuestionSubject] = useState("");
+  const [supportQuestionBody, setSupportQuestionBody] = useState("");
+  const [supportReplyBody, setSupportReplyBody] = useState("");
   const [loadingAppContent, setLoadingAppContent] = useState(false);
   const [savingAppContent, setSavingAppContent] = useState(false);
   const [revertingAppContentForId, setRevertingAppContentForId] = useState<
@@ -1858,6 +1899,24 @@ export default function Home() {
   const selectedProductMgmtItems = productMgmtItems.filter(
     (item) => item.area_id === selectedProductMgmtArea?.id
   );
+  const openSupportTickets = supportTickets.filter(
+    (ticket) => !["closed", "resolved"].includes(ticket.status)
+  );
+  const currentSupportTicket =
+    openSupportTickets[0] ??
+    supportTickets.find((ticket) => ticket.status === "resolved") ??
+    null;
+  const currentSupportMessages = currentSupportTicket
+    ? supportTicketMessages.filter(
+        (messageRow) => messageRow.ticket_id === currentSupportTicket.id
+      )
+    : [];
+  const latestVisibleSupportMessage = [...currentSupportMessages]
+    .reverse()
+    .find((messageRow) => !messageRow.is_internal);
+  const hasUpdatedSupportQuestion = Boolean(
+    currentSupportTicket?.user_has_unread_update
+  );
 
   function appContentText(key: keyof typeof appContentDefaults) {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
@@ -2006,6 +2065,7 @@ export default function Home() {
             initialUiState?.appointmentView,
             initialUiState?.selectedSubjectId
           );
+          await loadCurrentUserSupportTickets();
 
           if (initialUiState?.mainTab === "admin") {
             if (initialUiState.adminTab === "ai") {
@@ -3462,6 +3522,142 @@ export default function Home() {
 
     if (tab === "admin") {
       await Promise.all([loadAiInstructions(), loadAppContent()]);
+    }
+  }
+
+  async function loadCurrentUserSupportTickets() {
+    try {
+      const { data: ticketRows, error: ticketError } = await supabase
+        .from("support_tickets")
+        .select(
+          "id,user_id,subject,status,priority,category,current_page,needs_admin_followup,user_has_unread_update,created_at,updated_at"
+        )
+        .order("updated_at", { ascending: false })
+        .limit(5);
+
+      if (ticketError) {
+        throw ticketError;
+      }
+
+      const loadedTickets = (ticketRows ?? []) as SupportTicket[];
+      setSupportTickets(loadedTickets);
+
+      if (loadedTickets.length === 0) {
+        setSupportTicketMessages([]);
+        return;
+      }
+
+      const { data: messageRows, error: messageError } = await supabase
+        .from("support_ticket_messages")
+        .select(
+          "id,ticket_id,author_role,message_body,is_internal,created_at"
+        )
+        .in(
+          "ticket_id",
+          loadedTickets.map((ticket) => ticket.id)
+        )
+        .eq("is_internal", false)
+        .order("created_at", { ascending: true });
+
+      if (messageError) {
+        throw messageError;
+      }
+
+      setSupportTicketMessages((messageRows ?? []) as SupportTicketMessage[]);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
+  }
+
+  async function handleCreateSupportQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!supportQuestionSubject.trim() || !supportQuestionBody.trim()) {
+      setMessage("Add a short subject and a few details before sending.");
+      return;
+    }
+
+    setSavingSupportQuestion(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("create_support_question", {
+        p_context: {
+          browser_timezone: browserTimezone(),
+          signed_in_email: signedInEmail,
+          tab: mainTab,
+        },
+        p_current_page: mainTab,
+        p_message: supportQuestionBody,
+        p_subject: supportQuestionSubject,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setSupportQuestionSubject("");
+      setSupportQuestionBody("");
+      setSupportReplyBody("");
+      setAskingSupportQuestion(false);
+      setSupportQuestionExpanded(true);
+      await loadCurrentUserSupportTickets();
+      showToast("Your question was sent.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingSupportQuestion(false);
+    }
+  }
+
+  async function handleAddSupportReply(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!currentSupportTicket || !supportReplyBody.trim()) {
+      return;
+    }
+
+    setSavingSupportReply(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("add_support_ticket_message", {
+        p_is_internal: false,
+        p_message: supportReplyBody,
+        p_ticket_id: currentSupportTicket.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setSupportReplyBody("");
+      await loadCurrentUserSupportTickets();
+      showToast("Your reply was added.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingSupportReply(false);
+    }
+  }
+
+  async function handleMarkSupportQuestionSeen(ticket: SupportTicket) {
+    if (!ticket.user_has_unread_update) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase.rpc("mark_support_ticket_seen", {
+        p_ticket_id: ticket.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      await loadCurrentUserSupportTickets();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
     }
   }
 
@@ -5971,12 +6167,28 @@ export default function Home() {
             !needsOnboarding ? (
               <span className="hidden text-slate-300 sm:inline">·</span>
             ) : null}
-            <a
-              className="font-semibold text-blue-700"
-              href={supportMailtoHref(signedInEmail, mainTab)}
-            >
-              Support
-            </a>
+            {signedInEmail &&
+            authMode !== "updatePassword" &&
+            !needsBetaAgreement &&
+            !needsOnboarding ? (
+              <button
+                className="font-semibold text-blue-700"
+                onClick={() => {
+                  setAskingSupportQuestion(true);
+                  setSupportQuestionExpanded(true);
+                }}
+                type="button"
+              >
+                Get help
+              </button>
+            ) : (
+              <a
+                className="font-semibold text-blue-700"
+                href={supportMailtoHref(signedInEmail, mainTab)}
+              >
+                Support
+              </a>
+            )}
           </div>
         </header>
 
@@ -7387,6 +7599,182 @@ export default function Home() {
               </p>
             ) : null}
 
+            {signedInEmail &&
+            !needsBetaAgreement &&
+            !needsOnboarding ? (
+              <section
+                className={`rounded-lg border p-3 shadow-sm ${
+                  hasUpdatedSupportQuestion
+                    ? "border-amber-200 bg-amber-50 text-amber-950"
+                    : currentSupportTicket
+                      ? "border-slate-200 bg-slate-100 text-slate-800"
+                      : askingSupportQuestion
+                        ? "border-blue-200 bg-blue-50 text-blue-950"
+                        : "border-slate-200 bg-white text-slate-800"
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {hasUpdatedSupportQuestion
+                        ? "We have more info about your question."
+                        : currentSupportTicket
+                          ? "You have an open question."
+                          : "Need a hand?"}
+                    </p>
+                    {currentSupportTicket ? (
+                      <p className="mt-1 text-sm opacity-80">
+                        {currentSupportTicket.subject}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                      onClick={() => {
+                        setSupportQuestionExpanded((isExpanded) => !isExpanded);
+                        if (currentSupportTicket?.user_has_unread_update) {
+                          void handleMarkSupportQuestionSeen(currentSupportTicket);
+                        }
+                      }}
+                      type="button"
+                    >
+                      {supportQuestionExpanded ? "Hide" : currentSupportTicket ? "More" : "Ask a question"}
+                    </button>
+                    {currentSupportTicket ? (
+                      <button
+                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                        onClick={() => {
+                          setAskingSupportQuestion(true);
+                          setSupportQuestionExpanded(true);
+                        }}
+                        type="button"
+                      >
+                        Ask another
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {supportQuestionExpanded ? (
+                  <div className="mt-3 rounded-md border border-white/70 bg-white p-3 text-slate-800">
+                    {currentSupportTicket && !askingSupportQuestion ? (
+                      <div>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="font-semibold text-slate-950">
+                              {currentSupportTicket.subject}
+                            </p>
+                            <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
+                              {currentSupportTicket.status.replace("_", " ")} · updated {formatDate(currentSupportTicket.updated_at)}
+                            </p>
+                          </div>
+                          <button
+                            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                            onClick={() => setAskingSupportQuestion(true)}
+                            type="button"
+                          >
+                            New question
+                          </button>
+                        </div>
+                        {latestVisibleSupportMessage ? (
+                          <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
+                            <p className="font-semibold text-slate-900">
+                              {latestVisibleSupportMessage.author_role === "admin"
+                                ? "CarePland replied"
+                                : "You wrote"}
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap">
+                              {latestVisibleSupportMessage.message_body}
+                            </p>
+                          </div>
+                        ) : null}
+                        <form className="mt-3" onSubmit={handleAddSupportReply}>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Add a comment
+                            <textarea
+                              className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                              disabled={savingSupportReply}
+                              onChange={(event) =>
+                                setSupportReplyBody(event.target.value)
+                              }
+                              placeholder="Add a quick follow-up or let us know whether this helped."
+                              value={supportReplyBody}
+                            />
+                          </label>
+                          <button
+                            className="mt-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                            disabled={savingSupportReply || !supportReplyBody.trim()}
+                            type="submit"
+                          >
+                            {savingSupportReply ? "Sending..." : "Send comment"}
+                          </button>
+                        </form>
+                      </div>
+                    ) : (
+                      <form onSubmit={handleCreateSupportQuestion}>
+                        <h2 className="text-lg font-semibold text-slate-950">
+                          Ask a question
+                        </h2>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Tell us what happened or what you were trying to do.
+                        </p>
+                        <label className="mt-3 block text-sm font-medium text-slate-700">
+                          Short subject
+                          <input
+                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                            disabled={savingSupportQuestion}
+                            onChange={(event) =>
+                              setSupportQuestionSubject(event.target.value)
+                            }
+                            placeholder="e.g. I cannot save an appointment"
+                            required
+                            value={supportQuestionSubject}
+                          />
+                        </label>
+                        <label className="mt-3 block text-sm font-medium text-slate-700">
+                          Details
+                          <textarea
+                            className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                            disabled={savingSupportQuestion}
+                            onChange={(event) =>
+                              setSupportQuestionBody(event.target.value)
+                            }
+                            placeholder="What did you expect? What happened instead?"
+                            required
+                            value={supportQuestionBody}
+                          />
+                        </label>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                            disabled={
+                              savingSupportQuestion ||
+                              !supportQuestionSubject.trim() ||
+                              !supportQuestionBody.trim()
+                            }
+                            type="submit"
+                          >
+                            {savingSupportQuestion ? "Sending..." : "Send question"}
+                          </button>
+                          {currentSupportTicket ? (
+                            <button
+                              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                              disabled={savingSupportQuestion}
+                              onClick={() => setAskingSupportQuestion(false)}
+                              type="button"
+                            >
+                              Back to open question
+                            </button>
+                          ) : null}
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
             {showWelcomeGuide ? (
               <section className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -7421,12 +7809,16 @@ export default function Home() {
                   >
                     Quick Add
                   </button>
-                  <a
+                  <button
                     className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
-                    href={supportMailtoHref(signedInEmail, "appointments")}
+                    onClick={() => {
+                      setAskingSupportQuestion(true);
+                      setSupportQuestionExpanded(true);
+                    }}
+                    type="button"
                   >
-                    Contact support
-                  </a>
+                    Ask a question
+                  </button>
                 </div>
                 {shouldOfferSampleData ? (
                   <div className="mt-4 rounded-md border border-blue-100 bg-white p-3">
