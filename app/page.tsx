@@ -163,6 +163,17 @@ type SupportTicketMessage = {
   ticket_id: string;
 };
 
+type SupportAssistantResult = {
+  answer: string;
+  category: string;
+  confidence: number;
+  escalationRecommended: boolean;
+  escalationReason: string;
+  interactionId: string;
+  priority: SupportTicketPriority;
+  suggestedNextStep: string;
+};
+
 function CalendarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -225,7 +236,8 @@ type AdminTab = "ai" | "content" | "messages" | "product" | "tickets" | "tools";
 type AiWorkflowKey =
   | "bulk_appointment_intake"
   | "careprep_generation"
-  | "note_intake_interpretation";
+  | "note_intake_interpretation"
+  | "support_assistant";
 type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
 type AppointmentModifier = "add" | "edit" | "import";
@@ -445,6 +457,7 @@ const appContentDefaults = {
   demo_prompt_title: "Want demo data to explore?",
   support_contact_note:
     "Need help or want to report an issue? Contact support from the app and include what you were trying to do.",
+  support_missing_feedback_prompt: "What was missing?",
   welcome_guide_body:
     "Start with an appointment, import appointment text or images, or contact support if something feels off.",
   welcome_guide_title: "Welcome to the CarePland beta",
@@ -480,6 +493,13 @@ const appContentOptions = [
     contentKey: "support_contact_note",
     description: "General support context for beta users.",
     label: "Support contact note",
+  },
+  {
+    category: "support",
+    contentKey: "support_missing_feedback_prompt",
+    description:
+      "Optional prompt shown after a support assistant answer is marked not helpful.",
+    label: "Support assistant missing-feedback prompt",
   },
   {
     category: "onboarding",
@@ -705,6 +725,29 @@ const defaultBulkAppointmentOutputSchema = {
   type: "object",
 };
 
+const defaultSupportAssistantOutputSchema = {
+  additionalProperties: false,
+  properties: {
+    answer: { type: "string" },
+    category: { type: "string" },
+    confidence: { type: "number" },
+    escalation_recommended: { type: "boolean" },
+    escalation_reason: { type: "string" },
+    priority: { enum: ["low", "medium", "high", "urgent"], type: "string" },
+    suggested_next_step: { type: "string" },
+  },
+  required: [
+    "answer",
+    "suggested_next_step",
+    "confidence",
+    "escalation_recommended",
+    "escalation_reason",
+    "category",
+    "priority",
+  ],
+  type: "object",
+};
+
 const aiWorkflows: Record<
   AiWorkflowKey,
   {
@@ -737,6 +780,14 @@ const aiWorkflows: Record<
       "Instructions used to interpret pasted appointment notes and appointment details.",
     historyLabel: "Intake History",
     label: "Note intake interpretation",
+  },
+  support_assistant: {
+    defaultChangeNote: "Initial support assistant instruction set",
+    defaultSchema: defaultSupportAssistantOutputSchema,
+    description:
+      "Instructions used to answer low-risk support questions before ticket escalation.",
+    historyLabel: "Support Assistant History",
+    label: "Support assistant",
   },
 };
 
@@ -1731,6 +1782,14 @@ export default function Home() {
   const [supportQuestionSubject, setSupportQuestionSubject] = useState("");
   const [supportQuestionBody, setSupportQuestionBody] = useState("");
   const [supportReplyBody, setSupportReplyBody] = useState("");
+  const [supportAssistantResult, setSupportAssistantResult] =
+    useState<SupportAssistantResult | null>(null);
+  const [supportAssistantFeedback, setSupportAssistantFeedback] = useState("");
+  const [supportAssistantFeedbackMode, setSupportAssistantFeedbackMode] =
+    useState<"helpful" | "not_helpful" | null>(null);
+  const [askingSupportAssistant, setAskingSupportAssistant] = useState(false);
+  const [savingSupportAssistantFeedback, setSavingSupportAssistantFeedback] =
+    useState(false);
   const [loadingAdminTickets, setLoadingAdminTickets] = useState(false);
   const [selectedAdminTicketId, setSelectedAdminTicketId] = useState("");
   const [adminTicketReplyBody, setAdminTicketReplyBody] = useState("");
@@ -3745,11 +3804,109 @@ export default function Home() {
     return displayName || fullName || profile?.email || ticket.user_id;
   }
 
-  async function handleCreateSupportQuestion(event: FormEvent<HTMLFormElement>) {
+  async function handleAskSupportAssistant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!supportQuestionSubject.trim() || !supportQuestionBody.trim()) {
-      setMessage("Add a short subject and a few details before sending.");
+      setMessage("Add a short subject and a few details before asking.");
+      return;
+    }
+
+    setAskingSupportAssistant(true);
+    setSupportAssistantResult(null);
+    setSupportAssistantFeedback("");
+    setSupportAssistantFeedbackMode(null);
+    setMessage("");
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before asking for help.");
+      }
+
+      const response = await fetch("/api/support-assistant", {
+        body: JSON.stringify({
+          context: {
+            email: signedInEmail,
+            has_open_support_ticket: Boolean(currentSupportTicket),
+            profile_label: savedProfileLabel,
+          },
+          currentPage: mainTab,
+          message: supportQuestionBody,
+          subject: supportQuestionSubject,
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "The support assistant could not answer.");
+      }
+
+      setSupportAssistantResult(result as SupportAssistantResult);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setAskingSupportAssistant(false);
+    }
+  }
+
+  async function handleSupportAssistantFeedback(
+    outcome: "helpful" | "not_helpful" | "escalated",
+    ticketId?: string
+  ) {
+    if (!supportAssistantResult) {
+      return;
+    }
+
+    setSavingSupportAssistantFeedback(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc(
+        "update_support_assistant_interaction",
+        {
+          p_interaction_id: supportAssistantResult.interactionId,
+          p_outcome: outcome,
+          p_ticket_id: ticketId ?? null,
+          p_user_feedback: supportAssistantFeedback,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      setSupportAssistantFeedbackMode(outcome === "helpful" ? "helpful" : "not_helpful");
+      showToast(
+        outcome === "helpful"
+          ? "Thanks. Your feedback was saved."
+          : outcome === "escalated"
+            ? "This was sent for review."
+            : "Thanks. Your feedback was saved.",
+        { type: "success" }
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingSupportAssistantFeedback(false);
+    }
+  }
+
+  async function handleEscalateSupportAssistant() {
+    if (!supportAssistantResult) {
       return;
     }
 
@@ -3757,28 +3914,60 @@ export default function Home() {
     setMessage("");
 
     try {
-      const { error } = await supabase.rpc("create_support_question", {
-        p_context: {
-          browser_timezone: browserTimezone(),
-          signed_in_email: signedInEmail,
-          tab: mainTab,
-        },
-        p_current_page: mainTab,
-        p_message: supportQuestionBody,
-        p_subject: supportQuestionSubject,
-      });
+      const escalationDetails = [
+        supportQuestionBody,
+        "",
+        "--- CarePland support assistant ---",
+        `Answer: ${supportAssistantResult.answer}`,
+        supportAssistantResult.suggestedNextStep
+          ? `Suggested next step: ${supportAssistantResult.suggestedNextStep}`
+          : "",
+        `Confidence: ${Math.round(supportAssistantResult.confidence * 100)}%`,
+        supportAssistantResult.escalationReason
+          ? `Escalation reason: ${supportAssistantResult.escalationReason}`
+          : "",
+        supportAssistantFeedback
+          ? `${appContentText("support_missing_feedback_prompt")} ${supportAssistantFeedback}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const { data: ticket, error } = await supabase.rpc(
+        "create_support_question",
+        {
+          p_context: {
+            assistant_category: supportAssistantResult.category,
+            assistant_confidence: supportAssistantResult.confidence,
+            assistant_interaction_id: supportAssistantResult.interactionId,
+            assistant_priority: supportAssistantResult.priority,
+            browser_timezone: browserTimezone(),
+            signed_in_email: signedInEmail,
+            tab: mainTab,
+          },
+          p_current_page: mainTab,
+          p_message: escalationDetails,
+          p_subject: supportQuestionSubject,
+        }
+      );
 
       if (error) {
         throw error;
       }
 
+      const ticketId =
+        ticket && typeof ticket === "object" && "id" in ticket
+          ? String(ticket.id)
+          : undefined;
+      await handleSupportAssistantFeedback("escalated", ticketId);
+
       setSupportQuestionSubject("");
       setSupportQuestionBody("");
-      setSupportReplyBody("");
+      setSupportAssistantResult(null);
+      setSupportAssistantFeedback("");
       setAskingSupportQuestion(false);
       setSupportQuestionExpanded(true);
       await loadCurrentUserSupportTickets();
-      showToast("Your question was sent.", { type: "success" });
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -7927,6 +8116,10 @@ export default function Home() {
                       <p className="mt-1 text-sm opacity-80">
                         {currentSupportTicket.subject}
                       </p>
+                    ) : askingSupportQuestion ? (
+                      <p className="mt-1 text-sm opacity-80">
+                        Ask the assistant first. If it cannot help, send the question for review.
+                      </p>
                     ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -7948,6 +8141,9 @@ export default function Home() {
                         onClick={() => {
                           setAskingSupportQuestion(true);
                           setSupportQuestionExpanded(true);
+                          setSupportAssistantResult(null);
+                          setSupportAssistantFeedback("");
+                          setSupportAssistantFeedbackMode(null);
                         }}
                         type="button"
                       >
@@ -7972,7 +8168,12 @@ export default function Home() {
                           </div>
                           <button
                             className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-                            onClick={() => setAskingSupportQuestion(true)}
+                            onClick={() => {
+                              setAskingSupportQuestion(true);
+                              setSupportAssistantResult(null);
+                              setSupportAssistantFeedback("");
+                              setSupportAssistantFeedbackMode(null);
+                            }}
                             type="button"
                           >
                             New question
@@ -8013,7 +8214,7 @@ export default function Home() {
                         </form>
                       </div>
                     ) : (
-                      <form onSubmit={handleCreateSupportQuestion}>
+                      <form onSubmit={handleAskSupportAssistant}>
                         <h2 className="text-lg font-semibold text-slate-950">
                           Ask a question
                         </h2>
@@ -8024,7 +8225,7 @@ export default function Home() {
                           Short subject
                           <input
                             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                            disabled={savingSupportQuestion}
+                            disabled={savingSupportQuestion || askingSupportAssistant}
                             onChange={(event) =>
                               setSupportQuestionSubject(event.target.value)
                             }
@@ -8037,7 +8238,7 @@ export default function Home() {
                           Details
                           <textarea
                             className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                            disabled={savingSupportQuestion}
+                            disabled={savingSupportQuestion || askingSupportAssistant}
                             onChange={(event) =>
                               setSupportQuestionBody(event.target.value)
                             }
@@ -8046,17 +8247,105 @@ export default function Home() {
                             value={supportQuestionBody}
                           />
                         </label>
+
+                        {supportAssistantResult ? (
+                          <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-slate-800">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="font-semibold text-slate-950">
+                                  CarePland assistant
+                                </p>
+                                <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
+                                  {supportAssistantResult.category} · {Math.round(supportAssistantResult.confidence * 100)}% confidence
+                                </p>
+                              </div>
+                              {supportAssistantResult.escalationRecommended ? (
+                                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                                  May need review
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="mt-3 whitespace-pre-wrap">
+                              {supportAssistantResult.answer}
+                            </p>
+                            {supportAssistantResult.suggestedNextStep ? (
+                              <p className="mt-3 font-semibold text-slate-900">
+                                {supportAssistantResult.suggestedNextStep}
+                              </p>
+                            ) : null}
+                            {supportAssistantResult.escalationReason ? (
+                              <p className="mt-2 text-xs text-slate-600">
+                                Review note: {supportAssistantResult.escalationReason}
+                              </p>
+                            ) : null}
+
+                            {supportAssistantFeedbackMode === "not_helpful" ? (
+                              <label className="mt-3 block font-medium text-slate-700">
+                                {appContentText("support_missing_feedback_prompt")}
+                                <textarea
+                                  className="mt-1 min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                                  disabled={savingSupportAssistantFeedback || savingSupportQuestion}
+                                  onChange={(event) =>
+                                    setSupportAssistantFeedback(event.target.value)
+                                  }
+                                  placeholder="Optional"
+                                  value={supportAssistantFeedback}
+                                />
+                              </label>
+                            ) : null}
+
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                                disabled={savingSupportAssistantFeedback}
+                                onClick={() => handleSupportAssistantFeedback("helpful")}
+                                type="button"
+                              >
+                                Helpful
+                              </button>
+                              <button
+                                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                            disabled={savingSupportAssistantFeedback}
+                            onClick={() => {
+                              setSupportAssistantFeedbackMode("not_helpful");
+                            }}
+                            type="button"
+                          >
+                            Not helpful
+                          </button>
+                              {supportAssistantFeedbackMode === "not_helpful" ? (
+                                <button
+                                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                                  disabled={savingSupportAssistantFeedback}
+                                  onClick={() => handleSupportAssistantFeedback("not_helpful")}
+                                  type="button"
+                                >
+                                  Save feedback
+                                </button>
+                              ) : null}
+                              <button
+                                className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                                disabled={savingSupportQuestion}
+                                onClick={handleEscalateSupportAssistant}
+                                type="button"
+                              >
+                                {savingSupportQuestion ? "Sending..." : "Send for review"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
                             className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
                             disabled={
-                              savingSupportQuestion ||
+                              askingSupportAssistant ||
                               !supportQuestionSubject.trim() ||
                               !supportQuestionBody.trim()
                             }
                             type="submit"
                           >
-                            {savingSupportQuestion ? "Sending..." : "Send question"}
+                            {askingSupportAssistant ? "Checking..." : "Ask assistant"}
                           </button>
                           {currentSupportTicket ? (
                             <button

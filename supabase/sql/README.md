@@ -35,6 +35,15 @@ Supabase SQL editor history.
 - `2026-05-20_remove_demo_support_tickets.sql`
   Admin utility: removes only the demo support tickets created by the seed script.
 
+- `2026-05-20_support_assistant_interactions.sql`
+  Migration/admin utility: stores auditable support assistant answers, outcomes, escalation links, and user feedback.
+
+- `2026-05-20_seed_support_assistant_content.sql`
+  Admin utility: seeds editable support assistant UI copy into dynamic app content.
+
+- `2026-05-20_seed_support_assistant_instruction.sql`
+  Admin utility: seeds the editable Support Assistant AI prompt/instruction set for existing care circles.
+
 ## Supabase SQL History Triage
 
 Recommended categories for the visible Supabase SQL editor history.
