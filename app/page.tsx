@@ -326,31 +326,59 @@ const appContentDefaults = {
 
 const appContentOptions = [
   {
+    category: "beta",
     contentKey: "beta_notice_intro",
     description: "Introductory text shown before beta acknowledgement checkboxes.",
     label: "Beta testing notice intro",
   },
   {
+    category: "beta",
     contentKey: "beta_terms_ack",
     description: "Checkbox text confirming Terms of Service status during beta.",
     label: "Beta terms acknowledgement",
   },
   {
+    category: "beta",
     contentKey: "beta_privacy_ack",
     description: "Checkbox text confirming Privacy Policy status during beta.",
     label: "Beta privacy acknowledgement",
   },
   {
+    category: "beta",
     contentKey: "beta_disclaimer_ack",
     description: "Checkbox text confirming beta safety limitations.",
     label: "Beta safety acknowledgement",
   },
   {
+    category: "support",
     contentKey: "support_contact_note",
     description: "General support context for beta users.",
     label: "Support contact note",
   },
 ];
+
+const appContentCategories = [
+  {
+    description: "Testing notices, temporary legal acknowledgements, and safety language.",
+    key: "beta",
+    label: "Beta and legal",
+  },
+  {
+    description: "Support guidance and help text shown to users.",
+    key: "support",
+    label: "Support",
+  },
+  {
+    description: "First-run guidance, demo data prompts, and welcome copy.",
+    key: "onboarding",
+    label: "Onboarding",
+  },
+  {
+    description: "Short status, success, warning, and validation messages.",
+    key: "messages",
+    label: "Messages",
+  },
+] as const;
 
 const betaAgreementVersion = "beta-2026-05-19";
 const welcomeGuideStoragePrefix = "carepland-welcome-guide-dismissed:";
@@ -1375,6 +1403,9 @@ export default function Home() {
   const [selectedAppContentKey, setSelectedAppContentKey] = useState(
     appContentOptions[0].contentKey
   );
+  const [selectedAppContentCategory, setSelectedAppContentCategory] = useState(
+    appContentOptions[0].category
+  );
   const [loadingAppContent, setLoadingAppContent] = useState(false);
   const [savingAppContent, setSavingAppContent] = useState(false);
   const [revertingAppContentForId, setRevertingAppContentForId] = useState<
@@ -1511,8 +1542,20 @@ export default function Home() {
         .map((version) => [version.content_key, version])
     );
   }, [appContentVersions]);
+  const selectedAppContentOption = appContentOptions.find(
+    (item) => item.contentKey === selectedAppContentKey
+  );
   const selectedAppContent =
-    currentAppContentByKey.get(selectedAppContentKey) ?? null;
+    selectedAppContentOption?.category === selectedAppContentCategory
+      ? currentAppContentByKey.get(selectedAppContentKey) ?? null
+      : null;
+  const selectedAppContentCategoryConfig =
+    appContentCategories.find(
+      (category) => category.key === selectedAppContentCategory
+    ) ?? appContentCategories[0];
+  const filteredAppContentOptions = appContentOptions.filter(
+    (item) => item.category === selectedAppContentCategory
+  );
 
   function appContentText(key: keyof typeof appContentDefaults) {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
@@ -2562,6 +2605,12 @@ export default function Home() {
 
   async function handleChangeAppContentKey(contentKey: string) {
     setSelectedAppContentKey(contentKey);
+    const optionForCategory = appContentOptions.find(
+      (item) => item.contentKey === contentKey
+    );
+    if (optionForCategory) {
+      setSelectedAppContentCategory(optionForCategory.category);
+    }
     const currentVersion =
       appContentVersions.find(
         (version) => version.content_key === contentKey && version.is_current
@@ -2582,6 +2631,17 @@ export default function Home() {
     );
     setAppContentChangeNote("");
     await loadAppContent(contentKey);
+  }
+
+  async function handleChangeAppContentCategory(categoryKey: string) {
+    setSelectedAppContentCategory(categoryKey);
+    const firstOption = appContentOptions.find(
+      (item) => item.category === categoryKey
+    );
+
+    if (firstOption) {
+      await handleChangeAppContentKey(firstOption.contentKey);
+    }
   }
 
   async function handleSaveAppContent(event: FormEvent<HTMLFormElement>) {
@@ -7447,24 +7507,84 @@ export default function Home() {
                   </button>
                 </div>
 
-                <label className="mt-5 block max-w-xl text-sm font-medium text-slate-700">
-                  Content block
-                  <select
-                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                    disabled={loadingAppContent}
-                    onChange={(event) =>
-                      handleChangeAppContentKey(event.target.value)
-                    }
-                    value={selectedAppContentKey}
-                  >
-                    {appContentOptions.map((item) => (
-                      <option key={item.contentKey} value={item.contentKey}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="mt-5 grid gap-5 lg:grid-cols-[16rem_minmax(0,1fr)]">
+                  <aside className="space-y-2">
+                    <p className="text-sm font-medium text-slate-700">
+                      Content area
+                    </p>
+                    <div className="space-y-2">
+                      {appContentCategories.map((category) => {
+                        const count = appContentOptions.filter(
+                          (item) => item.category === category.key
+                        ).length;
+                        const isSelected =
+                          selectedAppContentCategory === category.key;
 
+                        return (
+                          <button
+                            className={`w-full rounded-md border px-3 py-3 text-left transition ${
+                              isSelected
+                                ? "border-blue-300 bg-blue-50 text-blue-950"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50"
+                            }`}
+                            key={category.key}
+                            onClick={() =>
+                              void handleChangeAppContentCategory(category.key)
+                            }
+                            type="button"
+                          >
+                            <span className="block font-semibold">
+                              {category.label}
+                            </span>
+                            <span className="mt-1 block text-xs text-slate-500">
+                              {count
+                                ? `${count} editable item${count === 1 ? "" : "s"}`
+                                : "Planned"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </aside>
+
+                  <div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {selectedAppContentCategoryConfig.label}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {selectedAppContentCategoryConfig.description}
+                      </p>
+                    </div>
+
+                    {filteredAppContentOptions.length ? (
+                      <label className="mt-5 block max-w-xl text-sm font-medium text-slate-700">
+                        Content block
+                        <select
+                          className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          disabled={loadingAppContent}
+                          onChange={(event) =>
+                            handleChangeAppContentKey(event.target.value)
+                          }
+                          value={selectedAppContentKey}
+                        >
+                          {filteredAppContentOptions.map((item) => (
+                            <option key={item.contentKey} value={item.contentKey}>
+                              {item.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <div className="mt-5 rounded-md border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-600">
+                        No managed content blocks are in this area yet. We can
+                        promote these strings when the app text is ready to be
+                        managed here.
+                      </div>
+                    )}
+
+                    {filteredAppContentOptions.length ? (
+                      <>
                 <form className="mt-5 space-y-4" onSubmit={handleSaveAppContent}>
                   <label className="block text-sm font-medium text-slate-700">
                     Label
@@ -7586,6 +7706,10 @@ export default function Home() {
                     ) : null}
                   </div>
                 </section>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
               </section>
               ) : null}
 
