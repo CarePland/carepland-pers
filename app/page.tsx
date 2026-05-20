@@ -5415,7 +5415,7 @@ export default function Home() {
             </div>
 
             <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
+              <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Current plan</p>
                 <p className="mt-2">
                   {entitlement.plan_name} · Care VIPs {careSubjects.length}/
@@ -5427,7 +5427,7 @@ export default function Home() {
                   </p>
                 ) : null}
               </div>
-              <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
+              <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Plan changes</p>
                 <button
                   className="mt-2 rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
@@ -5439,7 +5439,7 @@ export default function Home() {
                   Change plan
                 </button>
               </div>
-              <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
+              <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Beta support</p>
                 <p className="mt-2 text-slate-600">
                   {appContentText("support_contact_note")}
@@ -5451,7 +5451,7 @@ export default function Home() {
                   Contact support
                 </a>
               </div>
-              <div className="rounded-md bg-slate-100 p-4 text-sm text-slate-700">
+              <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
                 <p className="font-semibold text-slate-900">Account security</p>
                 <button
                   className="mt-2 rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 disabled:bg-slate-200"
@@ -5512,7 +5512,7 @@ export default function Home() {
             )}
 
             {canUseMultipleCareVips ? (
-              <section className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4">
+              <section className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-4">
                 <h3 className="text-lg font-semibold">Care VIPs</h3>
                 <p className="mt-1 text-sm text-slate-600">
                   Manage the people, pets, and important lives connected to this
@@ -6586,7 +6586,7 @@ export default function Home() {
 
                 {activeAppointmentPanel === "add" ? (
                   <form
-                    className="mt-4 grid gap-4 rounded-md bg-slate-50 p-4 md:grid-cols-2"
+                    className="mt-4 grid gap-4 rounded-md border border-blue-100 bg-blue-50 p-4 md:grid-cols-2"
                     onSubmit={handleCreateAppointment}
                   >
                     {canUseMultipleCareVips ? (
@@ -6703,7 +6703,7 @@ export default function Home() {
                 ) : null}
 
                 {activeAppointmentPanel === "quickAdd" ? (
-                  <section className="mt-4 rounded-md bg-slate-50 p-4">
+                  <section className="mt-4 rounded-md border border-blue-100 bg-blue-50 p-4">
                     <form onSubmit={handleInterpretTextIntake}>
                       {canUseMultipleCareVips ? (
                         <label className="block text-sm font-medium text-slate-700">
