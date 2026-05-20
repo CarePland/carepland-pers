@@ -328,7 +328,53 @@ type SampleDataStatus = {
   user_id?: string | null;
 };
 
+type StoredUiState = {
+  activeAppointmentPanel?: AppointmentPanel | null;
+  adminTab?: AdminTab;
+  aiAdminTab?: AiAdminTab;
+  appointmentView?: AppointmentView;
+  mainTab?: MainTab;
+  selectedAiWorkflow?: AiWorkflowKey;
+  selectedAppContentCategory?: string;
+  selectedAppContentKey?: string;
+  selectedProductMgmtSection?: string;
+  selectedSubjectId?: string;
+};
+
+type StoredDraftState = {
+  appointmentDrafts?: Record<string, typeof emptyAppointmentDraft>;
+  bulkAppointmentDrafts?: BulkAppointmentDraft[];
+  bulkAppointmentSummary?: string;
+  carePrepDrafts?: Record<string, typeof emptyCarePrepDraft>;
+  contextualTextIntakeValue?: string;
+  editingAppointmentIds?: Record<string, boolean>;
+  editingCarePrepIds?: Record<string, boolean>;
+  editingNoteIds?: Record<string, boolean>;
+  newAppointmentDraft?: {
+    locationAddress: string;
+    locationName: string;
+    locationPhone: string;
+    providerName: string;
+    providerOrganization: string;
+    reason: string;
+    startsAt: string;
+    subjectId: string;
+    title: string;
+  };
+  noteDrafts?: Record<string, typeof emptyNoteDraft>;
+  textIntakeAiDraft?: TextIntakeDraft | null;
+  textIntakeDraft?: TextIntakeDraft | null;
+  textIntakeItemId?: string | null;
+  textIntakeMatches?: TextIntakeMatch[];
+  selectedTextIntakeMatchId?: string;
+  textIntakeSubjectId?: string;
+  textIntakeTargetAppointmentId?: string | null;
+  textIntakeValue?: string;
+};
+
 const ALL_SUBJECTS = "all";
+const appUiStateStorageKey = "carepland-ui-state:v1";
+const appDraftStateStorageKey = "carepland-draft-state:v1";
 
 const defaultEntitlement: CareCircleEntitlement = {
   max_active_subjects: 1,
@@ -1366,6 +1412,36 @@ function welcomeGuideWasDismissed(email: string | null) {
   );
 }
 
+function readStoredJson<T>(storage: Storage, key: string): T | null {
+  try {
+    const rawValue = storage.getItem(key);
+
+    if (!rawValue) {
+      return null;
+    }
+
+    return JSON.parse(rawValue) as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredJson(storage: Storage, key: string, value: unknown) {
+  try {
+    storage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage can be unavailable in private or locked-down browser contexts.
+  }
+}
+
+function removeStoredValue(storage: Storage, key: string) {
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Storage can be unavailable in private or locked-down browser contexts.
+  }
+}
+
 function intakeDraftFromResult(value: unknown): TextIntakeDraft {
   const draft =
     value && typeof value === "object" && !Array.isArray(value)
@@ -1426,59 +1502,109 @@ function bulkAppointmentDraftsFromResult(value: unknown): BulkAppointmentDraft[]
 }
 
 export default function Home() {
+  const [initialUiState] = useState<StoredUiState | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return readStoredJson<StoredUiState>(
+      window.localStorage,
+      appUiStateStorageKey
+    );
+  });
+  const [initialDraftState] = useState<StoredDraftState | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return readStoredJson<StoredDraftState>(
+      window.sessionStorage,
+      appDraftStateStorageKey
+    );
+  });
   const [authMode, setAuthMode] = useState<AuthMode>("signIn");
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
-    useState<AppointmentPanel | null>(null);
-  const [mainTab, setMainTab] = useState<MainTab>("appointments");
+    useState<AppointmentPanel | null>(
+      initialUiState?.activeAppointmentPanel ?? null
+    );
+  const [mainTab, setMainTab] = useState<MainTab>(
+    initialUiState?.mainTab ?? "appointments"
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [newAppointmentTitle, setNewAppointmentTitle] = useState("");
-  const [newAppointmentReason, setNewAppointmentReason] = useState("");
-  const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState("");
+  const [newAppointmentTitle, setNewAppointmentTitle] = useState(
+    initialDraftState?.newAppointmentDraft?.title ?? ""
+  );
+  const [newAppointmentReason, setNewAppointmentReason] = useState(
+    initialDraftState?.newAppointmentDraft?.reason ?? ""
+  );
+  const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState(
+    initialDraftState?.newAppointmentDraft?.startsAt ?? ""
+  );
   const [newAppointmentProviderName, setNewAppointmentProviderName] =
-    useState("");
+    useState(initialDraftState?.newAppointmentDraft?.providerName ?? "");
   const [
     newAppointmentProviderOrganization,
     setNewAppointmentProviderOrganization,
-  ] = useState("");
+  ] = useState(
+    initialDraftState?.newAppointmentDraft?.providerOrganization ?? ""
+  );
   const [newAppointmentLocationName, setNewAppointmentLocationName] =
-    useState("");
+    useState(initialDraftState?.newAppointmentDraft?.locationName ?? "");
   const [newAppointmentLocationAddress, setNewAppointmentLocationAddress] =
-    useState("");
+    useState(initialDraftState?.newAppointmentDraft?.locationAddress ?? "");
   const [newAppointmentLocationPhone, setNewAppointmentLocationPhone] =
-    useState("");
-  const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState("");
-  const [textIntakeSubjectId, setTextIntakeSubjectId] = useState("");
-  const [textIntakeValue, setTextIntakeValue] = useState("");
+    useState(initialDraftState?.newAppointmentDraft?.locationPhone ?? "");
+  const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState(
+    initialDraftState?.newAppointmentDraft?.subjectId ?? ""
+  );
+  const [textIntakeSubjectId, setTextIntakeSubjectId] = useState(
+    initialDraftState?.textIntakeSubjectId ?? ""
+  );
+  const [textIntakeValue, setTextIntakeValue] = useState(
+    initialDraftState?.textIntakeValue ?? ""
+  );
   const [textIntakeDraft, setTextIntakeDraft] =
-    useState<TextIntakeDraft | null>(null);
+    useState<TextIntakeDraft | null>(initialDraftState?.textIntakeDraft ?? null);
   const [textIntakeAiDraft, setTextIntakeAiDraft] =
-    useState<TextIntakeDraft | null>(null);
-  const [textIntakeItemId, setTextIntakeItemId] = useState<string | null>(null);
+    useState<TextIntakeDraft | null>(initialDraftState?.textIntakeAiDraft ?? null);
+  const [textIntakeItemId, setTextIntakeItemId] = useState<string | null>(
+    initialDraftState?.textIntakeItemId ?? null
+  );
   const [textIntakeMatches, setTextIntakeMatches] = useState<TextIntakeMatch[]>(
-    []
+    initialDraftState?.textIntakeMatches ?? []
   );
   const [selectedTextIntakeMatchId, setSelectedTextIntakeMatchId] =
-    useState("new");
+    useState(initialDraftState?.selectedTextIntakeMatchId ?? "new");
   const [textIntakeTargetAppointmentId, setTextIntakeTargetAppointmentId] =
-    useState<string | null>(null);
+    useState<string | null>(
+      initialDraftState?.textIntakeTargetAppointmentId ?? null
+    );
   const [contextualTextIntakeValue, setContextualTextIntakeValue] =
-    useState("");
+    useState(initialDraftState?.contextualTextIntakeValue ?? "");
   const [
     applyTextIntakeAppointmentDetails,
     setApplyTextIntakeAppointmentDetails,
   ] = useState(false);
   const [bulkAppointmentDrafts, setBulkAppointmentDrafts] = useState<
     BulkAppointmentDraft[]
-  >([]);
-  const [bulkAppointmentSummary, setBulkAppointmentSummary] = useState("");
+  >(initialDraftState?.bulkAppointmentDrafts ?? []);
+  const [bulkAppointmentSummary, setBulkAppointmentSummary] = useState(
+    initialDraftState?.bulkAppointmentSummary ?? ""
+  );
   const [newCareVipName, setNewCareVipName] = useState("");
   const [managingCareVips, setManagingCareVips] = useState(false);
   const [selectedAiWorkflow, setSelectedAiWorkflow] =
-    useState<AiWorkflowKey>("careprep_generation");
-  const [aiAdminTab, setAiAdminTab] = useState<AiAdminTab>("instructions");
-  const [adminTab, setAdminTab] = useState<AdminTab>("tools");
+    useState<AiWorkflowKey>(
+      initialUiState?.selectedAiWorkflow ?? "careprep_generation"
+    );
+  const [aiAdminTab, setAiAdminTab] = useState<AiAdminTab>(
+    initialUiState?.aiAdminTab ?? "instructions"
+  );
+  const [adminTab, setAdminTab] = useState<AdminTab>(
+    initialUiState?.adminTab ?? "tools"
+  );
   const [loadingInstructions, setLoadingInstructions] = useState(false);
   const [loadingCarePrepHistory, setLoadingCarePrepHistory] = useState(false);
   const [savingInstructions, setSavingInstructions] = useState(false);
@@ -1505,13 +1631,16 @@ export default function Home() {
     AppContentVersion[]
   >([]);
   const [selectedAppContentKey, setSelectedAppContentKey] = useState(
-    appContentOptions[0].contentKey
+    initialUiState?.selectedAppContentKey ?? appContentOptions[0].contentKey
   );
   const [selectedAppContentCategory, setSelectedAppContentCategory] = useState(
-    appContentOptions[0].category
+    initialUiState?.selectedAppContentCategory ?? appContentOptions[0].category
   );
   const [selectedProductMgmtSection, setSelectedProductMgmtSection] =
-    useState<ProductMgmtSection>("bug");
+    useState<ProductMgmtSection>(
+      (initialUiState?.selectedProductMgmtSection as ProductMgmtSection) ??
+        "bug"
+    );
   const [productMgmtAreas, setProductMgmtAreas] = useState<ProductMgmtArea[]>([]);
   const [productMgmtItems, setProductMgmtItems] = useState<ProductMgmtItem[]>([]);
   const [loadingProductMgmt, setLoadingProductMgmt] = useState(false);
@@ -1559,20 +1688,22 @@ export default function Home() {
         takeaways: string;
       }
     >
-  >({});
+  >(initialDraftState?.noteDrafts ?? {});
   const [appointmentDrafts, setAppointmentDrafts] = useState<
     Record<string, typeof emptyAppointmentDraft>
-  >({});
+  >(initialDraftState?.appointmentDrafts ?? {});
   const [carePrepDrafts, setCarePrepDrafts] = useState<
     Record<string, typeof emptyCarePrepDraft>
-  >({});
+  >(initialDraftState?.carePrepDrafts ?? {});
   const [editingCarePrepIds, setEditingCarePrepIds] = useState<
     Record<string, boolean>
-  >({});
+  >(initialDraftState?.editingCarePrepIds ?? {});
   const [editingAppointmentIds, setEditingAppointmentIds] = useState<
     Record<string, boolean>
-  >({});
-  const [editingNoteIds, setEditingNoteIds] = useState<Record<string, boolean>>({});
+  >(initialDraftState?.editingAppointmentIds ?? {});
+  const [editingNoteIds, setEditingNoteIds] = useState<Record<string, boolean>>(
+    initialDraftState?.editingNoteIds ?? {}
+  );
   const [pendingModifierSwitch, setPendingModifierSwitch] =
     useState<PendingModifierSwitch | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1581,9 +1712,12 @@ export default function Home() {
   const [extractingImageText, setExtractingImageText] = useState(false);
   const [savingTextIntake, setSavingTextIntake] = useState(false);
   const [creatingCareVip, setCreatingCareVip] = useState(false);
-  const [appointmentView, setAppointmentView] =
-    useState<AppointmentView>("upcoming");
-  const [selectedSubjectId, setSelectedSubjectId] = useState(ALL_SUBJECTS);
+  const [appointmentView, setAppointmentView] = useState<AppointmentView>(
+    initialUiState?.appointmentView ?? "upcoming"
+  );
+  const [selectedSubjectId, setSelectedSubjectId] = useState(
+    initialUiState?.selectedSubjectId ?? ALL_SUBJECTS
+  );
   const [savingAppointmentForId, setSavingAppointmentForId] = useState<
     string | null
   >(null);
@@ -1852,7 +1986,23 @@ export default function Home() {
 
         try {
           await loadAppContent();
-          await loadAppointments();
+          await loadAppointments(
+            initialUiState?.appointmentView,
+            initialUiState?.selectedSubjectId
+          );
+
+          if (initialUiState?.mainTab === "admin") {
+            if (initialUiState.adminTab === "ai") {
+              await loadAiInstructions(initialUiState.selectedAiWorkflow);
+            } else if (initialUiState.adminTab === "product") {
+              await loadProductMgmt();
+            } else if (
+              initialUiState.adminTab === "content" ||
+              initialUiState.adminTab === "messages"
+            ) {
+              await loadAppContent(initialUiState.selectedAppContentKey);
+            }
+          }
         } catch (error) {
           setMessage(getErrorMessage(error));
         } finally {
@@ -1900,6 +2050,100 @@ export default function Home() {
 
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    writeStoredJson(window.localStorage, appUiStateStorageKey, {
+      activeAppointmentPanel,
+      adminTab,
+      aiAdminTab,
+      appointmentView,
+      mainTab,
+      selectedAiWorkflow,
+      selectedAppContentCategory,
+      selectedAppContentKey,
+      selectedProductMgmtSection,
+      selectedSubjectId,
+    } satisfies StoredUiState);
+  }, [
+    activeAppointmentPanel,
+    adminTab,
+    aiAdminTab,
+    appointmentView,
+    mainTab,
+    selectedAiWorkflow,
+    selectedAppContentCategory,
+    selectedAppContentKey,
+    selectedProductMgmtSection,
+    selectedSubjectId,
+  ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    writeStoredJson(window.sessionStorage, appDraftStateStorageKey, {
+      appointmentDrafts,
+      bulkAppointmentDrafts,
+      bulkAppointmentSummary,
+      carePrepDrafts,
+      contextualTextIntakeValue,
+      editingAppointmentIds,
+      editingCarePrepIds,
+      editingNoteIds,
+      newAppointmentDraft: {
+        locationAddress: newAppointmentLocationAddress,
+        locationName: newAppointmentLocationName,
+        locationPhone: newAppointmentLocationPhone,
+        providerName: newAppointmentProviderName,
+        providerOrganization: newAppointmentProviderOrganization,
+        reason: newAppointmentReason,
+        startsAt: newAppointmentStartsAt,
+        subjectId: newAppointmentSubjectId,
+        title: newAppointmentTitle,
+      },
+      noteDrafts,
+      selectedTextIntakeMatchId,
+      textIntakeAiDraft,
+      textIntakeDraft,
+      textIntakeItemId,
+      textIntakeMatches,
+      textIntakeSubjectId,
+      textIntakeTargetAppointmentId,
+      textIntakeValue,
+    } satisfies StoredDraftState);
+  }, [
+    appointmentDrafts,
+    bulkAppointmentDrafts,
+    bulkAppointmentSummary,
+    carePrepDrafts,
+    contextualTextIntakeValue,
+    editingAppointmentIds,
+    editingCarePrepIds,
+    editingNoteIds,
+    newAppointmentLocationAddress,
+    newAppointmentLocationName,
+    newAppointmentLocationPhone,
+    newAppointmentProviderName,
+    newAppointmentProviderOrganization,
+    newAppointmentReason,
+    newAppointmentStartsAt,
+    newAppointmentSubjectId,
+    newAppointmentTitle,
+    noteDrafts,
+    selectedTextIntakeMatchId,
+    textIntakeAiDraft,
+    textIntakeDraft,
+    textIntakeItemId,
+    textIntakeMatches,
+    textIntakeSubjectId,
+    textIntakeTargetAppointmentId,
+    textIntakeValue,
+  ]);
 
   function showToast(
     messageText: string,
@@ -3396,6 +3640,10 @@ export default function Home() {
 
   async function handleSignOut() {
     await supabase.auth.signOut();
+    if (typeof window !== "undefined") {
+      removeStoredValue(window.localStorage, appUiStateStorageKey);
+      removeStoredValue(window.sessionStorage, appDraftStateStorageKey);
+    }
     setSignedInEmail(null);
     setAcceptBetaDisclaimer(false);
     setAcceptBetaPrivacy(false);
