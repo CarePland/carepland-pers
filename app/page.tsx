@@ -112,6 +112,28 @@ type AppContentVersion = {
   version_number: number;
 };
 
+type ProductMgmtArea = {
+  id: string;
+  area_key: string;
+  label: string;
+  description: string | null;
+  display_order: number;
+  is_active: boolean;
+};
+
+type ProductMgmtItem = {
+  id: string;
+  area_id: string;
+  title: string;
+  body: string;
+  status: ProductMgmtStatus;
+  priority: ProductMgmtPriority;
+  current_version_number: number;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+};
+
 function CalendarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -179,7 +201,9 @@ type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
 type AppointmentModifier = "add" | "edit" | "import";
 type MainTab = "admin" | "appointments" | "profile";
-type ProductMgmtSection = "beta" | "release" | "wishlist";
+type ProductMgmtSection = string;
+type ProductMgmtStatus = "deferred" | "in_progress" | "open" | "resolved";
+type ProductMgmtPriority = "high" | "low" | "medium";
 type PendingModifierSwitch = {
   appointmentId: string;
   target: AppointmentModifier;
@@ -429,6 +453,11 @@ const appContentCategories = [
 
 const productMgmtSections = [
   {
+    description: "Regressions, confusing behavior, and things that should be verified as fixed.",
+    key: "bug",
+    label: "Bugs",
+  },
+  {
     description: "Must-have items before inviting beta testers over Memorial Day weekend.",
     key: "beta",
     label: "Beta Readiness",
@@ -442,6 +471,16 @@ const productMgmtSections = [
     description: "Useful ideas that should not interrupt the current beta path.",
     key: "wishlist",
     label: "Wishlist",
+  },
+  {
+    description: "AI interpretation quality, prompt behavior, and review tooling.",
+    key: "ai_qa",
+    label: "AI / QA",
+  },
+  {
+    description: "Maintenance tools, test data, error visibility, and support workflows.",
+    key: "admin_ops",
+    label: "Admin / Ops",
   },
 ] as const;
 
@@ -1472,7 +1511,30 @@ export default function Home() {
     appContentOptions[0].category
   );
   const [selectedProductMgmtSection, setSelectedProductMgmtSection] =
-    useState<ProductMgmtSection>("beta");
+    useState<ProductMgmtSection>("bug");
+  const [productMgmtAreas, setProductMgmtAreas] = useState<ProductMgmtArea[]>([]);
+  const [productMgmtItems, setProductMgmtItems] = useState<ProductMgmtItem[]>([]);
+  const [loadingProductMgmt, setLoadingProductMgmt] = useState(false);
+  const [savingProductMgmtItem, setSavingProductMgmtItem] = useState(false);
+  const [resolvingProductMgmtItemId, setResolvingProductMgmtItemId] = useState<
+    string | null
+  >(null);
+  const [newProductMgmtTitle, setNewProductMgmtTitle] = useState("");
+  const [newProductMgmtBody, setNewProductMgmtBody] = useState("");
+  const [newProductMgmtPriority, setNewProductMgmtPriority] =
+    useState<ProductMgmtPriority>("medium");
+  const [newProductMgmtStatus, setNewProductMgmtStatus] =
+    useState<ProductMgmtStatus>("open");
+  const [newProductMgmtChangeNote, setNewProductMgmtChangeNote] =
+    useState("Initial entry");
+  const [showProductMgmtAreaForm, setShowProductMgmtAreaForm] = useState(false);
+  const [newProductMgmtAreaLabel, setNewProductMgmtAreaLabel] = useState("");
+  const [newProductMgmtAreaDescription, setNewProductMgmtAreaDescription] =
+    useState("");
+  const [savingProductMgmtArea, setSavingProductMgmtArea] = useState(false);
+  const [retiringProductMgmtAreaId, setRetiringProductMgmtAreaId] = useState<
+    string | null
+  >(null);
   const [loadingAppContent, setLoadingAppContent] = useState(false);
   const [savingAppContent, setSavingAppContent] = useState(false);
   const [revertingAppContentForId, setRevertingAppContentForId] = useState<
@@ -1624,9 +1686,28 @@ export default function Home() {
     (item) => item.category === selectedAppContentCategory
   );
   const selectedProductMgmtSectionConfig =
+    productMgmtAreas.find(
+      (section) => section.area_key === selectedProductMgmtSection
+    ) ??
     productMgmtSections.find(
       (section) => section.key === selectedProductMgmtSection
-    ) ?? productMgmtSections[0];
+    ) ??
+    productMgmtSections[0];
+  const visibleProductMgmtSections =
+    productMgmtAreas.length > 0
+      ? productMgmtAreas.map((area) => ({
+          description: area.description ?? "Product management lane.",
+          key: area.area_key,
+          label: area.label,
+        }))
+      : [...productMgmtSections];
+  const selectedProductMgmtArea =
+    productMgmtAreas.find(
+      (area) => area.area_key === selectedProductMgmtSection
+    ) ?? productMgmtAreas[0] ?? null;
+  const selectedProductMgmtItems = productMgmtItems.filter(
+    (item) => item.area_id === selectedProductMgmtArea?.id
+  );
 
   function appContentText(key: keyof typeof appContentDefaults) {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
@@ -2769,6 +2850,185 @@ export default function Home() {
     }
   }
 
+  async function loadProductMgmt() {
+    setLoadingProductMgmt(true);
+
+    try {
+      const { data: areas, error: areaError } = await supabase
+        .from("product_mgmt_areas")
+        .select("id,area_key,label,description,display_order,is_active")
+        .eq("is_active", true)
+        .order("display_order", { ascending: true })
+        .order("label", { ascending: true });
+
+      if (areaError) {
+        throw areaError;
+      }
+
+      const loadedAreas = (areas ?? []) as ProductMgmtArea[];
+      setProductMgmtAreas(loadedAreas);
+
+      const effectiveAreaKey =
+        loadedAreas.find(
+          (area) => area.area_key === selectedProductMgmtSection
+        )?.area_key ??
+        loadedAreas[0]?.area_key ??
+        selectedProductMgmtSection;
+
+      if (effectiveAreaKey !== selectedProductMgmtSection) {
+        setSelectedProductMgmtSection(effectiveAreaKey);
+      }
+
+      const { data: items, error: itemError } = await supabase
+        .from("product_mgmt_items")
+        .select(
+          "id,area_id,title,body,status,priority,current_version_number,created_at,updated_at,resolved_at"
+        )
+        .order("status", { ascending: true })
+        .order("updated_at", { ascending: false });
+
+      if (itemError) {
+        throw itemError;
+      }
+
+      setProductMgmtItems((items ?? []) as ProductMgmtItem[]);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingProductMgmt(false);
+    }
+  }
+
+  async function handleCreateProductMgmtItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedProductMgmtArea) {
+      setMessage("Run the product management SQL first, then reload this tab.");
+      return;
+    }
+
+    setSavingProductMgmtItem(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("create_product_mgmt_item", {
+        p_area_id: selectedProductMgmtArea.id,
+        p_body: newProductMgmtBody,
+        p_change_note: newProductMgmtChangeNote.trim() || "Initial entry",
+        p_priority: newProductMgmtPriority,
+        p_status: newProductMgmtStatus,
+        p_title: newProductMgmtTitle,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setNewProductMgmtTitle("");
+      setNewProductMgmtBody("");
+      setNewProductMgmtPriority("medium");
+      setNewProductMgmtStatus("open");
+      setNewProductMgmtChangeNote("Initial entry");
+      await loadProductMgmt();
+      showToast("Product item added as version 1.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingProductMgmtItem(false);
+    }
+  }
+
+  async function handleCreateProductMgmtArea(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingProductMgmtArea(true);
+    setMessage("");
+
+    try {
+      const areaKey = newProductMgmtAreaLabel
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+
+      const { data, error } = await supabase.rpc("create_product_mgmt_area", {
+        p_area_key: areaKey,
+        p_description: newProductMgmtAreaDescription,
+        p_display_order: 100,
+        p_label: newProductMgmtAreaLabel,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const newArea = data as ProductMgmtArea;
+      setNewProductMgmtAreaLabel("");
+      setNewProductMgmtAreaDescription("");
+      setShowProductMgmtAreaForm(false);
+      await loadProductMgmt();
+      setSelectedProductMgmtSection(newArea.area_key);
+      showToast("Product lane added.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingProductMgmtArea(false);
+    }
+  }
+
+  async function handleRetireProductMgmtArea(area: ProductMgmtArea) {
+    const hasItems = productMgmtItems.some((item) => item.area_id === area.id);
+
+    if (hasItems) {
+      setMessage("Only empty lanes can be retired for now.");
+      return;
+    }
+
+    setRetiringProductMgmtAreaId(area.id);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("retire_product_mgmt_area", {
+        p_area_id: area.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      await loadProductMgmt();
+      showToast("Product lane retired.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setRetiringProductMgmtAreaId(null);
+    }
+  }
+
+  async function handleResolveProductMgmtItem(item: ProductMgmtItem) {
+    setResolvingProductMgmtItemId(item.id);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("resolve_product_mgmt_item", {
+        p_change_note: "Marked resolved from Product Mgmt admin",
+        p_item_id: item.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      await loadProductMgmt();
+      showToast("Product item marked resolved as a new version.", {
+        type: "success",
+      });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setResolvingProductMgmtItemId(null);
+    }
+  }
+
   async function loadCarePrepHistory(appointmentId = historyAppointmentId) {
     setLoadingCarePrepHistory(true);
     setMessage("");
@@ -2879,6 +3139,10 @@ export default function Home() {
 
     if (tab === "content" || tab === "messages") {
       await loadAppContent();
+    }
+
+    if (tab === "product") {
+      await loadProductMgmt();
     }
   }
 
@@ -7611,8 +7875,8 @@ export default function Home() {
                           </button>
                         );
                       })}
-                    </div>
-                  </aside>
+                        </div>
+                    </aside>
 
                   <div>
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -8212,9 +8476,9 @@ export default function Home() {
                   <div>
                     <h2 className="text-2xl font-semibold">Product management</h2>
                     <p className="mt-1 max-w-3xl text-slate-600">
-                      Track beta readiness, release notes, and later wishlist
-                      items in one place while CarePland moves toward tester
-                      invites.
+                      Track bugs, beta readiness, release notes, wishlist items,
+                      and admin follow-ups without leaving the app. Each add or
+                      status change is versioned.
                     </p>
                   </div>
 
@@ -8224,9 +8488,15 @@ export default function Home() {
                         Product area
                       </p>
                       <div className="space-y-2">
-                        {productMgmtSections.map((section) => {
+                        {visibleProductMgmtSections.map((section) => {
                           const isSelected =
                             selectedProductMgmtSection === section.key;
+                          const area = productMgmtAreas.find(
+                            (item) => item.area_key === section.key
+                          );
+                          const itemCount = productMgmtItems.filter(
+                            (item) => item.area_id === area?.id
+                          ).length;
 
                           return (
                             <button
@@ -8247,106 +8517,308 @@ export default function Home() {
                                 {section.label}
                               </span>
                               <span className="mt-1 block text-xs text-slate-500">
-                                Planning section
+                                {productMgmtAreas.length > 0
+                                  ? `${itemCount} item${itemCount === 1 ? "" : "s"}`
+                                  : "Run SQL to enable entries"}
                               </span>
                             </button>
                           );
                         })}
                       </div>
+                      <div className="mt-3 border-t border-slate-200 pt-3">
+                        <button
+                          className="text-sm font-semibold text-blue-700 hover:text-blue-900"
+                          onClick={() =>
+                            setShowProductMgmtAreaForm(
+                              (isVisible) => !isVisible
+                            )
+                          }
+                          type="button"
+                        >
+                          {showProductMgmtAreaForm ? "Hide lane form" : "+ Add lane"}
+                        </button>
+                        {showProductMgmtAreaForm ? (
+                          <form
+                            className="mt-3 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3"
+                            onSubmit={handleCreateProductMgmtArea}
+                          >
+                            <label className="block">
+                              <span className="text-xs font-semibold text-slate-600">
+                                Lane name
+                              </span>
+                              <input
+                                className="mt-1 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
+                                disabled={savingProductMgmtArea}
+                                onChange={(event) =>
+                                  setNewProductMgmtAreaLabel(event.target.value)
+                                }
+                                placeholder="e.g. Beta Program"
+                                required
+                                value={newProductMgmtAreaLabel}
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="text-xs font-semibold text-slate-600">
+                                Description
+                              </span>
+                              <textarea
+                                className="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-2 py-2 text-sm"
+                                disabled={savingProductMgmtArea}
+                                onChange={(event) =>
+                                  setNewProductMgmtAreaDescription(
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="What belongs in this lane?"
+                                value={newProductMgmtAreaDescription}
+                              />
+                            </label>
+                            <button
+                              className="rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                              disabled={
+                                savingProductMgmtArea ||
+                                !newProductMgmtAreaLabel.trim()
+                              }
+                              type="submit"
+                            >
+                              {savingProductMgmtArea ? "Adding..." : "Add lane"}
+                            </button>
+                          </form>
+                        ) : null}
+                      </div>
                     </aside>
 
                     <div className="space-y-4">
                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-sm font-semibold text-slate-900">
-                          {selectedProductMgmtSectionConfig.label}
-                        </p>
-                        <p className="mt-1 text-sm text-slate-600">
-                          {selectedProductMgmtSectionConfig.description}
-                        </p>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {selectedProductMgmtSectionConfig.label}
+                            </p>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {selectedProductMgmtSectionConfig.description}
+                            </p>
+                          </div>
+                          {selectedProductMgmtArea &&
+                          selectedProductMgmtItems.length === 0 ? (
+                            <button
+                              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600 disabled:bg-slate-100"
+                              disabled={
+                                retiringProductMgmtAreaId ===
+                                selectedProductMgmtArea.id
+                              }
+                              onClick={() =>
+                                handleRetireProductMgmtArea(
+                                  selectedProductMgmtArea
+                                )
+                              }
+                              type="button"
+                            >
+                              {retiringProductMgmtAreaId ===
+                              selectedProductMgmtArea.id
+                                ? "Retiring..."
+                                : "Retire lane"}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
 
-                      {selectedProductMgmtSection === "beta" ? (
-                        <div className="rounded-lg border border-slate-200 bg-white p-4">
-                          <h3 className="text-lg font-semibold text-slate-900">
-                            Memorial Day beta path
-                          </h3>
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            {[
-                              [
-                                "User-facing polish",
-                                "First-run flow, support access, demo labels, and appointment UI clarity.",
-                              ],
-                              [
-                                "Messages and feedback",
-                                "Save, archive, reset, notes, intake, and CarePrep actions should clearly confirm what happened.",
-                              ],
-                              [
-                                "Tester workflow",
-                                "Signup, confirmation, profile setup, optional demo data, and first appointment path.",
-                              ],
-                              [
-                                "Known rough edges",
-                                "Anything not ready should read as beta, not broken.",
-                              ],
-                            ].map(([title, body]) => (
-                              <article
-                                className="rounded-md border border-slate-200 bg-slate-50 p-3"
-                                key={title}
-                              >
-                                <p className="font-semibold text-slate-900">
-                                  {title}
-                                </p>
-                                <p className="mt-1 text-sm text-slate-600">
-                                  {body}
-                                </p>
-                              </article>
-                            ))}
-                          </div>
+                      <form
+                        className="rounded-lg border border-slate-200 bg-white p-4"
+                        onSubmit={handleCreateProductMgmtItem}
+                      >
+                        <h3 className="text-lg font-semibold text-slate-900">
+                          Add entry
+                        </h3>
+                        <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_10rem]">
+                          <label className="block">
+                            <span className="text-sm font-medium text-slate-700">
+                              Title
+                            </span>
+                            <input
+                              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                              disabled={!selectedProductMgmtArea || savingProductMgmtItem}
+                              onChange={(event) =>
+                                setNewProductMgmtTitle(event.target.value)
+                              }
+                              placeholder="e.g. Add onboarding support link"
+                              required
+                              value={newProductMgmtTitle}
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="text-sm font-medium text-slate-700">
+                              Priority
+                            </span>
+                            <select
+                              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                              disabled={!selectedProductMgmtArea || savingProductMgmtItem}
+                              onChange={(event) =>
+                                setNewProductMgmtPriority(
+                                  event.target.value as ProductMgmtPriority
+                                )
+                              }
+                              value={newProductMgmtPriority}
+                            >
+                              <option value="low">Low</option>
+                              <option value="medium">Medium</option>
+                              <option value="high">High</option>
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="text-sm font-medium text-slate-700">
+                              Status
+                            </span>
+                            <select
+                              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                              disabled={!selectedProductMgmtArea || savingProductMgmtItem}
+                              onChange={(event) =>
+                                setNewProductMgmtStatus(
+                                  event.target.value as ProductMgmtStatus
+                                )
+                              }
+                              value={newProductMgmtStatus}
+                            >
+                              <option value="open">Open</option>
+                              <option value="in_progress">In progress</option>
+                              <option value="deferred">Deferred</option>
+                            </select>
+                          </label>
                         </div>
-                      ) : null}
-
-                      {selectedProductMgmtSection === "release" ? (
-                        <div className="rounded-lg border border-slate-200 bg-white p-4">
-                          <h3 className="text-lg font-semibold text-slate-900">
-                            Release note shape
-                          </h3>
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            {[
-                              ["Date / version", "When the change was made or pushed."],
-                              ["User-facing changes", "What a tester would notice."],
-                              ["Admin/internal changes", "Tools, schema, prompts, and maintenance changes."],
-                              ["Known limitations", "What is still rough or intentionally beta."],
-                            ].map(([title, body]) => (
-                              <article
-                                className="rounded-md border border-slate-200 bg-slate-50 p-3"
-                                key={title}
-                              >
-                                <p className="font-semibold text-slate-900">
-                                  {title}
-                                </p>
-                                <p className="mt-1 text-sm text-slate-600">
-                                  {body}
-                                </p>
-                              </article>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {selectedProductMgmtSection === "wishlist" ? (
-                        <div className="rounded-lg border border-slate-200 bg-white p-4">
-                          <h3 className="text-lg font-semibold text-slate-900">
-                            Wishlist parking lot
-                          </h3>
-                          <p className="mt-2 text-sm text-slate-600">
-                            Future ideas can live here once this section gets
-                            rows: dictation, Twilio/2FA, billing enforcement,
-                            provider directory, admin evaluator reports, and
-                            other items worth preserving without interrupting
-                            the beta path.
+                        <label className="mt-3 block">
+                          <span className="text-sm font-medium text-slate-700">
+                            Notes
+                          </span>
+                          <textarea
+                            className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                            disabled={!selectedProductMgmtArea || savingProductMgmtItem}
+                            onChange={(event) =>
+                              setNewProductMgmtBody(event.target.value)
+                            }
+                            placeholder="What should future Andrew remember about this?"
+                            value={newProductMgmtBody}
+                          />
+                        </label>
+                        <label className="mt-3 block">
+                          <span className="text-sm font-medium text-slate-700">
+                            Version note
+                          </span>
+                          <input
+                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                            disabled={!selectedProductMgmtArea || savingProductMgmtItem}
+                            onChange={(event) =>
+                              setNewProductMgmtChangeNote(event.target.value)
+                            }
+                            value={newProductMgmtChangeNote}
+                          />
+                        </label>
+                        <button
+                          className="mt-3 rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                          disabled={
+                            !selectedProductMgmtArea ||
+                            savingProductMgmtItem ||
+                            !newProductMgmtTitle.trim()
+                          }
+                          type="submit"
+                        >
+                          {savingProductMgmtItem ? "Adding..." : "Add entry"}
+                        </button>
+                        {!selectedProductMgmtArea ? (
+                          <p className="mt-2 text-sm text-slate-500">
+                            Run the product management SQL in Supabase to enable
+                            entries for this tab.
                           </p>
+                        ) : null}
+                      </form>
+
+                      <div className="rounded-lg border border-slate-200 bg-white p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-lg font-semibold text-slate-900">
+                            Current entries
+                          </h3>
+                          {loadingProductMgmt ? (
+                            <span className="text-sm text-slate-500">Loading...</span>
+                          ) : null}
                         </div>
-                      ) : null}
+
+                        {selectedProductMgmtItems.length === 0 ? (
+                          <p className="mt-3 rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+                            No entries in this lane yet.
+                          </p>
+                        ) : (
+                          <div className="mt-3 space-y-3">
+                            {selectedProductMgmtItems.map((item) => {
+                              const isResolved = item.status === "resolved";
+                              const statusLabel = item.status
+                                .replace("_", " ")
+                                .replace(/^./, (letter) => letter.toUpperCase());
+
+                              return (
+                                <article
+                                  className={`rounded-md border p-3 ${
+                                    isResolved
+                                      ? "border-slate-200 bg-slate-50"
+                                      : "border-slate-200 bg-white"
+                                  }`}
+                                  key={item.id}
+                                >
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                      <p className="font-semibold text-slate-950">
+                                        {item.title}
+                                      </p>
+                                      <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
+                                        v{item.current_version_number} · {item.priority} priority · updated {formatDate(item.updated_at)}
+                                      </p>
+                                    </div>
+                                    <span
+                                      className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                                        isResolved
+                                          ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                                          : item.status === "in_progress"
+                                            ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
+                                            : item.status === "deferred"
+                                              ? "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                                              : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                                      }`}
+                                    >
+                                      {statusLabel}
+                                    </span>
+                                  </div>
+                                  {item.body ? (
+                                    <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                                      {item.body}
+                                    </p>
+                                  ) : null}
+                                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    {!isResolved ? (
+                                      <button
+                                        className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 disabled:bg-slate-100 disabled:text-slate-400"
+                                        disabled={
+                                          resolvingProductMgmtItemId === item.id
+                                        }
+                                        onClick={() =>
+                                          handleResolveProductMgmtItem(item)
+                                        }
+                                        type="button"
+                                      >
+                                        {resolvingProductMgmtItemId === item.id
+                                          ? "Resolving..."
+                                          : "Mark resolved"}
+                                      </button>
+                                    ) : null}
+                                    {isResolved && item.resolved_at ? (
+                                      <span className="text-sm text-slate-500">
+                                        Resolved {formatDate(item.resolved_at)}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </section>

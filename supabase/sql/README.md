@@ -20,6 +20,9 @@ Supabase SQL editor history.
 - `2026-05-19_app_content_versions.sql`
   Migration/admin utility: versioned dynamic app text for beta/legal/support copy.
 
+- `2026-05-20_product_management.sql`
+  Migration/admin utility: versioned product-management lanes, bugs, wishlist, and release notes.
+
 ## Supabase SQL History Triage
 
 Recommended categories for the visible Supabase SQL editor history.
