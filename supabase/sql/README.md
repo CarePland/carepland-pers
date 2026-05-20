@@ -29,6 +29,12 @@ Supabase SQL editor history.
 - `2026-05-20_support_questions.sql`
   Migration/admin utility: in-app support questions, admin ticket workflow, message history, and audit events.
 
+- `2026-05-20_seed_demo_support_tickets.sql`
+  Admin utility: seeds varied demo support tickets for one user so Admin > Tix can be reviewed.
+
+- `2026-05-20_remove_demo_support_tickets.sql`
+  Admin utility: removes only the demo support tickets created by the seed script.
+
 ## Supabase SQL History Triage
 
 Recommended categories for the visible Supabase SQL editor history.
