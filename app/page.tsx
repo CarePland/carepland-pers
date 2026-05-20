@@ -170,7 +170,7 @@ function PencilSquareIcon({ className = "h-4 w-4" }: { className?: string }) {
 
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
-type AdminTab = "ai" | "content" | "messages" | "tools";
+type AdminTab = "ai" | "content" | "messages" | "product" | "tools";
 type AiWorkflowKey =
   | "bulk_appointment_intake"
   | "careprep_generation"
@@ -179,6 +179,7 @@ type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
 type AppointmentModifier = "add" | "edit" | "import";
 type MainTab = "admin" | "appointments" | "profile";
+type ProductMgmtSection = "beta" | "release" | "wishlist";
 type PendingModifierSwitch = {
   appointmentId: string;
   target: AppointmentModifier;
@@ -423,6 +424,24 @@ const appContentCategories = [
     description: "Short status, success, warning, and validation messages.",
     key: "messages",
     label: "Messages",
+  },
+] as const;
+
+const productMgmtSections = [
+  {
+    description: "Must-have items before inviting beta testers over Memorial Day weekend.",
+    key: "beta",
+    label: "Beta Readiness",
+  },
+  {
+    description: "A running note of visible changes, deployment notes, and known limitations.",
+    key: "release",
+    label: "Release Notes",
+  },
+  {
+    description: "Useful ideas that should not interrupt the current beta path.",
+    key: "wishlist",
+    label: "Wishlist",
   },
 ] as const;
 
@@ -1452,6 +1471,8 @@ export default function Home() {
   const [selectedAppContentCategory, setSelectedAppContentCategory] = useState(
     appContentOptions[0].category
   );
+  const [selectedProductMgmtSection, setSelectedProductMgmtSection] =
+    useState<ProductMgmtSection>("beta");
   const [loadingAppContent, setLoadingAppContent] = useState(false);
   const [savingAppContent, setSavingAppContent] = useState(false);
   const [revertingAppContentForId, setRevertingAppContentForId] = useState<
@@ -1602,6 +1623,10 @@ export default function Home() {
   const filteredAppContentOptions = appContentOptions.filter(
     (item) => item.category === selectedAppContentCategory
   );
+  const selectedProductMgmtSectionConfig =
+    productMgmtSections.find(
+      (section) => section.key === selectedProductMgmtSection
+    ) ?? productMgmtSections[0];
 
   function appContentText(key: keyof typeof appContentDefaults) {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
@@ -7430,6 +7455,7 @@ export default function Home() {
                     ["content", "Content"],
                     ["ai", "AI Prompts"],
                     ["messages", "Messages"],
+                    ["product", "Prod Mgmt"],
                   ].map(([tab, label]) => (
                     <button
                       className={`rounded-md px-4 py-2 text-sm font-semibold ${
@@ -8178,6 +8204,151 @@ export default function Home() {
                     ready for the message catalog once we promote those strings
                     into managed content.
                   </p>
+                </section>
+              ) : null}
+
+              {adminTab === "product" ? (
+                <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Product management</h2>
+                    <p className="mt-1 max-w-3xl text-slate-600">
+                      Track beta readiness, release notes, and later wishlist
+                      items in one place while CarePland moves toward tester
+                      invites.
+                    </p>
+                  </div>
+
+                  <div className="mt-5 grid gap-5 lg:grid-cols-[16rem_minmax(0,1fr)]">
+                    <aside className="space-y-2">
+                      <p className="text-sm font-medium text-slate-700">
+                        Product area
+                      </p>
+                      <div className="space-y-2">
+                        {productMgmtSections.map((section) => {
+                          const isSelected =
+                            selectedProductMgmtSection === section.key;
+
+                          return (
+                            <button
+                              className={`w-full rounded-md border px-3 py-3 text-left transition ${
+                                isSelected
+                                  ? "border-blue-300 bg-blue-50 text-blue-950"
+                                  : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50"
+                              }`}
+                              key={section.key}
+                              onClick={() =>
+                                setSelectedProductMgmtSection(
+                                  section.key as ProductMgmtSection
+                                )
+                              }
+                              type="button"
+                            >
+                              <span className="block font-semibold">
+                                {section.label}
+                              </span>
+                              <span className="mt-1 block text-xs text-slate-500">
+                                Planning section
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </aside>
+
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {selectedProductMgmtSectionConfig.label}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-600">
+                          {selectedProductMgmtSectionConfig.description}
+                        </p>
+                      </div>
+
+                      {selectedProductMgmtSection === "beta" ? (
+                        <div className="rounded-lg border border-slate-200 bg-white p-4">
+                          <h3 className="text-lg font-semibold text-slate-900">
+                            Memorial Day beta path
+                          </h3>
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            {[
+                              [
+                                "User-facing polish",
+                                "First-run flow, support access, demo labels, and appointment UI clarity.",
+                              ],
+                              [
+                                "Messages and feedback",
+                                "Save, archive, reset, notes, intake, and CarePrep actions should clearly confirm what happened.",
+                              ],
+                              [
+                                "Tester workflow",
+                                "Signup, confirmation, profile setup, optional demo data, and first appointment path.",
+                              ],
+                              [
+                                "Known rough edges",
+                                "Anything not ready should read as beta, not broken.",
+                              ],
+                            ].map(([title, body]) => (
+                              <article
+                                className="rounded-md border border-slate-200 bg-slate-50 p-3"
+                                key={title}
+                              >
+                                <p className="font-semibold text-slate-900">
+                                  {title}
+                                </p>
+                                <p className="mt-1 text-sm text-slate-600">
+                                  {body}
+                                </p>
+                              </article>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {selectedProductMgmtSection === "release" ? (
+                        <div className="rounded-lg border border-slate-200 bg-white p-4">
+                          <h3 className="text-lg font-semibold text-slate-900">
+                            Release note shape
+                          </h3>
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            {[
+                              ["Date / version", "When the change was made or pushed."],
+                              ["User-facing changes", "What a tester would notice."],
+                              ["Admin/internal changes", "Tools, schema, prompts, and maintenance changes."],
+                              ["Known limitations", "What is still rough or intentionally beta."],
+                            ].map(([title, body]) => (
+                              <article
+                                className="rounded-md border border-slate-200 bg-slate-50 p-3"
+                                key={title}
+                              >
+                                <p className="font-semibold text-slate-900">
+                                  {title}
+                                </p>
+                                <p className="mt-1 text-sm text-slate-600">
+                                  {body}
+                                </p>
+                              </article>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {selectedProductMgmtSection === "wishlist" ? (
+                        <div className="rounded-lg border border-slate-200 bg-white p-4">
+                          <h3 className="text-lg font-semibold text-slate-900">
+                            Wishlist parking lot
+                          </h3>
+                          <p className="mt-2 text-sm text-slate-600">
+                            Future ideas can live here once this section gets
+                            rows: dictation, Twilio/2FA, billing enforcement,
+                            provider directory, admin evaluator reports, and
+                            other items worth preserving without interrupting
+                            the beta path.
+                          </p>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
                 </section>
               ) : null}
               </>
