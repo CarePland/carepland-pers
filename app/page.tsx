@@ -112,26 +112,6 @@ type AppContentVersion = {
   version_number: number;
 };
 
-function ArchiveBoxIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M3 7h18" />
-      <path d="M5 7l1.5 13h11L19 7" />
-      <path d="M8 7V4h8v3" />
-      <path d="M10 12h4" />
-    </svg>
-  );
-}
-
 function CalendarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -3737,6 +3717,10 @@ export default function Home() {
       ...currentIds,
       [appointment.id]: false,
     }));
+    setEditingAppointmentIds((currentIds) => ({
+      ...currentIds,
+      [appointment.id]: false,
+    }));
     setTextIntakeTargetAppointmentId(appointment.id);
     setContextualTextIntakeValue("");
     setTextIntakeValue("");
@@ -3754,6 +3738,10 @@ export default function Home() {
 
   function startTypingNote(appointmentId: string) {
     cancelTextIntake();
+    setEditingAppointmentIds((currentIds) => ({
+      ...currentIds,
+      [appointmentId]: false,
+    }));
     setNoteDrafts((currentDrafts) => ({
       ...currentDrafts,
       [appointmentId]: emptyNoteDraft,
@@ -4469,6 +4457,11 @@ export default function Home() {
   }
 
   function startEditingAppointment(appointment: Appointment) {
+    cancelTextIntake();
+    setEditingNoteIds((currentIds) => ({
+      ...currentIds,
+      [appointment.id]: false,
+    }));
     setAppointmentDrafts((currentDrafts) => ({
       ...currentDrafts,
       [appointment.id]: {
@@ -4892,6 +4885,11 @@ export default function Home() {
   }
 
   function startEditingNote(appointmentId: string, note: AppointmentNote) {
+    cancelTextIntake();
+    setEditingAppointmentIds((currentIds) => ({
+      ...currentIds,
+      [appointmentId]: false,
+    }));
     setNoteDrafts((currentDrafts) => ({
       ...currentDrafts,
       [appointmentId]: {
@@ -8238,6 +8236,18 @@ export default function Home() {
                 const canPasteContextualNotes = !isArchived && !isLogged;
                 const isContextualTextIntake =
                   textIntakeTargetAppointmentId === appointment.id;
+                const activeModifier = isEditingAppointment
+                  ? "edit"
+                  : isContextualTextIntake
+                    ? "import"
+                    : isEditingNote
+                      ? "add"
+                      : null;
+                const modifierButtonBase =
+                  "h-11 px-4 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-300";
+                const modifierButtonActive = "bg-blue-700 text-white";
+                const modifierButtonInactive =
+                  "bg-white text-blue-700 hover:bg-blue-50";
                 const mapsLink = googleMapsUrl(appointment.location_address);
                 const calendarLink = agicalUrl(appointment);
                 return (
@@ -8287,7 +8297,7 @@ export default function Home() {
                           </div>
                         ) : null}
 
-                        {!isEditingAppointment && !isArchived ? (
+                        {!isArchived ? (
                           <div className="mt-4 flex flex-wrap gap-3">
                             {mapsLink ? (
                               <a
@@ -8315,45 +8325,78 @@ export default function Home() {
                             ) : null}
                             {canPasteContextualNotes ? (
                               <div
-                                aria-label="Enter appointment notes"
+                                aria-label="Appointment modifier actions"
                                 className="inline-flex h-11 overflow-hidden rounded-md border border-blue-300 bg-white"
-                                title="Enter appointment notes"
                               >
                                 <button
-                                  className="px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-300"
+                                  className={`${modifierButtonBase} ${
+                                    activeModifier === "add"
+                                      ? modifierButtonActive
+                                      : modifierButtonInactive
+                                  }`}
                                   onClick={() => startTypingNote(appointment.id)}
-                                  title="Type notes manually"
+                                  title="Type appointment notes"
                                   type="button"
                                 >
-                                  Type
+                                  Add Notes
                                 </button>
                                 <button
-                                  className="border-l border-blue-300 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-300"
+                                  className={`${modifierButtonBase} border-l border-blue-300 ${
+                                    activeModifier === "import"
+                                      ? modifierButtonActive
+                                      : modifierButtonInactive
+                                  }`}
                                   onClick={() =>
                                     startContextualTextIntake(appointment)
                                   }
-                                  title="Paste notes or portal text"
+                                  title="Paste or upload notes"
                                   type="button"
                                 >
-                                  Paste
+                                  Import Notes
+                                </button>
+                                <button
+                                  aria-label="Edit Appointment"
+                                  className={`${modifierButtonBase} inline-flex items-center gap-2 border-l border-blue-300 ${
+                                    activeModifier === "edit"
+                                      ? modifierButtonActive
+                                      : modifierButtonInactive
+                                  }`}
+                                  onClick={() =>
+                                    startEditingAppointment(appointment)
+                                  }
+                                  title="Edit appointment"
+                                  type="button"
+                                >
+                                  <PencilSquareIcon className="h-5 w-5" />
+                                  Edit
                                 </button>
                               </div>
                             ) : null}
-                            <button
-                              aria-label="Edit Appointment"
-                              className="inline-flex h-11 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300"
-                              onClick={() =>
-                                startEditingAppointment(appointment)
-                              }
-                              title="Edit Appointment"
-                              type="button"
-                            >
-                              <PencilSquareIcon className="h-5 w-5" />
-                              Edit
-                            </button>
+                            {!canPasteContextualNotes ? (
+                              <button
+                                aria-label="Edit Appointment"
+                                className={`inline-flex h-11 items-center gap-2 rounded-md border px-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-300 ${
+                                  activeModifier === "edit"
+                                    ? "border-blue-700 bg-blue-700 text-white"
+                                    : "border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                                }`}
+                                onClick={() =>
+                                  startEditingAppointment(appointment)
+                                }
+                                title="Edit appointment"
+                                type="button"
+                              >
+                                <PencilSquareIcon className="h-5 w-5" />
+                                Edit
+                              </button>
+                            ) : null}
                             <button
                               aria-label="Archive Appointment"
-                              className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:text-slate-400"
+                              className={`inline-flex h-11 items-center justify-center rounded-md border px-4 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-300 ${
+                                archivingAppointmentForId === appointment.id
+                                  ? "border-blue-300 bg-blue-50 text-blue-800"
+                                  : "border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                              }`}
                               disabled={
                                 archivingAppointmentForId === appointment.id
                               }
@@ -8367,7 +8410,9 @@ export default function Home() {
                               }
                               type="button"
                             >
-                              <ArchiveBoxIcon className="h-5 w-5" />
+                              {archivingAppointmentForId === appointment.id
+                                ? "Archiving..."
+                                : "Archive"}
                             </button>
                           </div>
                         ) : null}
@@ -8401,7 +8446,7 @@ export default function Home() {
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <h3 className="text-lg font-semibold text-blue-950">
-                              Paste notes for this appointment
+                              Import notes for this appointment
                             </h3>
                             <p className="mt-1 text-sm text-blue-800">
                               The notes will be attached here and versioned.
@@ -8538,6 +8583,98 @@ export default function Home() {
                       </form>
                     ) : null}
 
+                    {!isArchived &&
+                    !isContextualTextIntake &&
+                    isEditingNote ? (
+                      <form
+                        className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-4"
+                        onSubmit={(event) => handleSaveNote(event, appointment)}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-semibold text-slate-900">
+                              {note ? "Edit notes" : "Add notes"}
+                            </h3>
+                            {note ? (
+                              <p className="mt-1 text-sm text-slate-500">
+                                Saving creates version {note.version_number + 1}
+                                and keeps the old one archived.
+                              </p>
+                            ) : null}
+                          </div>
+                          <button
+                            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                            onClick={() => cancelEditingNote(appointment.id)}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                          <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                            Visit summary
+                            <textarea
+                              className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateNoteDraft(
+                                  appointment.id,
+                                  "summary",
+                                  event.target.value
+                                )
+                              }
+                              placeholder="What happened in the visit?"
+                              value={noteDraft.summary}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Takeaways
+                            <textarea
+                              className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateNoteDraft(
+                                  appointment.id,
+                                  "takeaways",
+                                  event.target.value
+                                )
+                              }
+                              placeholder={
+                                "One per line\nExample: Medication changed"
+                              }
+                              value={noteDraft.takeaways}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Follow-ups
+                            <textarea
+                              className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateNoteDraft(
+                                  appointment.id,
+                                  "followups",
+                                  event.target.value
+                                )
+                              }
+                              placeholder={"One per line\nExample: Schedule labs"}
+                              value={noteDraft.followups}
+                            />
+                          </label>
+                          <div className="flex items-end">
+                            <button
+                              className="w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                              disabled={savingNoteForId === appointment.id}
+                              type="submit"
+                            >
+                              {savingNoteForId === appointment.id
+                                ? "Saving..."
+                                : note
+                                  ? "Save edited notes"
+                                  : "Save notes"}
+                            </button>
+                          </div>
+                        </div>
+                      </form>
+                    ) : null}
+
                     {isArchived ? (
                       <div className="mt-4">
                         <button
@@ -8555,7 +8692,7 @@ export default function Home() {
 
                     {isEditingAppointment && !isArchived ? (
                       <form
-                        className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
+                        className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-4"
                         onSubmit={(event) =>
                           handleSaveAppointment(event, appointment)
                         }
@@ -9210,99 +9347,6 @@ export default function Home() {
                       </section>
                     ) : null}
 
-                    {!isArchived &&
-                    !isContextualTextIntake &&
-                    ((note && !isEditingNote) || (!note && !isEditingNote) ? null : (
-                      <form
-                        className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
-                        onSubmit={(event) => handleSaveNote(event, appointment)}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <h3 className="text-lg font-semibold text-slate-900">
-                              {note ? "Edit notes" : "Add notes"}
-                            </h3>
-                            {note ? (
-                              <p className="mt-1 text-sm text-slate-500">
-                                Saving creates version {note.version_number + 1}
-                                and keeps the old one archived.
-                              </p>
-                            ) : null}
-                          </div>
-                          {note ? (
-                            <button
-                              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                              onClick={() => cancelEditingNote(appointment.id)}
-                              type="button"
-                            >
-                              Cancel
-                            </button>
-                          ) : null}
-                        </div>
-                        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                          <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
-                            Visit summary
-                            <textarea
-                              className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                              onChange={(event) =>
-                                updateNoteDraft(
-                                  appointment.id,
-                                  "summary",
-                                  event.target.value
-                                )
-                              }
-                              placeholder="What happened in the visit?"
-                              value={noteDraft.summary}
-                            />
-                          </label>
-                          <label className="block text-sm font-medium text-slate-700">
-                            Takeaways
-                            <textarea
-                              className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                              onChange={(event) =>
-                                updateNoteDraft(
-                                  appointment.id,
-                                  "takeaways",
-                                  event.target.value
-                                )
-                              }
-                              placeholder={
-                                "One per line\nExample: Medication changed"
-                              }
-                              value={noteDraft.takeaways}
-                            />
-                          </label>
-                          <label className="block text-sm font-medium text-slate-700">
-                            Follow-ups
-                            <textarea
-                              className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                              onChange={(event) =>
-                                updateNoteDraft(
-                                  appointment.id,
-                                  "followups",
-                                  event.target.value
-                                )
-                              }
-                              placeholder={"One per line\nExample: Schedule labs"}
-                              value={noteDraft.followups}
-                            />
-                          </label>
-                          <div className="flex items-end">
-                            <button
-                              className="w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                              disabled={savingNoteForId === appointment.id}
-                              type="submit"
-                            >
-                              {savingNoteForId === appointment.id
-                                ? "Saving..."
-                                : note
-                                  ? "Save edited notes"
-                                  : "Save notes"}
-                            </button>
-                          </div>
-                        </div>
-                      </form>
-                    ))}
                   </article>
                 );
               })
