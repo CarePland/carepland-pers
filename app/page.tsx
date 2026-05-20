@@ -141,6 +141,12 @@ type SupportTicket = {
   current_page: string | null;
   needs_admin_followup: boolean;
   priority: SupportTicketPriority;
+  profiles?: {
+    display_name: string | null;
+    email: string | null;
+    family_name: string | null;
+    given_name: string | null;
+  } | null;
   status: SupportTicketStatus;
   subject: string;
   updated_at: string;
@@ -215,7 +221,7 @@ function PencilSquareIcon({ className = "h-4 w-4" }: { className?: string }) {
 
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
-type AdminTab = "ai" | "content" | "messages" | "product" | "tools";
+type AdminTab = "ai" | "content" | "messages" | "product" | "tickets" | "tools";
 type AiWorkflowKey =
   | "bulk_appointment_intake"
   | "careprep_generation"
@@ -1710,8 +1716,12 @@ export default function Home() {
   const [retiringProductMgmtAreaId, setRetiringProductMgmtAreaId] = useState<
     string | null
   >(null);
-  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
-  const [supportTicketMessages, setSupportTicketMessages] = useState<
+  const [userSupportTickets, setUserSupportTickets] = useState<SupportTicket[]>([]);
+  const [userSupportTicketMessages, setUserSupportTicketMessages] = useState<
+    SupportTicketMessage[]
+  >([]);
+  const [adminSupportTickets, setAdminSupportTickets] = useState<SupportTicket[]>([]);
+  const [adminSupportTicketMessages, setAdminSupportTicketMessages] = useState<
     SupportTicketMessage[]
   >([]);
   const [supportQuestionExpanded, setSupportQuestionExpanded] = useState(false);
@@ -1721,6 +1731,20 @@ export default function Home() {
   const [supportQuestionSubject, setSupportQuestionSubject] = useState("");
   const [supportQuestionBody, setSupportQuestionBody] = useState("");
   const [supportReplyBody, setSupportReplyBody] = useState("");
+  const [loadingAdminTickets, setLoadingAdminTickets] = useState(false);
+  const [selectedAdminTicketId, setSelectedAdminTicketId] = useState("");
+  const [adminTicketReplyBody, setAdminTicketReplyBody] = useState("");
+  const [adminTicketInternalNote, setAdminTicketInternalNote] = useState("");
+  const [adminTicketStatus, setAdminTicketStatus] =
+    useState<SupportTicketStatus>("open");
+  const [adminTicketPriority, setAdminTicketPriority] =
+    useState<SupportTicketPriority>("medium");
+  const [adminTicketCategory, setAdminTicketCategory] = useState("general");
+  const [adminTicketNeedsFollowup, setAdminTicketNeedsFollowup] =
+    useState(true);
+  const [adminTicketChangeNote, setAdminTicketChangeNote] = useState("");
+  const [savingAdminTicketReply, setSavingAdminTicketReply] = useState(false);
+  const [savingAdminTicketStatus, setSavingAdminTicketStatus] = useState(false);
   const [loadingAppContent, setLoadingAppContent] = useState(false);
   const [savingAppContent, setSavingAppContent] = useState(false);
   const [revertingAppContentForId, setRevertingAppContentForId] = useState<
@@ -1899,15 +1923,15 @@ export default function Home() {
   const selectedProductMgmtItems = productMgmtItems.filter(
     (item) => item.area_id === selectedProductMgmtArea?.id
   );
-  const openSupportTickets = supportTickets.filter(
+  const openSupportTickets = userSupportTickets.filter(
     (ticket) => !["closed", "resolved"].includes(ticket.status)
   );
   const currentSupportTicket =
     openSupportTickets[0] ??
-    supportTickets.find((ticket) => ticket.status === "resolved") ??
+    userSupportTickets.find((ticket) => ticket.status === "resolved") ??
     null;
   const currentSupportMessages = currentSupportTicket
-    ? supportTicketMessages.filter(
+    ? userSupportTicketMessages.filter(
         (messageRow) => messageRow.ticket_id === currentSupportTicket.id
       )
     : [];
@@ -1917,6 +1941,23 @@ export default function Home() {
   const hasUpdatedSupportQuestion = Boolean(
     currentSupportTicket?.user_has_unread_update
   );
+  const adminOpenTickets = adminSupportTickets.filter(
+    (ticket) => !["closed", "resolved"].includes(ticket.status)
+  );
+  const adminTicketsNeedingFollowup = adminOpenTickets.filter(
+    (ticket) => ticket.needs_admin_followup
+  );
+  const selectedAdminTicket =
+    adminSupportTickets.find((ticket) => ticket.id === selectedAdminTicketId) ??
+    adminTicketsNeedingFollowup[0] ??
+    adminOpenTickets[0] ??
+    adminSupportTickets[0] ??
+    null;
+  const selectedAdminTicketMessages = selectedAdminTicket
+    ? adminSupportTicketMessages.filter(
+        (messageRow) => messageRow.ticket_id === selectedAdminTicket.id
+      )
+    : [];
 
   function appContentText(key: keyof typeof appContentDefaults) {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
@@ -2072,6 +2113,8 @@ export default function Home() {
               await loadAiInstructions(initialUiState.selectedAiWorkflow);
             } else if (initialUiState.adminTab === "product") {
               await loadProductMgmt();
+            } else if (initialUiState.adminTab === "tickets") {
+              await loadAdminSupportTickets();
             } else if (
               initialUiState.adminTab === "content" ||
               initialUiState.adminTab === "messages"
@@ -2365,8 +2408,12 @@ export default function Home() {
     const loadedProfileDraft = profileDraftFromRow(profileRow, profileEmail);
     setProfileDraft(loadedProfileDraft);
     setSavedProfileLabel(profileDisplayName(loadedProfileDraft));
-    setIsAdmin(profileRow?.is_admin === true);
-    if (profileRow?.is_admin !== true) {
+    const userIsAdmin = profileRow?.is_admin === true;
+    setIsAdmin(userIsAdmin);
+    if (userIsAdmin) {
+      void loadAdminSupportTickets();
+    }
+    if (!userIsAdmin) {
       setMainTab((currentTab) =>
         currentTab === "admin" ? "appointments" : currentTab
       );
@@ -3527,11 +3574,24 @@ export default function Home() {
 
   async function loadCurrentUserSupportTickets() {
     try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError) {
+        throw userError;
+      }
+
+      if (!userData.user) {
+        setUserSupportTickets([]);
+        setUserSupportTicketMessages([]);
+        return;
+      }
+
       const { data: ticketRows, error: ticketError } = await supabase
         .from("support_tickets")
         .select(
           "id,user_id,subject,status,priority,category,current_page,needs_admin_followup,user_has_unread_update,created_at,updated_at"
         )
+        .eq("user_id", userData.user.id)
         .order("updated_at", { ascending: false })
         .limit(5);
 
@@ -3540,10 +3600,10 @@ export default function Home() {
       }
 
       const loadedTickets = (ticketRows ?? []) as SupportTicket[];
-      setSupportTickets(loadedTickets);
+      setUserSupportTickets(loadedTickets);
 
       if (loadedTickets.length === 0) {
-        setSupportTicketMessages([]);
+        setUserSupportTicketMessages([]);
         return;
       }
 
@@ -3563,10 +3623,126 @@ export default function Home() {
         throw messageError;
       }
 
-      setSupportTicketMessages((messageRows ?? []) as SupportTicketMessage[]);
+      setUserSupportTicketMessages((messageRows ?? []) as SupportTicketMessage[]);
     } catch (error) {
       setMessage(getErrorMessage(error));
     }
+  }
+
+  async function loadAdminSupportTickets() {
+    setLoadingAdminTickets(true);
+
+    try {
+      const { data: ticketRows, error: ticketError } = await supabase
+        .from("support_tickets")
+        .select(
+          "id,user_id,subject,status,priority,category,current_page,needs_admin_followup,user_has_unread_update,created_at,updated_at"
+        )
+        .order("needs_admin_followup", { ascending: false })
+        .order("updated_at", { ascending: false });
+
+      if (ticketError) {
+        throw ticketError;
+      }
+
+      const userIds = Array.from(
+        new Set((ticketRows ?? []).map((ticket) => ticket.user_id).filter(Boolean))
+      );
+      const profileById = new Map<
+        string,
+        NonNullable<SupportTicket["profiles"]>
+      >();
+
+      if (userIds.length > 0) {
+        const { data: profileRows, error: profileError } = await supabase
+          .from("profiles")
+          .select("id,email,display_name,given_name,family_name")
+          .in("id", userIds);
+
+        if (!profileError) {
+          (profileRows ?? []).forEach((profile) => {
+            profileById.set(profile.id, {
+              display_name: profile.display_name,
+              email: profile.email,
+              family_name: profile.family_name,
+              given_name: profile.given_name,
+            });
+          });
+        }
+      }
+
+      const loadedTickets = (ticketRows ?? []).map((ticket) => ({
+        ...ticket,
+        profiles: profileById.get(ticket.user_id) ?? null,
+      })) as SupportTicket[];
+      setAdminSupportTickets(loadedTickets);
+
+      if (loadedTickets.length === 0) {
+        setAdminSupportTicketMessages([]);
+        setSelectedAdminTicketId("");
+        return;
+      }
+
+      const effectiveTicketId =
+        loadedTickets.find((ticket) => ticket.id === selectedAdminTicketId)?.id ??
+        loadedTickets.find((ticket) => ticket.needs_admin_followup)?.id ??
+        loadedTickets[0].id;
+
+      setSelectedAdminTicketId(effectiveTicketId);
+      const effectiveTicket = loadedTickets.find(
+        (ticket) => ticket.id === effectiveTicketId
+      );
+
+      if (effectiveTicket) {
+        setAdminTicketStatus(effectiveTicket.status);
+        setAdminTicketPriority(effectiveTicket.priority);
+        setAdminTicketCategory(effectiveTicket.category);
+        setAdminTicketNeedsFollowup(effectiveTicket.needs_admin_followup);
+      }
+
+      const { data: messageRows, error: messageError } = await supabase
+        .from("support_ticket_messages")
+        .select(
+          "id,ticket_id,author_role,message_body,is_internal,created_at"
+        )
+        .in(
+          "ticket_id",
+          loadedTickets.map((ticket) => ticket.id)
+        )
+        .order("created_at", { ascending: true });
+
+      if (messageError) {
+        throw messageError;
+      }
+
+      setAdminSupportTicketMessages((messageRows ?? []) as SupportTicketMessage[]);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAdminTickets(false);
+    }
+  }
+
+  function selectAdminTicket(ticket: SupportTicket) {
+    setSelectedAdminTicketId(ticket.id);
+    setAdminTicketStatus(ticket.status);
+    setAdminTicketPriority(ticket.priority);
+    setAdminTicketCategory(ticket.category);
+    setAdminTicketNeedsFollowup(ticket.needs_admin_followup);
+    setAdminTicketChangeNote("");
+    setAdminTicketReplyBody("");
+    setAdminTicketInternalNote("");
+  }
+
+  function supportTicketUserLabel(ticket: SupportTicket) {
+    const profile = ticket.profiles;
+    const displayName = profile?.display_name?.trim();
+    const fullName = [profile?.given_name, profile?.family_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    return displayName || fullName || profile?.email || ticket.user_id;
   }
 
   async function handleCreateSupportQuestion(event: FormEvent<HTMLFormElement>) {
@@ -3641,6 +3817,104 @@ export default function Home() {
     }
   }
 
+  async function handleAddAdminTicketReply(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedAdminTicket || !adminTicketReplyBody.trim()) {
+      return;
+    }
+
+    setSavingAdminTicketReply(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("add_support_ticket_message", {
+        p_is_internal: false,
+        p_message: adminTicketReplyBody,
+        p_ticket_id: selectedAdminTicket.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setAdminTicketReplyBody("");
+      await loadAdminSupportTickets();
+      showToast("Reply added to the question.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAdminTicketReply(false);
+    }
+  }
+
+  async function handleAddAdminInternalNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedAdminTicket || !adminTicketInternalNote.trim()) {
+      return;
+    }
+
+    setSavingAdminTicketReply(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("add_support_ticket_message", {
+        p_is_internal: true,
+        p_message: adminTicketInternalNote,
+        p_ticket_id: selectedAdminTicket.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setAdminTicketInternalNote("");
+      await loadAdminSupportTickets();
+      showToast("Internal note added.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAdminTicketReply(false);
+    }
+  }
+
+  async function handleUpdateAdminTicketStatus(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (!selectedAdminTicket) {
+      return;
+    }
+
+    setSavingAdminTicketStatus(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("update_support_ticket_status", {
+        p_category: adminTicketCategory,
+        p_needs_admin_followup: adminTicketNeedsFollowup,
+        p_note: adminTicketChangeNote,
+        p_priority: adminTicketPriority,
+        p_status: adminTicketStatus,
+        p_ticket_id: selectedAdminTicket.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setAdminTicketChangeNote("");
+      await loadAdminSupportTickets();
+      showToast("Ticket updated.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAdminTicketStatus(false);
+    }
+  }
+
   async function handleMarkSupportQuestionSeen(ticket: SupportTicket) {
     if (!ticket.user_has_unread_update) {
       return;
@@ -3675,6 +3949,10 @@ export default function Home() {
 
     if (tab === "product") {
       await loadProductMgmt();
+    }
+
+    if (tab === "tickets") {
+      await loadAdminSupportTickets();
     }
   }
 
@@ -6171,16 +6449,39 @@ export default function Home() {
             authMode !== "updatePassword" &&
             !needsBetaAgreement &&
             !needsOnboarding ? (
-              <button
-                className="font-semibold text-blue-700"
-                onClick={() => {
-                  setAskingSupportQuestion(true);
-                  setSupportQuestionExpanded(true);
-                }}
-                type="button"
-              >
-                Get help
-              </button>
+              isAdmin ? (
+                <button
+                  className="font-semibold text-sky-800"
+                  onClick={async () => {
+                    setMainTab("admin");
+                    await handleChangeAdminTab("tickets");
+                  }}
+                  type="button"
+                >
+                  Tix{" "}
+                  <span
+                    className={
+                      adminTicketsNeedingFollowup.length > 0
+                        ? "text-red-600"
+                        : "text-slate-600"
+                    }
+                  >
+                    {adminTicketsNeedingFollowup.length}
+                  </span>
+                  /{adminOpenTickets.length}
+                </button>
+              ) : (
+                <button
+                  className="font-semibold text-blue-700"
+                  onClick={() => {
+                    setAskingSupportQuestion(true);
+                    setSupportQuestionExpanded(true);
+                  }}
+                  type="button"
+                >
+                  Get help
+                </button>
+              )
             ) : (
               <a
                 className="font-semibold text-blue-700"
@@ -8452,6 +8753,10 @@ export default function Home() {
                     ["ai", "AI Prompts"],
                     ["messages", "Messages"],
                     ["product", "Prod Mgmt"],
+                    [
+                      "tickets",
+                      `Tix ${adminTicketsNeedingFollowup.length}/${adminOpenTickets.length}`,
+                    ],
                   ].map(([tab, label]) => (
                     <button
                       className={`rounded-md px-4 py-2 text-sm font-semibold ${
@@ -8463,7 +8768,25 @@ export default function Home() {
                       onClick={() => handleChangeAdminTab(tab as AdminTab)}
                       type="button"
                     >
-                      {label}
+                      {tab === "tickets" ? (
+                        <span>
+                          Tix{" "}
+                          <span
+                            className={
+                              adminTicketsNeedingFollowup.length > 0
+                                ? adminTab === "tickets"
+                                  ? "text-red-100"
+                                  : "text-red-600"
+                                : ""
+                            }
+                          >
+                            {adminTicketsNeedingFollowup.length}
+                          </span>
+                          /{adminOpenTickets.length}
+                        </span>
+                      ) : (
+                        label
+                      )}
                     </button>
                   ))}
                 </div>
@@ -8544,6 +8867,276 @@ export default function Home() {
                 >
                   {seedingAdminSampleData ? "Adding..." : "Add sample data"}
                 </button>
+              </section>
+              ) : null}
+
+              {adminTab === "tickets" ? (
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Support questions</h2>
+                    <p className="mt-1 text-slate-600">
+                      Review user questions, reply, and track follow-up state.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                    disabled={loadingAdminTickets}
+                    onClick={() => loadAdminSupportTickets()}
+                    type="button"
+                  >
+                    {loadingAdminTickets ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+
+                <div className="mt-5 grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
+                  <aside className="space-y-2">
+                    {adminSupportTickets.length === 0 ? (
+                      <div className="rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
+                        No support questions yet.
+                      </div>
+                    ) : (
+                      adminSupportTickets.map((ticket) => {
+                        const selected = selectedAdminTicket?.id === ticket.id;
+
+                        return (
+                          <button
+                            className={`w-full rounded-md border p-3 text-left transition ${
+                              selected
+                                ? "border-sky-300 bg-sky-50"
+                                : ticket.needs_admin_followup
+                                  ? "border-red-200 bg-red-50/70"
+                                  : "border-slate-200 bg-white hover:border-sky-200"
+                            }`}
+                            key={ticket.id}
+                            onClick={() => selectAdminTicket(ticket)}
+                            type="button"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-semibold text-slate-900">
+                                {ticket.subject}
+                              </span>
+                              {ticket.needs_admin_followup ? (
+                                <span className="shrink-0 rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
+                                  Follow up
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {supportTicketUserLabel(ticket)}
+                            </p>
+                            <p className="mt-2 text-xs uppercase tracking-wide text-slate-500">
+                              {ticket.status.replace("_", " ")} · {ticket.priority}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Updated {formatDate(ticket.updated_at)}
+                            </p>
+                          </button>
+                        );
+                      })
+                    )}
+                  </aside>
+
+                  {selectedAdminTicket ? (
+                    <div className="rounded-md border border-slate-200 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-xl font-semibold text-slate-900">
+                            {selectedAdminTicket.subject}
+                          </h3>
+                          <p className="mt-1 text-sm text-slate-600">
+                            {supportTicketUserLabel(selectedAdminTicket)} · {selectedAdminTicket.category}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Opened {formatDate(selectedAdminTicket.created_at)} · updated {formatDate(selectedAdminTicket.updated_at)}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+                            {selectedAdminTicket.status.replace("_", " ")}
+                          </span>
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+                            {selectedAdminTicket.priority}
+                          </span>
+                          {selectedAdminTicket.needs_admin_followup ? (
+                            <span className="rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-700">
+                              Needs response
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">
+                              No admin follow-up
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 max-h-[28rem] space-y-3 overflow-auto rounded-md bg-slate-50 p-3">
+                        {selectedAdminTicketMessages.length === 0 ? (
+                          <p className="text-sm text-slate-600">
+                            No messages found for this question.
+                          </p>
+                        ) : (
+                          selectedAdminTicketMessages.map((messageRow) => (
+                            <div
+                              className={`rounded-md border p-3 ${
+                                messageRow.is_internal
+                                  ? "border-amber-200 bg-amber-50 text-amber-950"
+                                  : messageRow.author_role === "admin"
+                                    ? "border-sky-200 bg-sky-50 text-slate-800"
+                                    : "border-slate-200 bg-white text-slate-800"
+                              }`}
+                              key={messageRow.id}
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                <span>
+                                  {messageRow.is_internal
+                                    ? "Internal note"
+                                    : messageRow.author_role === "admin"
+                                      ? "Admin reply"
+                                      : "User"}
+                                </span>
+                                <span>{formatDate(messageRow.created_at)}</span>
+                              </div>
+                              <p className="mt-2 whitespace-pre-wrap text-sm">
+                                {messageRow.message_body}
+                              </p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                        <form
+                          className="rounded-md border border-slate-200 p-3"
+                          onSubmit={handleAddAdminTicketReply}
+                        >
+                          <h4 className="font-semibold text-slate-900">
+                            Reply to user
+                          </h4>
+                          <textarea
+                            className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2"
+                            onChange={(event) =>
+                              setAdminTicketReplyBody(event.target.value)
+                            }
+                            placeholder="Write a user-visible reply."
+                            value={adminTicketReplyBody}
+                          />
+                          <button
+                            className="mt-3 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                            disabled={savingAdminTicketReply || !adminTicketReplyBody.trim()}
+                            type="submit"
+                          >
+                            {savingAdminTicketReply ? "Sending..." : "Send reply"}
+                          </button>
+                        </form>
+
+                        <form
+                          className="rounded-md border border-slate-200 p-3"
+                          onSubmit={handleAddAdminInternalNote}
+                        >
+                          <h4 className="font-semibold text-slate-900">
+                            Internal note
+                          </h4>
+                          <textarea
+                            className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2"
+                            onChange={(event) =>
+                              setAdminTicketInternalNote(event.target.value)
+                            }
+                            placeholder="Private admin note."
+                            value={adminTicketInternalNote}
+                          />
+                          <button
+                            className="mt-3 rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
+                            disabled={savingAdminTicketReply || !adminTicketInternalNote.trim()}
+                            type="submit"
+                          >
+                            {savingAdminTicketReply ? "Saving..." : "Add internal note"}
+                          </button>
+                        </form>
+                      </div>
+
+                      <form
+                        className="mt-4 rounded-md border border-slate-200 p-3"
+                        onSubmit={handleUpdateAdminTicketStatus}
+                      >
+                        <h4 className="font-semibold text-slate-900">
+                          Status and routing
+                        </h4>
+                        <div className="mt-3 grid gap-3 md:grid-cols-3">
+                          <label className="block text-sm font-medium text-slate-700">
+                            Status
+                            <select
+                              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                              onChange={(event) =>
+                                setAdminTicketStatus(event.target.value as SupportTicketStatus)
+                              }
+                              value={adminTicketStatus}
+                            >
+                              <option value="open">Open</option>
+                              <option value="in_progress">In progress</option>
+                              <option value="waiting_on_user">Waiting on user</option>
+                              <option value="resolved">Resolved</option>
+                              <option value="closed">Closed</option>
+                            </select>
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Priority
+                            <select
+                              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                              onChange={(event) =>
+                                setAdminTicketPriority(event.target.value as SupportTicketPriority)
+                              }
+                              value={adminTicketPriority}
+                            >
+                              <option value="low">Low</option>
+                              <option value="medium">Medium</option>
+                              <option value="high">High</option>
+                              <option value="urgent">Urgent</option>
+                            </select>
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Category
+                            <input
+                              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                              onChange={(event) =>
+                                setAdminTicketCategory(event.target.value)
+                              }
+                              value={adminTicketCategory}
+                            />
+                          </label>
+                        </div>
+                        <label className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-700">
+                          <input
+                            checked={adminTicketNeedsFollowup}
+                            onChange={(event) =>
+                              setAdminTicketNeedsFollowup(event.target.checked)
+                            }
+                            type="checkbox"
+                          />
+                          Needs admin follow-up
+                        </label>
+                        <label className="mt-3 block text-sm font-medium text-slate-700">
+                          Change note
+                          <input
+                            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                            onChange={(event) =>
+                              setAdminTicketChangeNote(event.target.value)
+                            }
+                            placeholder="What changed and why?"
+                            value={adminTicketChangeNote}
+                          />
+                        </label>
+                        <button
+                          className="mt-3 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                          disabled={savingAdminTicketStatus}
+                          type="submit"
+                        >
+                          {savingAdminTicketStatus ? "Saving..." : "Save ticket status"}
+                        </button>
+                      </form>
+                    </div>
+                  ) : null}
+                </div>
               </section>
               ) : null}
 
