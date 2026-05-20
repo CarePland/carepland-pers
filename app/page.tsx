@@ -177,7 +177,12 @@ type AiWorkflowKey =
   | "note_intake_interpretation";
 type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
+type AppointmentModifier = "add" | "edit" | "import";
 type MainTab = "admin" | "appointments" | "profile";
+type PendingModifierSwitch = {
+  appointmentId: string;
+  target: AppointmentModifier;
+};
 type ToastState = {
   actionLabel?: string;
   durationMs?: number;
@@ -1408,6 +1413,8 @@ export default function Home() {
     Record<string, boolean>
   >({});
   const [editingNoteIds, setEditingNoteIds] = useState<Record<string, boolean>>({});
+  const [pendingModifierSwitch, setPendingModifierSwitch] =
+    useState<PendingModifierSwitch | null>(null);
   const [loading, setLoading] = useState(false);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [processingTextIntake, setProcessingTextIntake] = useState(false);
@@ -3712,7 +3719,141 @@ export default function Home() {
     }));
   }
 
+  function currentAppointmentModifier(
+    appointmentId: string
+  ): AppointmentModifier | null {
+    if (editingAppointmentIds[appointmentId]) {
+      return "edit";
+    }
+
+    if (textIntakeTargetAppointmentId === appointmentId) {
+      return "import";
+    }
+
+    if (editingNoteIds[appointmentId]) {
+      return "add";
+    }
+
+    return null;
+  }
+
+  function hasUnsavedAppointmentModifierChanges(
+    appointment: Appointment,
+    modifier: AppointmentModifier | null
+  ) {
+    if (modifier === "add") {
+      const draft = noteDrafts[appointment.id] ?? emptyNoteDraft;
+
+      return Boolean(
+        draft.summary.trim() ||
+          draft.takeaways.trim() ||
+          draft.followups.trim()
+      );
+    }
+
+    if (modifier === "import") {
+      return Boolean(
+        contextualTextIntakeValue.trim() ||
+          textIntakeDraft ||
+          textIntakeAiDraft ||
+          textIntakeItemId
+      );
+    }
+
+    if (modifier === "edit") {
+      const draft = appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
+
+      return (
+        draft.locationAddress !== (appointment.location_address ?? "") ||
+        draft.locationName !== (appointment.location_name ?? "") ||
+        draft.locationPhone !== (appointment.location_phone ?? "") ||
+        draft.providerName !== (appointment.provider_name ?? "") ||
+        draft.providerOrganization !==
+          (appointment.provider_organization ?? "") ||
+        draft.reason !== (appointment.reason ?? "") ||
+        draft.startsAt !== toDatetimeLocalValue(appointment.starts_at) ||
+        draft.status !== appointment.status ||
+        draft.title !== (appointment.title ?? "")
+      );
+    }
+
+    return false;
+  }
+
+  function discardAppointmentModifier(
+    appointmentId: string,
+    modifier: AppointmentModifier | null
+  ) {
+    if (modifier === "add") {
+      cancelEditingNote(appointmentId);
+    }
+
+    if (modifier === "import") {
+      cancelTextIntake();
+    }
+
+    if (modifier === "edit") {
+      cancelEditingAppointment(appointmentId);
+    }
+  }
+
+  function openAppointmentModifier(
+    appointment: Appointment,
+    modifier: AppointmentModifier
+  ) {
+    if (modifier === "add") {
+      startTypingNote(appointment.id);
+      return;
+    }
+
+    if (modifier === "import") {
+      startContextualTextIntake(appointment);
+      return;
+    }
+
+    startEditingAppointment(appointment);
+  }
+
+  function requestAppointmentModifier(
+    appointment: Appointment,
+    target: AppointmentModifier
+  ) {
+    const currentModifier = currentAppointmentModifier(appointment.id);
+
+    if (currentModifier === target) {
+      return;
+    }
+
+    if (
+      currentModifier &&
+      hasUnsavedAppointmentModifierChanges(appointment, currentModifier)
+    ) {
+      setPendingModifierSwitch({
+        appointmentId: appointment.id,
+        target,
+      });
+      return;
+    }
+
+    discardAppointmentModifier(appointment.id, currentModifier);
+    setPendingModifierSwitch(null);
+    openAppointmentModifier(appointment, target);
+  }
+
+  function discardAndSwitchAppointmentModifier(appointment: Appointment) {
+    if (!pendingModifierSwitch) {
+      return;
+    }
+
+    const currentModifier = currentAppointmentModifier(appointment.id);
+
+    discardAppointmentModifier(appointment.id, currentModifier);
+    openAppointmentModifier(appointment, pendingModifierSwitch.target);
+    setPendingModifierSwitch(null);
+  }
+
   function startContextualTextIntake(appointment: Appointment) {
+    setPendingModifierSwitch(null);
     setEditingNoteIds((currentIds) => ({
       ...currentIds,
       [appointment.id]: false,
@@ -3737,6 +3878,7 @@ export default function Home() {
   }
 
   function startTypingNote(appointmentId: string) {
+    setPendingModifierSwitch(null);
     cancelTextIntake();
     setEditingAppointmentIds((currentIds) => ({
       ...currentIds,
@@ -3753,6 +3895,7 @@ export default function Home() {
   }
 
   function cancelTextIntake() {
+    setPendingModifierSwitch(null);
     setTextIntakeDraft(null);
     setTextIntakeAiDraft(null);
     setTextIntakeItemId(null);
@@ -4457,6 +4600,7 @@ export default function Home() {
   }
 
   function startEditingAppointment(appointment: Appointment) {
+    setPendingModifierSwitch(null);
     cancelTextIntake();
     setEditingNoteIds((currentIds) => ({
       ...currentIds,
@@ -4483,6 +4627,7 @@ export default function Home() {
   }
 
   function cancelEditingAppointment(appointmentId: string) {
+    setPendingModifierSwitch(null);
     setEditingAppointmentIds((currentIds) => ({
       ...currentIds,
       [appointmentId]: false,
@@ -4885,6 +5030,7 @@ export default function Home() {
   }
 
   function startEditingNote(appointmentId: string, note: AppointmentNote) {
+    setPendingModifierSwitch(null);
     cancelTextIntake();
     setEditingAppointmentIds((currentIds) => ({
       ...currentIds,
@@ -4905,6 +5051,7 @@ export default function Home() {
   }
 
   function cancelEditingNote(appointmentId: string) {
+    setPendingModifierSwitch(null);
     setEditingNoteIds((currentIds) => ({
       ...currentIds,
       [appointmentId]: false,
@@ -8334,7 +8481,12 @@ export default function Home() {
                                       ? modifierButtonActive
                                       : modifierButtonInactive
                                   }`}
-                                  onClick={() => startTypingNote(appointment.id)}
+                                  onClick={() =>
+                                    requestAppointmentModifier(
+                                      appointment,
+                                      "add"
+                                    )
+                                  }
                                   title="Type appointment notes"
                                   type="button"
                                 >
@@ -8347,7 +8499,10 @@ export default function Home() {
                                       : modifierButtonInactive
                                   }`}
                                   onClick={() =>
-                                    startContextualTextIntake(appointment)
+                                    requestAppointmentModifier(
+                                      appointment,
+                                      "import"
+                                    )
                                   }
                                   title="Paste or upload notes"
                                   type="button"
@@ -8362,7 +8517,10 @@ export default function Home() {
                                       : modifierButtonInactive
                                   }`}
                                   onClick={() =>
-                                    startEditingAppointment(appointment)
+                                    requestAppointmentModifier(
+                                      appointment,
+                                      "edit"
+                                    )
                                   }
                                   title="Edit appointment"
                                   type="button"
@@ -8381,7 +8539,7 @@ export default function Home() {
                                     : "border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
                                 }`}
                                 onClick={() =>
-                                  startEditingAppointment(appointment)
+                                  requestAppointmentModifier(appointment, "edit")
                                 }
                                 title="Edit appointment"
                                 type="button"
@@ -8433,6 +8591,34 @@ export default function Home() {
                         ) : null}
                       </div>
                     </div>
+
+                    {pendingModifierSwitch?.appointmentId === appointment.id ? (
+                      <section className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <p className="text-sm font-medium text-amber-950">
+                            Switching will discard your unsaved changes. Proceed?
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              className="rounded-md bg-amber-900 px-3 py-2 text-sm font-semibold text-white"
+                              onClick={() =>
+                                discardAndSwitchAppointmentModifier(appointment)
+                              }
+                              type="button"
+                            >
+                              Discard and switch
+                            </button>
+                            <button
+                              className="rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950"
+                              onClick={() => setPendingModifierSwitch(null)}
+                              type="button"
+                            >
+                              Return to editing
+                            </button>
+                          </div>
+                        </div>
+                      </section>
+                    ) : null}
 
                     {isContextualTextIntake && canPasteContextualNotes ? (
                       <form
