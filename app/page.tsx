@@ -204,6 +204,15 @@ type MainTab = "admin" | "appointments" | "profile";
 type ProductMgmtSection = string;
 type ProductMgmtStatus = "deferred" | "in_progress" | "open" | "resolved";
 type ProductMgmtPriority = "high" | "low" | "medium";
+
+type ProductMgmtItemDraft = {
+  areaId: string;
+  body: string;
+  changeNote: string;
+  priority: ProductMgmtPriority;
+  status: ProductMgmtStatus;
+  title: string;
+};
 type PendingModifierSwitch = {
   appointmentId: string;
   target: AppointmentModifier;
@@ -1648,6 +1657,13 @@ export default function Home() {
   const [resolvingProductMgmtItemId, setResolvingProductMgmtItemId] = useState<
     string | null
   >(null);
+  const [editingProductMgmtItemId, setEditingProductMgmtItemId] = useState<
+    string | null
+  >(null);
+  const [savingProductMgmtEditItemId, setSavingProductMgmtEditItemId] =
+    useState<string | null>(null);
+  const [productMgmtItemDraft, setProductMgmtItemDraft] =
+    useState<ProductMgmtItemDraft | null>(null);
   const [newProductMgmtTitle, setNewProductMgmtTitle] = useState("");
   const [newProductMgmtBody, setNewProductMgmtBody] = useState("");
   const [newProductMgmtPriority, setNewProductMgmtPriority] =
@@ -3140,6 +3156,82 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setLoadingProductMgmt(false);
+    }
+  }
+
+  function startEditingProductMgmtItem(item: ProductMgmtItem) {
+    setEditingProductMgmtItemId(item.id);
+    setProductMgmtItemDraft({
+      areaId: item.area_id,
+      body: item.body,
+      changeNote: "Updated product management item",
+      priority: item.priority,
+      status: item.status,
+      title: item.title,
+    });
+    setMessage("");
+  }
+
+  function cancelEditingProductMgmtItem() {
+    setEditingProductMgmtItemId(null);
+    setProductMgmtItemDraft(null);
+  }
+
+  function updateProductMgmtItemDraft(
+    field: keyof ProductMgmtItemDraft,
+    value: string
+  ) {
+    setProductMgmtItemDraft((currentDraft) =>
+      currentDraft ? { ...currentDraft, [field]: value } : currentDraft
+    );
+  }
+
+  async function handleUpdateProductMgmtItem(
+    event: FormEvent<HTMLFormElement>,
+    item: ProductMgmtItem
+  ) {
+    event.preventDefault();
+
+    if (!productMgmtItemDraft) {
+      return;
+    }
+
+    if (!productMgmtItemDraft.title.trim()) {
+      setMessage("Title is required.");
+      return;
+    }
+
+    if (!productMgmtItemDraft.changeNote.trim()) {
+      setMessage("Version note is required when editing a product item.");
+      return;
+    }
+
+    setSavingProductMgmtEditItemId(item.id);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("update_product_mgmt_item", {
+        p_area_id: productMgmtItemDraft.areaId,
+        p_body: productMgmtItemDraft.body,
+        p_change_note: productMgmtItemDraft.changeNote,
+        p_item_id: item.id,
+        p_priority: productMgmtItemDraft.priority,
+        p_status: productMgmtItemDraft.status,
+        p_title: productMgmtItemDraft.title,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setEditingProductMgmtItemId(null);
+      setProductMgmtItemDraft(null);
+      await loadProductMgmt();
+      showToast("Product item updated as a new version.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingProductMgmtEditItemId(null);
     }
   }
 
@@ -8997,6 +9089,11 @@ export default function Home() {
                           <div className="mt-3 space-y-3">
                             {selectedProductMgmtItems.map((item) => {
                               const isResolved = item.status === "resolved";
+                              const isEditing =
+                                editingProductMgmtItemId === item.id &&
+                                productMgmtItemDraft !== null;
+                              const isSavingEdit =
+                                savingProductMgmtEditItemId === item.id;
                               const statusLabel = item.status
                                 .replace("_", " ")
                                 .replace(/^./, (letter) => letter.toUpperCase());
@@ -9038,12 +9135,183 @@ export default function Home() {
                                       {item.body}
                                     </p>
                                   ) : null}
+
+                                  {isEditing ? (
+                                    <form
+                                      className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3"
+                                      onSubmit={(event) =>
+                                        handleUpdateProductMgmtItem(event, item)
+                                      }
+                                    >
+                                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem_10rem]">
+                                        <label className="block">
+                                          <span className="text-sm font-medium text-slate-700">
+                                            Title
+                                          </span>
+                                          <input
+                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                            disabled={isSavingEdit}
+                                            onChange={(event) =>
+                                              updateProductMgmtItemDraft(
+                                                "title",
+                                                event.target.value
+                                              )
+                                            }
+                                            required
+                                            value={productMgmtItemDraft.title}
+                                          />
+                                        </label>
+                                        <label className="block">
+                                          <span className="text-sm font-medium text-slate-700">
+                                            Priority
+                                          </span>
+                                          <select
+                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                            disabled={isSavingEdit}
+                                            onChange={(event) =>
+                                              updateProductMgmtItemDraft(
+                                                "priority",
+                                                event.target
+                                                  .value as ProductMgmtPriority
+                                              )
+                                            }
+                                            value={productMgmtItemDraft.priority}
+                                          >
+                                            <option value="low">Low</option>
+                                            <option value="medium">Medium</option>
+                                            <option value="high">High</option>
+                                          </select>
+                                        </label>
+                                        <label className="block">
+                                          <span className="text-sm font-medium text-slate-700">
+                                            Status
+                                          </span>
+                                          <select
+                                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                            disabled={isSavingEdit}
+                                            onChange={(event) =>
+                                              updateProductMgmtItemDraft(
+                                                "status",
+                                                event.target
+                                                  .value as ProductMgmtStatus
+                                              )
+                                            }
+                                            value={productMgmtItemDraft.status}
+                                          >
+                                            <option value="open">Open</option>
+                                            <option value="in_progress">
+                                              In progress
+                                            </option>
+                                            <option value="deferred">
+                                              Deferred
+                                            </option>
+                                            <option value="resolved">
+                                              Resolved
+                                            </option>
+                                          </select>
+                                        </label>
+                                      </div>
+
+                                      <label className="mt-3 block">
+                                        <span className="text-sm font-medium text-slate-700">
+                                          Lane
+                                        </span>
+                                        <select
+                                          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                          disabled={isSavingEdit}
+                                          onChange={(event) =>
+                                            updateProductMgmtItemDraft(
+                                              "areaId",
+                                              event.target.value
+                                            )
+                                          }
+                                          value={productMgmtItemDraft.areaId}
+                                        >
+                                          {productMgmtAreas.map((area) => (
+                                            <option key={area.id} value={area.id}>
+                                              {area.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+
+                                      <label className="mt-3 block">
+                                        <span className="text-sm font-medium text-slate-700">
+                                          Notes
+                                        </span>
+                                        <textarea
+                                          className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                          disabled={isSavingEdit}
+                                          onChange={(event) =>
+                                            updateProductMgmtItemDraft(
+                                              "body",
+                                              event.target.value
+                                            )
+                                          }
+                                          value={productMgmtItemDraft.body}
+                                        />
+                                      </label>
+
+                                      <label className="mt-3 block">
+                                        <span className="text-sm font-medium text-slate-700">
+                                          Version note
+                                        </span>
+                                        <input
+                                          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                          disabled={isSavingEdit}
+                                          onChange={(event) =>
+                                            updateProductMgmtItemDraft(
+                                              "changeNote",
+                                              event.target.value
+                                            )
+                                          }
+                                          required
+                                          value={productMgmtItemDraft.changeNote}
+                                        />
+                                      </label>
+
+                                      <div className="mt-3 flex flex-wrap gap-2">
+                                        <button
+                                          className="rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                                          disabled={
+                                            isSavingEdit ||
+                                            !productMgmtItemDraft.title.trim() ||
+                                            !productMgmtItemDraft.changeNote.trim()
+                                          }
+                                          type="submit"
+                                        >
+                                          {isSavingEdit ? "Saving..." : "Save edit"}
+                                        </button>
+                                        <button
+                                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:bg-slate-100"
+                                          disabled={isSavingEdit}
+                                          onClick={cancelEditingProductMgmtItem}
+                                          type="button"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </form>
+                                  ) : null}
+
                                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    {!isEditing ? (
+                                      <button
+                                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                                        onClick={() =>
+                                          startEditingProductMgmtItem(item)
+                                        }
+                                        type="button"
+                                      >
+                                        Edit
+                                      </button>
+                                    ) : null}
                                     {!isResolved ? (
                                       <button
                                         className="rounded-md border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 disabled:bg-slate-100 disabled:text-slate-400"
                                         disabled={
-                                          resolvingProductMgmtItemId === item.id
+                                          resolvingProductMgmtItemId === item.id ||
+                                          isEditing
                                         }
                                         onClick={() =>
                                           handleResolveProductMgmtItem(item)
