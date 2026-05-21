@@ -3,7 +3,7 @@
 import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { AIReviewBadge } from "./components/AIReviewBadge";
+import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 
 type Appointment = {
   id: string;
@@ -174,6 +174,48 @@ type SupportAssistantResult = {
   suggestedNextStep: string;
 };
 
+type SupportAssistantInteraction = {
+  id: string;
+  assistant_answer: string;
+  category: string;
+  confidence: number;
+  context: Record<string, unknown> | null;
+  created_at: string;
+  current_page: string | null;
+  escalation_reason: string;
+  escalation_recommended: boolean;
+  instruction_version_id: string | null;
+  model: string | null;
+  outcome: SupportAssistantOutcome;
+  priority: SupportTicketPriority;
+  profiles?: {
+    display_name: string | null;
+    email: string | null;
+    family_name: string | null;
+    given_name: string | null;
+  } | null;
+  prompt_version: string | null;
+  question_body: string;
+  question_subject: string;
+  raw_response: Record<string, unknown> | null;
+  suggested_next_step: string;
+  ticket_id: string | null;
+  updated_at: string;
+  user_feedback: string | null;
+  user_id: string;
+};
+
+type SupportAssistantAdminReview = {
+  id: string;
+  admin_note: string;
+  created_at: string;
+  interaction_id: string;
+  recommended_action: string | null;
+  review_status: SupportAssistantReviewStatus;
+  reviewer_user_id: string;
+  updated_at: string;
+};
+
 function CalendarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -232,7 +274,14 @@ function PencilSquareIcon({ className = "h-4 w-4" }: { className?: string }) {
 
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
-type AdminTab = "ai" | "content" | "messages" | "product" | "tickets" | "tools";
+type AdminTab =
+  | "ai"
+  | "assistantReview"
+  | "content"
+  | "messages"
+  | "product"
+  | "tickets"
+  | "tools";
 type AiWorkflowKey =
   | "bulk_appointment_intake"
   | "careprep_generation"
@@ -245,6 +294,18 @@ type MainTab = "admin" | "appointments" | "profile";
 type ProductMgmtSection = string;
 type ProductMgmtStatus = "deferred" | "in_progress" | "open" | "resolved";
 type ProductMgmtPriority = "high" | "low" | "medium";
+type SupportAssistantOutcome =
+  | "answered"
+  | "escalated"
+  | "helpful"
+  | "not_helpful";
+type SupportAssistantReviewStatus =
+  | "good_answer"
+  | "needs_prompt_work"
+  | "needs_review"
+  | "needs_ui_work"
+  | "not_actionable"
+  | "should_escalate";
 type SupportTicketStatus =
   | "closed"
   | "in_progress"
@@ -1807,6 +1868,25 @@ export default function Home() {
   const [adminTicketChangeNote, setAdminTicketChangeNote] = useState("");
   const [savingAdminTicketReply, setSavingAdminTicketReply] = useState(false);
   const [savingAdminTicketStatus, setSavingAdminTicketStatus] = useState(false);
+  const [assistantReviewInteractions, setAssistantReviewInteractions] =
+    useState<SupportAssistantInteraction[]>([]);
+  const [assistantReviewAdminReviews, setAssistantReviewAdminReviews] =
+    useState<SupportAssistantAdminReview[]>([]);
+  const [loadingAssistantReviews, setLoadingAssistantReviews] = useState(false);
+  const [selectedAssistantReviewId, setSelectedAssistantReviewId] = useState("");
+  const [assistantReviewOutcomeFilter, setAssistantReviewOutcomeFilter] =
+    useState<"all" | SupportAssistantOutcome>("all");
+  const [assistantReviewPromptFilter, setAssistantReviewPromptFilter] =
+    useState("all");
+  const [assistantReviewConfidenceFilter, setAssistantReviewConfidenceFilter] =
+    useState<"all" | "high" | "low" | "medium" | "needs_review">("all");
+  const [assistantReviewStatus, setAssistantReviewStatus] =
+    useState<SupportAssistantReviewStatus>("needs_review");
+  const [assistantReviewNote, setAssistantReviewNote] = useState("");
+  const [assistantReviewRecommendedAction, setAssistantReviewRecommendedAction] =
+    useState("");
+  const [savingAssistantAdminReview, setSavingAssistantAdminReview] =
+    useState(false);
   const [loadingAppContent, setLoadingAppContent] = useState(false);
   const [savingAppContent, setSavingAppContent] = useState(false);
   const [revertingAppContentForId, setRevertingAppContentForId] = useState<
@@ -2018,6 +2098,39 @@ export default function Home() {
   const selectedAdminTicketMessages = selectedAdminTicket
     ? adminSupportTicketMessages.filter(
         (messageRow) => messageRow.ticket_id === selectedAdminTicket.id
+      )
+    : [];
+  const assistantReviewPromptVersions = Array.from(
+    new Set(
+      assistantReviewInteractions
+        .map((interaction) => interaction.prompt_version || "Unknown prompt")
+        .filter(Boolean)
+    )
+  ).sort();
+  const filteredAssistantReviewInteractions = assistantReviewInteractions.filter(
+    (interaction) => {
+      const promptVersion = interaction.prompt_version || "Unknown prompt";
+      const confidenceLevel = aiReviewLevel(Number(interaction.confidence));
+
+      return (
+        (assistantReviewOutcomeFilter === "all" ||
+          interaction.outcome === assistantReviewOutcomeFilter) &&
+        (assistantReviewPromptFilter === "all" ||
+          promptVersion === assistantReviewPromptFilter) &&
+        (assistantReviewConfidenceFilter === "all" ||
+          confidenceLevel === assistantReviewConfidenceFilter)
+      );
+    }
+  );
+  const selectedAssistantReviewInteraction =
+    filteredAssistantReviewInteractions.find(
+      (interaction) => interaction.id === selectedAssistantReviewId
+    ) ??
+    filteredAssistantReviewInteractions[0] ??
+    null;
+  const selectedAssistantAdminReviews = selectedAssistantReviewInteraction
+    ? assistantReviewAdminReviews.filter(
+        (review) => review.interaction_id === selectedAssistantReviewInteraction.id
       )
     : [];
 
@@ -3807,6 +3920,150 @@ export default function Home() {
     return displayName || fullName || profile?.email || ticket.user_id;
   }
 
+  function assistantInteractionUserLabel(interaction: SupportAssistantInteraction) {
+    const profile = interaction.profiles;
+    const displayName = profile?.display_name?.trim();
+    const fullName = [profile?.given_name, profile?.family_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    return displayName || fullName || profile?.email || interaction.user_id;
+  }
+
+  async function loadAssistantReviewInteractions() {
+    setLoadingAssistantReviews(true);
+
+    try {
+      const { data: interactionRows, error: interactionError } = await supabase
+        .from("support_assistant_interactions")
+        .select(
+          "id,user_id,care_circle_id,ticket_id,question_subject,question_body,assistant_answer,suggested_next_step,confidence,escalation_recommended,escalation_reason,category,priority,outcome,user_feedback,current_page,context,instruction_version_id,prompt_version,model,raw_response,created_at,updated_at"
+        )
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (interactionError) {
+        throw interactionError;
+      }
+
+      const loadedInteractions =
+        (interactionRows ?? []) as SupportAssistantInteraction[];
+      const userIds = Array.from(
+        new Set(
+          loadedInteractions
+            .map((interaction) => interaction.user_id)
+            .filter(Boolean)
+        )
+      );
+      const profileById = new Map<
+        string,
+        NonNullable<SupportAssistantInteraction["profiles"]>
+      >();
+
+      if (userIds.length > 0) {
+        const { data: profileRows, error: profileError } = await supabase
+          .from("profiles")
+          .select("id,email,display_name,given_name,family_name")
+          .in("id", userIds);
+
+        if (!profileError) {
+          (profileRows ?? []).forEach((profile) => {
+            profileById.set(profile.id, {
+              display_name: profile.display_name,
+              email: profile.email,
+              family_name: profile.family_name,
+              given_name: profile.given_name,
+            });
+          });
+        }
+      }
+
+      const hydratedInteractions = loadedInteractions.map((interaction) => ({
+        ...interaction,
+        profiles: profileById.get(interaction.user_id) ?? null,
+      }));
+
+      setAssistantReviewInteractions(hydratedInteractions);
+
+      if (hydratedInteractions.length === 0) {
+        setAssistantReviewAdminReviews([]);
+        setSelectedAssistantReviewId("");
+        return;
+      }
+
+      if (
+        !hydratedInteractions.some(
+          (interaction) => interaction.id === selectedAssistantReviewId
+        )
+      ) {
+        setSelectedAssistantReviewId(hydratedInteractions[0].id);
+      }
+
+      const { data: reviewRows, error: reviewError } = await supabase
+        .from("support_assistant_admin_reviews")
+        .select(
+          "id,interaction_id,reviewer_user_id,review_status,admin_note,recommended_action,created_at,updated_at"
+        )
+        .in(
+          "interaction_id",
+          hydratedInteractions.map((interaction) => interaction.id)
+        )
+        .order("created_at", { ascending: false });
+
+      if (reviewError) {
+        throw reviewError;
+      }
+
+      setAssistantReviewAdminReviews(
+        (reviewRows ?? []) as SupportAssistantAdminReview[]
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAssistantReviews(false);
+    }
+  }
+
+  async function handleCreateAssistantAdminReview(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (!selectedAssistantReviewInteraction) {
+      return;
+    }
+
+    setSavingAssistantAdminReview(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc(
+        "create_support_assistant_admin_review",
+        {
+          p_admin_note: assistantReviewNote,
+          p_interaction_id: selectedAssistantReviewInteraction.id,
+          p_recommended_action: assistantReviewRecommendedAction,
+          p_review_status: assistantReviewStatus,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      setAssistantReviewNote("");
+      setAssistantReviewRecommendedAction("");
+      setAssistantReviewStatus("needs_review");
+      showToast("Assistant review saved.", { type: "success" });
+      await loadAssistantReviewInteractions();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAssistantAdminReview(false);
+    }
+  }
+
   async function handleAskSupportAssistant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -4170,6 +4427,10 @@ export default function Home() {
 
     if (tab === "tickets") {
       await loadAdminSupportTickets();
+    }
+
+    if (tab === "assistantReview") {
+      await loadAssistantReviewInteractions();
     }
   }
 
@@ -9135,6 +9396,7 @@ export default function Home() {
                     ["tools", "Tools"],
                     ["content", "Content"],
                     ["ai", "AI Prompts"],
+                    ["assistantReview", "Asst Review"],
                     ["messages", "Messages"],
                     ["product", "Prod Mgmt"],
                     [
@@ -9516,6 +9778,313 @@ export default function Home() {
                           type="submit"
                         >
                           {savingAdminTicketStatus ? "Saving..." : "Save ticket status"}
+                        </button>
+                      </form>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+              ) : null}
+
+              {adminTab === "assistantReview" ? (
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Assistant answer review</h2>
+                    <p className="mt-1 text-slate-600">
+                      Review every support assistant answer, including helpful and untouched responses.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                    disabled={loadingAssistantReviews}
+                    onClick={() => loadAssistantReviewInteractions()}
+                    type="button"
+                  >
+                    {loadingAssistantReviews ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+
+                <div className="mt-5 grid gap-3 lg:grid-cols-3">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Outcome
+                    <select
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                      onChange={(event) =>
+                        setAssistantReviewOutcomeFilter(
+                          event.target.value as "all" | SupportAssistantOutcome
+                        )
+                      }
+                      value={assistantReviewOutcomeFilter}
+                    >
+                      <option value="all">All outcomes</option>
+                      <option value="answered">Answered only</option>
+                      <option value="helpful">Helpful</option>
+                      <option value="not_helpful">Not helpful</option>
+                      <option value="escalated">Escalated</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Confidence
+                    <select
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                      onChange={(event) =>
+                        setAssistantReviewConfidenceFilter(
+                          event.target.value as typeof assistantReviewConfidenceFilter
+                        )
+                      }
+                      value={assistantReviewConfidenceFilter}
+                    >
+                      <option value="all">All confidence levels</option>
+                      <option value="high">High confidence</option>
+                      <option value="medium">Medium confidence</option>
+                      <option value="low">Low confidence</option>
+                      <option value="needs_review">Needs review</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Prompt version
+                    <select
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                      onChange={(event) =>
+                        setAssistantReviewPromptFilter(event.target.value)
+                      }
+                      value={assistantReviewPromptFilter}
+                    >
+                      <option value="all">All prompt versions</option>
+                      {assistantReviewPromptVersions.map((promptVersion) => (
+                        <option key={promptVersion} value={promptVersion}>
+                          {promptVersion}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="mt-5 grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
+                  <aside className="space-y-2">
+                    <p className="text-sm font-semibold text-slate-700">
+                      Showing {filteredAssistantReviewInteractions.length} of {assistantReviewInteractions.length}
+                    </p>
+                    {filteredAssistantReviewInteractions.length === 0 ? (
+                      <div className="rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
+                        No assistant answers match these filters.
+                      </div>
+                    ) : (
+                      filteredAssistantReviewInteractions.map((interaction) => {
+                        const selected =
+                          selectedAssistantReviewInteraction?.id === interaction.id;
+                        const hasAdminReview = assistantReviewAdminReviews.some(
+                          (review) => review.interaction_id === interaction.id
+                        );
+
+                        return (
+                          <button
+                            className={`w-full rounded-md border p-3 text-left transition ${
+                              selected
+                                ? "border-sky-300 bg-sky-50"
+                                : interaction.outcome === "not_helpful"
+                                  ? "border-amber-200 bg-amber-50/70"
+                                  : interaction.outcome === "escalated"
+                                    ? "border-red-200 bg-red-50/70"
+                                    : "border-slate-200 bg-white hover:border-sky-200"
+                            }`}
+                            key={interaction.id}
+                            onClick={() => setSelectedAssistantReviewId(interaction.id)}
+                            type="button"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-semibold text-slate-900">
+                                {interaction.question_subject}
+                              </span>
+                              {hasAdminReview ? (
+                                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                                  Reviewed
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {assistantInteractionUserLabel(interaction)}
+                            </p>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <AIReviewBadge confidence={Number(interaction.confidence)} />
+                              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                                {interaction.outcome.replace("_", " ")}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-xs text-slate-500">
+                              {formatDate(interaction.created_at)}
+                            </p>
+                          </button>
+                        );
+                      })
+                    )}
+                  </aside>
+
+                  {selectedAssistantReviewInteraction ? (
+                    <div className="rounded-md border border-slate-200 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-xl font-semibold text-slate-900">
+                            {selectedAssistantReviewInteraction.question_subject}
+                          </h3>
+                          <p className="mt-1 text-sm text-slate-600">
+                            {assistantInteractionUserLabel(selectedAssistantReviewInteraction)} · {selectedAssistantReviewInteraction.category}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {formatDate(selectedAssistantReviewInteraction.created_at)} · {selectedAssistantReviewInteraction.prompt_version ?? "Unknown prompt"}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <AIReviewBadge confidence={Number(selectedAssistantReviewInteraction.confidence)} />
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+                            {selectedAssistantReviewInteraction.outcome.replace("_", " ")}
+                          </span>
+                          {selectedAssistantReviewInteraction.ticket_id ? (
+                            <span className="rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-700">
+                              Ticket linked
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                          <h4 className="font-semibold text-slate-900">Question</h4>
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                            {selectedAssistantReviewInteraction.question_body}
+                          </p>
+                        </div>
+                        <div className="rounded-md border border-sky-200 bg-sky-50 p-3">
+                          <h4 className="font-semibold text-slate-900">Assistant answer</h4>
+                          <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
+                            {selectedAssistantReviewInteraction.assistant_answer}
+                          </p>
+                          {selectedAssistantReviewInteraction.suggested_next_step ? (
+                            <p className="mt-3 text-sm font-semibold text-slate-900">
+                              {selectedAssistantReviewInteraction.suggested_next_step}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid gap-3 xl:grid-cols-3">
+                        <div className="rounded-md border border-slate-200 p-3 text-sm text-slate-700">
+                          <p className="font-semibold text-slate-900">User feedback</p>
+                          <p className="mt-2 whitespace-pre-wrap">
+                            {selectedAssistantReviewInteraction.user_feedback || "No user comment saved."}
+                          </p>
+                        </div>
+                        <div className="rounded-md border border-slate-200 p-3 text-sm text-slate-700">
+                          <p className="font-semibold text-slate-900">Escalation</p>
+                          <p className="mt-2">
+                            {selectedAssistantReviewInteraction.escalation_recommended
+                              ? "Assistant recommended review."
+                              : "No review recommended by assistant."}
+                          </p>
+                          {selectedAssistantReviewInteraction.escalation_reason ? (
+                            <p className="mt-2 whitespace-pre-wrap">
+                              {selectedAssistantReviewInteraction.escalation_reason}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="rounded-md border border-slate-200 p-3 text-sm text-slate-700">
+                          <p className="font-semibold text-slate-900">Run metadata</p>
+                          <p className="mt-2">Model: {selectedAssistantReviewInteraction.model ?? "Unknown"}</p>
+                          <p>Page: {selectedAssistantReviewInteraction.current_page ?? "Unknown"}</p>
+                          <p>Priority: {selectedAssistantReviewInteraction.priority}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-md border border-slate-200 p-3">
+                        <h4 className="font-semibold text-slate-900">Admin review history</h4>
+                        {selectedAssistantAdminReviews.length === 0 ? (
+                          <p className="mt-2 text-sm text-slate-600">
+                            No admin review notes yet.
+                          </p>
+                        ) : (
+                          <div className="mt-3 space-y-2">
+                            {selectedAssistantAdminReviews.map((review) => (
+                              <div
+                                className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+                                key={review.id}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-semibold text-slate-900">
+                                    {review.review_status.replaceAll("_", " ")}
+                                  </span>
+                                  <span className="text-xs text-slate-500">
+                                    {formatDate(review.created_at)}
+                                  </span>
+                                </div>
+                                <p className="mt-2 whitespace-pre-wrap">
+                                  {review.admin_note || "No note entered."}
+                                </p>
+                                {review.recommended_action ? (
+                                  <p className="mt-2 whitespace-pre-wrap font-semibold text-slate-900">
+                                    {review.recommended_action}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <form
+                        className="mt-4 rounded-md border border-slate-200 p-3"
+                        onSubmit={handleCreateAssistantAdminReview}
+                      >
+                        <h4 className="font-semibold text-slate-900">Add admin interpretation</h4>
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          <label className="block text-sm font-medium text-slate-700">
+                            Review status
+                            <select
+                              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                              onChange={(event) =>
+                                setAssistantReviewStatus(
+                                  event.target.value as SupportAssistantReviewStatus
+                                )
+                              }
+                              value={assistantReviewStatus}
+                            >
+                              <option value="needs_review">Needs review</option>
+                              <option value="good_answer">Good answer</option>
+                              <option value="needs_prompt_work">Needs prompt work</option>
+                              <option value="needs_ui_work">Needs UI/workflow work</option>
+                              <option value="should_escalate">Should escalate</option>
+                              <option value="not_actionable">Not actionable</option>
+                            </select>
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Recommended action
+                            <input
+                              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                              onChange={(event) =>
+                                setAssistantReviewRecommendedAction(event.target.value)
+                              }
+                              placeholder="Optional next step"
+                              value={assistantReviewRecommendedAction}
+                            />
+                          </label>
+                        </div>
+                        <label className="mt-3 block text-sm font-medium text-slate-700">
+                          Admin note
+                          <textarea
+                            className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2"
+                            onChange={(event) =>
+                              setAssistantReviewNote(event.target.value)
+                            }
+                            placeholder="What did this answer do well or poorly?"
+                            value={assistantReviewNote}
+                          />
+                        </label>
+                        <button
+                          className="mt-3 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                          disabled={savingAssistantAdminReview || !assistantReviewNote.trim()}
+                          type="submit"
+                        >
+                          {savingAssistantAdminReview ? "Saving..." : "Save admin review"}
                         </button>
                       </form>
                     </div>
