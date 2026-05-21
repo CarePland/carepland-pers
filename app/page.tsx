@@ -134,6 +134,28 @@ type ProductMgmtItem = {
   resolved_at: string | null;
 };
 
+type AdminUserActivityRow = {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  account_created_at: string | null;
+  last_seen_at: string | null;
+  appointment_count: number;
+  upcoming_appointment_count: number;
+  logged_appointment_count: number;
+  note_count: number;
+  careprep_count: number;
+  support_ticket_count: number;
+  open_support_ticket_count: number;
+  last_appointment_created_at: string | null;
+  last_appointment_starts_at: string | null;
+  last_note_created_at: string | null;
+  last_careprep_generated_at: string | null;
+  last_support_ticket_at: string | null;
+  is_admin: boolean;
+  is_test_user: boolean;
+};
+
 type SupportTicket = {
   id: string;
   category: string;
@@ -347,7 +369,8 @@ type AdminTab =
   | "messages"
   | "product"
   | "tickets"
-  | "tools";
+  | "tools"
+  | "users";
 type AiWorkflowKey =
   | "bulk_appointment_intake"
   | "careprep_generation"
@@ -378,6 +401,13 @@ type SupportAssistantAnalysisStatus =
   | "new"
   | "rejected"
   | "reviewed";
+type AdminUserActivityFilter =
+  | "active"
+  | "all"
+  | "inactive"
+  | "needs_followup"
+  | "real"
+  | "test";
 type SupportTicketStatus =
   | "closed"
   | "in_progress"
@@ -951,6 +981,12 @@ const aiWorkflows: Record<
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+const careplandBuildNumber =
+  process.env.NEXT_PUBLIC_CAREPLAND_BUILD_NUMBER ??
+  process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ??
+  "02345e9a";
+const careplandBuildDttm =
+  process.env.NEXT_PUBLIC_CAREPLAND_BUILD_DTTM ?? "05/21/26 12:51 PM";
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -1330,6 +1366,10 @@ function formatDate(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatAdminDate(value: string | null): string {
+  return value ? formatDate(value) : "—";
 }
 
 function toDatetimeLocalValue(value: string | null): string {
@@ -1972,6 +2012,13 @@ export default function Home() {
   const [retiringProductMgmtAreaId, setRetiringProductMgmtAreaId] = useState<
     string | null
   >(null);
+  const [adminUserActivity, setAdminUserActivity] = useState<
+    AdminUserActivityRow[]
+  >([]);
+  const [loadingAdminUserActivity, setLoadingAdminUserActivity] =
+    useState(false);
+  const [adminUserActivityFilter, setAdminUserActivityFilter] =
+    useState<AdminUserActivityFilter>("all");
   const [userSupportTickets, setUserSupportTickets] = useState<SupportTicket[]>([]);
   const [userSupportTicketMessages, setUserSupportTicketMessages] = useState<
     SupportTicketMessage[]
@@ -2298,6 +2345,67 @@ export default function Home() {
     assistantAnalysisRuns.find((run) => run.id === selectedAssistantAnalysisRunId) ??
     assistantAnalysisRuns[0] ??
     null;
+  const adminUserActivityStats = useMemo(() => {
+    const realUsers = adminUserActivity.filter((row) => !row.is_test_user);
+    const activeSince = Date.now() - 1000 * 60 * 60 * 24 * 14;
+    const activeRecently = realUsers.filter(
+      (row) =>
+        row.last_seen_at && new Date(row.last_seen_at).getTime() >= activeSince
+    );
+    const needsFollowup = realUsers.filter(
+      (row) =>
+        row.appointment_count === 0 ||
+        (row.appointment_count > 0 && row.note_count === 0) ||
+        row.open_support_ticket_count > 0
+    );
+
+    return {
+      activeRecently: activeRecently.length,
+      needsFollowup: needsFollowup.length,
+      realUsers: realUsers.length,
+      totalUsers: adminUserActivity.length,
+    };
+  }, [adminUserActivity]);
+  const filteredAdminUserActivity = useMemo(() => {
+    const inactiveSince = Date.now() - 1000 * 60 * 60 * 24 * 14;
+
+    return adminUserActivity.filter((row) => {
+      if (adminUserActivityFilter === "real") {
+        return !row.is_test_user;
+      }
+
+      if (adminUserActivityFilter === "test") {
+        return row.is_test_user;
+      }
+
+      if (adminUserActivityFilter === "active") {
+        return (
+          !row.is_test_user &&
+          Boolean(row.last_seen_at) &&
+          new Date(row.last_seen_at as string).getTime() >= inactiveSince
+        );
+      }
+
+      if (adminUserActivityFilter === "inactive") {
+        return (
+          !row.is_test_user &&
+          (!row.last_seen_at ||
+            new Date(row.last_seen_at).getTime() < inactiveSince)
+        );
+      }
+
+      if (adminUserActivityFilter === "needs_followup") {
+        return (
+          !row.is_test_user &&
+          (row.appointment_count === 0 ||
+            (row.appointment_count > 0 && row.note_count === 0) ||
+            row.open_support_ticket_count > 0)
+        );
+      }
+
+      return true;
+    });
+  }, [adminUserActivity, adminUserActivityFilter]);
 
   function appContentText(key: keyof typeof appContentDefaults) {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
@@ -2464,6 +2572,8 @@ export default function Home() {
               await loadProductMgmt();
             } else if (initialUiState.adminTab === "tickets") {
               await loadAdminSupportTickets();
+            } else if (initialUiState.adminTab === "users") {
+              await loadAdminUserActivity();
             } else if (
               initialUiState.adminTab === "content" ||
               initialUiState.adminTab === "messages"
@@ -4042,6 +4152,29 @@ export default function Home() {
     }
   }
 
+  async function loadAdminUserActivity() {
+    setLoadingAdminUserActivity(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "get_admin_user_activity_summary"
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      const rows = (data ?? []) as AdminUserActivityRow[];
+      setAdminUserActivity(rows);
+      setMessage(`Loaded ${rows.length} user activity row(s).`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAdminUserActivity(false);
+    }
+  }
+
   async function loadAdminSupportTickets() {
     setLoadingAdminTickets(true);
 
@@ -4829,6 +4962,10 @@ export default function Home() {
 
     if (tab === "tickets") {
       await loadAdminSupportTickets();
+    }
+
+    if (tab === "users") {
+      await loadAdminUserActivity();
     }
 
     if (tab === "assistantReview") {
@@ -9827,6 +9964,7 @@ export default function Home() {
                 <div className="flex flex-wrap gap-2">
                   {[
                     ["tools", "Tools"],
+                    ["users", "Users"],
                     ["content", "Content"],
                     ["ai", "AI Prompts"],
                     ["assistantReview", "Asst Review"],
@@ -9946,6 +10084,199 @@ export default function Home() {
                 >
                   {seedingAdminSampleData ? "Adding..." : "Add sample data"}
                 </button>
+              </section>
+              ) : null}
+
+              {adminTab === "users" ? (
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Users / activity</h2>
+                    <p className="mt-1 text-slate-600">
+                      Review account presence, product usage, and follow-up
+                      signals for beta operations.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
+                    disabled={loadingAdminUserActivity}
+                    onClick={() => loadAdminUserActivity()}
+                    type="button"
+                  >
+                    {loadingAdminUserActivity ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ["Total users", adminUserActivityStats.totalUsers],
+                    ["Real users", adminUserActivityStats.realUsers],
+                    ["Active 14d", adminUserActivityStats.activeRecently],
+                    ["Needs follow-up", adminUserActivityStats.needsFollowup],
+                  ].map(([label, value]) => (
+                    <div
+                      className="rounded-md border border-slate-200 bg-slate-50 p-3"
+                      key={label}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {label}
+                      </p>
+                      <p className="mt-1 text-2xl font-semibold text-slate-900">
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
+                  <label className="block text-sm font-medium text-slate-700">
+                    View
+                    <select
+                      className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                      onChange={(event) =>
+                        setAdminUserActivityFilter(
+                          event.target.value as AdminUserActivityFilter
+                        )
+                      }
+                      value={adminUserActivityFilter}
+                    >
+                      <option value="all">All users</option>
+                      <option value="real">Real users</option>
+                      <option value="test">Test/admin users</option>
+                      <option value="active">Active last 14 days</option>
+                      <option value="inactive">Inactive 14+ days</option>
+                      <option value="needs_followup">Needs follow-up</option>
+                    </select>
+                  </label>
+                  <p className="text-sm text-slate-500">
+                    Showing {filteredAdminUserActivity.length} of{" "}
+                    {adminUserActivity.length}
+                  </p>
+                </div>
+
+                {adminUserActivity.length === 0 ? (
+                  <div className="mt-5 rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
+                    No user activity loaded yet.
+                  </div>
+                ) : (
+                  <div className="mt-5 overflow-x-auto">
+                    <table className="min-w-[980px] w-full border-separate border-spacing-0 text-left text-sm">
+                      <thead>
+                        <tr className="text-xs uppercase tracking-wide text-slate-500">
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            User
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Last seen
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Created
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            Appts
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            Notes
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            CarePrep
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            Tix
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Last activity
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Flags
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredAdminUserActivity.map((row) => {
+                          const lastActivity =
+                            row.last_support_ticket_at ??
+                            row.last_careprep_generated_at ??
+                            row.last_note_created_at ??
+                            row.last_appointment_created_at ??
+                            row.last_seen_at;
+
+                          return (
+                            <tr key={row.user_id}>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top">
+                                <p className="font-semibold text-slate-900">
+                                  {row.display_name || row.email || "Unknown user"}
+                                </p>
+                                <p className="break-all text-xs text-slate-500">
+                                  {row.email || row.user_id}
+                                </p>
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                                {formatAdminDate(row.last_seen_at)}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                                {formatAdminDate(row.account_created_at)}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top">
+                                <span className="font-semibold text-slate-900">
+                                  {row.appointment_count}
+                                </span>
+                                <p className="text-xs text-slate-500">
+                                  {row.upcoming_appointment_count} upcoming /{" "}
+                                  {row.logged_appointment_count} logged
+                                </p>
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
+                                {row.note_count}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
+                                {row.careprep_count}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top">
+                                <span className="font-semibold text-slate-900">
+                                  {row.open_support_ticket_count}
+                                </span>
+                                <p className="text-xs text-slate-500">
+                                  {row.support_ticket_count} total
+                                </p>
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                                {formatAdminDate(lastActivity)}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top">
+                                <div className="flex flex-wrap gap-1">
+                                  {row.is_admin ? (
+                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                                      Admin
+                                    </span>
+                                  ) : null}
+                                  {row.is_test_user ? (
+                                    <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                                      Test
+                                    </span>
+                                  ) : null}
+                                  {!row.is_test_user &&
+                                  row.appointment_count === 0 ? (
+                                    <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+                                      No appts
+                                    </span>
+                                  ) : null}
+                                  {!row.is_test_user &&
+                                  row.appointment_count > 0 &&
+                                  row.note_count === 0 ? (
+                                    <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+                                      No notes
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
               ) : null}
 
@@ -13511,6 +13842,12 @@ export default function Home() {
           </div>
         </div>
         )}
+        {isAdmin && isSignedInAppShell ? (
+          <footer className="mt-8 pb-2 text-center text-xs text-slate-400">
+            Build Number {careplandBuildNumber} * Build dttm:{" "}
+            {careplandBuildDttm}
+          </footer>
+        ) : null}
       </section>
     </main>
   );
