@@ -7248,6 +7248,9 @@ export default function Home() {
     authMode !== "updatePassword" &&
     !needsBetaAgreement &&
     !needsOnboarding;
+  const signedInDisplayName = savedProfileLabel || signedInEmail;
+  const shouldShowSignedInEmail =
+    Boolean(savedProfileLabel) && savedProfileLabel !== signedInEmail;
 
   return (
     <main className="min-h-screen overflow-x-clip bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6 lg:py-8">
@@ -7285,7 +7288,9 @@ export default function Home() {
 
             {isSignedInAppShell ? (
               <nav
-                className="flex min-w-0 justify-end gap-2 xl:col-start-2 xl:justify-start"
+                className={`flex min-w-0 gap-2 ${
+                  isAdmin ? "justify-end" : "justify-start"
+                } xl:col-start-2 xl:justify-start`}
                 aria-label="Main navigation"
               >
               <button
@@ -7337,14 +7342,24 @@ export default function Home() {
             {isSignedInAppShell ? (
               <span>
                 <span className="font-semibold text-slate-900">
-                  <span className="hidden xl:inline">Welcome, </span>
-                  {savedProfileLabel || signedInEmail}
+                  {shouldShowSignedInEmail ? (
+                    <span className="hidden xl:inline">Welcome, </span>
+                  ) : null}
+                  {signedInDisplayName}
                 </span>
-                <span className="mx-2 hidden text-slate-300 xl:inline">·</span>
-                <span className="hidden break-all xl:inline">{signedInEmail}</span>
+                {shouldShowSignedInEmail ? (
+                  <>
+                    <span className="mx-2 hidden text-slate-300 xl:inline">
+                      ·
+                    </span>
+                    <span className="hidden break-all xl:inline">
+                      {signedInEmail}
+                    </span>
+                  </>
+                ) : null}
               </span>
             ) : null}
-            {isSignedInAppShell ? (
+            {isSignedInAppShell && shouldShowSignedInEmail ? (
               <span className="hidden text-slate-300 xl:inline">·</span>
             ) : null}
             {isSignedInAppShell ? (
