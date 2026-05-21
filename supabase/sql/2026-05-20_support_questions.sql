@@ -468,7 +468,54 @@ begin
 end;
 $$;
 
+create or replace function public.update_support_ticket_message_email_status(
+  p_message_id uuid,
+  p_status text
+)
+returns public.support_ticket_messages
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller_is_admin boolean;
+  cleaned_status text;
+  updated_message public.support_ticket_messages%rowtype;
+begin
+  if auth.uid() is null then
+    raise exception 'Must be signed in to update support email status';
+  end if;
+
+  select coalesce(p.is_admin, false)
+    into caller_is_admin
+  from public.profiles p
+  where p.id = auth.uid();
+
+  if coalesce(caller_is_admin, false) = false then
+    raise exception 'Admin access is required to update support email status';
+  end if;
+
+  cleaned_status := coalesce(nullif(trim(p_status), ''), 'not_queued');
+
+  if cleaned_status not in ('not_queued', 'queued', 'sent', 'failed') then
+    raise exception 'Unsupported support email status: %', cleaned_status;
+  end if;
+
+  update public.support_ticket_messages
+  set email_notification_status = cleaned_status
+  where id = p_message_id
+  returning * into updated_message;
+
+  if not found then
+    raise exception 'Support ticket message not found';
+  end if;
+
+  return updated_message;
+end;
+$$;
+
 grant execute on function public.create_support_question(text, text, text, jsonb) to authenticated;
 grant execute on function public.add_support_ticket_message(uuid, text, boolean) to authenticated;
 grant execute on function public.update_support_ticket_status(uuid, text, text, text, boolean, text) to authenticated;
 grant execute on function public.mark_support_ticket_seen(uuid) to authenticated;
+grant execute on function public.update_support_ticket_message_email_status(uuid, text) to authenticated;

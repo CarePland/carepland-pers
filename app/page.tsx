@@ -554,6 +554,10 @@ const appContentDefaults = {
   demo_prompt_title: "Want demo data to explore?",
   support_contact_note:
     "Need help or want to report an issue? Contact support from the app and include what you were trying to do.",
+  support_reply_email_body:
+    "You've got a response to your CarePland question. Please log in to review it.\n\n{appUrl}",
+  support_reply_email_subject:
+    "You have a response to your CarePland question",
   support_missing_feedback_prompt: "What was missing?",
   welcome_guide_body:
     "Start with an appointment, import appointment text or images, or contact support if something feels off.",
@@ -597,6 +601,20 @@ const appContentOptions = [
     description:
       "Optional prompt shown after a support assistant answer is marked not helpful.",
     label: "Support assistant missing-feedback prompt",
+  },
+  {
+    category: "communications",
+    contentKey: "support_reply_email_subject",
+    description:
+      "Subject line for the generic email sent after an admin replies to a support question.",
+    label: "Support reply email subject",
+  },
+  {
+    category: "communications",
+    contentKey: "support_reply_email_body",
+    description:
+      "Body text for the generic support reply notification. Supported placeholders: {appUrl}, {recipientName}.",
+    label: "Support reply email body",
   },
   {
     category: "onboarding",
@@ -646,6 +664,12 @@ const appContentCategories = [
     description: "Support guidance and help text shown to users.",
     key: "support",
     label: "Support",
+  },
+  {
+    description:
+      "Email and notification wording that invites users back into the app.",
+    key: "communications",
+    label: "Communications",
   },
   {
     description: "First-run guidance, demo data prompts, and welcome copy.",
@@ -2496,6 +2520,34 @@ export default function Home() {
 
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
+
+  useEffect(() => {
+    if (!signedInEmail || needsBetaAgreement || needsOnboarding) {
+      return;
+    }
+
+    const touchActivity = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      supabase.rpc("touch_profile_activity").then(({ error }) => {
+        if (error) {
+          console.error("Could not update profile activity", error);
+        }
+      });
+    };
+
+    touchActivity();
+
+    const intervalId = window.setInterval(touchActivity, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", touchActivity);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", touchActivity);
+    };
+  }, [needsBetaAgreement, needsOnboarding, signedInEmail]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -4592,14 +4644,40 @@ export default function Home() {
     setMessage("");
 
     try {
-      const { error } = await supabase.rpc("add_support_ticket_message", {
-        p_is_internal: false,
-        p_message: adminTicketReplyBody,
-        p_ticket_id: selectedAdminTicket.id,
-      });
+      const { data: replyMessage, error } = await supabase.rpc(
+        "add_support_ticket_message",
+        {
+          p_is_internal: false,
+          p_message: adminTicketReplyBody,
+          p_ticket_id: selectedAdminTicket.id,
+        }
+      );
 
       if (error) {
         throw error;
+      }
+
+      const replyMessageId =
+        replyMessage && typeof replyMessage === "object" && "id" in replyMessage
+          ? String(replyMessage.id)
+          : "";
+
+      if (replyMessageId) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+
+        if (accessToken) {
+          fetch("/api/support-ticket-notifications", {
+            body: JSON.stringify({ messageId: replyMessageId }),
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+            method: "POST",
+          }).catch((notificationError) => {
+            console.error("Support reply notification failed", notificationError);
+          });
+        }
       }
 
       setAdminTicketReplyBody("");
@@ -12178,7 +12256,7 @@ export default function Home() {
               </section>
             ) : null}
 
-            {mainTab === "appointments" ? (
+            {signedInEmail && mainTab === "appointments" ? (
               appointments.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600">
                 {appointmentView === "archived"
