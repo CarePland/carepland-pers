@@ -7451,7 +7451,7 @@ export default function Home() {
         <div className="mt-8 space-y-4">
           <aside
             className={`rounded-lg border border-slate-200 bg-white p-5 shadow-sm ${
-              signedInEmail ? "hidden" : ""
+              signedInEmail ? "hidden" : "mx-auto max-w-xl"
             }`}
           >
             {signedInEmail ? (
