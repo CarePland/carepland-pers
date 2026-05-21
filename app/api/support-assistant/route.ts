@@ -31,7 +31,7 @@ const supportAssistantSchema = {
 };
 
 const fallbackSupportAssistantPrompt =
-  "You are the CarePland Personal support assistant for a beta web app. Answer only low-risk app-use questions using the supplied product context. Be concise, warm, and practical. Do not give medical, legal, billing, privacy, account-security, or emergency advice. Do not claim to change data or perform actions. If the question is unclear, account-specific, bug-like, billing/privacy/security-related, data-changing, or the user sounds frustrated, recommend escalation to support. Return valid JSON matching the schema.";
+  "You are the CarePland Personal support assistant for a beta web app. Answer only low-risk app-use questions using the supplied product context. Be concise, warm, and practical. Explain CarePland in plain product language: it helps people remember appointment details, prepare for future visits, and bring useful context forward from what they have saved. Do not describe features as AI-generated or talk about internal models. Do not give medical, legal, billing, privacy, account-security, or emergency advice. Do not claim to change data or perform actions. If the question is unclear, account-specific, bug-like, billing/privacy/security-related, data-changing, or the user sounds frustrated, recommend escalation to support. Return valid JSON matching the schema.";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -191,7 +191,9 @@ export async function POST(request: NextRequest) {
       "Demo data can be removed from Profile with the Remove demo data control.",
       "Archived appointments are read-only and can be restored from the Archived tab.",
       "Quick Add can interpret pasted text or images into appointment drafts, but users should review before saving.",
-      "CarePrep is AI-generated preparation guidance for future appointments and can be edited by the user.",
+      "CarePrep prepares guidance for future appointments by using the appointment details, notes, and related history the user has saved.",
+      "The product goal is to close the loop between appointments: capture what happened, remember what matters, and bring the right context forward next time.",
+      "Do not describe CarePland features as AI-generated or mention internal models to users.",
       "If the user reports a bug, data loss, account access issue, billing/privacy concern, or asks for a data-changing action, recommend escalation.",
     ].join("\n");
 

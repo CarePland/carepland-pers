@@ -1787,6 +1787,9 @@ export default function Home() {
   const [supportAssistantFeedback, setSupportAssistantFeedback] = useState("");
   const [supportAssistantFeedbackMode, setSupportAssistantFeedbackMode] =
     useState<"helpful" | "not_helpful" | null>(null);
+  const [supportAssistantResolution, setSupportAssistantResolution] = useState<
+    "helpful" | "not_helpful_saved" | "escalated" | null
+  >(null);
   const [askingSupportAssistant, setAskingSupportAssistant] = useState(false);
   const [savingSupportAssistantFeedback, setSavingSupportAssistantFeedback] =
     useState(false);
@@ -3816,6 +3819,7 @@ export default function Home() {
     setSupportAssistantResult(null);
     setSupportAssistantFeedback("");
     setSupportAssistantFeedbackMode(null);
+    setSupportAssistantResolution(null);
     setMessage("");
 
     try {
@@ -3856,6 +3860,8 @@ export default function Home() {
       }
 
       setSupportAssistantResult(result as SupportAssistantResult);
+      setSupportAssistantFeedbackMode(null);
+      setSupportAssistantResolution(null);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -3889,15 +3895,35 @@ export default function Home() {
         throw error;
       }
 
-      setSupportAssistantFeedbackMode(outcome === "helpful" ? "helpful" : "not_helpful");
+      setSupportAssistantFeedbackMode(null);
+      setSupportAssistantResolution(
+        outcome === "helpful"
+          ? "helpful"
+          : outcome === "escalated"
+            ? "escalated"
+            : "not_helpful_saved"
+      );
       showToast(
         outcome === "helpful"
           ? "Thanks. Your feedback was saved."
           : outcome === "escalated"
             ? "This was sent for review."
-            : "Thanks. Your feedback was saved.",
+            : "Thanks. We will use this to improve CarePland answers.",
         { type: "success" }
       );
+
+      if (outcome === "helpful") {
+        window.setTimeout(() => {
+          setSupportQuestionSubject("");
+          setSupportQuestionBody("");
+          setSupportAssistantResult(null);
+          setSupportAssistantFeedback("");
+          setSupportAssistantFeedbackMode(null);
+          setSupportAssistantResolution(null);
+          setAskingSupportQuestion(false);
+          setSupportQuestionExpanded(false);
+        }, 1400);
+      }
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -3965,6 +3991,8 @@ export default function Home() {
       setSupportQuestionBody("");
       setSupportAssistantResult(null);
       setSupportAssistantFeedback("");
+      setSupportAssistantFeedbackMode(null);
+      setSupportAssistantResolution(null);
       setAskingSupportQuestion(false);
       setSupportQuestionExpanded(true);
       await loadCurrentUserSupportTickets();
@@ -7423,7 +7451,7 @@ export default function Home() {
         <div className="mt-8 space-y-4">
           <aside
             className={`rounded-lg border border-slate-200 bg-white p-5 shadow-sm ${
-              signedInEmail || mainTab === "admin" ? "hidden" : ""
+              signedInEmail ? "hidden" : ""
             }`}
           >
             {signedInEmail ? (
@@ -8107,10 +8135,10 @@ export default function Home() {
                   <div>
                     <p className="text-sm font-semibold">
                       {hasUpdatedSupportQuestion
-                        ? "We have more info about your question."
+                          ? "We have more info about your question."
                         : currentSupportTicket
                           ? "You have an open question."
-                          : "Need a hand?"}
+                          : "Need a hand? Ask a question"}
                     </p>
                     {currentSupportTicket ? (
                       <p className="mt-1 text-sm opacity-80">
@@ -8118,7 +8146,7 @@ export default function Home() {
                       </p>
                     ) : askingSupportQuestion ? (
                       <p className="mt-1 text-sm opacity-80">
-                        Ask the assistant first. If it cannot help, send the question for review.
+                        Tell us what happened or what you were trying to do.
                       </p>
                     ) : null}
                   </div>
@@ -8144,6 +8172,7 @@ export default function Home() {
                           setSupportAssistantResult(null);
                           setSupportAssistantFeedback("");
                           setSupportAssistantFeedbackMode(null);
+                          setSupportAssistantResolution(null);
                         }}
                         type="button"
                       >
@@ -8173,6 +8202,7 @@ export default function Home() {
                               setSupportAssistantResult(null);
                               setSupportAssistantFeedback("");
                               setSupportAssistantFeedbackMode(null);
+                              setSupportAssistantResolution(null);
                             }}
                             type="button"
                           >
@@ -8221,32 +8251,45 @@ export default function Home() {
                         <p className="mt-1 text-sm text-slate-600">
                           Tell us what happened or what you were trying to do.
                         </p>
-                        <label className="mt-3 block text-sm font-medium text-slate-700">
-                          Short subject
-                          <input
-                            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                            disabled={savingSupportQuestion || askingSupportAssistant}
-                            onChange={(event) =>
-                              setSupportQuestionSubject(event.target.value)
-                            }
-                            placeholder="e.g. I cannot save an appointment"
-                            required
-                            value={supportQuestionSubject}
-                          />
-                        </label>
-                        <label className="mt-3 block text-sm font-medium text-slate-700">
-                          Details
-                          <textarea
-                            className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                            disabled={savingSupportQuestion || askingSupportAssistant}
-                            onChange={(event) =>
-                              setSupportQuestionBody(event.target.value)
-                            }
-                            placeholder="What did you expect? What happened instead?"
-                            required
-                            value={supportQuestionBody}
-                          />
-                        </label>
+                        {!supportAssistantResult ? (
+                          <>
+                            <label className="mt-3 block text-sm font-medium text-slate-700">
+                              Short subject
+                              <input
+                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                disabled={savingSupportQuestion || askingSupportAssistant}
+                                onChange={(event) =>
+                                  setSupportQuestionSubject(event.target.value)
+                                }
+                                placeholder="e.g. I cannot save an appointment"
+                                required
+                                value={supportQuestionSubject}
+                              />
+                            </label>
+                            <label className="mt-3 block text-sm font-medium text-slate-700">
+                              Details
+                              <textarea
+                                className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                disabled={savingSupportQuestion || askingSupportAssistant}
+                                onChange={(event) =>
+                                  setSupportQuestionBody(event.target.value)
+                                }
+                                placeholder="What did you expect? What happened instead?"
+                                required
+                                value={supportQuestionBody}
+                              />
+                            </label>
+                          </>
+                        ) : (
+                          <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
+                            <p className="font-semibold text-slate-900">
+                              {supportQuestionSubject}
+                            </p>
+                            <p className="mt-1 line-clamp-2 whitespace-pre-wrap">
+                              {supportQuestionBody}
+                            </p>
+                          </div>
+                        )}
 
                         {supportAssistantResult ? (
                           <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-slate-800">
@@ -8255,9 +8298,9 @@ export default function Home() {
                                 <p className="font-semibold text-slate-950">
                                   CarePland assistant
                                 </p>
-                                <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
-                                  {supportAssistantResult.category} · {Math.round(supportAssistantResult.confidence * 100)}% confidence
-                                </p>
+                                <div className="mt-2">
+                                  <AIReviewBadge confidence={supportAssistantResult.confidence} />
+                                </div>
                               </div>
                               {supportAssistantResult.escalationRecommended ? (
                                 <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
@@ -8279,6 +8322,17 @@ export default function Home() {
                               </p>
                             ) : null}
 
+                            {supportAssistantResolution === "not_helpful_saved" ? (
+                              <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
+                                <p className="font-semibold text-slate-950">
+                                  Thank you for submitting this.
+                                </p>
+                                <p className="mt-1">
+                                  We use this information to improve the quality of CarePland answers. If this still needs attention, send it for review.
+                                </p>
+                              </div>
+                            ) : null}
+
                             {supportAssistantFeedbackMode === "not_helpful" ? (
                               <label className="mt-3 block font-medium text-slate-700">
                                 {appContentText("support_missing_feedback_prompt")}
@@ -8295,47 +8349,87 @@ export default function Home() {
                             ) : null}
 
                             <div className="mt-3 flex flex-wrap gap-2">
-                              <button
-                                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
-                                disabled={savingSupportAssistantFeedback}
-                                onClick={() => handleSupportAssistantFeedback("helpful")}
-                                type="button"
-                              >
-                                Helpful
-                              </button>
-                              <button
-                                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
-                            disabled={savingSupportAssistantFeedback}
-                            onClick={() => {
-                              setSupportAssistantFeedbackMode("not_helpful");
-                            }}
-                            type="button"
-                          >
-                            Not helpful
-                          </button>
+                              {!supportAssistantFeedbackMode && !supportAssistantResolution ? (
+                                <>
+                                  <button
+                                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                                    disabled={savingSupportAssistantFeedback}
+                                    onClick={() => handleSupportAssistantFeedback("helpful")}
+                                    type="button"
+                                  >
+                                    Helpful
+                                  </button>
+                                  <button
+                                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                                    disabled={savingSupportAssistantFeedback}
+                                    onClick={() => {
+                                      setSupportAssistantFeedbackMode("not_helpful");
+                                      setSupportAssistantResolution(null);
+                                    }}
+                                    type="button"
+                                  >
+                                    Not helpful
+                                  </button>
+                                </>
+                              ) : null}
                               {supportAssistantFeedbackMode === "not_helpful" ? (
                                 <button
-                                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                                  className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
                                   disabled={savingSupportAssistantFeedback}
                                   onClick={() => handleSupportAssistantFeedback("not_helpful")}
                                   type="button"
                                 >
-                                  Save feedback
+                                  {savingSupportAssistantFeedback ? "Saving..." : "Save feedback"}
                                 </button>
                               ) : null}
-                              <button
+                              {supportAssistantFeedbackMode === "not_helpful" ? (
+                                <button
+                                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                                  disabled={savingSupportAssistantFeedback || savingSupportQuestion}
+                                  onClick={() => {
+                                    setSupportAssistantFeedbackMode(null);
+                                    setSupportAssistantFeedback("");
+                                  }}
+                                  type="button"
+                                >
+                                  Back
+                                </button>
+                              ) : null}
+                              {supportAssistantResolution === "not_helpful_saved" ? (
+                                <button
+                                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                                  disabled={savingSupportQuestion}
+                                  onClick={() => {
+                                    setSupportQuestionSubject("");
+                                    setSupportQuestionBody("");
+                                    setSupportAssistantResult(null);
+                                    setSupportAssistantFeedback("");
+                                    setSupportAssistantFeedbackMode(null);
+                                    setSupportAssistantResolution(null);
+                                    setAskingSupportQuestion(false);
+                                    setSupportQuestionExpanded(false);
+                                  }}
+                                  type="button"
+                                >
+                                  Done
+                                </button>
+                              ) : null}
+                              {supportAssistantResolution !== "helpful" ? (
+                                <button
                                 className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
                                 disabled={savingSupportQuestion}
                                 onClick={handleEscalateSupportAssistant}
                                 type="button"
                               >
                                 {savingSupportQuestion ? "Sending..." : "Send for review"}
-                              </button>
+                                </button>
+                              ) : null}
                             </div>
                           </div>
                         ) : null}
 
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        {!supportAssistantResult ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
                           <button
                             className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
                             disabled={
@@ -8345,7 +8439,7 @@ export default function Home() {
                             }
                             type="submit"
                           >
-                            {askingSupportAssistant ? "Checking..." : "Ask assistant"}
+                            {askingSupportAssistant ? "Checking..." : "Ask the CarePland Assistant"}
                           </button>
                           {currentSupportTicket ? (
                             <button
@@ -8357,7 +8451,8 @@ export default function Home() {
                               Back to open question
                             </button>
                           ) : null}
-                        </div>
+                          </div>
+                        ) : null}
                       </form>
                     )}
                   </div>
