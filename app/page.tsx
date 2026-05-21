@@ -1580,9 +1580,11 @@ function resetInstructionDraft(
   };
 }
 
-function supportMailtoHref(userEmail: string | null, area = "CarePland beta") {
-  const timestamp = new Date().toISOString();
-  const timezone = browserTimezone() || "unknown";
+function supportMailtoHref(
+  userEmail: string | null,
+  area = "CarePland beta",
+  includeRuntimeContext = true
+) {
   const subject = `CarePland beta support: ${area}`;
   const body = [
     "Hi CarePland support,",
@@ -1592,14 +1594,49 @@ function supportMailtoHref(userEmail: string | null, area = "CarePland beta") {
     "",
     "---",
     `User email: ${userEmail ?? "not signed in"}`,
-    `Timestamp: ${timestamp}`,
-    `Time zone: ${timezone}`,
+    ...(includeRuntimeContext
+      ? [
+          `Timestamp: ${new Date().toISOString()}`,
+          `Time zone: ${browserTimezone() || "unknown"}`,
+        ]
+      : []),
     `Area: ${area}`,
   ].join("\n");
 
   return `mailto:support@carepland.com?subject=${encodeURIComponent(
     subject
   )}&body=${encodeURIComponent(body)}`;
+}
+
+function nonProductionEnvironmentLabel(hostname: string, configuredEnv = "") {
+  const normalizedEnv = configuredEnv.trim().toLowerCase();
+
+  if (normalizedEnv && !["prd", "prod", "production"].includes(normalizedEnv)) {
+    return normalizedEnv.toUpperCase();
+  }
+
+  const normalizedHost = hostname.toLowerCase();
+
+  if (
+    ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(normalizedHost) ||
+    normalizedHost.endsWith(".local")
+  ) {
+    return "DEV";
+  }
+
+  if (
+    normalizedHost.includes("stg") ||
+    normalizedHost.includes("stage") ||
+    normalizedHost.includes("test")
+  ) {
+    return "STG";
+  }
+
+  if (normalizedHost.endsWith(".vercel.app")) {
+    return "PREVIEW";
+  }
+
+  return "";
 }
 
 function welcomeGuideWasDismissed(email: string | null) {
@@ -1705,6 +1742,8 @@ function bulkAppointmentDraftsFromResult(value: unknown): BulkAppointmentDraft[]
 export default function Home() {
   const mainHeaderRef = useRef<HTMLElement | null>(null);
   const [stickySecondaryOffset, setStickySecondaryOffset] = useState(0);
+  const [hasHydrated, setHasHydrated] = useState(false);
+  const [runtimeEnvironmentLabel, setRuntimeEnvironmentLabel] = useState("");
   const [initialUiState] = useState<StoredUiState | null>(() => {
     if (typeof window === "undefined") {
       return null;
@@ -2300,6 +2339,16 @@ export default function Home() {
   }
 
   useEffect(() => {
+    const hydrationFlagTimeoutId = window.setTimeout(() => {
+      setHasHydrated(true);
+      setRuntimeEnvironmentLabel(
+        nonProductionEnvironmentLabel(
+          window.location.hostname,
+          process.env.NEXT_PUBLIC_CAREPLAND_ENV
+        )
+      );
+    }, 0);
+
     async function restoreSession() {
       const isRecoveryRedirect = isPasswordRecoveryRedirect();
 
@@ -2373,6 +2422,7 @@ export default function Home() {
     }
 
     restoreSession();
+    return () => window.clearTimeout(hydrationFlagTimeoutId);
     // This runs once on page load to restore Supabase session state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -7082,7 +7132,7 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6 lg:py-8">
+    <main className="min-h-screen overflow-x-clip bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6 lg:py-8">
       <section className="mx-auto w-full max-w-5xl 2xl:max-w-6xl">
         <header
           className="sticky top-0 z-50 flex flex-col gap-4 border-b border-slate-200 bg-slate-50/95 py-3 backdrop-blur lg:flex-row lg:items-center lg:justify-between"
@@ -7101,6 +7151,14 @@ export default function Home() {
               <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
                 Personal
               </span>
+              {runtimeEnvironmentLabel ? (
+                <span
+                  className="rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-900"
+                  title="Non-production environment"
+                >
+                  {runtimeEnvironmentLabel}
+                </span>
+              ) : null}
             </div>
 
             {signedInEmail &&
@@ -7206,7 +7264,11 @@ export default function Home() {
             ) : (
               <a
                 className="font-semibold text-blue-700"
-                href={supportMailtoHref(signedInEmail, mainTab)}
+                href={supportMailtoHref(
+                  signedInEmail,
+                  hasHydrated ? mainTab : "CarePland beta",
+                  hasHydrated
+                )}
               >
                 Support
               </a>
