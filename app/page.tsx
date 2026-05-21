@@ -4256,6 +4256,11 @@ export default function Home() {
 
     setMainTab(tab);
 
+    if (tab !== "appointments") {
+      cancelTextIntake();
+      setActiveAppointmentPanel(null);
+    }
+
     if (tab === "admin") {
       await Promise.all([loadAiInstructions(), loadAppContent()]);
     }
@@ -6110,6 +6115,18 @@ export default function Home() {
       return;
     }
 
+    setFileImportStatus("");
+    setTextIntakeValue("");
+    setTextIntakeDraft(null);
+    setTextIntakeAiDraft(null);
+    setTextIntakeItemId(null);
+    setTextIntakeMatches([]);
+    setBulkAppointmentDrafts([]);
+    setBulkAppointmentSummary("");
+    setSelectedTextIntakeMatchId("new");
+    setTextIntakeTargetAppointmentId(null);
+    setApplyTextIntakeAppointmentDetails(false);
+
     const calendarFiles = selectedFiles.filter((file) =>
       file.name.toLowerCase().endsWith(".ics")
     );
@@ -6358,6 +6375,7 @@ export default function Home() {
 
   function cancelTextIntake() {
     setPendingModifierSwitch(null);
+    setTextIntakeValue("");
     setTextIntakeDraft(null);
     setTextIntakeAiDraft(null);
     setTextIntakeItemId(null);
@@ -6368,6 +6386,7 @@ export default function Home() {
     setTextIntakeTargetAppointmentId(null);
     setContextualTextIntakeValue("");
     setApplyTextIntakeAppointmentDetails(false);
+    setFileImportStatus("");
   }
 
   async function findTextIntakeMatches(
@@ -9552,14 +9571,20 @@ export default function Home() {
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
                     className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white"
-                    onClick={() => setActiveAppointmentPanel("add")}
+                    onClick={() => {
+                      cancelTextIntake();
+                      setActiveAppointmentPanel("add");
+                    }}
                     type="button"
                   >
                     Add appointment
                   </button>
                   <button
                     className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
-                    onClick={() => setActiveAppointmentPanel("quickAdd")}
+                    onClick={() => {
+                      cancelTextIntake();
+                      setActiveAppointmentPanel("quickAdd");
+                    }}
                     type="button"
                   >
                     Import
@@ -9655,11 +9680,12 @@ export default function Home() {
                           ? "bg-blue-700 text-white"
                           : "border border-slate-300 bg-white text-slate-700"
                       }`}
-                      onClick={() =>
+                      onClick={() => {
+                        cancelTextIntake();
                         setActiveAppointmentPanel((currentPanel) =>
                           currentPanel === "add" ? null : "add"
-                        )
-                      }
+                        );
+                      }}
                       type="button"
                     >
                       Add appointment
@@ -9670,11 +9696,12 @@ export default function Home() {
                           ? "bg-blue-700 text-white"
                           : "border border-slate-300 bg-white text-slate-700"
                       }`}
-                      onClick={() =>
+                      onClick={() => {
+                        cancelTextIntake();
                         setActiveAppointmentPanel((currentPanel) =>
                           currentPanel === "quickAdd" ? null : "quickAdd"
-                        )
-                      }
+                        );
+                      }}
                       type="button"
                     >
                       Import
@@ -9826,12 +9853,28 @@ export default function Home() {
                         </label>
                       ) : null}
                       <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
-                        <label className="block text-sm font-medium text-slate-700">
+                        <label
+                          className="block text-sm font-medium text-slate-700"
+                          htmlFor="appointment-import-files"
+                        >
                           Choose files
+                        </label>
+                        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-700">
+                          <label
+                            className={`rounded-md border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 ${
+                              extractingImageText
+                                ? "cursor-not-allowed opacity-60"
+                                : "cursor-pointer"
+                            }`}
+                            htmlFor="appointment-import-files"
+                          >
+                            Choose Files
+                          </label>
                           <input
                             accept=".ics,text/calendar,image/gif,image/jpeg,image/png,image/webp"
-                            className="mt-2 block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
+                            className="sr-only"
                             disabled={extractingImageText}
+                            id="appointment-import-files"
                             multiple
                             onChange={(event) => {
                               void handleImportAppointmentFiles(event.target.files);
@@ -9839,10 +9882,16 @@ export default function Home() {
                             }}
                             type="file"
                           />
-                        </label>
+                          <span>No file chosen</span>
+                          {fileImportStatus ? (
+                            <span className="font-semibold text-amber-700">
+                              {fileImportStatus}
+                            </span>
+                          ) : null}
+                        </div>
                         <p className="mt-2 text-xs text-slate-500">
-                          {fileImportStatus ||
-                            "Choose one .iCal calendar file or up to 10 images. Imported items must be reviewed before saving."}
+                          Choose one .iCal calendar file or up to 10 images.
+                          Imported items must be reviewed before saving.
                         </p>
                       </div>
                       <label className="mt-3 block text-sm font-medium text-slate-700">
@@ -9868,7 +9917,10 @@ export default function Home() {
                         </button>
                         <button
                           className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
-                          onClick={() => setActiveAppointmentPanel(null)}
+                          onClick={() => {
+                            cancelTextIntake();
+                            setActiveAppointmentPanel(null);
+                          }}
                           type="button"
                         >
                           Cancel
