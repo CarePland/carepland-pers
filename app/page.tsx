@@ -7712,8 +7712,6 @@ export default function Home() {
     !needsBetaAgreement &&
     !needsOnboarding;
   const signedInDisplayName = savedProfileLabel || signedInEmail;
-  const shouldShowSignedInEmail =
-    Boolean(savedProfileLabel) && savedProfileLabel !== signedInEmail;
 
   return (
     <main className="min-h-screen overflow-x-clip bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6 lg:py-8">
@@ -7803,27 +7801,9 @@ export default function Home() {
 
             <div className="col-span-2 flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm text-slate-600 xl:col-span-1 xl:col-start-3 xl:justify-end xl:text-right">
             {isSignedInAppShell ? (
-              <span>
-                <span className="font-semibold text-slate-900">
-                  {shouldShowSignedInEmail ? (
-                    <span className="hidden xl:inline">Welcome, </span>
-                  ) : null}
-                  {signedInDisplayName}
-                </span>
-                {shouldShowSignedInEmail ? (
-                  <>
-                    <span className="mx-2 hidden text-slate-300 xl:inline">
-                      ·
-                    </span>
-                    <span className="hidden break-all xl:inline">
-                      {signedInEmail}
-                    </span>
-                  </>
-                ) : null}
+              <span className="font-semibold text-slate-900">
+                {signedInDisplayName}
               </span>
-            ) : null}
-            {isSignedInAppShell && shouldShowSignedInEmail ? (
-              <span className="hidden text-slate-300 xl:inline">·</span>
             ) : null}
             {isSignedInAppShell ? (
               isAdmin ? (
