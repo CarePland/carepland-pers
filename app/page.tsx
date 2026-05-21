@@ -156,6 +156,18 @@ type AdminUserActivityRow = {
   is_test_user: boolean;
 };
 
+type AdminIntegrationErrorSummaryRow = {
+  window_grain: "day" | "minute";
+  window_start: string;
+  integration_key: string;
+  error_key: string;
+  occurrence_count: number;
+  affected_user_count: number;
+  latest_occurred_at: string;
+  max_attempted_call_count: number | null;
+  latest_error_message: string | null;
+};
+
 type SupportTicket = {
   id: string;
   category: string;
@@ -366,6 +378,7 @@ type AdminTab =
   | "ai"
   | "assistantReview"
   | "content"
+  | "errors"
   | "messages"
   | "product"
   | "tickets"
@@ -2178,6 +2191,11 @@ export default function Home() {
     useState(false);
   const [adminUserActivityFilter, setAdminUserActivityFilter] =
     useState<AdminUserActivityFilter>("all");
+  const [adminIntegrationErrors, setAdminIntegrationErrors] = useState<
+    AdminIntegrationErrorSummaryRow[]
+  >([]);
+  const [loadingAdminIntegrationErrors, setLoadingAdminIntegrationErrors] =
+    useState(false);
   const [userSupportTickets, setUserSupportTickets] = useState<SupportTicket[]>([]);
   const [userSupportTicketMessages, setUserSupportTicketMessages] = useState<
     SupportTicketMessage[]
@@ -2572,6 +2590,24 @@ export default function Home() {
   const allBulkAppointmentsSelected =
     bulkAppointmentDrafts.length > 0 &&
     selectedBulkAppointmentCount === bulkAppointmentDrafts.length;
+  const adminIntegrationErrorStats = useMemo(() => {
+    const dayRows = adminIntegrationErrors.filter(
+      (row) => row.window_grain === "day"
+    );
+    const minuteRows = adminIntegrationErrors.filter(
+      (row) => row.window_grain === "minute"
+    );
+
+    return {
+      affectedUsers: dayRows.reduce(
+        (total, row) => total + Number(row.affected_user_count ?? 0),
+        0
+      ),
+      dayWindows: dayRows.length,
+      latestErrorAt: adminIntegrationErrors[0]?.latest_occurred_at ?? null,
+      minuteWindows: minuteRows.length,
+    };
+  }, [adminIntegrationErrors]);
 
   function appContentText(key: keyof typeof appContentDefaults) {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
@@ -2740,6 +2776,8 @@ export default function Home() {
               await loadAdminSupportTickets();
             } else if (initialUiState.adminTab === "users") {
               await loadAdminUserActivity();
+            } else if (initialUiState.adminTab === "errors") {
+              await loadAdminIntegrationErrors();
             } else if (
               initialUiState.adminTab === "content" ||
               initialUiState.adminTab === "messages"
@@ -4346,6 +4384,29 @@ export default function Home() {
     }
   }
 
+  async function loadAdminIntegrationErrors() {
+    setLoadingAdminIntegrationErrors(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "get_admin_integration_error_summary"
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      const rows = (data ?? []) as AdminIntegrationErrorSummaryRow[];
+      setAdminIntegrationErrors(rows);
+      setMessage(`Loaded ${rows.length} integration error summary row(s).`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAdminIntegrationErrors(false);
+    }
+  }
+
   async function loadAdminSupportTickets() {
     setLoadingAdminTickets(true);
 
@@ -5137,6 +5198,10 @@ export default function Home() {
 
     if (tab === "users") {
       await loadAdminUserActivity();
+    }
+
+    if (tab === "errors") {
+      await loadAdminIntegrationErrors();
     }
 
     if (tab === "assistantReview") {
@@ -10294,6 +10359,7 @@ export default function Home() {
                   {[
                     ["tools", "Tools"],
                     ["users", "Users"],
+                    ["errors", "Errors"],
                     ["content", "Content"],
                     ["ai", "AI Prompts"],
                     ["assistantReview", "Asst Review"],
@@ -10602,6 +10668,135 @@ export default function Home() {
                             </tr>
                           );
                         })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+              ) : null}
+
+              {adminTab === "errors" ? (
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Integration errors</h2>
+                    <p className="mt-1 text-slate-600">
+                      Review rolled-up integration limit and availability events.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
+                    disabled={loadingAdminIntegrationErrors}
+                    onClick={() => loadAdminIntegrationErrors()}
+                    type="button"
+                  >
+                    {loadingAdminIntegrationErrors ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ["Minute windows", adminIntegrationErrorStats.minuteWindows],
+                    ["Day windows", adminIntegrationErrorStats.dayWindows],
+                    ["Affected users", adminIntegrationErrorStats.affectedUsers],
+                    [
+                      "Latest",
+                      adminIntegrationErrorStats.latestErrorAt
+                        ? formatAdminDate(adminIntegrationErrorStats.latestErrorAt)
+                        : "None",
+                    ],
+                  ].map(([label, value]) => (
+                    <div
+                      className="rounded-md border border-slate-200 bg-slate-50 p-3"
+                      key={label}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {label}
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-slate-900">
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 rounded-md bg-blue-50 p-3 text-sm text-blue-900">
+                  Google Places over-quota messages should be gentle for users:
+                  Looks like autocomplete for addresses isn&apos;t available right
+                  now. We&apos;ll look into it.
+                </div>
+
+                {adminIntegrationErrors.length === 0 ? (
+                  <div className="mt-5 rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
+                    No integration errors have been recorded yet.
+                  </div>
+                ) : (
+                  <div className="mt-5 overflow-x-auto">
+                    <table className="min-w-[900px] w-full border-separate border-spacing-0 text-left text-sm">
+                      <thead>
+                        <tr className="text-xs uppercase tracking-wide text-slate-500">
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Window
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Integration
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Error
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            Hits
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            Users
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            Calls before error
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Latest
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Message
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminIntegrationErrors.map((row) => (
+                          <tr
+                            key={`${row.window_grain}-${row.window_start}-${row.integration_key}-${row.error_key}`}
+                          >
+                            <td className="border-b border-slate-100 px-3 py-3 align-top">
+                              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
+                                {row.window_grain}
+                              </span>
+                              <p className="mt-2 text-slate-700">
+                                {formatAdminDate(row.window_start)}
+                              </p>
+                            </td>
+                            <td className="border-b border-slate-100 px-3 py-3 align-top font-semibold text-slate-900">
+                              {row.integration_key.replaceAll("_", " ")}
+                            </td>
+                            <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                              {row.error_key.replaceAll("_", " ")}
+                            </td>
+                            <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
+                              {row.occurrence_count}
+                            </td>
+                            <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
+                              {row.affected_user_count}
+                            </td>
+                            <td className="border-b border-slate-100 px-3 py-3 text-right align-top text-slate-700">
+                              {row.max_attempted_call_count ?? "Unknown"}
+                            </td>
+                            <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                              {formatAdminDate(row.latest_occurred_at)}
+                            </td>
+                            <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                              {row.latest_error_message || "No detail recorded"}
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
