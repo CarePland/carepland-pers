@@ -2,7 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 
 type Appointment = {
@@ -1703,6 +1703,8 @@ function bulkAppointmentDraftsFromResult(value: unknown): BulkAppointmentDraft[]
 }
 
 export default function Home() {
+  const mainHeaderRef = useRef<HTMLElement | null>(null);
+  const [stickySecondaryOffset, setStickySecondaryOffset] = useState(0);
   const [initialUiState] = useState<StoredUiState | null>(() => {
     if (typeof window === "undefined") {
       return null;
@@ -2395,6 +2397,41 @@ export default function Home() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const updateStickyOffset = () => {
+      setStickySecondaryOffset(
+        Math.ceil(mainHeaderRef.current?.getBoundingClientRect().height ?? 0)
+      );
+    };
+
+    updateStickyOffset();
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(updateStickyOffset);
+
+    if (mainHeaderRef.current) {
+      resizeObserver?.observe(mainHeaderRef.current);
+    }
+
+    window.addEventListener("resize", updateStickyOffset);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateStickyOffset);
+    };
+  }, [
+    adminOpenTickets.length,
+    adminTicketsNeedingFollowup.length,
+    authMode,
+    isAdmin,
+    needsBetaAgreement,
+    needsOnboarding,
+    savedProfileLabel,
+    signedInEmail,
+  ]);
 
   useEffect(() => {
     if (!toast?.durationMs) {
@@ -7047,7 +7084,10 @@ export default function Home() {
   return (
     <main className="min-h-screen overflow-x-hidden bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6 lg:py-8">
       <section className="mx-auto w-full max-w-5xl 2xl:max-w-6xl">
-        <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-center lg:justify-between">
+        <header
+          className="sticky top-0 z-50 flex flex-col gap-4 border-b border-slate-200 bg-slate-50/95 py-3 backdrop-blur lg:flex-row lg:items-center lg:justify-between"
+          ref={mainHeaderRef}
+        >
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
               <Image
@@ -9593,7 +9633,10 @@ export default function Home() {
 
             {mainTab === "admin" && isAdmin ? (
               <>
-              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <section
+                className="sticky z-40 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                style={{ top: stickySecondaryOffset }}
+              >
                 <div className="flex flex-wrap gap-2">
                   {[
                     ["tools", "Tools"],
@@ -11755,8 +11798,11 @@ export default function Home() {
               </>
             ) : null}
 
-            {signedInEmail ? (
-              <div className="flex flex-wrap gap-2">
+            {signedInEmail && mainTab === "appointments" ? (
+              <div
+                className="sticky z-40 flex flex-wrap gap-2 bg-slate-50/95 py-3 backdrop-blur"
+                style={{ top: stickySecondaryOffset }}
+              >
                 <button
                   className={`rounded-md px-4 py-2 text-sm font-semibold ${
                     appointmentView === "upcoming"
