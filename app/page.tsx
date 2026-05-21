@@ -302,6 +302,42 @@ function PencilSquareIcon({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
+function GearIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+      <path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.05.05a2.1 2.1 0 1 1-2.97 2.97l-.05-.05a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.08 1.65V21a2.1 2.1 0 1 1-4.2 0v-.07a1.8 1.8 0 0 0-1.08-1.65 1.8 1.8 0 0 0-2 .36l-.05.05a2.1 2.1 0 1 1-2.97-2.97l.05-.05a1.8 1.8 0 0 0 .36-2A1.8 1.8 0 0 0 2.57 13H2.5a2.1 2.1 0 1 1 0-4.2h.07a1.8 1.8 0 0 0 1.65-1.08 1.8 1.8 0 0 0-.36-2l-.05-.05A2.1 2.1 0 0 1 6.78 2.7l.05.05a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 9.9 1.46V1.4a2.1 2.1 0 1 1 4.2 0v.06a1.8 1.8 0 0 0 1.08 1.65 1.8 1.8 0 0 0 2-.36l.05-.05a2.1 2.1 0 1 1 2.97 2.97l-.05.05a1.8 1.8 0 0 0-.36 2 1.8 1.8 0 0 0 1.65 1.08h.06a2.1 2.1 0 1 1 0 4.2h-.06A1.8 1.8 0 0 0 19.4 15Z" />
+    </svg>
+  );
+}
+
+function UserIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M20 21a8 8 0 0 0-16 0" />
+      <path d="M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z" />
+    </svg>
+  );
+}
+
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab = "history" | "instructions";
 type AdminTab =
@@ -1766,7 +1802,6 @@ function bulkAppointmentDraftsFromResult(value: unknown): BulkAppointmentDraft[]
 export default function Home() {
   const mainHeaderRef = useRef<HTMLElement | null>(null);
   const [stickySecondaryOffset, setStickySecondaryOffset] = useState(0);
-  const [hasHydrated, setHasHydrated] = useState(false);
   const [runtimeEnvironmentLabel, setRuntimeEnvironmentLabel] = useState("");
   const [initialUiState] = useState<StoredUiState | null>(() => {
     if (typeof window === "undefined") {
@@ -2364,7 +2399,6 @@ export default function Home() {
 
   useEffect(() => {
     const hydrationFlagTimeoutId = window.setTimeout(() => {
-      setHasHydrated(true);
       setRuntimeEnvironmentLabel(
         nonProductionEnvironmentLabel(
           window.location.hostname,
@@ -7209,29 +7243,39 @@ export default function Home() {
     }
   }
 
+  const isSignedInAppShell =
+    Boolean(signedInEmail) &&
+    authMode !== "updatePassword" &&
+    !needsBetaAgreement &&
+    !needsOnboarding;
+
   return (
     <main className="min-h-screen overflow-x-clip bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6 lg:py-8">
-      <section className="mx-auto w-full max-w-5xl 2xl:max-w-6xl">
+      <section
+        className={`mx-auto w-full ${
+          isSignedInAppShell ? "max-w-5xl 2xl:max-w-6xl" : "max-w-3xl"
+        }`}
+      >
         <header
-          className="sticky top-0 z-50 flex flex-col gap-4 border-b border-slate-200 bg-slate-50/95 py-3 backdrop-blur lg:flex-row lg:items-center lg:justify-between"
+          className="sticky top-0 z-50 grid gap-3 border-b border-slate-200 bg-slate-50/95 py-3 backdrop-blur"
           ref={mainHeaderRef}
         >
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
+          <div className="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-2 sm:gap-3 xl:grid-cols-[auto_auto_1fr]">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               <Image
                 alt="CarePland"
-                className="h-auto w-24"
+                className="h-auto w-20 sm:w-24"
                 height={100}
                 priority
                 src="/carepland-logo.png"
                 width={160}
               />
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+              <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 sm:inline-flex">
                 Personal
               </span>
               {runtimeEnvironmentLabel ? (
                 <span
-                  className="rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-900"
+                  className="hidden rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-900 sm:inline-flex"
                   title="Non-production environment"
                 >
                   {runtimeEnvironmentLabel}
@@ -7239,13 +7283,13 @@ export default function Home() {
               ) : null}
             </div>
 
-            {signedInEmail &&
-            authMode !== "updatePassword" &&
-            !needsBetaAgreement &&
-            !needsOnboarding ? (
-              <nav className="flex flex-wrap gap-2" aria-label="Main navigation">
+            {isSignedInAppShell ? (
+              <nav
+                className="flex min-w-0 justify-end gap-2 xl:col-start-2 xl:justify-start"
+                aria-label="Main navigation"
+              >
               <button
-                className={`rounded-md px-4 py-2 font-semibold ${
+                className={`h-11 rounded-md px-4 text-sm font-semibold sm:text-base ${
                   mainTab === "appointments"
                     ? "bg-blue-700 text-white"
                     : "border border-slate-300 bg-white text-slate-700"
@@ -7253,59 +7297,57 @@ export default function Home() {
                 onClick={() => handleChangeMainTab("appointments")}
                 type="button"
               >
-                Appointments
+                <span className="hidden sm:inline">Appointments</span>
+                <span className="sm:hidden">Appts</span>
               </button>
               <button
-                className={`rounded-md px-4 py-2 font-semibold ${
+                aria-label="Profile"
+                className={`flex h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold sm:px-4 sm:text-base ${
                   mainTab === "profile"
                     ? "bg-blue-700 text-white"
                     : "border border-slate-300 bg-white text-slate-700"
                 }`}
                 onClick={() => handleChangeMainTab("profile")}
                 type="button"
+                title="Profile"
               >
-                Profile
+                <UserIcon className="h-5 w-5 sm:hidden" />
+                <span className="hidden sm:inline">Profile</span>
               </button>
               {isAdmin ? (
                 <button
-                  className={`rounded-md px-4 py-2 font-semibold ${
+                  aria-label="Admin"
+                  className={`flex h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold sm:px-4 sm:text-base ${
                     mainTab === "admin"
                       ? "bg-blue-700 text-white"
                       : "border border-slate-300 bg-white text-slate-700"
                   }`}
                   onClick={() => handleChangeMainTab("admin")}
                   type="button"
+                  title="Admin"
                 >
-                  Admin
+                  <GearIcon className="h-5 w-5 sm:hidden" />
+                  <span className="hidden sm:inline">Admin</span>
                 </button>
               ) : null}
               </nav>
             ) : null}
-          </div>
 
-          <div className="flex flex-col items-start gap-1 text-sm text-slate-600 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-2 lg:text-right">
-            {signedInEmail &&
-            authMode !== "updatePassword" &&
-            !needsBetaAgreement &&
-            !needsOnboarding ? (
+            <div className="col-span-2 flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm text-slate-600 xl:col-span-1 xl:col-start-3 xl:justify-end xl:text-right">
+            {isSignedInAppShell ? (
               <span>
                 <span className="font-semibold text-slate-900">
-                  Welcome, {savedProfileLabel || signedInEmail}
+                  <span className="hidden xl:inline">Welcome, </span>
+                  {savedProfileLabel || signedInEmail}
                 </span>
-                <span className="mx-2 text-slate-300">·</span>
-                <span className="break-all">{signedInEmail}</span>
+                <span className="mx-2 hidden text-slate-300 xl:inline">·</span>
+                <span className="hidden break-all xl:inline">{signedInEmail}</span>
               </span>
             ) : null}
-            {signedInEmail &&
-            authMode !== "updatePassword" &&
-            !needsBetaAgreement &&
-            !needsOnboarding ? (
-              <span className="hidden text-slate-300 sm:inline">·</span>
+            {isSignedInAppShell ? (
+              <span className="hidden text-slate-300 xl:inline">·</span>
             ) : null}
-            {signedInEmail &&
-            authMode !== "updatePassword" &&
-            !needsBetaAgreement &&
-            !needsOnboarding ? (
+            {isSignedInAppShell ? (
               isAdmin ? (
                 <button
                   className="font-semibold text-sky-800"
@@ -7339,18 +7381,8 @@ export default function Home() {
                   Get help
                 </button>
               )
-            ) : (
-              <a
-                className="font-semibold text-blue-700"
-                href={supportMailtoHref(
-                  signedInEmail,
-                  hasHydrated ? mainTab : "CarePland beta",
-                  hasHydrated
-                )}
-              >
-                Support
-              </a>
-            )}
+            ) : null}
+            </div>
           </div>
         </header>
 
