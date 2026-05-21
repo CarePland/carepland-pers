@@ -1839,6 +1839,165 @@ function bulkAppointmentDraftsFromResult(value: unknown): BulkAppointmentDraft[]
   });
 }
 
+function unescapeCalendarText(value: string): string {
+  return value
+    .replace(/\\n/gi, "\n")
+    .replace(/\\,/g, ",")
+    .replace(/\\;/g, ";")
+    .replace(/\\\\/g, "\\")
+    .trim();
+}
+
+function formatLocalDateTimeInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function parseCalendarDateTime(value: string): string {
+  const cleanValue = value.trim();
+  const dateOnlyMatch = cleanValue.match(/^(\d{4})(\d{2})(\d{2})$/);
+
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch;
+    return `${year}-${month}-${day}T09:00`;
+  }
+
+  const dateTimeMatch = cleanValue.match(
+    /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/
+  );
+
+  if (!dateTimeMatch) {
+    return "";
+  }
+
+  const [, year, month, day, hours, minutes, seconds = "00", utcMarker] =
+    dateTimeMatch;
+
+  if (utcMarker) {
+    return formatLocalDateTimeInput(
+      new Date(
+        Date.UTC(
+          Number(year),
+          Number(month) - 1,
+          Number(day),
+          Number(hours),
+          Number(minutes),
+          Number(seconds)
+        )
+      )
+    );
+  }
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function parseICalendarAppointments(
+  calendarText: string,
+  fileName: string
+): { drafts: BulkAppointmentDraft[]; foundCount: number } {
+  const unfoldedLines = calendarText
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\n[ \t]/g, "")
+    .split("\n");
+  const events: Record<string, string>[] = [];
+  let currentEvent: Record<string, string> | null = null;
+
+  unfoldedLines.forEach((line) => {
+    const trimmedLine = line.trim();
+
+    if (trimmedLine === "BEGIN:VEVENT") {
+      currentEvent = {};
+      return;
+    }
+
+    if (trimmedLine === "END:VEVENT") {
+      if (currentEvent) {
+        events.push(currentEvent);
+      }
+      currentEvent = null;
+      return;
+    }
+
+    if (!currentEvent) {
+      return;
+    }
+
+    const separatorIndex = trimmedLine.indexOf(":");
+
+    if (separatorIndex < 0) {
+      return;
+    }
+
+    const propertyName = trimmedLine
+      .slice(0, separatorIndex)
+      .split(";")[0]
+      .toUpperCase();
+    const propertyValue = trimmedLine.slice(separatorIndex + 1);
+
+    if (!currentEvent[propertyName]) {
+      currentEvent[propertyName] = propertyValue;
+    }
+  });
+
+  const now = new Date();
+  const futureEvents = events
+    .map((event, index) => {
+      const startsAt = parseCalendarDateTime(event.DTSTART ?? "");
+      const startsAtDate = startsAt ? new Date(startsAt) : null;
+
+      return {
+        event,
+        index,
+        startsAt,
+        startsAtDate,
+      };
+    })
+    .filter(
+      (event) =>
+        event.startsAt &&
+        event.startsAtDate &&
+        !Number.isNaN(event.startsAtDate.getTime()) &&
+        event.startsAtDate >= now
+    )
+    .sort(
+      (firstEvent, secondEvent) =>
+        (firstEvent.startsAtDate?.getTime() ?? 0) -
+        (secondEvent.startsAtDate?.getTime() ?? 0)
+    );
+
+  const drafts = futureEvents.slice(0, 100).map(({ event, index, startsAt }) => {
+    const summary = unescapeCalendarText(event.SUMMARY ?? "Calendar event");
+    const location = unescapeCalendarText(event.LOCATION ?? "");
+    const description = unescapeCalendarText(event.DESCRIPTION ?? "");
+
+    return {
+      appointmentReason: description,
+      appointmentTitle: summary,
+      confidence: 0,
+      importId: `ics-${fileName}-${index}`,
+      isSelected: false,
+      locationAddress: location,
+      locationName: "",
+      locationPhone: "",
+      providerName: "",
+      providerOrganization: "",
+      startsAt,
+      suggestedAction: "Calendar import. Review and select before saving.",
+    };
+  });
+
+  return {
+    drafts,
+    foundCount: futureEvents.length,
+  };
+}
+
 export default function Home() {
   const mainHeaderRef = useRef<HTMLElement | null>(null);
   const [stickySecondaryOffset, setStickySecondaryOffset] = useState(0);
@@ -2139,6 +2298,7 @@ export default function Home() {
   const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [processingTextIntake, setProcessingTextIntake] = useState(false);
   const [extractingImageText, setExtractingImageText] = useState(false);
+  const [fileImportStatus, setFileImportStatus] = useState("");
   const [savingTextIntake, setSavingTextIntake] = useState(false);
   const [creatingCareVip, setCreatingCareVip] = useState(false);
   const [appointmentView, setAppointmentView] = useState<AppointmentView>(
@@ -5866,6 +6026,7 @@ export default function Home() {
     }
 
     setExtractingImageText(true);
+    setFileImportStatus("Uploading and importing, please wait...");
     setMessage("");
 
     try {
@@ -5932,7 +6093,76 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setExtractingImageText(false);
+      setFileImportStatus("");
     }
+  }
+
+  async function handleImportAppointmentFiles(files: FileList | null) {
+    const selectedFiles = files ? Array.from(files) : [];
+
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
+    const calendarFiles = selectedFiles.filter((file) =>
+      file.name.toLowerCase().endsWith(".ics")
+    );
+    const imageFiles = selectedFiles.filter((file) =>
+      file.type.startsWith("image/")
+    );
+
+    if (calendarFiles.length > 1) {
+      setMessage("Choose only one .iCal calendar file at a time.");
+      return;
+    }
+
+    if (calendarFiles.length > 0 && imageFiles.length > 0) {
+      setMessage("Choose either one .iCal file or up to 10 images, not both.");
+      return;
+    }
+
+    if (calendarFiles.length === 1) {
+      setExtractingImageText(true);
+      setFileImportStatus("Uploading and importing, please wait...");
+      setMessage("");
+
+      try {
+        const calendarFile = calendarFiles[0];
+        const calendarText = await calendarFile.text();
+        const { drafts, foundCount } = parseICalendarAppointments(
+          calendarText,
+          calendarFile.name
+        );
+
+        if (drafts.length === 0) {
+          throw new Error("No future calendar events were found in that file.");
+        }
+
+        setTextIntakeValue("");
+        setTextIntakeDraft(null);
+        setTextIntakeAiDraft(null);
+        setTextIntakeItemId(null);
+        setTextIntakeMatches([]);
+        setBulkAppointmentDrafts(drafts);
+        setBulkAppointmentSummary(
+          `Found ${foundCount} future calendar event${
+            foundCount === 1 ? "" : "s"
+          }. Showing ${drafts.length}; select up to 10 to import.`
+        );
+        setSelectedTextIntakeMatchId("new");
+        setTextIntakeTargetAppointmentId(null);
+        setApplyTextIntakeAppointmentDetails(false);
+        setMessage("Calendar file imported. Review and select appointments to save.");
+      } catch (error) {
+        setMessage(getErrorMessage(error));
+      } finally {
+        setExtractingImageText(false);
+        setFileImportStatus("");
+      }
+      return;
+    }
+
+    await handleExtractImageText(files, "quickAdd");
   }
 
   function updateTextIntakeDraft(
@@ -8887,7 +9117,7 @@ export default function Home() {
                   disabled={creatingAppointment}
                   type="submit"
                 >
-                  {creatingAppointment ? "Adding..." : "+ Add appointment"}
+                  {creatingAppointment ? "Adding..." : "Add appointment"}
                 </button>
               </form>
             ) : null}
@@ -9313,14 +9543,14 @@ export default function Home() {
                     onClick={() => setActiveAppointmentPanel("add")}
                     type="button"
                   >
-                    + Add appointment
+                    Add appointment
                   </button>
                   <button
                     className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
                     onClick={() => setActiveAppointmentPanel("quickAdd")}
                     type="button"
                   >
-                    Quick Add
+                    Import
                   </button>
                   <button
                     className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
@@ -9420,7 +9650,7 @@ export default function Home() {
                       }
                       type="button"
                     >
-                      + Add appointment
+                      Add appointment
                     </button>
                     <button
                       className={`rounded-md px-4 py-2 text-sm font-semibold ${
@@ -9435,7 +9665,7 @@ export default function Home() {
                       }
                       type="button"
                     >
-                      Quick Add
+                      Import
                     </button>
                   </div>
                 </div>
@@ -9545,7 +9775,7 @@ export default function Home() {
                         disabled={creatingAppointment}
                         type="submit"
                       >
-                        {creatingAppointment ? "Adding..." : "+ Add appointment"}
+                        {creatingAppointment ? "Adding..." : "Add appointment"}
                       </button>
                       <button
                         className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
@@ -9585,23 +9815,22 @@ export default function Home() {
                       ) : null}
                       <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
                         <label className="block text-sm font-medium text-slate-700">
-                          Image to text
+                          Choose files
                           <input
-                            accept="image/gif,image/jpeg,image/png,image/webp"
+                            accept=".ics,text/calendar,image/gif,image/jpeg,image/png,image/webp"
                             className="mt-2 block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
                             disabled={extractingImageText}
                             multiple
                             onChange={(event) => {
-                              void handleExtractImageText(event.target.files);
+                              void handleImportAppointmentFiles(event.target.files);
                               event.target.value = "";
                             }}
                             type="file"
                           />
                         </label>
                         <p className="mt-2 text-xs text-slate-500">
-                          {extractingImageText
-                            ? "Extracting text..."
-                            : "Up to 10 images are converted to text only and are not stored."}
+                          {fileImportStatus ||
+                            "Choose one .iCal calendar file or up to 10 images. Imported items must be reviewed before saving."}
                         </p>
                       </div>
                       <label className="mt-3 block text-sm font-medium text-slate-700">
@@ -12541,9 +12770,8 @@ export default function Home() {
                             />
                           </label>
                           <p className="mt-2 text-xs text-slate-500">
-                            {extractingImageText
-                              ? "Extracting text..."
-                              : "Up to 10 images are converted to text only and are not stored."}
+                            {fileImportStatus ||
+                              "Up to 10 images are converted to text only and are not stored."}
                           </p>
                         </div>
                         <label className="mt-4 block text-sm font-medium text-slate-700">
@@ -12969,9 +13197,8 @@ export default function Home() {
                                 />
                               </label>
                               <p className="mt-2 text-xs text-slate-500">
-                                {extractingImageText
-                                  ? "Extracting text..."
-                                  : "Up to 10 images are converted to text only and are not stored."}
+                                {fileImportStatus ||
+                                  "Up to 10 images are converted to text only and are not stored."}
                               </p>
                             </div>
                             <label className="mt-4 block text-sm font-medium text-slate-700">

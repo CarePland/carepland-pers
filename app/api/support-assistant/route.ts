@@ -187,10 +187,10 @@ export async function POST(request: NextRequest) {
 
     const productContext = [
       "CarePland Personal is a beta appointment memory app.",
-      "Core areas: Upcoming, Logged, Archived appointments; Quick Add/import; appointment notes; CarePrep; Profile; demo data; support questions.",
+      "Core areas: Upcoming, Logged, Archived appointments; Import; appointment notes; CarePrep; Profile; demo data; support questions.",
       "Demo data can be removed from Profile with the Remove demo data control.",
       "Archived appointments are read-only and can be restored from the Archived tab.",
-      "Quick Add can interpret pasted text or images into appointment drafts, but users should review before saving.",
+      "Import can interpret pasted text, images, or reviewed calendar file events into appointment drafts, but users should review before saving.",
       "CarePrep prepares guidance for future appointments by using the appointment details, notes, and related history the user has saved.",
       "The product goal is to close the loop between appointments: capture what happened, remember what matters, and bring the right context forward next time.",
       "Do not describe CarePland features as AI-generated or mention internal models to users.",
