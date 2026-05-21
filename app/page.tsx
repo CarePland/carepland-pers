@@ -2566,6 +2566,12 @@ export default function Home() {
       return true;
     });
   }, [adminUserActivity, adminUserActivityFilter]);
+  const selectedBulkAppointmentCount = bulkAppointmentDrafts.filter(
+    (draft) => draft.isSelected
+  ).length;
+  const allBulkAppointmentsSelected =
+    bulkAppointmentDrafts.length > 0 &&
+    selectedBulkAppointmentCount === bulkAppointmentDrafts.length;
 
   function appContentText(key: keyof typeof appContentDefaults) {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
@@ -6868,6 +6874,12 @@ export default function Home() {
     );
   }
 
+  function toggleAllBulkAppointmentDrafts(isSelected: boolean) {
+    setBulkAppointmentDrafts((currentDrafts) =>
+      currentDrafts.map((draft) => ({ ...draft, isSelected }))
+    );
+  }
+
   async function handleSaveBulkAppointments(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSavingTextIntake(true);
@@ -10013,6 +10025,24 @@ export default function Home() {
                           </p>
                         </div>
 
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-100 bg-white p-3">
+                          <label className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                            <input
+                              checked={allBulkAppointmentsSelected}
+                              onChange={(event) =>
+                                toggleAllBulkAppointmentDrafts(
+                                  event.target.checked
+                                )
+                              }
+                              type="checkbox"
+                            />
+                            Select all
+                          </label>
+                          <p className="text-sm text-slate-500">
+                            {selectedBulkAppointmentCount} selected
+                          </p>
+                        </div>
+
                         <div className="mt-4 space-y-4">
                           {bulkAppointmentDrafts.map((draft, index) => (
                             <article
@@ -10157,6 +10187,24 @@ export default function Home() {
                               </div>
                             </article>
                           ))}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-100 bg-white p-3">
+                          <label className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                            <input
+                              checked={allBulkAppointmentsSelected}
+                              onChange={(event) =>
+                                toggleAllBulkAppointmentDrafts(
+                                  event.target.checked
+                                )
+                              }
+                              type="checkbox"
+                            />
+                            Select all
+                          </label>
+                          <p className="text-sm text-slate-500">
+                            {selectedBulkAppointmentCount} selected
+                          </p>
                         </div>
 
                         <div className="mt-4 flex flex-wrap gap-3">
