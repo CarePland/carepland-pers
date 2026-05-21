@@ -1880,6 +1880,8 @@ export default function Home() {
     useState("all");
   const [assistantReviewConfidenceFilter, setAssistantReviewConfidenceFilter] =
     useState<"all" | "high" | "low" | "medium" | "needs_review">("all");
+  const [assistantReviewHasFeedbackOnly, setAssistantReviewHasFeedbackOnly] =
+    useState(false);
   const [assistantReviewStatus, setAssistantReviewStatus] =
     useState<SupportAssistantReviewStatus>("needs_review");
   const [assistantReviewNote, setAssistantReviewNote] = useState("");
@@ -2118,7 +2120,9 @@ export default function Home() {
         (assistantReviewPromptFilter === "all" ||
           promptVersion === assistantReviewPromptFilter) &&
         (assistantReviewConfidenceFilter === "all" ||
-          confidenceLevel === assistantReviewConfidenceFilter)
+          confidenceLevel === assistantReviewConfidenceFilter) &&
+        (!assistantReviewHasFeedbackOnly ||
+          Boolean(interaction.user_feedback?.trim()))
       );
     }
   );
@@ -9805,7 +9809,7 @@ export default function Home() {
                   </button>
                 </div>
 
-                <div className="mt-5 grid gap-3 lg:grid-cols-3">
+                <div className="mt-5 grid gap-3 lg:grid-cols-4">
                   <label className="block text-sm font-medium text-slate-700">
                     Outcome
                     <select
@@ -9858,6 +9862,16 @@ export default function Home() {
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label className="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 lg:self-end">
+                    <input
+                      checked={assistantReviewHasFeedbackOnly}
+                      onChange={(event) =>
+                        setAssistantReviewHasFeedbackOnly(event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    Has user feedback
                   </label>
                 </div>
 
