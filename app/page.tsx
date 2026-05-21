@@ -4,6 +4,13 @@ import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
+import {
+  favoriteLocationLabel,
+  FavoriteLocation,
+  PlaceAutocompleteSuggestion,
+  PlaceDetailsResult,
+  placesUnavailableMessage,
+} from "./lib/places";
 
 type Appointment = {
   id: string;
@@ -2069,6 +2076,22 @@ export default function Home() {
     useState(initialDraftState?.newAppointmentDraft?.locationAddress ?? "");
   const [newAppointmentLocationPhone, setNewAppointmentLocationPhone] =
     useState(initialDraftState?.newAppointmentDraft?.locationPhone ?? "");
+  const [favoriteLocations, setFavoriteLocations] = useState<FavoriteLocation[]>(
+    []
+  );
+  const [loadingFavoriteLocations, setLoadingFavoriteLocations] =
+    useState(false);
+  const [placeLookupQuery, setPlaceLookupQuery] = useState("");
+  const [placeLookupSuggestions, setPlaceLookupSuggestions] = useState<
+    PlaceAutocompleteSuggestion[]
+  >([]);
+  const [placeLookupSessionToken, setPlaceLookupSessionToken] = useState("");
+  const [searchingPlaces, setSearchingPlaces] = useState(false);
+  const [placesStatusMessage, setPlacesStatusMessage] = useState("");
+  const [selectedGooglePlace, setSelectedGooglePlace] =
+    useState<PlaceDetailsResult | null>(null);
+  const [addFavoriteLocation, setAddFavoriteLocation] = useState(false);
+  const [favoriteLocationNickname, setFavoriteLocationNickname] = useState("");
   const [newAppointmentSubjectId, setNewAppointmentSubjectId] = useState(
     initialDraftState?.newAppointmentDraft?.subjectId ?? ""
   );
@@ -2590,6 +2613,28 @@ export default function Home() {
   const allBulkAppointmentsSelected =
     bulkAppointmentDrafts.length > 0 &&
     selectedBulkAppointmentCount === bulkAppointmentDrafts.length;
+  const filteredFavoriteLocations = useMemo(() => {
+    const query = placeLookupQuery.trim().toLowerCase();
+
+    if (!query) {
+      return favoriteLocations.slice(0, 5);
+    }
+
+    return favoriteLocations
+      .filter((location) =>
+        [
+          location.nickname,
+          location.place_name,
+          location.address,
+          location.phone,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(query)
+      )
+      .slice(0, 5);
+  }, [favoriteLocations, placeLookupQuery]);
   const adminIntegrationErrorStats = useMemo(() => {
     const dayRows = adminIntegrationErrors.filter(
       (row) => row.window_grain === "day"
@@ -2896,6 +2941,61 @@ export default function Home() {
       document.removeEventListener("visibilitychange", touchActivity);
     };
   }, [needsBetaAgreement, needsOnboarding, signedInEmail]);
+
+  useEffect(() => {
+    if (
+      !signedInEmail ||
+      authMode === "updatePassword" ||
+      needsBetaAgreement ||
+      needsOnboarding ||
+      activeAppointmentPanel !== "add"
+    ) {
+      return;
+    }
+
+    void loadFavoriteLocations();
+    // Load favorite locations only when the add-appointment panel opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeAppointmentPanel,
+    authMode,
+    needsBetaAgreement,
+    needsOnboarding,
+    signedInEmail,
+  ]);
+
+  useEffect(() => {
+    if (
+      !signedInEmail ||
+      authMode === "updatePassword" ||
+      needsBetaAgreement ||
+      needsOnboarding ||
+      activeAppointmentPanel !== "add"
+    ) {
+      return;
+    }
+
+    const query = placeLookupQuery.trim();
+
+    if (query.length < 3) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void searchGooglePlaces(query);
+    }, 450);
+
+    return () => window.clearTimeout(timeoutId);
+    // Search is intentionally debounced from the current query only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeAppointmentPanel,
+    authMode,
+    needsBetaAgreement,
+    needsOnboarding,
+    placeLookupQuery,
+    signedInEmail,
+  ]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -4296,6 +4396,7 @@ export default function Home() {
 
     if (tab !== "appointments") {
       cancelTextIntake();
+      resetPlaceLookup();
       setActiveAppointmentPanel(null);
     }
 
@@ -7086,6 +7187,211 @@ export default function Home() {
     }
   }
 
+  function resetPlaceLookup() {
+    setPlaceLookupQuery("");
+    setPlaceLookupSuggestions([]);
+    setPlaceLookupSessionToken("");
+    setSearchingPlaces(false);
+    setPlacesStatusMessage("");
+    setSelectedGooglePlace(null);
+    setAddFavoriteLocation(false);
+    setFavoriteLocationNickname("");
+  }
+
+  async function placesAuthHeader() {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      throw new Error("Please sign in before searching locations.");
+    }
+
+    return { Authorization: `Bearer ${accessToken}` };
+  }
+
+  async function loadFavoriteLocations() {
+    setLoadingFavoriteLocations(true);
+
+    try {
+      const { careCircleId } = await getPrimaryCareContext(
+        newAppointmentSubjectId ||
+          (selectedSubjectId !== ALL_SUBJECTS ? selectedSubjectId : "")
+      );
+      const { data, error } = await supabase
+        .from("favorite_locations")
+        .select(
+          "id,care_circle_id,nickname,place_name,address,phone,google_place_id,google_maps_uri,source,usage_count,last_used_at"
+        )
+        .eq("care_circle_id", careCircleId)
+        .order("last_used_at", { ascending: false, nullsFirst: false })
+        .order("updated_at", { ascending: false })
+        .limit(20);
+
+      if (error) {
+        throw error;
+      }
+
+      setFavoriteLocations((data ?? []) as FavoriteLocation[]);
+    } catch (error) {
+      console.error("Could not load favorite locations", error);
+    } finally {
+      setLoadingFavoriteLocations(false);
+    }
+  }
+
+  async function searchGooglePlaces(query: string) {
+    setSearchingPlaces(true);
+    setPlacesStatusMessage("");
+
+    try {
+      const sessionToken =
+        placeLookupSessionToken ||
+        (typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random()}`);
+
+      if (!placeLookupSessionToken) {
+        setPlaceLookupSessionToken(sessionToken);
+      }
+
+      const response = await fetch("/api/places/autocomplete", {
+        body: JSON.stringify({ input: query, sessionToken }),
+        headers: {
+          ...(await placesAuthHeader()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? placesUnavailableMessage);
+      }
+
+      setPlaceLookupSuggestions(
+        Array.isArray(result.suggestions) ? result.suggestions : []
+      );
+    } catch (error) {
+      setPlaceLookupSuggestions([]);
+      setPlacesStatusMessage(getErrorMessage(error) || placesUnavailableMessage);
+    } finally {
+      setSearchingPlaces(false);
+    }
+  }
+
+  function applyFavoriteLocation(location: FavoriteLocation) {
+    const label = favoriteLocationLabel(location);
+
+    setNewAppointmentLocationName(label);
+    setNewAppointmentLocationAddress(location.address ?? "");
+    setNewAppointmentLocationPhone(location.phone ?? "");
+    setNewAppointmentProviderOrganization(location.place_name ?? label);
+    setPlaceLookupQuery(label);
+    setSelectedGooglePlace(null);
+    setAddFavoriteLocation(false);
+    setFavoriteLocationNickname("");
+
+    void supabase
+      .from("favorite_locations")
+      .update({
+        last_used_at: new Date().toISOString(),
+        usage_count: location.usage_count + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", location.id);
+  }
+
+  async function applyGooglePlaceSuggestion(
+    suggestion: PlaceAutocompleteSuggestion
+  ) {
+    setSearchingPlaces(true);
+    setPlacesStatusMessage("");
+
+    try {
+      const response = await fetch("/api/places/details", {
+        body: JSON.stringify({
+          placeId: suggestion.placeId,
+          sessionToken: placeLookupSessionToken,
+        }),
+        headers: {
+          ...(await placesAuthHeader()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? placesUnavailableMessage);
+      }
+
+      const place = result.place as PlaceDetailsResult;
+      const placeName = place.placeName || suggestion.text;
+
+      setSelectedGooglePlace(place);
+      setNewAppointmentProviderOrganization(placeName);
+      setNewAppointmentLocationName(placeName);
+      setNewAppointmentLocationAddress(place.formattedAddress);
+      setNewAppointmentLocationPhone(place.nationalPhoneNumber);
+      setPlaceLookupQuery(placeName);
+      setPlaceLookupSuggestions([]);
+      setAddFavoriteLocation(false);
+      setFavoriteLocationNickname(placeName);
+    } catch (error) {
+      setPlacesStatusMessage(getErrorMessage(error) || placesUnavailableMessage);
+    } finally {
+      setSearchingPlaces(false);
+    }
+  }
+
+  async function saveFavoriteLocationIfNeeded({
+    careCircleId,
+    userId,
+  }: {
+    careCircleId: string;
+    userId: string;
+  }) {
+    if (!addFavoriteLocation) {
+      return;
+    }
+
+    const nickname =
+      favoriteLocationNickname.trim() ||
+      newAppointmentLocationName.trim() ||
+      newAppointmentProviderOrganization.trim();
+
+    if (!nickname) {
+      return;
+    }
+
+    const { error } = await supabase.from("favorite_locations").insert({
+      address: newAppointmentLocationAddress.trim() || null,
+      care_circle_id: careCircleId,
+      created_by_user_id: userId,
+      google_maps_uri: selectedGooglePlace?.googleMapsUri || null,
+      google_place_id: selectedGooglePlace?.placeId || null,
+      last_used_at: new Date().toISOString(),
+      nickname,
+      phone: newAppointmentLocationPhone.trim() || null,
+      place_name:
+        selectedGooglePlace?.placeName ||
+        newAppointmentProviderOrganization.trim() ||
+        null,
+      source: selectedGooglePlace ? "google_places" : "manual",
+      usage_count: 1,
+    });
+
+    if (error) {
+      throw error;
+    }
+  }
+
   async function handleCreateAppointment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreatingAppointment(true);
@@ -7110,12 +7416,18 @@ export default function Home() {
       const startsAt = newAppointmentStartsAt
         ? new Date(newAppointmentStartsAt).toISOString()
         : null;
+      const favoriteNickname =
+        addFavoriteLocation && favoriteLocationNickname.trim()
+          ? favoriteLocationNickname.trim()
+          : "";
+      const locationNameForSave =
+        favoriteNickname || newAppointmentLocationName.trim() || null;
 
       const { error } = await supabase.from("appointments").insert({
         care_circle_id: careCircleId,
         care_subject_id: careSubjectId,
         location_address: newAppointmentLocationAddress.trim() || null,
-        location_name: newAppointmentLocationName.trim() || null,
+        location_name: locationNameForSave,
         location_phone: newAppointmentLocationPhone.trim() || null,
         owner_user_id: userId,
         provider_name: newAppointmentProviderName.trim() || null,
@@ -7132,6 +7444,8 @@ export default function Home() {
         throw error;
       }
 
+      await saveFavoriteLocationIfNeeded({ careCircleId, userId });
+
       setNewAppointmentTitle("");
       setNewAppointmentReason("");
       setNewAppointmentStartsAt("");
@@ -7141,6 +7455,7 @@ export default function Home() {
       setNewAppointmentLocationAddress("");
       setNewAppointmentLocationPhone("");
       setNewAppointmentSubjectId(careSubjectId);
+      resetPlaceLookup();
       setActiveAppointmentPanel(null);
       await loadAppointments();
       setMessage("Appointment added.");
@@ -7704,6 +8019,146 @@ export default function Home() {
     } finally {
       setSavingNoteForId(null);
     }
+  }
+
+  function renderPlaceLookup(className = "") {
+    const canFavorite =
+      Boolean(newAppointmentLocationName.trim()) ||
+      Boolean(newAppointmentProviderOrganization.trim()) ||
+      Boolean(newAppointmentLocationAddress.trim());
+
+    return (
+      <section
+        className={`rounded-md border border-blue-100 bg-white p-3 ${className}`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">
+              Location lookup
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Search favorite locations first, or look up a place with Google.
+            </p>
+          </div>
+          {loadingFavoriteLocations ? (
+            <span className="text-xs font-semibold text-slate-500">
+              Loading favorites...
+            </span>
+          ) : null}
+        </div>
+
+        <input
+          className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            setPlaceLookupQuery(nextQuery);
+            setSelectedGooglePlace(null);
+            setPlacesStatusMessage("");
+            if (nextQuery.trim().length < 3) {
+              setPlaceLookupSuggestions([]);
+            }
+          }}
+          placeholder="Search by clinic, business, or address"
+          type="text"
+          value={placeLookupQuery}
+        />
+
+        {placesStatusMessage ? (
+          <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+            {placesStatusMessage}
+          </p>
+        ) : null}
+
+        {filteredFavoriteLocations.length > 0 ? (
+          <div className="mt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Favorite locations
+            </p>
+            <div className="mt-2 grid gap-2">
+              {filteredFavoriteLocations.map((location) => (
+                <button
+                  className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                  key={location.id}
+                  onClick={() => applyFavoriteLocation(location)}
+                  type="button"
+                >
+                  <span className="font-semibold text-slate-900">
+                    {favoriteLocationLabel(location)}
+                  </span>
+                  {location.place_name || location.address ? (
+                    <span className="mt-1 block text-xs text-slate-500">
+                      {[location.place_name, location.address]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {placeLookupSuggestions.length > 0 ? (
+          <div className="mt-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Google suggestions
+              </p>
+              <p className="text-xs font-semibold text-slate-500">
+                Powered by Google
+              </p>
+            </div>
+            <div className="mt-2 grid gap-2">
+              {placeLookupSuggestions.map((suggestion) => (
+                <button
+                  className="rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                  key={suggestion.placeId}
+                  onClick={() => applyGooglePlaceSuggestion(suggestion)}
+                  type="button"
+                >
+                  {suggestion.text}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {searchingPlaces ? (
+          <p className="mt-2 text-sm font-semibold text-blue-700">
+            Searching locations...
+          </p>
+        ) : null}
+
+        {canFavorite ? (
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <label className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <input
+                checked={addFavoriteLocation}
+                onChange={(event) =>
+                  setAddFavoriteLocation(event.target.checked)
+                }
+                type="checkbox"
+              />
+              Add as a favorite location
+            </label>
+            {addFavoriteLocation ? (
+              <label className="mt-3 block text-sm font-medium text-slate-700">
+                Nickname
+                <input
+                  className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                  onChange={(event) =>
+                    setFavoriteLocationNickname(event.target.value)
+                  }
+                  placeholder="e.g. Mom's cardiologist"
+                  type="text"
+                  value={favoriteLocationNickname}
+                />
+              </label>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+    );
   }
 
   const isSignedInAppShell =
@@ -9122,6 +9577,7 @@ export default function Home() {
                     </select>
                   </label>
                 ) : null}
+                {renderPlaceLookup("mt-4")}
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Title
                   <input
@@ -9618,6 +10074,7 @@ export default function Home() {
                     className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white"
                     onClick={() => {
                       cancelTextIntake();
+                      resetPlaceLookup();
                       setActiveAppointmentPanel("add");
                     }}
                     type="button"
@@ -9628,6 +10085,7 @@ export default function Home() {
                     className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
                     onClick={() => {
                       cancelTextIntake();
+                      resetPlaceLookup();
                       setActiveAppointmentPanel("quickAdd");
                     }}
                     type="button"
@@ -9727,6 +10185,7 @@ export default function Home() {
                       }`}
                       onClick={() => {
                         cancelTextIntake();
+                        resetPlaceLookup();
                         setActiveAppointmentPanel((currentPanel) =>
                           currentPanel === "add" ? null : "add"
                         );
@@ -9743,6 +10202,7 @@ export default function Home() {
                       }`}
                       onClick={() => {
                         cancelTextIntake();
+                        resetPlaceLookup();
                         setActiveAppointmentPanel((currentPanel) =>
                           currentPanel === "quickAdd" ? null : "quickAdd"
                         );
@@ -9781,6 +10241,7 @@ export default function Home() {
                         </select>
                       </label>
                     ) : null}
+                    {renderPlaceLookup("md:col-span-2")}
                     <label className="block text-sm font-medium text-slate-700">
                       Title
                       <input
@@ -9863,7 +10324,10 @@ export default function Home() {
                       </button>
                       <button
                         className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
-                        onClick={() => setActiveAppointmentPanel(null)}
+                        onClick={() => {
+                          resetPlaceLookup();
+                          setActiveAppointmentPanel(null);
+                        }}
                         type="button"
                       >
                         Cancel
@@ -13239,7 +13703,8 @@ export default function Home() {
                             {appointment.location_name ? (
                               <p>{appointment.location_name}</p>
                             ) : null}
-                            {appointment.location_address ? (
+                            {!appointment.location_name &&
+                            appointment.location_address ? (
                               <p>{appointment.location_address}</p>
                             ) : null}
                             {appointment.location_phone ? (
