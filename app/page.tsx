@@ -226,6 +226,26 @@ type SupportAssistantAnalysisResult = {
   uiRecommendations: string[];
 };
 
+type SupportAssistantAnalysisRun = {
+  id: string;
+  admin_note: string | null;
+  admin_status: SupportAssistantAnalysisStatus;
+  analysis_summary: string;
+  created_at: string;
+  criteria: Record<string, unknown> | null;
+  failure_patterns: string[];
+  interaction_count: number;
+  interaction_ids: string[];
+  model: string;
+  prompt_recommendations: string[];
+  prompt_versions: string[];
+  recommendations: string[];
+  requested_by_user_id: string;
+  strengths: string[];
+  ui_recommendations: string[];
+  updated_at: string;
+};
+
 function CalendarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -316,6 +336,12 @@ type SupportAssistantReviewStatus =
   | "needs_ui_work"
   | "not_actionable"
   | "should_escalate";
+type SupportAssistantAnalysisStatus =
+  | "accepted"
+  | "needs_more_data"
+  | "new"
+  | "rejected"
+  | "reviewed";
 type SupportTicketStatus =
   | "closed"
   | "in_progress"
@@ -1261,6 +1287,14 @@ function toDatetimeLocalValue(value: string | null): string {
   return localDate.toISOString().slice(0, 16);
 }
 
+function stringArrayFromJson(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+}
+
+function supportAnalysisStatusLabel(status: SupportAssistantAnalysisStatus) {
+  return status.replaceAll("_", " ");
+}
+
 function startOfToday(): Date {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -1902,6 +1936,16 @@ export default function Home() {
   const [analyzingAssistantReviews, setAnalyzingAssistantReviews] = useState(false);
   const [assistantAnalysisResult, setAssistantAnalysisResult] =
     useState<SupportAssistantAnalysisResult | null>(null);
+  const [assistantAnalysisRuns, setAssistantAnalysisRuns] = useState<
+    SupportAssistantAnalysisRun[]
+  >([]);
+  const [selectedAssistantAnalysisRunId, setSelectedAssistantAnalysisRunId] =
+    useState("");
+  const [assistantAnalysisRunStatus, setAssistantAnalysisRunStatus] =
+    useState<SupportAssistantAnalysisStatus>("reviewed");
+  const [assistantAnalysisRunNote, setAssistantAnalysisRunNote] = useState("");
+  const [savingAssistantAnalysisRunReview, setSavingAssistantAnalysisRunReview] =
+    useState(false);
   const [loadingAppContent, setLoadingAppContent] = useState(false);
   const [savingAppContent, setSavingAppContent] = useState(false);
   const [revertingAppContentForId, setRevertingAppContentForId] = useState<
@@ -2150,6 +2194,10 @@ export default function Home() {
         (review) => review.interaction_id === selectedAssistantReviewInteraction.id
       )
     : [];
+  const selectedAssistantAnalysisRun =
+    assistantAnalysisRuns.find((run) => run.id === selectedAssistantAnalysisRunId) ??
+    assistantAnalysisRuns[0] ??
+    null;
 
   function appContentText(key: keyof typeof appContentDefaults) {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
@@ -4006,6 +4054,7 @@ export default function Home() {
       if (hydratedInteractions.length === 0) {
         setAssistantReviewAdminReviews([]);
         setSelectedAssistantReviewId("");
+        await loadAssistantAnalysisRuns();
         return;
       }
 
@@ -4035,10 +4084,90 @@ export default function Home() {
       setAssistantReviewAdminReviews(
         (reviewRows ?? []) as SupportAssistantAdminReview[]
       );
+      await loadAssistantAnalysisRuns();
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
       setLoadingAssistantReviews(false);
+    }
+  }
+
+  async function loadAssistantAnalysisRuns() {
+    try {
+      const { data: runRows, error: runError } = await supabase
+        .from("support_assistant_analysis_runs")
+        .select(
+          "id,requested_by_user_id,criteria,interaction_ids,prompt_versions,interaction_count,model,analysis_summary,failure_patterns,strengths,recommendations,prompt_recommendations,ui_recommendations,admin_status,admin_note,created_at,updated_at"
+        )
+        .order("created_at", { ascending: false })
+        .limit(25);
+
+      if (runError) {
+        throw runError;
+      }
+
+      const loadedRuns = (runRows ?? []).map((run) => ({
+        ...run,
+        failure_patterns: stringArrayFromJson(run.failure_patterns),
+        interaction_ids: stringArrayFromJson(run.interaction_ids),
+        prompt_recommendations: stringArrayFromJson(run.prompt_recommendations),
+        prompt_versions: stringArrayFromJson(run.prompt_versions),
+        recommendations: stringArrayFromJson(run.recommendations),
+        strengths: stringArrayFromJson(run.strengths),
+        ui_recommendations: stringArrayFromJson(run.ui_recommendations),
+      })) as SupportAssistantAnalysisRun[];
+
+      setAssistantAnalysisRuns(loadedRuns);
+
+      if (
+        loadedRuns.length > 0 &&
+        !loadedRuns.some((run) => run.id === selectedAssistantAnalysisRunId)
+      ) {
+        setSelectedAssistantAnalysisRunId(loadedRuns[0].id);
+        setAssistantAnalysisRunStatus(loadedRuns[0].admin_status);
+        setAssistantAnalysisRunNote(loadedRuns[0].admin_note ?? "");
+      }
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
+  }
+
+  function selectAssistantAnalysisRun(run: SupportAssistantAnalysisRun) {
+    setSelectedAssistantAnalysisRunId(run.id);
+    setAssistantAnalysisRunStatus(run.admin_status);
+    setAssistantAnalysisRunNote(run.admin_note ?? "");
+  }
+
+  async function handleUpdateAssistantAnalysisRun(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedAssistantAnalysisRun) {
+      return;
+    }
+
+    setSavingAssistantAnalysisRunReview(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc(
+        "update_support_assistant_analysis_run",
+        {
+          p_admin_note: assistantAnalysisRunNote,
+          p_admin_status: assistantAnalysisRunStatus,
+          p_run_id: selectedAssistantAnalysisRun.id,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      showToast("Analysis run review saved.", { type: "success" });
+      await loadAssistantAnalysisRuns();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAssistantAnalysisRunReview(false);
     }
   }
 
@@ -4130,6 +4259,7 @@ export default function Home() {
 
       setAssistantAnalysisResult(result as SupportAssistantAnalysisResult);
       showToast("Assistant analysis saved.", { type: "success" });
+      await loadAssistantAnalysisRuns();
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -9979,6 +10109,48 @@ export default function Home() {
                         </p>
                       </div>
                     ) : null}
+                    {assistantAnalysisRuns.length > 0 ? (
+                      <div className="rounded-md border border-slate-200 bg-white p-3">
+                        <p className="text-sm font-semibold text-slate-900">
+                          Analysis history
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          {assistantAnalysisRuns.slice(0, 5).map((run) => {
+                            const selected =
+                              selectedAssistantAnalysisRun?.id === run.id;
+
+                            return (
+                              <button
+                                className={`w-full rounded-md border p-3 text-left text-sm transition ${
+                                  selected
+                                    ? "border-sky-300 bg-sky-50"
+                                    : "border-slate-200 bg-white hover:border-sky-200"
+                                }`}
+                                key={run.id}
+                                onClick={() => selectAssistantAnalysisRun(run)}
+                                type="button"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="font-semibold text-slate-900">
+                                    {run.interaction_count} answer
+                                    {run.interaction_count === 1 ? "" : "s"}
+                                  </span>
+                                  <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                                    {supportAnalysisStatusLabel(run.admin_status)}
+                                  </span>
+                                </div>
+                                <p className="mt-2 line-clamp-2 text-slate-600">
+                                  {run.analysis_summary}
+                                </p>
+                                <p className="mt-2 text-xs text-slate-500">
+                                  {formatDate(run.created_at)}
+                                </p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
                     {filteredAssistantReviewInteractions.length === 0 ? (
                       <div className="rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
                         No assistant answers match these filters.
@@ -10189,6 +10361,148 @@ export default function Home() {
                               </ul>
                             </div>
                           </div>
+                        </div>
+                      ) : null}
+
+                      {selectedAssistantAnalysisRun ? (
+                        <div className="mt-4 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h4 className="font-semibold text-slate-900">
+                                Saved analysis run
+                              </h4>
+                              <p className="mt-1 text-slate-500">
+                                {formatDate(selectedAssistantAnalysisRun.created_at)} ·{" "}
+                                {selectedAssistantAnalysisRun.interaction_count} answer
+                                {selectedAssistantAnalysisRun.interaction_count === 1
+                                  ? ""
+                                  : "s"}{" "}
+                                reviewed
+                              </p>
+                              {selectedAssistantAnalysisRun.prompt_versions.length > 0 ? (
+                                <p className="mt-1 text-slate-500">
+                                  Prompt versions:{" "}
+                                  {selectedAssistantAnalysisRun.prompt_versions.join(", ")}
+                                </p>
+                              ) : null}
+                            </div>
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+                              {supportAnalysisStatusLabel(
+                                selectedAssistantAnalysisRun.admin_status
+                              )}
+                            </span>
+                          </div>
+                          <p className="mt-3 whitespace-pre-wrap">
+                            {selectedAssistantAnalysisRun.analysis_summary}
+                          </p>
+
+                          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                            <div>
+                              <p className="font-semibold text-slate-900">Patterns</p>
+                              {selectedAssistantAnalysisRun.failure_patterns.length > 0 ? (
+                                <ul className="mt-1 list-disc space-y-1 pl-5">
+                                  {selectedAssistantAnalysisRun.failure_patterns.map(
+                                    (item) => (
+                                      <li key={item}>{item}</li>
+                                    )
+                                  )}
+                                </ul>
+                              ) : (
+                                <p className="mt-1 text-slate-500">No patterns saved.</p>
+                              )}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-900">Strengths</p>
+                              {selectedAssistantAnalysisRun.strengths.length > 0 ? (
+                                <ul className="mt-1 list-disc space-y-1 pl-5">
+                                  {selectedAssistantAnalysisRun.strengths.map((item) => (
+                                    <li key={item}>{item}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="mt-1 text-slate-500">No strengths saved.</p>
+                              )}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-900">Prompt ideas</p>
+                              {selectedAssistantAnalysisRun.prompt_recommendations.length >
+                              0 ? (
+                                <ul className="mt-1 list-disc space-y-1 pl-5">
+                                  {selectedAssistantAnalysisRun.prompt_recommendations.map(
+                                    (item) => (
+                                      <li key={item}>{item}</li>
+                                    )
+                                  )}
+                                </ul>
+                              ) : (
+                                <p className="mt-1 text-slate-500">No prompt ideas saved.</p>
+                              )}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-900">
+                                UI/workflow ideas
+                              </p>
+                              {selectedAssistantAnalysisRun.ui_recommendations.length >
+                              0 ? (
+                                <ul className="mt-1 list-disc space-y-1 pl-5">
+                                  {selectedAssistantAnalysisRun.ui_recommendations.map(
+                                    (item) => (
+                                      <li key={item}>{item}</li>
+                                    )
+                                  )}
+                                </ul>
+                              ) : (
+                                <p className="mt-1 text-slate-500">No UI ideas saved.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          <form
+                            className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3"
+                            onSubmit={handleUpdateAssistantAnalysisRun}
+                          >
+                            <h5 className="font-semibold text-slate-900">
+                              Admin conclusion
+                            </h5>
+                            <label className="mt-3 block text-sm font-medium text-slate-700">
+                              Status
+                              <select
+                                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                                onChange={(event) =>
+                                  setAssistantAnalysisRunStatus(
+                                    event.target.value as SupportAssistantAnalysisStatus
+                                  )
+                                }
+                                value={assistantAnalysisRunStatus}
+                              >
+                                <option value="new">New</option>
+                                <option value="reviewed">Reviewed</option>
+                                <option value="accepted">Accepted</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="needs_more_data">Needs more data</option>
+                              </select>
+                            </label>
+                            <label className="mt-3 block text-sm font-medium text-slate-700">
+                              Admin note
+                              <textarea
+                                className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2"
+                                onChange={(event) =>
+                                  setAssistantAnalysisRunNote(event.target.value)
+                                }
+                                placeholder="What should you do with this analysis?"
+                                value={assistantAnalysisRunNote}
+                              />
+                            </label>
+                            <button
+                              className="mt-3 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                              disabled={savingAssistantAnalysisRunReview}
+                              type="submit"
+                            >
+                              {savingAssistantAnalysisRunReview
+                                ? "Saving..."
+                                : "Save analysis review"}
+                            </button>
+                          </form>
                         </div>
                       ) : null}
 

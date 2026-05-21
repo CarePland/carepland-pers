@@ -57,3 +57,55 @@ create policy "Admins can create support assistant analysis runs"
         and coalesce(p.is_admin, false) = true
     )
   );
+
+create or replace function public.update_support_assistant_analysis_run(
+  p_run_id uuid,
+  p_admin_status text,
+  p_admin_note text default null
+)
+returns public.support_assistant_analysis_runs
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller_is_admin boolean;
+  cleaned_status text;
+  updated_run public.support_assistant_analysis_runs%rowtype;
+begin
+  if auth.uid() is null then
+    raise exception 'Must be signed in to update assistant analysis runs';
+  end if;
+
+  select coalesce(p.is_admin, false)
+    into caller_is_admin
+  from public.profiles p
+  where p.id = auth.uid();
+
+  if coalesce(caller_is_admin, false) = false then
+    raise exception 'Admin access is required to update assistant analysis runs';
+  end if;
+
+  cleaned_status := coalesce(nullif(trim(p_admin_status), ''), 'reviewed');
+
+  if cleaned_status not in ('new', 'reviewed', 'accepted', 'rejected', 'needs_more_data') then
+    raise exception 'Unsupported analysis run status: %', cleaned_status;
+  end if;
+
+  update public.support_assistant_analysis_runs
+  set admin_status = cleaned_status,
+      admin_note = nullif(trim(coalesce(p_admin_note, '')), ''),
+      updated_at = now()
+  where id = p_run_id
+  returning * into updated_run;
+
+  if not found then
+    raise exception 'Assistant analysis run not found';
+  end if;
+
+  return updated_run;
+end;
+$$;
+
+grant execute on function public.update_support_assistant_analysis_run(uuid, text, text)
+  to authenticated;
