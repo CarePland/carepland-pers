@@ -216,6 +216,16 @@ type SupportAssistantAdminReview = {
   updated_at: string;
 };
 
+type SupportAssistantAnalysisResult = {
+  id: string;
+  analysisSummary: string;
+  failurePatterns: string[];
+  promptRecommendations: string[];
+  recommendations: string[];
+  strengths: string[];
+  uiRecommendations: string[];
+};
+
 function CalendarIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg
@@ -1889,6 +1899,9 @@ export default function Home() {
     useState("");
   const [savingAssistantAdminReview, setSavingAssistantAdminReview] =
     useState(false);
+  const [analyzingAssistantReviews, setAnalyzingAssistantReviews] = useState(false);
+  const [assistantAnalysisResult, setAssistantAnalysisResult] =
+    useState<SupportAssistantAnalysisResult | null>(null);
   const [loadingAppContent, setLoadingAppContent] = useState(false);
   const [savingAppContent, setSavingAppContent] = useState(false);
   const [revertingAppContentForId, setRevertingAppContentForId] = useState<
@@ -4065,6 +4078,62 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setSavingAssistantAdminReview(false);
+    }
+  }
+
+  async function handleAnalyzeFilteredAssistantReviews() {
+    if (filteredAssistantReviewInteractions.length === 0) {
+      setMessage("No assistant answers match these filters.");
+      return;
+    }
+
+    setAnalyzingAssistantReviews(true);
+    setAssistantAnalysisResult(null);
+    setMessage("");
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before analyzing assistant answers.");
+      }
+
+      const selectedInteractions = filteredAssistantReviewInteractions.slice(0, 50);
+      const response = await fetch("/api/support-assistant-analysis", {
+        body: JSON.stringify({
+          criteria: {
+            confidence: assistantReviewConfidenceFilter,
+            has_user_feedback: assistantReviewHasFeedbackOnly,
+            outcome: assistantReviewOutcomeFilter,
+            prompt_version: assistantReviewPromptFilter,
+          },
+          interactionIds: selectedInteractions.map((interaction) => interaction.id),
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Assistant QA analysis failed.");
+      }
+
+      setAssistantAnalysisResult(result as SupportAssistantAnalysisResult);
+      showToast("Assistant analysis saved.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setAnalyzingAssistantReviews(false);
     }
   }
 
@@ -9877,9 +9946,39 @@ export default function Home() {
 
                 <div className="mt-5 grid gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
                   <aside className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-700">
-                      Showing {filteredAssistantReviewInteractions.length} of {assistantReviewInteractions.length}
-                    </p>
+                    <div className="rounded-md border border-slate-200 bg-white p-3">
+                      <p className="text-sm font-semibold text-slate-700">
+                        Showing {filteredAssistantReviewInteractions.length} of {assistantReviewInteractions.length}
+                      </p>
+                      <button
+                        className="mt-3 w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                        disabled={
+                          analyzingAssistantReviews ||
+                          filteredAssistantReviewInteractions.length === 0
+                        }
+                        onClick={handleAnalyzeFilteredAssistantReviews}
+                        type="button"
+                      >
+                        {analyzingAssistantReviews
+                          ? "Analyzing..."
+                          : `Analyze filtered${
+                              filteredAssistantReviewInteractions.length > 50
+                                ? " first 50"
+                                : ""
+                            }`}
+                      </button>
+                    </div>
+                    {assistantAnalysisResult ? (
+                      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                        <p className="font-semibold">Latest analysis</p>
+                        <p className="mt-2 whitespace-pre-wrap">
+                          {assistantAnalysisResult.analysisSummary}
+                        </p>
+                        <p className="mt-2 text-xs font-semibold uppercase tracking-wide">
+                          Saved run {assistantAnalysisResult.id}
+                        </p>
+                      </div>
+                    ) : null}
                     {filteredAssistantReviewInteractions.length === 0 ? (
                       <div className="rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
                         No assistant answers match these filters.
@@ -9925,6 +10024,11 @@ export default function Home() {
                               <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
                                 {interaction.outcome.replace("_", " ")}
                               </span>
+                              {interaction.ticket_id ? (
+                                <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
+                                  Ticket linked
+                                </span>
+                              ) : null}
                             </div>
                             <p className="mt-2 text-xs text-slate-500">
                               {formatDate(interaction.created_at)}
@@ -10044,6 +10148,49 @@ export default function Home() {
                           </div>
                         )}
                       </div>
+
+                      {assistantAnalysisResult ? (
+                        <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                          <h4 className="font-semibold">Latest filtered analysis</h4>
+                          <p className="mt-2 whitespace-pre-wrap">
+                            {assistantAnalysisResult.analysisSummary}
+                          </p>
+                          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                            <div>
+                              <p className="font-semibold">Patterns</p>
+                              <ul className="mt-1 list-disc space-y-1 pl-5">
+                                {assistantAnalysisResult.failurePatterns.map((item) => (
+                                  <li key={item}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="font-semibold">Strengths</p>
+                              <ul className="mt-1 list-disc space-y-1 pl-5">
+                                {assistantAnalysisResult.strengths.map((item) => (
+                                  <li key={item}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="font-semibold">Prompt ideas</p>
+                              <ul className="mt-1 list-disc space-y-1 pl-5">
+                                {assistantAnalysisResult.promptRecommendations.map((item) => (
+                                  <li key={item}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="font-semibold">UI/workflow ideas</p>
+                              <ul className="mt-1 list-disc space-y-1 pl-5">
+                                {assistantAnalysisResult.uiRecommendations.map((item) => (
+                                  <li key={item}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
 
                       <form
                         className="mt-4 rounded-md border border-slate-200 p-3"
