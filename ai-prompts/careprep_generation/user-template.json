@@ -1,0 +1,11 @@
+{
+  "workflow_key": "careprep_generation",
+  "source": "app/api/careprep/route.ts runtime userPrompt composition",
+  "role": "user",
+  "dynamic_instruction_template_default": "",
+  "runtime_sections": [
+    "Instruction template, when ai_instruction_versions.user_prompt_template exists",
+    "Future appointment: {{futureAppointment}}",
+    "Past appointments: {{pastAppointments}}"
+  ]
+}

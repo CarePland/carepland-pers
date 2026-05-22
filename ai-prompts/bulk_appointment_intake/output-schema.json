@@ -1,0 +1,40 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "appointments": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "appointment_reason": { "type": "string" },
+          "appointment_title": { "type": "string" },
+          "confidence": { "type": "number" },
+          "location_address": { "type": "string" },
+          "location_name": { "type": "string" },
+          "location_phone": { "type": "string" },
+          "provider_name": { "type": "string" },
+          "provider_organization": { "type": "string" },
+          "starts_at_local": { "type": "string" },
+          "suggested_action": { "type": "string" }
+        },
+        "required": [
+          "appointment_title",
+          "appointment_reason",
+          "starts_at_local",
+          "provider_name",
+          "provider_organization",
+          "location_name",
+          "location_address",
+          "location_phone",
+          "confidence",
+          "suggested_action"
+        ],
+        "type": "object"
+      },
+      "maxItems": 10,
+      "type": "array"
+    },
+    "import_summary": { "type": "string" }
+  },
+  "required": ["appointments", "import_summary"],
+  "type": "object"
+}

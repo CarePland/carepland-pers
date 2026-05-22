@@ -1,0 +1,11 @@
+workflow_key: support_assistant
+route: app/api/support-assistant/route.ts
+runtime_source: Supabase dynamic instruction when present; code fallback otherwise.
+default_model: gpt-4.1-mini
+default_temperature: 0.2
+response_format: json_schema
+schema_name: carepland_support_assistant
+dynamic_instruction_table: ai_instruction_sets / ai_instruction_versions
+notes:
+- Intended only for low-risk app-use help.
+- Escalates bugs, account/security/privacy/billing concerns, data-changing actions, unclear requests, and frustrated users.

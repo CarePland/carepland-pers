@@ -1,0 +1,11 @@
+{
+  "workflow_key": "ocr_image_text_extraction",
+  "source": "app/api/ocr/route.ts hardcoded input_text",
+  "role": "user",
+  "content": "Extract all visible appointment-related text from these images. Preserve line breaks, dates, times, provider names, locations, addresses, phone numbers, and labels. Process images in the order provided. Do not summarize, classify, infer, or add commentary. Return only the extracted text. Use page markers like --- Image 1 --- before each image's extracted text.",
+  "runtime_sections": [
+    "Prompt text above",
+    "Image 1 label and image bytes",
+    "Additional image labels and image bytes, up to 10 total"
+  ]
+}

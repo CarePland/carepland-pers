@@ -1,0 +1,14 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "bring_list": { "items": { "type": "string" }, "type": "array" },
+    "key_questions": { "items": { "type": "string" }, "type": "array" },
+    "med_review": { "items": { "type": "string" }, "type": "array" },
+    "next_steps": { "items": { "type": "string" }, "type": "array" },
+    "since_last_visit": { "items": { "type": "string" }, "type": "array" },
+    "summary": { "type": "string" },
+    "watchouts": { "items": { "type": "string" }, "type": "array" }
+  },
+  "required": ["summary", "key_questions", "bring_list"],
+  "type": "object"
+}

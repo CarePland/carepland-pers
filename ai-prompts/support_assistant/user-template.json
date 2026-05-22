@@ -1,0 +1,14 @@
+{
+  "workflow_key": "support_assistant",
+  "source": "supabase/sql/2026-05-20_seed_support_assistant_instruction.sql and app/api/support-assistant/route.ts runtime userPrompt composition",
+  "role": "user",
+  "dynamic_instruction_template_default": "Use the current page, app context, product context, user subject, and user details supplied by the app. If the issue can be answered safely, provide a direct answer and one suggested next step. If the issue needs human review, set escalation_recommended true and explain why in escalation_reason.",
+  "runtime_sections": [
+    "Instruction template, when a dynamic ai_instruction_versions.user_prompt_template exists",
+    "Current page: {{currentPage}}",
+    "Product context: app-assembled CarePland product facts",
+    "App context: {{context}}",
+    "User subject: {{subject}}",
+    "User details: {{message}}"
+  ]
+}

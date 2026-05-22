@@ -1,0 +1,10 @@
+workflow_key: support_assistant_analysis
+route: app/api/support-assistant-analysis/route.ts
+runtime_source: hardcoded prompt in route
+model: gpt-4.1-mini
+temperature: 0.2
+response_format: json_schema
+schema_name: carepland_support_assistant_qa_analysis
+notes:
+- Admin-only analysis over selected support assistant interactions.
+- Includes prompt/version details when those interactions have instruction version IDs.

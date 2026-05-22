@@ -1,0 +1,12 @@
+workflow_key: ocr_image_text_extraction
+route: app/api/ocr/route.ts
+runtime_source: hardcoded prompt in route
+model: gpt-4.1-mini
+temperature: 0
+response_format: plain text
+max_images: 10
+max_image_size_bytes: 8388608
+supported_image_types: image/gif, image/jpeg, image/png, image/webp
+notes:
+- This is a text extraction step only.
+- Appointment interpretation happens later through the intake workflow.

@@ -1,0 +1,11 @@
+workflow_key: note_intake_interpretation
+route: app/api/intake/route.ts
+runtime_source: Supabase dynamic instruction when present; code fallback otherwise.
+default_model: gpt-4.1-mini
+default_temperature: 0.1
+response_format: json_schema
+schema_name: carepland_intake
+dynamic_instruction_table: ai_instruction_sets / ai_instruction_versions
+notes:
+- Used for pasted appointment details and visit-note interpretation.
+- Existing appointment context changes the task toward note/takeaway/follow-up extraction.

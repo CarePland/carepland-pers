@@ -1,0 +1,13 @@
+{
+  "workflow_key": "note_intake_interpretation",
+  "source": "app/api/intake/route.ts runtime userPrompt composition",
+  "role": "user",
+  "dynamic_instruction_template_default": "",
+  "runtime_sections": [
+    "Instruction template, when a dynamic ai_instruction_versions.user_prompt_template exists",
+    "Care VIP: {{care_subject.display_name}}",
+    "Current date: {{new Date().toISOString()}}",
+    "Existing appointment context, when supplied",
+    "Pasted text: {{rawText}}"
+  ]
+}

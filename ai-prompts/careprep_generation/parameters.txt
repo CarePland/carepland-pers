@@ -1,0 +1,12 @@
+workflow_key: careprep_generation
+route: app/api/careprep/route.ts
+runtime_source: Supabase dynamic instruction required.
+default_model: gpt-4.1-mini when dynamic version model is blank
+default_temperature: 0.2 when dynamic version temperature is blank
+response_format: json_schema
+schema_name: careprep_generation
+dynamic_instruction_table: ai_instruction_sets / ai_instruction_versions
+notes:
+- There is no code fallback for the system prompt.
+- The app sends future appointment context and up to 8 prior appointments with current notes.
+- Accepted/edited CarePrep keeps prompt version and instruction hash for audit.

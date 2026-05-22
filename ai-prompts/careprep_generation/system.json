@@ -1,0 +1,8 @@
+{
+  "workflow_key": "careprep_generation",
+  "source": "Supabase dynamic instruction required by app/api/careprep/route.ts",
+  "role": "system",
+  "content": "",
+  "status": "dynamic_required_no_code_fallback",
+  "note": "CarePrep generation requires a current ai_instruction_versions row. The app does not currently define a hardcoded CarePrep system prompt fallback."
+}

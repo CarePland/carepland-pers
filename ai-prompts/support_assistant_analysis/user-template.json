@@ -1,0 +1,11 @@
+{
+  "workflow_key": "support_assistant_analysis",
+  "source": "app/api/support-assistant-analysis/route.ts userPrompt composition",
+  "role": "user",
+  "runtime_sections": [
+    "Selected criteria: {{criteria}}",
+    "Prompt versions represented: {{promptVersions}}",
+    "Instruction prompt details: {{instructionVersions}}",
+    "Assistant interactions: {{interactions}}"
+  ]
+}

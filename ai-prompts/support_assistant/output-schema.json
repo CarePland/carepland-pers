@@ -1,0 +1,22 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "answer": { "type": "string" },
+    "category": { "type": "string" },
+    "confidence": { "type": "number" },
+    "escalation_recommended": { "type": "boolean" },
+    "escalation_reason": { "type": "string" },
+    "priority": { "enum": ["low", "medium", "high", "urgent"], "type": "string" },
+    "suggested_next_step": { "type": "string" }
+  },
+  "required": [
+    "answer",
+    "suggested_next_step",
+    "confidence",
+    "escalation_recommended",
+    "escalation_reason",
+    "category",
+    "priority"
+  ],
+  "type": "object"
+}

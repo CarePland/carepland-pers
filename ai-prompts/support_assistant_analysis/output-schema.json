@@ -1,0 +1,20 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "analysis_summary": { "type": "string" },
+    "failure_patterns": { "items": { "type": "string" }, "type": "array" },
+    "prompt_recommendations": { "items": { "type": "string" }, "type": "array" },
+    "recommendations": { "items": { "type": "string" }, "type": "array" },
+    "strengths": { "items": { "type": "string" }, "type": "array" },
+    "ui_recommendations": { "items": { "type": "string" }, "type": "array" }
+  },
+  "required": [
+    "analysis_summary",
+    "failure_patterns",
+    "strengths",
+    "recommendations",
+    "prompt_recommendations",
+    "ui_recommendations"
+  ],
+  "type": "object"
+}

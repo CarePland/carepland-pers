@@ -1,0 +1,12 @@
+workflow_key: bulk_appointment_intake
+route: app/api/intake/route.ts
+runtime_source: Supabase dynamic instruction when present; code fallback otherwise.
+default_model: gpt-4.1-mini
+default_temperature: 0.1
+response_format: json_schema
+schema_name: carepland_intake
+dynamic_instruction_table: ai_instruction_sets / ai_instruction_versions
+notes:
+- The app prepends the saved user prompt template as "Instruction template:" when present.
+- The app always adds Care VIP, current date, optional appointment context, and pasted text.
+- Output is limited to 10 appointment drafts.
