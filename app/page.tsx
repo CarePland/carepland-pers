@@ -652,7 +652,7 @@ const appContentDefaults = {
   support_agent_product_facts:
     "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app.",
   welcome_guide_body:
-    "Start with an appointment, import appointment text or images, or contact support if something feels off.",
+    "Help is always available in the upper right [?].",
   welcome_guide_title: "Welcome to the CarePland beta",
 };
 
@@ -2559,6 +2559,9 @@ export default function Home() {
   );
   const adminTicketsNeedingFollowup = adminOpenTickets.filter(
     (ticket) => ticket.needs_admin_followup
+  );
+  const adminNewTickets = adminOpenTickets.filter(
+    (ticket) => !ticket.needs_admin_followup
   );
   const selectedAdminTicket =
     adminSupportTickets.find((ticket) => ticket.id === selectedAdminTicketId) ??
@@ -4571,7 +4574,6 @@ export default function Home() {
       }
 
       setCarePrepHistory(historyRows ?? []);
-      setMessage(`Loaded ${historyRows?.length ?? 0} CarePrep history row(s).`);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -4622,7 +4624,6 @@ export default function Home() {
       }
 
       setIntakeHistory(historyRows);
-      setMessage(`Loaded ${historyRows.length} intake history row(s).`);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -8669,8 +8670,8 @@ export default function Home() {
           className="sticky top-0 z-50 grid gap-3 border-b border-slate-200 bg-slate-50/95 py-3 backdrop-blur"
           ref={mainHeaderRef}
         >
-          <div className="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-2 sm:gap-3 xl:grid-cols-[auto_auto_1fr]">
-            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 lg:gap-3">
+            <div className="flex min-w-0 items-center gap-2">
               <button
                 aria-label="Home"
                 className="rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300"
@@ -8690,12 +8691,12 @@ export default function Home() {
                   width={160}
                 />
               </button>
-              <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 sm:inline-flex">
+              <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 xl:inline-flex">
                 Personal
               </span>
               {runtimeEnvironmentLabel ? (
                 <span
-                  className="hidden rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-900 sm:inline-flex"
+                  className="hidden rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-900 xl:inline-flex"
                   title="Non-production environment"
                 >
                   {runtimeEnvironmentLabel}
@@ -8706,12 +8707,12 @@ export default function Home() {
             {isSignedInAppShell ? (
               <nav
                 className={`flex min-w-0 gap-2 ${
-                  isAdmin ? "justify-end" : "justify-start"
-                } xl:col-start-2 xl:justify-start`}
+                  isAdmin ? "justify-center" : "justify-start"
+                }`}
                 aria-label="Main navigation"
               >
               <button
-                className={`h-11 rounded-md px-4 text-sm font-semibold sm:text-base ${
+                className={`h-11 rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
                   mainTab === "appointments"
                     ? "bg-blue-700 text-white"
                     : "border border-slate-300 bg-white text-slate-700"
@@ -8719,12 +8720,12 @@ export default function Home() {
                 onClick={() => handleChangeMainTab("appointments")}
                 type="button"
               >
-                <span className="hidden sm:inline">Appointments</span>
-                <span className="sm:hidden">Appts</span>
+                <span className="hidden lg:inline">Appointments</span>
+                <span className="lg:hidden">Appts</span>
               </button>
               <button
                 aria-label="Profile"
-                className={`flex h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold sm:px-4 sm:text-base ${
+                className={`flex h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
                   mainTab === "profile"
                     ? "bg-blue-700 text-white"
                     : "border border-slate-300 bg-white text-slate-700"
@@ -8733,13 +8734,13 @@ export default function Home() {
                 type="button"
                 title="Profile"
               >
-                <UserIcon className="h-5 w-5 sm:hidden" />
-                <span className="hidden sm:inline">Profile</span>
+                <UserIcon className="h-5 w-5 md:hidden" />
+                <span className="hidden md:inline">Profile</span>
               </button>
               {isAdmin ? (
                 <button
                   aria-label="Admin"
-                  className={`flex h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold sm:px-4 sm:text-base ${
+                  className={`flex h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
                     mainTab === "admin"
                       ? "bg-blue-700 text-white"
                       : "border border-slate-300 bg-white text-slate-700"
@@ -8748,40 +8749,47 @@ export default function Home() {
                   type="button"
                   title="Admin"
                 >
-                  <GearIcon className="h-5 w-5 sm:hidden" />
-                  <span className="hidden sm:inline">Admin</span>
+                  <GearIcon className="h-5 w-5 md:hidden" />
+                  <span className="hidden md:inline">Admin</span>
                 </button>
               ) : null}
               </nav>
             ) : null}
 
-            <div className="col-span-2 flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm text-slate-600 xl:col-span-1 xl:col-start-3 xl:justify-end xl:text-right">
+            <div className="flex min-w-0 items-center justify-end gap-2 text-sm text-slate-600">
             {isSignedInAppShell ? (
-              <span className="font-semibold text-slate-900">
+              <span className="hidden min-w-0 truncate font-semibold text-slate-900 md:inline xl:max-w-60 2xl:max-w-none">
                 {signedInDisplayName}
               </span>
             ) : null}
             {isSignedInAppShell ? (
               isAdmin ? (
                 <button
-                  className="font-semibold text-sky-800"
+                  className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm"
                   onClick={async () => {
                     setMainTab("admin");
                     await handleChangeAdminTab("tickets");
                   }}
                   type="button"
                 >
-                  Tix{" "}
                   <span
-                    className={
-                      adminTicketsNeedingFollowup.length > 0
-                        ? "text-red-600"
-                        : "text-slate-600"
-                    }
+                    className={`px-2.5 py-1 ${
+                      adminNewTickets.length > 0
+                        ? "bg-red-50 text-red-700"
+                        : "bg-slate-50 text-slate-500"
+                    }`}
                   >
-                    {adminTicketsNeedingFollowup.length}
+                    {adminNewTickets.length} New
                   </span>
-                  /{adminOpenTickets.length}
+                  <span
+                    className={`border-l border-slate-200 px-2.5 py-1 ${
+                      adminTicketsNeedingFollowup.length > 0
+                        ? "bg-amber-50 text-amber-800"
+                        : "bg-slate-50 text-slate-500"
+                    }`}
+                  >
+                    {adminTicketsNeedingFollowup.length} Followup
+                  </span>
                 </button>
               ) : (
                 <button
@@ -10214,7 +10222,10 @@ export default function Home() {
 
             {signedInEmail &&
             !needsBetaAgreement &&
-            !needsOnboarding ? (
+            !needsOnboarding &&
+            (hasUpdatedSupportQuestion ||
+              askingSupportQuestion ||
+              supportQuestionExpanded) ? (
               <section
                 className={`rounded-lg border p-3 shadow-sm ${
                   hasUpdatedSupportQuestion
@@ -10565,6 +10576,12 @@ export default function Home() {
                     <p className="mt-1 max-w-3xl text-sm text-blue-900">
                       {appContentText("welcome_guide_body")}
                     </p>
+                    {shouldOfferSampleData ? (
+                      <p className="mt-3 max-w-3xl text-sm text-blue-900">
+                        Add some demo appointments, notes, and CarePrep examples
+                        to quickly get acquainted, or skip and enter your own.
+                      </p>
+                    ) : null}
                   </div>
                   <button
                     className="rounded-md border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-700"
@@ -10574,49 +10591,8 @@ export default function Home() {
                     Dismiss
                   </button>
                 </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white"
-                    onClick={() => {
-                      cancelTextIntake();
-                      resetPlaceLookup();
-                      setActiveAppointmentPanel("add");
-                    }}
-                    type="button"
-                  >
-                    Add appointment
-                  </button>
-                  <button
-                    className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
-                    onClick={() => {
-                      cancelTextIntake();
-                      resetPlaceLookup();
-                      setActiveAppointmentPanel("quickAdd");
-                    }}
-                    type="button"
-                  >
-                    Import
-                  </button>
-                  <button
-                    className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
-                    onClick={() => {
-                      setAskingSupportQuestion(true);
-                      setSupportQuestionExpanded(true);
-                    }}
-                    type="button"
-                  >
-                    Ask a question
-                  </button>
-                </div>
                 {shouldOfferSampleData ? (
-                  <div className="mt-4 rounded-md border border-blue-100 bg-white p-3">
-                    <p className="text-sm font-semibold text-blue-950">
-                      {appContentText("demo_prompt_title")}
-                    </p>
-                    <p className="mt-1 text-sm text-blue-900">
-                      {appContentText("demo_prompt_body")}
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
                         disabled={seedingSampleData || decliningSampleData}
@@ -10634,7 +10610,6 @@ export default function Home() {
                         {decliningSampleData ? "Skipping..." : "Skip demo data"}
                       </button>
                     </div>
-                  </div>
                 ) : null}
               </section>
             ) : null}
@@ -11314,10 +11289,7 @@ export default function Home() {
                     ["assistantReview", "Asst Review"],
                     ["messages", "Messages"],
                     ["product", "Prod Mgmt"],
-                    [
-                      "tickets",
-                      `Tix ${adminTicketsNeedingFollowup.length}/${adminOpenTickets.length}`,
-                    ],
+                    ["tickets", "Tickets"],
                   ].map(([tab, label]) => (
                     <button
                       className={`rounded-md px-4 py-2 text-sm font-semibold ${
@@ -11330,20 +11302,33 @@ export default function Home() {
                       type="button"
                     >
                       {tab === "tickets" ? (
-                        <span>
-                          Tix{" "}
+                        <span className="inline-flex items-center gap-1.5">
                           <span
-                            className={
+                            className={`rounded-full px-2 py-0.5 text-xs ${
+                              adminNewTickets.length > 0
+                                ? adminTab === "tickets"
+                                  ? "bg-red-100 text-red-700"
+                                  : "bg-red-50 text-red-700"
+                                : adminTab === "tickets"
+                                  ? "bg-white/20 text-white"
+                                  : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {adminNewTickets.length} New
+                          </span>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-xs ${
                               adminTicketsNeedingFollowup.length > 0
                                 ? adminTab === "tickets"
-                                  ? "text-red-100"
-                                  : "text-red-600"
-                                : ""
-                            }
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-amber-50 text-amber-800"
+                                : adminTab === "tickets"
+                                  ? "bg-white/20 text-white"
+                                  : "bg-slate-100 text-slate-500"
+                            }`}
                           >
-                            {adminTicketsNeedingFollowup.length}
+                            {adminTicketsNeedingFollowup.length} Followup
                           </span>
-                          /{adminOpenTickets.length}
                         </span>
                       ) : (
                         label
