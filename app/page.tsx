@@ -8688,11 +8688,19 @@ export default function Home() {
               >
                 <Image
                   alt="CarePland"
-                  className="h-auto w-20 sm:w-24"
-                  height={100}
+                  className={
+                    isSignedInAppShell
+                      ? "h-auto w-11 sm:w-12"
+                      : "h-auto w-20 sm:w-24"
+                  }
+                  height={isSignedInAppShell ? 460 : 100}
                   priority
-                  src="/carepland-logo.png"
-                  width={160}
+                  src={
+                    isSignedInAppShell
+                      ? "/carepland-loop-mark.png"
+                      : "/carepland-logo.png"
+                  }
+                  width={isSignedInAppShell ? 460 : 160}
                 />
               </button>
               <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 xl:inline-flex">
