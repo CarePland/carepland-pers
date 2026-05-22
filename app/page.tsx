@@ -10432,7 +10432,7 @@ export default function Home() {
                   <div
                     aria-hidden={!planHelpExpanded}
                     className={`mt-3 rounded-md border border-blue-100 bg-white p-3 text-sm leading-6 text-slate-700 ${
-                      planHelpExpanded ? "" : "invisible"
+                      planHelpExpanded ? "" : "hidden sm:block sm:invisible"
                     }`}
                   >
                     <ul className="space-y-2">
