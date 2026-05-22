@@ -380,7 +380,7 @@ function UserIcon({ className = "h-5 w-5" }: { className?: string }) {
 }
 
 type AppointmentView = "archived" | "logged" | "upcoming";
-type AiAdminTab = "history" | "instructions";
+type AiAdminTab = "agentKnowledge" | "history" | "instructions";
 type AdminTab =
   | "ai"
   | "assistantReview"
@@ -645,6 +645,12 @@ const appContentDefaults = {
   support_reply_email_subject:
     "You have a response to your CarePland question",
   support_missing_feedback_prompt: "What was missing?",
+  support_agent_escalation_guidance:
+    "Escalate bugs, account access issues, data loss, billing/privacy/security concerns, emergency or medical advice requests, data-changing requests, unclear issues, and frustrated users.",
+  support_agent_known_limitations:
+    "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests.",
+  support_agent_product_facts:
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app.",
   welcome_guide_body:
     "Start with an appointment, import appointment text or images, or contact support if something feels off.",
   welcome_guide_title: "Welcome to the CarePland beta",
@@ -687,6 +693,27 @@ const appContentOptions = [
     description:
       "Optional prompt shown after a support assistant answer is marked not helpful.",
     label: "Support assistant missing-feedback prompt",
+  },
+  {
+    category: "ai",
+    contentKey: "support_agent_product_facts",
+    description:
+      "Current product facts injected into the support assistant knowledge context.",
+    label: "Agent product facts",
+  },
+  {
+    category: "ai",
+    contentKey: "support_agent_known_limitations",
+    description:
+      "Known limitations injected into the support assistant knowledge context.",
+    label: "Agent known limitations",
+  },
+  {
+    category: "ai",
+    contentKey: "support_agent_escalation_guidance",
+    description:
+      "Escalation rules injected into the support assistant knowledge context.",
+    label: "Agent escalation guidance",
   },
   {
     category: "communications",
@@ -750,6 +777,11 @@ const appContentCategories = [
     description: "Support guidance and help text shown to users.",
     key: "support",
     label: "Support",
+  },
+  {
+    description: "Product facts and guardrails injected into AI assistant context.",
+    key: "ai",
+    label: "AI Agent",
   },
   {
     description:
@@ -2160,6 +2192,17 @@ export default function Home() {
   );
   const [instructionModel, setInstructionModel] = useState("gpt-4.1-mini");
   const [instructionChangeNote, setInstructionChangeNote] = useState("");
+  const [agentProductFacts, setAgentProductFacts] = useState(
+    appContentDefaults.support_agent_product_facts
+  );
+  const [agentKnownLimitations, setAgentKnownLimitations] = useState(
+    appContentDefaults.support_agent_known_limitations
+  );
+  const [agentEscalationGuidance, setAgentEscalationGuidance] = useState(
+    appContentDefaults.support_agent_escalation_guidance
+  );
+  const [agentKnowledgeChangeNote, setAgentKnowledgeChangeNote] = useState("");
+  const [savingAgentKnowledge, setSavingAgentKnowledge] = useState(false);
   const [revertingInstructionForId, setRevertingInstructionForId] = useState<
     string | null
   >(null);
@@ -2459,6 +2502,17 @@ export default function Home() {
   const filteredAppContentOptions = appContentOptions.filter(
     (item) => item.category === selectedAppContentCategory
   );
+  const agentKnowledgeVersions = useMemo(() => {
+    const keys = [
+      "support_agent_product_facts",
+      "support_agent_known_limitations",
+      "support_agent_escalation_guidance",
+    ];
+
+    return appContentVersions.filter((version) =>
+      keys.includes(version.content_key)
+    );
+  }, [appContentVersions]);
   const selectedProductMgmtSectionConfig =
     productMgmtAreas.find(
       (section) => section.area_key === selectedProductMgmtSection
@@ -2855,7 +2909,10 @@ export default function Home() {
 
           if (initialUiState?.mainTab === "admin") {
             if (initialUiState.adminTab === "ai") {
-              await loadAiInstructions(initialUiState.selectedAiWorkflow);
+              await Promise.all([
+                loadAiInstructions(initialUiState.selectedAiWorkflow),
+                loadAppContent(),
+              ]);
             } else if (initialUiState.adminTab === "product") {
               await loadProductMgmt();
             } else if (initialUiState.adminTab === "tickets") {
@@ -4035,6 +4092,27 @@ export default function Home() {
 
       const versions = data ?? [];
       setAppContentVersions(versions);
+      setAgentProductFacts(
+        versions.find(
+          (version) =>
+            version.content_key === "support_agent_product_facts" &&
+            version.is_current
+        )?.body ?? appContentDefaults.support_agent_product_facts
+      );
+      setAgentKnownLimitations(
+        versions.find(
+          (version) =>
+            version.content_key === "support_agent_known_limitations" &&
+            version.is_current
+        )?.body ?? appContentDefaults.support_agent_known_limitations
+      );
+      setAgentEscalationGuidance(
+        versions.find(
+          (version) =>
+            version.content_key === "support_agent_escalation_guidance" &&
+            version.is_current
+        )?.body ?? appContentDefaults.support_agent_escalation_guidance
+      );
 
       const currentVersion =
         versions.find(
@@ -4117,6 +4195,71 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setSavingAppContent(false);
+    }
+  }
+
+  async function saveAppContentBlock({
+    body,
+    changeNote,
+    contentKey,
+  }: {
+    body: string;
+    changeNote: string;
+    contentKey: keyof typeof appContentDefaults;
+  }) {
+    const option = appContentOptions.find(
+      (item) => item.contentKey === contentKey
+    );
+
+    if (!option) {
+      throw new Error(`Unknown content key: ${contentKey}`);
+    }
+
+    const { error } = await supabase.rpc("save_app_content_version", {
+      p_body: body,
+      p_change_note: changeNote,
+      p_content_key: contentKey,
+      p_description: option.description,
+      p_label: option.label,
+    });
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  async function handleSaveAgentKnowledge(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingAgentKnowledge(true);
+    setMessage("");
+
+    try {
+      const changeNote =
+        agentKnowledgeChangeNote.trim() || "Updated AI agent knowledge";
+
+      await saveAppContentBlock({
+        body: agentProductFacts,
+        changeNote,
+        contentKey: "support_agent_product_facts",
+      });
+      await saveAppContentBlock({
+        body: agentKnownLimitations,
+        changeNote,
+        contentKey: "support_agent_known_limitations",
+      });
+      await saveAppContentBlock({
+        body: agentEscalationGuidance,
+        changeNote,
+        contentKey: "support_agent_escalation_guidance",
+      });
+
+      setAgentKnowledgeChangeNote("");
+      await loadAppContent("support_agent_product_facts");
+      showToast("Agent knowledge saved.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAgentKnowledge(false);
     }
   }
 
@@ -5467,7 +5610,7 @@ export default function Home() {
     setMessage("");
 
     if (tab === "ai") {
-      await loadAiInstructions();
+      await Promise.all([loadAiInstructions(), loadAppContent()]);
     }
 
     if (tab === "content" || tab === "messages") {
@@ -5500,6 +5643,8 @@ export default function Home() {
 
     if (tab === "instructions") {
       await loadAiInstructions();
+    } else if (tab === "agentKnowledge") {
+      await loadAppContent("support_agent_product_facts");
     } else if (selectedAiWorkflow === "careprep_generation") {
       await loadCarePrepHistory();
     } else {
@@ -12830,7 +12975,44 @@ export default function Home() {
                   </button>
                 </div>
 
-                <label className="mt-5 block max-w-xl text-sm font-medium text-slate-700">
+                <div className="mt-5 grid gap-5 lg:grid-cols-[14rem_minmax(0,1fr)]">
+                  <aside className="space-y-2">
+                    <p className="text-sm font-medium text-slate-700">
+                      AI area
+                    </p>
+                    {[
+                      ["instructions", "Instructions", "Prompt versions"],
+                      ["agentKnowledge", "Agent Knowledge", "Product truth"],
+                      ["history", selectedAiWorkflowConfig.historyLabel, "Audit trail"],
+                    ].map(([tabKey, label, description]) => {
+                      const isSelected = aiAdminTab === tabKey;
+
+                      return (
+                        <button
+                          className={`w-full rounded-md border px-3 py-3 text-left transition ${
+                            isSelected
+                              ? "border-blue-300 bg-blue-50 text-blue-950"
+                              : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50"
+                          }`}
+                          disabled={loadingInstructions || loadingCarePrepHistory}
+                          key={tabKey}
+                          onClick={() =>
+                            handleChangeAiAdminTab(tabKey as AiAdminTab)
+                          }
+                          type="button"
+                        >
+                          <span className="block font-semibold">{label}</span>
+                          <span className="mt-1 block text-xs text-slate-500">
+                            {description}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </aside>
+
+                  <div>
+                {aiAdminTab !== "agentKnowledge" ? (
+                  <label className="block max-w-xl text-sm font-medium text-slate-700">
                   AI workflow
                   <select
                     className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
@@ -12847,33 +13029,7 @@ export default function Home() {
                     ))}
                   </select>
                 </label>
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <button
-                    className={`rounded-md px-4 py-2 text-sm font-semibold ${
-                      aiAdminTab === "instructions"
-                        ? "bg-blue-700 text-white"
-                        : "border border-slate-300 bg-white text-slate-700"
-                    }`}
-                    disabled={loadingInstructions || loadingCarePrepHistory}
-                    onClick={() => handleChangeAiAdminTab("instructions")}
-                    type="button"
-                  >
-                    AI Instructions
-                  </button>
-                  <button
-                    className={`rounded-md px-4 py-2 text-sm font-semibold ${
-                      aiAdminTab === "history"
-                        ? "bg-blue-700 text-white"
-                        : "border border-slate-300 bg-white text-slate-700"
-                    }`}
-                    disabled={loadingInstructions || loadingCarePrepHistory}
-                    onClick={() => handleChangeAiAdminTab("history")}
-                    type="button"
-                  >
-                    {selectedAiWorkflowConfig.historyLabel}
-                  </button>
-                </div>
+                ) : null}
 
                 {aiAdminTab === "instructions" ? (
                   <>
@@ -13018,6 +13174,113 @@ export default function Home() {
                   </section>
                 ) : null}
                   </>
+                ) : aiAdminTab === "agentKnowledge" ? (
+                  <section className="space-y-5">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <h3 className="text-lg font-semibold text-slate-900">
+                        Agent Knowledge
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        These facts are injected into the support assistant so it
+                        can answer with current product context.
+                      </p>
+                    </div>
+
+                    <form
+                      className="space-y-4"
+                      onSubmit={handleSaveAgentKnowledge}
+                    >
+                      <label className="block text-sm font-medium text-slate-700">
+                        Product facts
+                        <textarea
+                          className="mt-2 min-h-36 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          onChange={(event) =>
+                            setAgentProductFacts(event.target.value)
+                          }
+                          value={agentProductFacts}
+                        />
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Known limitations
+                        <textarea
+                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          onChange={(event) =>
+                            setAgentKnownLimitations(event.target.value)
+                          }
+                          value={agentKnownLimitations}
+                        />
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Escalation guidance
+                        <textarea
+                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          onChange={(event) =>
+                            setAgentEscalationGuidance(event.target.value)
+                          }
+                          value={agentEscalationGuidance}
+                        />
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Change note
+                        <input
+                          className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                          onChange={(event) =>
+                            setAgentKnowledgeChangeNote(event.target.value)
+                          }
+                          placeholder="What changed and why?"
+                          value={agentKnowledgeChangeNote}
+                        />
+                      </label>
+                      <button
+                        className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                        disabled={savingAgentKnowledge}
+                        type="submit"
+                      >
+                        {savingAgentKnowledge
+                          ? "Saving..."
+                          : "Save agent knowledge"}
+                      </button>
+                    </form>
+
+                    <section className="border-t border-slate-200 pt-5">
+                      <h3 className="text-lg font-semibold text-slate-900">
+                        Knowledge version history
+                      </h3>
+                      {agentKnowledgeVersions.length === 0 ? (
+                        <p className="mt-3 rounded-md bg-slate-100 p-3 text-sm text-slate-600">
+                          No saved agent knowledge versions yet. The assistant
+                          will use the default knowledge text until this is
+                          saved.
+                        </p>
+                      ) : (
+                        <div className="mt-3 space-y-3">
+                          {agentKnowledgeVersions.slice(0, 12).map((version) => (
+                            <article
+                              className="rounded-md border border-slate-200 p-4"
+                              key={version.id}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <p className="font-semibold text-slate-900">
+                                    {version.label} · v{version.version_number}
+                                    {version.is_current ? " · current" : ""}
+                                  </p>
+                                  <p className="mt-1 text-sm text-slate-500">
+                                    {formatDate(version.created_at)}
+                                  </p>
+                                  {version.change_note ? (
+                                    <p className="mt-2 text-sm text-slate-700">
+                                      {version.change_note}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  </section>
                 ) : selectedAiWorkflow === "careprep_generation" ? (
                   <section className="mt-5 space-y-4">
                     <div className="flex flex-wrap items-end gap-3">
@@ -13208,6 +13471,8 @@ export default function Home() {
                     )}
                   </section>
                 )}
+                  </div>
+                </div>
               </section>
               ) : null}
 

@@ -32,6 +32,14 @@ const supportAssistantSchema = {
 
 const fallbackSupportAssistantPrompt =
   "You are the CarePland Personal support assistant for a beta web app. Answer only low-risk app-use questions using the supplied product context. Be concise, warm, and practical. Explain CarePland in plain product language: it helps people remember appointment details, prepare for future visits, and bring useful context forward from what they have saved. Do not describe features as AI-generated or talk about internal models. Do not give medical, legal, billing, privacy, account-security, or emergency advice. Do not claim to change data or perform actions. If the question is unclear, account-specific, bug-like, billing/privacy/security-related, data-changing, or the user sounds frustrated, recommend escalation to support. Return valid JSON matching the schema.";
+const defaultAgentKnowledge = {
+  support_agent_escalation_guidance:
+    "Escalate bugs, account access issues, data loss, billing/privacy/security concerns, emergency or medical advice requests, data-changing requests, unclear issues, and frustrated users.",
+  support_agent_known_limitations:
+    "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests.",
+  support_agent_product_facts:
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app.",
+};
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -185,13 +193,41 @@ export async function POST(request: NextRequest) {
       ? `support_assistant:v${instructionVersion.version_number}`
       : "support_assistant:fallback";
 
+    const agentKnowledgeKeys = Object.keys(defaultAgentKnowledge);
+    const { data: agentKnowledgeRows, error: agentKnowledgeError } =
+      await supabase
+        .from("app_content_versions")
+        .select("content_key,body")
+        .in("content_key", agentKnowledgeKeys)
+        .eq("is_current", true);
+
+    if (agentKnowledgeError) {
+      throw agentKnowledgeError;
+    }
+
+    const agentKnowledgeByKey = new Map(
+      (agentKnowledgeRows ?? []).map((row) => [row.content_key, row.body])
+    );
+
     const productContext = [
       "CarePland Personal is a beta appointment memory app.",
-      "Core areas: Upcoming, Logged, Archived appointments; Import; appointment notes; CarePrep; Profile; demo data; support questions.",
+      `Current product facts: ${
+        agentKnowledgeByKey.get("support_agent_product_facts") ??
+        defaultAgentKnowledge.support_agent_product_facts
+      }`,
+      `Known limitations: ${
+        agentKnowledgeByKey.get("support_agent_known_limitations") ??
+        defaultAgentKnowledge.support_agent_known_limitations
+      }`,
+      `Escalation guidance: ${
+        agentKnowledgeByKey.get("support_agent_escalation_guidance") ??
+        defaultAgentKnowledge.support_agent_escalation_guidance
+      }`,
+      "Core areas: Home, Appointments, Upcoming, Logged, Archived, Import, appointment notes, CarePrep, Profile, demo data, support questions.",
       "Demo data can be removed from Profile with the Remove demo data control.",
       "Archived appointments are read-only and can be restored from the Archived tab.",
       "Import can interpret pasted text, images, or reviewed calendar file events into appointment drafts, but users should review before saving.",
-      "CarePrep prepares guidance for future appointments by using the appointment details, notes, and related history the user has saved.",
+      "Google Places lookup can help autocomplete addresses and save favorite locations with nicknames.",
       "The product goal is to close the loop between appointments: capture what happened, remember what matters, and bring the right context forward next time.",
       "Do not describe CarePland features as AI-generated or mention internal models to users.",
       "If the user reports a bug, data loss, account access issue, billing/privacy concern, or asks for a data-changing action, recommend escalation.",
