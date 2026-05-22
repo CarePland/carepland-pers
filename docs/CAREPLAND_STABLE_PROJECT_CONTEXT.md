@@ -10,6 +10,7 @@ This document is the stable architectural and operational memory for CarePland P
 - Update this document when implementation decisions, terminology, business rules, workflows, or constraints change.
 - Prefer concise stable facts over chat-style notes.
 - If a topic is still speculative, mark it as future plan or open question.
+- More than one implementation chat may run at the same time. Each chat should stay contextually focused and avoid overlapping edits where possible to minimize conflicts.
 - Modularize progressively and intentionally as patterns stabilize. Avoid premature abstraction and unnecessary micro-components.
 - Separate logic from `app/page.tsx` when it improves architectural clarity, maintainability, and separation of concerns, not merely for stylistic purity.
 
@@ -27,6 +28,26 @@ Core philosophy:
 - Prefer calm patient-facing surfaces over admin-style control panels.
 
 CarePland Personal is currently a beta product. The old Adalo/Make/Twilio implementation is treated as product-discovery history, not as a code architecture to clone.
+
+## Legacy Adalo
+
+Legacy Adalo data may be imported for early adopters so they can resume testing in CarePland Personal with familiar appointments, notes, and CarePrep context. Treat these imports as one-off continuity migrations, not as a permanent parallel workflow.
+
+Structural assumptions:
+
+- Adalo `UID` / `UID.` / `UID_api` was the old unifying field for a user group. In CarePland Personal, that grouping maps to one Care Circle owned by one authenticated user.
+- Old Adalo usernames are not user-facing identifiers in CarePland Personal and should not be carried forward as product terminology.
+- Only explicitly reviewed real early adopters should be imported. Adalo test flags are unreliable: some real testers were flagged as test accounts, and some test-looking rows may still represent real people.
+- Placeholder-looking emails such as `@carepland.com`, `a@a.com`, `b@b.com`, and `cp@cp.com` may be intentional beta login aliases provided to testers. They can be imported when explicitly approved, but users will not be able to use normal email-based password reset or email verification flows unless the email is replaced with one they control.
+- Imported users with placeholder/login-alias emails should be marked as requiring an email update. Product behavior should send them through profile onboarding, blank the email field, require a real email they control, and attempt to update Supabase auth email before treating onboarding/account setup as complete.
+- Existing Adalo bcrypt password hashes should not be reused. Imported users should receive Supabase-auth accounts with generated temporary passwords or a password reset flow.
+- Adalo `Errands_Tasks` rows are the primary appointment shell when they contain appointment/date/provider/practice information. Adalo `Appointment_details` rows hold logged visit notes/takeaways/follow-ups and pair to tasks through `Errands_Tasks.appt_detail_id = Appointment_details.ID` and `Appointment_details.id_number = Errands_Tasks.ID`.
+- Paired task/detail rows should become one CarePland appointment, not duplicate appointment records.
+- Adalo appointment details with summaries, takeaways, follow-ups, or transcripts should become version 1 current Notes on the imported appointment.
+- Adalo guidance fields from task rows should become imported CarePrep guidance when present, marked with `source = legacy_adalo`.
+- Legacy import records should use `source = legacy_adalo` where the destination table supports `source`.
+- Care VIP assignment should prefer explicit legacy care-recipient names when present; otherwise default to the imported user/profile name.
+- Imports should start as dry-runs with a reviewable plan before any production write.
 
 ## Core Terminology And Naming
 
@@ -55,16 +76,29 @@ Naming preferences:
 Current implemented assumptions:
 
 - CarePland Personal has a plan/tier display in Profile/Admin contexts.
-- Personal/default plan supports a single primary Care VIP experience.
-- Personal Plus is visually/conceptually associated with multiple Care VIPs.
+- Profile should show current plan status quietly; detailed tier comparison belongs on the public website or billing flow rather than the Profile page.
+- Pricing tiers should reflect increasing continuity support, automation, reduced cognitive load, and care coordination rather than arbitrary technical usage limits.
+- Tier 1: Free introduces basic appointment tracking, limited manual CarePrep generation, limited document/OCR/calendar imports, and self-service help. It does not automatically generate CarePrep.
+- Tier 2: Active Use supports active healthcare management with larger manual CarePrep and import allowances, CarePland assistant/chat support access, and increased historical/context depth. It remains primarily manually triggered.
+- Tier 3: Premium Individual supports one Care VIP with automatic CarePrep for medical appointments, smart reminders, proactive preparation workflows, generous import allowances, enhanced support responsiveness, and reduced manual effort.
+- Tier 4: Group supports multiple Care VIPs, automatic CarePrep across multiple people, shared continuity workflows, group-oriented coordination, highest import allowances, and most generous support access.
+- Existing database plan ids are currently preserved for compatibility: `personal` maps to Free and `personal_plus` maps to Group.
 - Billing-grade enforcement is not complete; plan enforcement is currently lightweight and beta-oriented.
-- Multi-user/family access is a future expansion, not a fully implemented permission system.
+- Backend plan-feature metering foundation exists as SQL patches: `plan_features`, `care_circle_feature_usage`, `check_feature_access`, `consume_feature_usage`, and `refund_feature_usage`.
+- Manual CarePrep generation is the first metered workflow and uses feature key `careprep_manual`; automatic CarePrep entitlement uses feature key `careprep_auto` for future automation work.
+- Metering reserves usage before expensive work and refunds it if generation fails before a CarePrep draft is saved.
+- Manual CarePrep plan-limit copy is editable in Admin > Content > Messages via `careprep_manual_limit_message`; `plan_features.limit_message` remains a backend fallback.
+- Multi-user/group permissioning is future expansion, not a fully implemented role system.
+- CP Family is a separate future app direction for deeper caregiving support and should not be used as the Tier 4 label for CarePland Personal.
+- Plan changes during beta may be mediated through support/admin rather than self-service billing.
+- Metering should use user-facing workflow language such as CarePrep generations, automatic appointment preparation, document imports, and Care VIPs.
+- Do not expose technical concepts such as tokens, credits, context units, or model usage in patient-facing pricing surfaces.
 
 Future tiering may include:
 
-- Additional Care VIP limits.
-- CarePland Family / CP Family support.
 - More formal subscription and billing enforcement.
+- Trial access to selected higher-tier automation so Free users can experience proactive continuity and reduced cognitive effort.
+- Automated usage metering for document uploads, OCR processing, iCal/calendar imports, support assistant access, context depth, and additional workflows beyond CarePrep.
 
 ## Care VIP Definitions And Rules
 
@@ -230,8 +264,19 @@ AI instruction management:
 Agent knowledge:
 
 - Admin AI area includes Agent Knowledge content for product facts, known limitations, and escalation guidance.
+- Agent Knowledge also includes voice/tone guidance so the support assistant stays warm, steady, practical, empathetic without pretending intimacy, supportive without being syrupy, and clear about limits without sounding cold.
 - The support assistant injects current Agent Knowledge into its context.
 - Agent Knowledge should be updated when product capabilities change to prevent context drift.
+- Agent Knowledge includes beta plan tier facts, CarePrep metering context, and the limitation that self-service billing/plan changes are not wired up yet.
+- Agent Knowledge should evolve toward a proposal-based lifecycle: automated or manual checks can propose changes with justifications, source evidence, confidence, and risk category; Admin should approve, edit, reject, defer, or publish those changes.
+- Agent Knowledge proposals should preserve the original current text, AI-proposed text, and Admin-final text when edited. Admin edits are first-class QA signal and should not overwrite the original proposal trail.
+- Rollbacks should be granular where possible by Agent Knowledge block/entry and should create new current versions rather than deleting history.
+- User feedback on support assistant answer quality should feed knowledge-gap detection, proposal generation, and regression-test candidates. User feedback should not directly rewrite Agent Knowledge without review.
+- Agent Knowledge proposal generation should have Admin-controlled settings. Background auto-generation, software-update-triggered checks, scheduled checks, feedback clustering, and severity/quantity thresholds should be individually configurable.
+- Background auto-generation should have a configurable period in days so Admin can control how often unattended checks are queued.
+- Software-update-triggered checks should be easy to disable temporarily when Admin is doing many rapid implementation passes.
+- Feedback clustering should group similar answer-quality issues and may push a proposal automatically only when configured thresholds are met, such as repeated not-helpful feedback, Admin review flags, severity category, or a time-window threshold.
+- Manual Agent Knowledge checks should always be available from Admin AI regardless of background automation settings.
 
 AI user-facing principle:
 
@@ -255,6 +300,11 @@ Admin:
 - Admin header/ticket indicators should show actionable counts with words, e.g. `New` and `Followup`, not mystery fractions.
 - Admin tools may be denser than patient-facing pages.
 - Admin pages may use wider layouts than user-facing pages.
+- Admin Users / Activity supports a read-only `View as user` workflow for test-account pre-flight and troubleshooting. It is not auth impersonation and should not create a Supabase session as the target user.
+- Read-only admin user views should default to metadata and account/workflow shape. Sensitive profile/contact details, full appointment titles, appointment times, full provider/practice/location details, appointment details, Notes, CarePrep bodies, support message bodies, imported text, and extracted content should stay hidden until deliberately revealed. Appointment previews may show dates plus short prefixes of title/provider/practice/location so the view remains operationally useful without exposing full details.
+- Non-sensitive appointment metadata such as created/updated timestamps, short record IDs, Care VIP assignment, note/CarePrep presence, and draft/current state can be shown in Admin read-only views to support import QA and troubleshooting.
+- Sensitive reveals should be backed by admin-scoped RPCs and audit events, not by simply hiding already-loaded sensitive content in the browser.
+- Admin access is beginning to move from a single `is_admin` flag toward extensible permission scopes for future staff roles. `is_admin` remains the current owner/admin compatibility flag.
 
 Email notifications:
 
@@ -271,6 +321,8 @@ Dynamic content admin exists for app text that may change, including:
 - Support assistant copy.
 - Support email content.
 - Onboarding/welcome text.
+- Profile helper text, including the expandable plan-tier explanation.
+- Short workflow messages, including the manual CarePrep plan-limit message.
 - AI Agent knowledge.
 
 Rules:
@@ -279,6 +331,36 @@ Rules:
 - Preserve version history.
 - Reverting content should create a new current version.
 - Keep user-facing messages calm and practical.
+- Profile plan-tier helper content supports line breaks and a tiny safe inline formatting subset for bold text: `<b>` and `<strong>`.
+
+## Public Website And Domain Positioning
+
+CarePland should have a public website/front door separate from the signed-in app experience.
+
+Current website direction:
+
+- `carepland.com` / `www.carepland.com` should present the public marketing/beta site.
+- `app.carepland.com` remains the production signed-in app.
+- Vercel can host both the app and public website, either as separate projects or coordinated deployments.
+- The public website should route primary top-level calls to action toward beta signup rather than directly into the app while CarePland Personal is in beta.
+- Beta signup should collect interested tester emails and route operationally to `info@carepland.com`.
+- The public website should be calm, patient-centered, and concrete rather than startup-generic.
+
+Core public positioning:
+
+- CarePland completes the appointment loop.
+- CarePland helps patients and caregivers bring forward the context that matters.
+- CarePland turns past visits, notes, and care history into actionable preparation for the next appointment.
+- Healthcare asks patients to be active participants, but most tools are built around providers and systems. CarePland is purpose-built for patients and caregivers in the space between appointments.
+- CarePland helps people arrive prepared to collaborate with their clinician; avoid framing the product as replacing or competing with the doctor.
+
+Website content assumptions:
+
+- CP Pers can be introduced publicly as different perspectives for different care moments, but the core public language should remain understandable without internal feature jargon.
+- Public pricing/tier explanation can live on the website; draft website copy is preserved in `docs/CAREPLAND_PRICING_TIERS_WEBSITE_COPY.md`.
+- The existing public website/front-door surface can expose pricing as a top navigation tab for review.
+- A future demo video should be embedded from a video platform or CDN rather than stored as a large file in the website repo/deployment.
+- The circular hands/heart mark can be used as the public logo direction because it better implies the appointment loop than the rounded-square variant.
 
 ## Technical Stack And Architecture
 
@@ -325,6 +407,7 @@ Supabase is used for:
 - Support tickets/messages.
 - Support assistant interaction storage and admin reviews.
 - Integration error summaries.
+- Plan feature definitions and Care Circle feature usage counters.
 
 SQL rules:
 
@@ -355,6 +438,7 @@ Deployment:
 
 - Vercel hosts the app.
 - `app.carepland.com` is production/live.
+- `carepland.com` / `www.carepland.com` may host the public website/front door.
 - Vercel preview deployments are useful for beta testing.
 - Environment indicators such as `DEV`/`Preview` are useful outside production.
 - Production custom domain should not show preview/dev status.
@@ -377,6 +461,9 @@ Patient-facing UX:
 - Keep primary next action obvious.
 - Keep secondary actions available but less dominant.
 - Hide controls that are not currently useful.
+- Patient-facing UI should feel gentle, kind, and human-scale. Avoid "operator cockpit" density unless the user is in an admin or power-review context. Prefer calm grouping, plain language, and a small number of meaningful actions over dense controls, status panels, and configuration-heavy surfaces.
+- Avoid confirmation prompts for harmless, reversible actions such as signing out. Use confirmation or warning prompts when an action would discard unsaved user-entered changes, remove user data, or otherwise create meaningful loss.
+- Treat copy fit and line breaks as part of the design system, not incidental cleanup. Patient-facing UI should avoid awkward orphaned words, stranded helping verbs, cramped labels, and accidental wraps when a small wording change, deliberate line break, or modest layout adjustment can make the surface feel calmer and more polished. Single words should generally not wrap alone to a new line, and intentional multi-line word groups should look visually balanced.
 
 Admin UX:
 
@@ -423,6 +510,9 @@ Likely future directions:
 - More robust favorite location management.
 - Assistant-driven help and product guidance.
 - Improved prompt/Agent Knowledge lifecycle.
+- Agent Knowledge drift checks triggered by software updates, available manually from Admin, and scheduled as a beta safety net.
+- Assistant answer-quality regression checks based on real user questions and Admin-reviewed support assistant interactions.
+- Background Agent Knowledge checks should create reviewable proposals, not silently publish changes.
 - Broader error monitoring and alerting.
 - More formal staging/test data strategy.
 - SMS/text notification option when cost/benefit is justified.
@@ -448,6 +538,8 @@ Demo/test users:
 
 - Test-user flag should exist but should not be easy to toggle accidentally.
 - SQL/admin maintenance scripts are acceptable for test-user flag changes.
+- Imported Adalo/test users may be reviewed through the read-only Admin `View as user` flow before sending login instructions. Use this to confirm onboarding, email-update requirements, Care Circle/Care VIP setup, appointment import shape, and visible account state without changing the user's data.
+- Admin user-data access should be audited. Opening a read-only user view and revealing sensitive data should record the acting admin, target user, resource type, optional resource id, permission scope, reason when available, and timestamp.
 
 ## Implementation Decision Log
 
@@ -456,8 +548,12 @@ Demo/test users:
 - Prefer email notifications before SMS due to cost and complexity.
 - Use `noreply@carepland.com`.
 - Use Agent Knowledge in Admin AI section to keep the support assistant current.
+- Agent Knowledge updates should be reviewable proposals before publication when they materially affect product behavior, pricing, limitations, support escalation, medical-safety boundaries, or assistant voice.
+- Agent Knowledge proposal tracking should preserve original, AI-suggested, and Admin-final text so answer-quality failures can be traced to stale knowledge, proposal quality, Admin edits, or assistant behavior.
 - Use compact mark-only logo in signed-in header; keep fuller logo for signed-out context.
 - Cap normal signed-in user-facing pages at 900px; allow Admin to be wider.
 - Appointment toolbar extracted to `app/components/AppointmentViewToolbar.tsx` because it has a clean low-coupling boundary.
 - Do not extract the full appointment card yet; it is too coupled to page-local state and would create a large prop bundle.
-
+- Public website CTA should point to beta signup during beta rather than repeatedly sending users to the app.
+- Public website video should be embedded from a hosted video service/CDN rather than committed as a large deployment asset.
+- Admin `View as user` is implemented as read-only admin snapshot/reveal RPCs with audit logging rather than true session impersonation. Sensitive data should be fetched only after an explicit reveal action.

@@ -2,6 +2,17 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 type JsonObject = Record<string, unknown>;
+type AppContentFilter = {
+  eq: (column: string, value: unknown) => AppContentFilter;
+  limit: (
+    count: number
+  ) => Promise<{ data: Array<{ body: unknown }> | null; error: unknown }>;
+};
+type AppContentReader = {
+  from: (table: string) => {
+    select: (columns: string) => AppContentFilter;
+  };
+};
 type ReviewAction =
   | "accept"
   | "discard"
@@ -23,6 +34,32 @@ function errorMessage(error: unknown): string {
   }
 
   return String(error || "Something went wrong.");
+}
+
+function jsonBoolean(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
+function jsonString(value: unknown, fallback = ""): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+async function currentAppContentText(
+  supabase: AppContentReader,
+  contentKey: string
+) {
+  const { data, error } = await supabase
+    .from("app_content_versions")
+    .select("body")
+    .eq("content_key", contentKey)
+    .eq("is_current", true)
+    .limit(1);
+
+  if (error) {
+    return "";
+  }
+
+  return typeof data?.[0]?.body === "string" ? data[0].body.trim() : "";
 }
 
 function asTextList(value: unknown): string[] {
@@ -105,6 +142,12 @@ function carePrepPayload(output: JsonObject) {
 }
 
 export async function POST(request: NextRequest) {
+  let reservedMeteredFeature:
+    | { careCircleId: string; featureKey: string; quantity: number }
+    | null = null;
+  let meteredFeatureFinalized = false;
+  let meteringAccessToken = "";
+
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
       throw new Error("Missing Supabase server configuration.");
@@ -116,6 +159,7 @@ export async function POST(request: NextRequest) {
 
     const authorization = request.headers.get("authorization") ?? "";
     const accessToken = authorization.replace(/^Bearer\s+/i, "").trim();
+    meteringAccessToken = accessToken;
 
     if (!accessToken) {
       throw new Error("Please sign in before generating CarePrep.");
@@ -453,6 +497,43 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const meteredFeatureKey = "careprep_manual";
+    const { data: meteringResult, error: meteringError } = await supabase.rpc(
+      "consume_feature_usage",
+      {
+        p_care_circle_id: appointment.care_circle_id,
+        p_feature_key: meteredFeatureKey,
+        p_quantity: 1,
+      }
+    );
+
+    if (meteringError) {
+      throw meteringError;
+    }
+
+    const metering = (meteringResult ?? {}) as JsonObject;
+
+    if (!jsonBoolean(metering.allowed)) {
+      const dynamicLimitMessage = await currentAppContentText(
+        supabase as unknown as AppContentReader,
+        "careprep_manual_limit_message"
+      );
+
+      throw new Error(
+        dynamicLimitMessage ||
+          jsonString(
+            metering.message,
+            "This CarePrep generation is not available on your current plan."
+          )
+      );
+    }
+
+    reservedMeteredFeature = {
+      careCircleId: appointment.care_circle_id,
+      featureKey: meteredFeatureKey,
+      quantity: 1,
+    };
+
     const { data: instructionSets, error: instructionSetError } = await supabase
       .from("ai_instruction_sets")
       .select("id,instruction_key,name,description")
@@ -694,6 +775,8 @@ export async function POST(request: NextRequest) {
       throw guidanceError;
     }
 
+    meteredFeatureFinalized = true;
+
     if (existingDrafts.length > 0) {
       const { error: discardDraftError } = await supabase
         .from("careprep_guidance")
@@ -718,6 +801,31 @@ export async function POST(request: NextRequest) {
         : "AI CarePrep draft generated.",
     });
   } catch (error) {
+    if (
+      reservedMeteredFeature &&
+      !meteredFeatureFinalized &&
+      meteringAccessToken
+    ) {
+      try {
+        const refundClient = createClient(supabaseUrl, supabaseAnonKey, {
+          auth: { persistSession: false },
+          global: {
+            headers: {
+              Authorization: `Bearer ${meteringAccessToken}`,
+            },
+          },
+        });
+
+        await refundClient.rpc("refund_feature_usage", {
+          p_care_circle_id: reservedMeteredFeature.careCircleId,
+          p_feature_key: reservedMeteredFeature.featureKey,
+          p_quantity: reservedMeteredFeature.quantity,
+        });
+      } catch {
+        // Preserve the original generation error; failed refund can be reviewed in usage counters.
+      }
+    }
+
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
   }
 }

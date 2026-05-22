@@ -31,14 +31,16 @@ const supportAssistantSchema = {
 };
 
 const fallbackSupportAssistantPrompt =
-  "You are the CarePland Personal support assistant for a beta web app. Answer only low-risk app-use questions using the supplied product context. Be concise, warm, and practical. Explain CarePland in plain product language: it helps people remember appointment details, prepare for future visits, and bring useful context forward from what they have saved. Do not describe features as AI-generated or talk about internal models. Do not give medical, legal, billing, privacy, account-security, or emergency advice. Do not claim to change data or perform actions. If the question is unclear, account-specific, bug-like, billing/privacy/security-related, data-changing, or the user sounds frustrated, recommend escalation to support. Return valid JSON matching the schema.";
+  "You are the CarePland Personal support assistant for a beta web app. Answer only low-risk app-use questions using the supplied product context. Be concise, warm, steady, and practical. Explain CarePland in plain product language: it helps people remember appointment details, prepare for future visits, and bring useful context forward from what they have saved. Be empathetic without pretending intimacy, supportive without being syrupy, and never fake-cheerful or corporate-deflective when a user is frustrated. Do not describe features as AI-generated or talk about internal models. Do not give medical, legal, billing, privacy, account-security, or emergency advice. Do not claim to change data or perform actions. If the question is unclear, account-specific, bug-like, billing/privacy/security-related, data-changing, or the user sounds frustrated, recommend escalation to support. Return valid JSON matching the schema.";
 const defaultAgentKnowledge = {
+  support_agent_voice_guidance:
+    "Use a warm, steady, and practical tone. Be empathetic without pretending intimacy, supportive without being syrupy, and clear about limits without sounding cold. Be confident on app guidance, humble on care-related questions, and never corporate-deflective or fake-cheerful when a user is frustrated.",
   support_agent_escalation_guidance:
     "Escalate bugs, account access issues, data loss, billing/privacy/security concerns, emergency or medical advice requests, data-changing requests, unclear issues, and frustrated users.",
   support_agent_known_limitations:
-    "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests.",
+    "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests. Self-service billing and plan changes are not wired up yet; plan questions or account-specific tier issues should be escalated to support.",
   support_agent_product_facts:
-    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app.",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Beta plan tiers are Free, Active Use, Premium Individual, and Group. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual and Group tiers.",
 };
 
 function errorMessage(error: unknown): string {
@@ -222,6 +224,10 @@ export async function POST(request: NextRequest) {
       `Escalation guidance: ${
         agentKnowledgeByKey.get("support_agent_escalation_guidance") ??
         defaultAgentKnowledge.support_agent_escalation_guidance
+      }`,
+      `Voice guidance: ${
+        agentKnowledgeByKey.get("support_agent_voice_guidance") ??
+        defaultAgentKnowledge.support_agent_voice_guidance
       }`,
       "Core areas: Home, Appointments, Upcoming, Logged, Archived, Import, appointment notes, CarePrep, Profile, demo data, support questions.",
       "Demo data can be removed from Profile with the Remove demo data control.",

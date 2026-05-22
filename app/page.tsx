@@ -2,7 +2,23 @@
 
 import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FormEvent,
+  ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  AgentKnowledgeAutomationSettings,
+  AgentKnowledgeCheckRun,
+  AgentKnowledgeProposal,
+  AgentKnowledgeProposalItem,
+  AgentKnowledgeProposalItemReviewStatus,
+  AgentKnowledgeProposalsPanel,
+} from "./components/AgentKnowledgeProposalsPanel";
+import { AdminNavButton } from "./components/admin/AdminAttention";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import {
@@ -48,6 +64,23 @@ type CareCircleEntitlement = {
   plan_id: string;
   plan_name: string;
 };
+
+type PricingTier = {
+  id: string;
+  aliases?: string[];
+  name: string;
+  label: string;
+  purpose: string;
+  bestFor: string;
+  careVips: string;
+  carePrep: string;
+  imports: string;
+  support: string;
+  automation: string;
+  highlights: string[];
+};
+
+type PublicSiteTab = "access" | "pricing";
 
 type AppointmentNote = {
   id: string;
@@ -162,6 +195,83 @@ type AdminUserActivityRow = {
   last_support_ticket_at: string | null;
   is_admin: boolean;
   is_test_user: boolean;
+};
+
+type AdminReadonlyProfile = {
+  id: string;
+  display_name: string | null;
+  masked_email: string | null;
+  account_created_at: string | null;
+  last_seen_at: string | null;
+  onboarding_completed_at: string | null;
+  beta_terms_acknowledged_at: string | null;
+  beta_privacy_acknowledged_at: string | null;
+  beta_disclaimer_acknowledged_at: string | null;
+  requires_email_update: boolean;
+  is_admin: boolean;
+  is_test_user: boolean;
+  has_contact_details: boolean;
+};
+
+type AdminReadonlyCounts = {
+  appointment_count: number;
+  upcoming_appointment_count: number;
+  logged_appointment_count: number;
+  note_count: number;
+  careprep_count: number;
+  support_ticket_count: number;
+};
+
+type AdminReadonlyEntitlement = {
+  care_circle_id: string;
+  max_active_subjects: number | null;
+  plan_id: string | null;
+  plan_name: string | null;
+  status: string | null;
+};
+
+type AdminReadonlyAppointment = {
+  id: string;
+  care_subject_id: string | null;
+  current_note_id: string | null;
+  current_guidance_id: string | null;
+  current_guidance_review_status: string | null;
+  created_at: string | null;
+  title_preview: string | null;
+  starts_on: string | null;
+  status: string;
+  updated_at: string | null;
+  is_sample_data: boolean;
+  has_starts_at: boolean;
+  has_provider_name: boolean;
+  has_provider_organization: boolean;
+  has_location_name: boolean;
+  provider_name_preview: string | null;
+  provider_organization_preview: string | null;
+  location_name_preview: string | null;
+  has_reason: boolean;
+  has_location_address: boolean;
+  has_location_phone: boolean;
+  has_note: boolean;
+  has_careprep: boolean;
+};
+
+type AdminReadonlySnapshot = {
+  appointments: AdminReadonlyAppointment[];
+  care_subjects: CareSubject[];
+  counts: AdminReadonlyCounts;
+  entitlements: AdminReadonlyEntitlement[];
+  profile: AdminReadonlyProfile;
+};
+
+type AdminSensitiveResourceType =
+  | "appointment_details"
+  | "appointment_note"
+  | "careprep_guidance"
+  | "profile_contact";
+
+type AdminRevealedSensitiveData = Record<string, unknown> & {
+  resource_type?: AdminSensitiveResourceType;
 };
 
 type AdminIntegrationErrorSummaryRow = {
@@ -381,7 +491,11 @@ function UserIcon({ className = "h-5 w-5" }: { className?: string }) {
 }
 
 type AppointmentView = "archived" | "logged" | "upcoming";
-type AiAdminTab = "agentKnowledge" | "history" | "instructions";
+type AiAdminTab =
+  | "agentKnowledge"
+  | "history"
+  | "instructions"
+  | "proposals";
 type AdminTab =
   | "ai"
   | "assistantReview"
@@ -392,6 +506,20 @@ type AdminTab =
   | "tickets"
   | "tools"
   | "users";
+type AdminViewScopeType = "admin_tab" | "ai_admin_tab" | "product_area";
+type AdminViewState = {
+  admin_user_id: string;
+  last_viewed_at: string;
+  scope_key: string;
+  scope_type: AdminViewScopeType;
+  updated_at: string;
+};
+type AdminAttentionSummary = {
+  attention_count: number;
+  latest_activity_at: string | null;
+  scope_key: string;
+  scope_type: AdminViewScopeType;
+};
 type AiWorkflowKey =
   | "bulk_appointment_intake"
   | "careprep_generation"
@@ -447,7 +575,7 @@ type ProductMgmtItemDraft = {
 };
 type PendingModifierSwitch = {
   appointmentId: string;
-  target: AppointmentModifier;
+  target: AppointmentModifier | null;
 };
 type ToastState = {
   actionLabel?: string;
@@ -620,8 +748,175 @@ const appDraftStateStorageKey = "carepland-draft-state:v1";
 const defaultEntitlement: CareCircleEntitlement = {
   max_active_subjects: 1,
   plan_id: "personal",
-  plan_name: "Personal",
+  plan_name: "Free",
 };
+
+const defaultAgentKnowledgeAutomationSettings: AgentKnowledgeAutomationSettings = {
+  auto_generation_enabled: false,
+  background_generation_period_days: 7,
+  feedback_clustering_enabled: true,
+  feedback_min_admin_flags: 1,
+  feedback_min_not_helpful_count: 3,
+  feedback_push_to_proposal_enabled: true,
+  feedback_window_days: 14,
+  scheduled_checks_enabled: false,
+  settings_key: "default",
+  severity_threshold: "medium",
+  software_update_checks_enabled: true,
+  updated_at: "",
+};
+
+const pricingTiers: PricingTier[] = [
+  {
+    id: "personal",
+    aliases: ["free"],
+    name: "Free",
+    label: "Tier 1",
+    purpose: "A gentle way to try appointment memory and CarePrep.",
+    bestFor: "Light or occasional appointment tracking",
+    careVips: "1 Care VIP",
+    carePrep: "Limited manual CarePrep generations",
+    imports: "Limited document uploads, OCR, and calendar imports",
+    support: "Self-service help",
+    automation: "Manual preparation only",
+    highlights: [
+      "Basic appointment tracking",
+      "Manual CarePrep generation",
+      "Limited import allowances",
+    ],
+  },
+  {
+    id: "active_use",
+    name: "Active Use",
+    label: "Tier 2",
+    purpose: "More room for active healthcare management.",
+    bestFor: "Chronic care, frequent specialists, or fuller history",
+    careVips: "1 Care VIP",
+    carePrep: "Expanded manual CarePrep allowance",
+    imports: "Expanded document uploads, OCR, and calendar imports",
+    support: "CarePland assistant and chat support access",
+    automation: "Mostly manual preparation",
+    highlights: [
+      "Larger CarePrep generation bag",
+      "Deeper saved appointment context",
+      "More import capacity",
+    ],
+  },
+  {
+    id: "premium_individual",
+    name: "Premium Individual",
+    label: "Tier 3",
+    purpose: "Proactive continuity support for one person.",
+    bestFor: "People who want CarePland to quietly do more work",
+    careVips: "1 Care VIP",
+    carePrep: "Automatic CarePrep for medical appointments",
+    imports: "Generous document upload and import allowances",
+    support: "Enhanced support responsiveness",
+    automation: "Automatic preparation after appointment creation or import",
+    highlights: [
+      "Automatic appointment preparation",
+      "Smart reminders and preparation workflows",
+      "Reduced manual effort",
+    ],
+  },
+  {
+    id: "personal_plus",
+    aliases: ["group", "caregiver"],
+    name: "Group",
+    label: "Tier 4",
+    purpose: "Coordination across multiple Care VIPs.",
+    bestFor: "Families, caregivers, or groups managing care for others",
+    careVips: "Multiple Care VIPs",
+    carePrep: "Automatic CarePrep across multiple people",
+    imports: "Highest upload, OCR, and calendar import allowances",
+    support: "Most generous support access",
+    automation: "Multi-person automatic preparation and continuity support",
+    highlights: [
+      "Multiple Care VIP profiles",
+      "Shared continuity workflows",
+      "Group-oriented coordination support",
+    ],
+  },
+];
+
+function pricingTierForEntitlement(entitlement: CareCircleEntitlement) {
+  return (
+    pricingTiers.find(
+      (tier) =>
+        tier.id === entitlement.plan_id ||
+        tier.aliases?.includes(entitlement.plan_id)
+    ) ??
+    pricingTiers.find((tier) => tier.name === entitlement.plan_name) ??
+    pricingTiers[0]
+  );
+}
+
+function formattedHelpLines(body: string) {
+  const trimmedBody = body.trim();
+
+  if (!trimmedBody) {
+    return [];
+  }
+
+  if (trimmedBody.includes("\n")) {
+    return trimmedBody
+      .split("\n")
+      .map((line) => line.trim().replace(/^[-*]\s+/, ""))
+      .filter(Boolean);
+  }
+
+  return trimmedBody
+    .split(". ")
+    .map((line, index, lines) => {
+      const trimmedLine = line.trim();
+      const isLastLine = index === lines.length - 1;
+
+      if (!trimmedLine) {
+        return "";
+      }
+
+      return isLastLine || trimmedLine.endsWith(".")
+        ? trimmedLine
+        : `${trimmedLine}.`;
+    })
+    .filter(Boolean);
+}
+
+function renderBasicInlineMarkup(text: string): ReactNode[] {
+  const parts = text.split(/(<\/?(?:b|strong)>)/gi);
+  const renderedParts: ReactNode[] = [];
+  let isBold = false;
+
+  parts.forEach((part, index) => {
+    const normalizedPart = part.toLowerCase();
+
+    if (normalizedPart === "<b>" || normalizedPart === "<strong>") {
+      isBold = true;
+      return;
+    }
+
+    if (normalizedPart === "</b>" || normalizedPart === "</strong>") {
+      isBold = false;
+      return;
+    }
+
+    if (!part) {
+      return;
+    }
+
+    renderedParts.push(
+      isBold ? (
+        <strong className="font-semibold text-slate-900" key={`${part}-${index}`}>
+          {part}
+        </strong>
+      ) : (
+        part
+      )
+    );
+  });
+
+  return renderedParts;
+}
 
 const appContentDefaults = {
   beta_disclaimer_ack:
@@ -639,6 +934,10 @@ const appContentDefaults = {
   demo_prompt_body:
     "Add a few demo appointments, notes, and CarePrep examples. You can skip this if you want to start clean.",
   demo_prompt_title: "Want demo data to explore?",
+  profile_plan_tier_help_body:
+    "- <b>Free</b> is for light use.\n- <b>Active Use</b> adds larger manual CarePrep and import allowances.\n- <b>Premium Individual</b> adds automatic appointment preparation for one Care VIP.\n- <b>Group</b> supports multiple Care VIPs.",
+  careprep_manual_limit_message:
+    "You have used this month's manual CarePrep generations. Plan changes are not wired up yet, but support can help during beta.",
   support_contact_note:
     "Need help or want to report an issue? Contact support from the app and include what you were trying to do.",
   support_reply_email_body:
@@ -649,9 +948,11 @@ const appContentDefaults = {
   support_agent_escalation_guidance:
     "Escalate bugs, account access issues, data loss, billing/privacy/security concerns, emergency or medical advice requests, data-changing requests, unclear issues, and frustrated users.",
   support_agent_known_limitations:
-    "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests.",
+    "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests. Self-service billing and plan changes are not wired up yet; plan questions or account-specific tier issues should be escalated to support.",
   support_agent_product_facts:
-    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app.",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Beta plan tiers are Free, Active Use, Premium Individual, and Group. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual and Group tiers.",
+  support_agent_voice_guidance:
+    "Use a warm, steady, and practical tone. Be empathetic without pretending intimacy, supportive without being syrupy, and clear about limits without sounding cold. Be confident on app guidance, humble on care-related questions, and never corporate-deflective or fake-cheerful when a user is frustrated.",
   welcome_guide_body:
     "Help is always available in the upper right [?].",
   welcome_guide_title: "Welcome to the CarePland beta",
@@ -717,6 +1018,13 @@ const appContentOptions = [
     label: "Agent escalation guidance",
   },
   {
+    category: "ai",
+    contentKey: "support_agent_voice_guidance",
+    description:
+      "Tone guidance injected into the support assistant knowledge context.",
+    label: "Agent voice guidance",
+  },
+  {
     category: "communications",
     contentKey: "support_reply_email_subject",
     description:
@@ -766,6 +1074,20 @@ const appContentOptions = [
     description: "Profile page explanation shown before adding demo data.",
     label: "Demo data add note",
   },
+  {
+    category: "profile",
+    contentKey: "profile_plan_tier_help_body",
+    description:
+      "Expandable Profile page note that briefly explains plan tier differences. Supports line breaks and basic bold tags: <b> or <strong>.",
+    label: "Plan tier help note",
+  },
+  {
+    category: "messages",
+    contentKey: "careprep_manual_limit_message",
+    description:
+      "Message shown when a user has used the current plan allowance for manual CarePrep generations.",
+    label: "Manual CarePrep limit message",
+  },
 ];
 
 const appContentCategories = [
@@ -794,6 +1116,11 @@ const appContentCategories = [
     description: "First-run guidance, demo data prompts, and welcome copy.",
     key: "onboarding",
     label: "Onboarding",
+  },
+  {
+    description: "Editable Profile page helper text and account-setting notes.",
+    key: "profile",
+    label: "Profile",
   },
   {
     description: "Short status, success, warning, and validation messages.",
@@ -861,6 +1188,23 @@ function profileDisplayName(
     .join(" ");
 
   return profile.displayName.trim() || fullName || profile.email.trim();
+}
+
+function profileDraftKey(profile: ProfileDraft) {
+  return JSON.stringify({
+    addressLine1: profile.addressLine1.trim(),
+    addressLine2: profile.addressLine2.trim(),
+    city: profile.city.trim(),
+    country: profile.country.trim(),
+    displayName: profile.displayName.trim(),
+    email: profile.email.trim(),
+    familyName: profile.familyName.trim(),
+    givenName: profile.givenName.trim(),
+    phone: profile.phone.trim(),
+    postalCode: profile.postalCode.trim(),
+    region: profile.region.trim(),
+    timezone: profile.timezone.trim(),
+  });
 }
 
 const timeZoneOptions = [
@@ -1188,6 +1532,49 @@ function asTextList(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function adminSensitiveKey(
+  resourceType: AdminSensitiveResourceType,
+  resourceId: string | null = null
+) {
+  return `${resourceType}:${resourceId ?? "profile"}`;
+}
+
+function adminAppointmentPrivacyLabel(appointment: AdminReadonlyAppointment) {
+  const hiddenItems = [
+    "full title",
+    appointment.has_starts_at ? "date/time" : "",
+    appointment.has_provider_name ? "provider" : "",
+    appointment.has_provider_organization ? "practice" : "",
+    appointment.has_location_name ? "location" : "",
+    appointment.has_reason ? "reason" : "",
+    appointment.has_location_address ? "address" : "",
+    appointment.has_location_phone ? "phone" : "",
+  ].filter(Boolean);
+
+  return hiddenItems.length > 0
+    ? `Hidden: ${hiddenItems.join(", ")}`
+    : "No hidden appointment details";
+}
+
+function shortId(value: string | null): string {
+  return value ? value.slice(0, 8) : "—";
+}
+
+function careSubjectNameForId(subjects: CareSubject[], subjectId: string | null) {
+  if (!subjectId) {
+    return "No Care VIP";
+  }
+
+  return (
+    subjects.find((subject) => subject.id === subjectId)?.display_name ??
+    `Care VIP ${shortId(subjectId)}`
+  );
+}
+
 function linesToList(value: string): string[] {
   return value
     .split("\n")
@@ -1423,6 +1810,16 @@ function formatDate(value: string | null): string {
 
 function formatAdminDate(value: string | null): string {
   return value ? formatDate(value) : "—";
+}
+
+function formatDateOnly(value: string | null): string {
+  if (!value) {
+    return "Date not set";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+  }).format(new Date(`${value}T12:00:00`));
 }
 
 function toDatetimeLocalValue(value: string | null): string {
@@ -1733,34 +2130,6 @@ function resetInstructionDraft(
   };
 }
 
-function supportMailtoHref(
-  userEmail: string | null,
-  area = "CarePland beta",
-  includeRuntimeContext = true
-) {
-  const subject = `CarePland beta support: ${area}`;
-  const body = [
-    "Hi CarePland support,",
-    "",
-    "I need help with:",
-    "",
-    "",
-    "---",
-    `User email: ${userEmail ?? "not signed in"}`,
-    ...(includeRuntimeContext
-      ? [
-          `Timestamp: ${new Date().toISOString()}`,
-          `Time zone: ${browserTimezone() || "unknown"}`,
-        ]
-      : []),
-    `Area: ${area}`,
-  ].join("\n");
-
-  return `mailto:support@carepland.com?subject=${encodeURIComponent(
-    subject
-  )}&body=${encodeURIComponent(body)}`;
-}
-
 function nonProductionEnvironmentLabel(hostname: string, configuredEnv = "") {
   const normalizedEnv = configuredEnv.trim().toLowerCase();
 
@@ -1831,6 +2200,48 @@ function removeStoredValue(storage: Storage, key: string) {
   } catch {
     // Storage can be unavailable in private or locked-down browser contexts.
   }
+}
+
+function adminViewStateKey(scopeType: AdminViewScopeType, scopeKey: string) {
+  return `${scopeType}:${scopeKey}`;
+}
+
+function latestIsoTimestamp(
+  values: Array<string | null | undefined>
+): string | null {
+  let latestTime = 0;
+  let latestValue: string | null = null;
+
+  values.forEach((value) => {
+    if (!value) {
+      return;
+    }
+
+    const time = new Date(value).getTime();
+    if (!Number.isFinite(time) || time <= latestTime) {
+      return;
+    }
+
+    latestTime = time;
+    latestValue = value;
+  });
+
+  return latestValue;
+}
+
+function isNewForAdmin(
+  latestActivityAt: string | null,
+  lastViewedAt: string | null
+) {
+  if (!latestActivityAt) {
+    return false;
+  }
+
+  if (!lastViewedAt) {
+    return true;
+  }
+
+  return new Date(latestActivityAt).getTime() > new Date(lastViewedAt).getTime();
 }
 
 function intakeDraftFromResult(value: unknown): TextIntakeDraft {
@@ -2053,6 +2464,7 @@ function parseICalendarAppointments(
 
 export default function Home() {
   const mainHeaderRef = useRef<HTMLElement | null>(null);
+  const adminReadonlyPanelRef = useRef<HTMLElement | null>(null);
   const [stickySecondaryOffset, setStickySecondaryOffset] = useState(0);
   const [runtimeEnvironmentLabel, setRuntimeEnvironmentLabel] = useState("");
   const [initialUiState] = useState<StoredUiState | null>(() => {
@@ -2076,6 +2488,8 @@ export default function Home() {
     );
   });
   const [authMode, setAuthMode] = useState<AuthMode>("signIn");
+  const [publicSiteTab, setPublicSiteTab] = useState<PublicSiteTab>("access");
+  const [planHelpExpanded, setPlanHelpExpanded] = useState(false);
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
     useState<AppointmentPanel | null>(
       initialUiState?.activeAppointmentPanel ?? null
@@ -2174,6 +2588,12 @@ export default function Home() {
   const [adminTab, setAdminTab] = useState<AdminTab>(
     initialUiState?.adminTab ?? "tools"
   );
+  const [adminViewStates, setAdminViewStates] = useState<
+    Record<string, AdminViewState>
+  >({});
+  const [adminAttentionSummaries, setAdminAttentionSummaries] = useState<
+    Record<string, AdminAttentionSummary>
+  >({});
   const [loadingInstructions, setLoadingInstructions] = useState(false);
   const [loadingCarePrepHistory, setLoadingCarePrepHistory] = useState(false);
   const [savingInstructions, setSavingInstructions] = useState(false);
@@ -2202,8 +2622,43 @@ export default function Home() {
   const [agentEscalationGuidance, setAgentEscalationGuidance] = useState(
     appContentDefaults.support_agent_escalation_guidance
   );
+  const [agentVoiceGuidance, setAgentVoiceGuidance] = useState(
+    appContentDefaults.support_agent_voice_guidance
+  );
   const [agentKnowledgeChangeNote, setAgentKnowledgeChangeNote] = useState("");
   const [savingAgentKnowledge, setSavingAgentKnowledge] = useState(false);
+  const [agentKnowledgeProposals, setAgentKnowledgeProposals] = useState<
+    AgentKnowledgeProposal[]
+  >([]);
+  const [agentKnowledgeProposalItems, setAgentKnowledgeProposalItems] =
+    useState<AgentKnowledgeProposalItem[]>([]);
+  const [agentKnowledgeProposalDrafts, setAgentKnowledgeProposalDrafts] =
+    useState<Record<string, string>>({});
+  const [agentKnowledgeProposalNotes, setAgentKnowledgeProposalNotes] =
+    useState<Record<string, string>>({});
+  const [agentKnowledgeProposalPublishNote, setAgentKnowledgeProposalPublishNote] =
+    useState("");
+  const [
+    agentKnowledgeAutomationSettings,
+    setAgentKnowledgeAutomationSettings,
+  ] = useState<AgentKnowledgeAutomationSettings>(
+    defaultAgentKnowledgeAutomationSettings
+  );
+  const [agentKnowledgeCheckRuns, setAgentKnowledgeCheckRuns] = useState<
+    AgentKnowledgeCheckRun[]
+  >([]);
+  const [loadingAgentKnowledgeProposals, setLoadingAgentKnowledgeProposals] =
+    useState(false);
+  const [savingAgentKnowledgeAutomationSettings, setSavingAgentKnowledgeAutomationSettings] =
+    useState(false);
+  const [queueingAgentKnowledgeRun, setQueueingAgentKnowledgeRun] =
+    useState(false);
+  const [selectedAgentKnowledgeProposalId, setSelectedAgentKnowledgeProposalId] =
+    useState("");
+  const [savingAgentKnowledgeProposalItemId, setSavingAgentKnowledgeProposalItemId] =
+    useState<string | null>(null);
+  const [publishingAgentKnowledgeProposalId, setPublishingAgentKnowledgeProposalId] =
+    useState<string | null>(null);
   const [revertingInstructionForId, setRevertingInstructionForId] = useState<
     string | null
   >(null);
@@ -2258,6 +2713,15 @@ export default function Home() {
     useState(false);
   const [adminUserActivityFilter, setAdminUserActivityFilter] =
     useState<AdminUserActivityFilter>("all");
+  const [adminReadonlySnapshot, setAdminReadonlySnapshot] =
+    useState<AdminReadonlySnapshot | null>(null);
+  const [loadingAdminReadonlyUserId, setLoadingAdminReadonlyUserId] =
+    useState<string | null>(null);
+  const [revealingAdminSensitiveKey, setRevealingAdminSensitiveKey] =
+    useState<string | null>(null);
+  const [adminRevealedSensitiveData, setAdminRevealedSensitiveData] = useState<
+    Record<string, AdminRevealedSensitiveData>
+  >({});
   const [adminIntegrationErrors, setAdminIntegrationErrors] = useState<
     AdminIntegrationErrorSummaryRow[]
   >([]);
@@ -2408,6 +2872,9 @@ export default function Home() {
   const [generatingCarePrepForId, setGeneratingCarePrepForId] = useState<
     string | null
   >(null);
+  const [carePrepGenerationErrors, setCarePrepGenerationErrors] = useState<
+    Record<string, string>
+  >({});
   const [savingCarePrepForId, setSavingCarePrepForId] = useState<string | null>(
     null
   );
@@ -2416,14 +2883,13 @@ export default function Home() {
   >(null);
   const [profileDraft, setProfileDraft] =
     useState<ProfileDraft>(emptyProfileDraft);
+  const [savedProfileDraft, setSavedProfileDraft] =
+    useState<ProfileDraft>(emptyProfileDraft);
   const [savedProfileLabel, setSavedProfileLabel] = useState("");
   const [sampleDataSeededAt, setSampleDataSeededAt] = useState<string | null>(
     null
   );
   const [sampleDataDeclinedAt, setSampleDataDeclinedAt] = useState<
-    string | null
-  >(null);
-  const [sampleDataSeedVersion, setSampleDataSeedVersion] = useState<
     string | null
   >(null);
   const [seedingSampleData, setSeedingSampleData] = useState(false);
@@ -2462,6 +2928,7 @@ export default function Home() {
   >(null);
   const [message, setMessage] = useState("");
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
+  const [requiresEmailUpdate, setRequiresEmailUpdate] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [homeNextAppointment, setHomeNextAppointment] =
@@ -2508,12 +2975,39 @@ export default function Home() {
       "support_agent_product_facts",
       "support_agent_known_limitations",
       "support_agent_escalation_guidance",
+      "support_agent_voice_guidance",
     ];
 
     return appContentVersions.filter((version) =>
       keys.includes(version.content_key)
     );
   }, [appContentVersions]);
+  const selectedAgentKnowledgeProposal =
+    agentKnowledgeProposals.find(
+      (proposal) => proposal.id === selectedAgentKnowledgeProposalId
+    ) ??
+    agentKnowledgeProposals[0] ??
+    null;
+  const selectedAgentKnowledgeProposalItems = selectedAgentKnowledgeProposal
+    ? agentKnowledgeProposalItems.filter(
+        (item) => item.proposal_id === selectedAgentKnowledgeProposal.id
+      )
+    : [];
+  const selectedAgentKnowledgeProposalPublishableCount =
+    selectedAgentKnowledgeProposalItems.filter((item) =>
+      ["accepted", "edited"].includes(item.review_status)
+    ).length;
+  const adminAttentionFor = (
+    scopeType: AdminViewScopeType,
+    scopeKey: string
+  ) =>
+    adminAttentionSummaries[adminViewStateKey(scopeType, scopeKey)] ?? null;
+  const adminLastViewedAt = (
+    scopeType: AdminViewScopeType,
+    scopeKey: string
+  ) =>
+    adminViewStates[adminViewStateKey(scopeType, scopeKey)]?.last_viewed_at ??
+    null;
   const selectedProductMgmtSectionConfig =
     productMgmtAreas.find(
       (section) => section.area_key === selectedProductMgmtSection
@@ -2766,9 +3260,15 @@ export default function Home() {
   }, [careSubjects]);
 
   const careVipLimit = Math.max(entitlement.max_active_subjects || 1, 1);
+  const currentPricingTier = pricingTierForEntitlement(entitlement);
   const canUseMultipleCareVips = careVipLimit > 1;
   const canFilterCareVips = careSubjects.length > 1;
   const canAddCareVip = careSubjects.length < careVipLimit;
+  const hasUnsavedProfileChanges =
+    profileDraftKey(profileDraft) !== profileDraftKey(savedProfileDraft);
+  const hasUnaddedCareVipName = newCareVipName.trim().length > 0;
+  const shouldWarnBeforeProfileSignOut =
+    mainTab === "profile" && (hasUnsavedProfileChanges || hasUnaddedCareVipName);
   const hasAcceptedBetaAgreement =
     Boolean(betaDisclaimerAcknowledgedAt) &&
     Boolean(betaPrivacyAcknowledgedAt) &&
@@ -2776,7 +3276,9 @@ export default function Home() {
   const needsBetaAgreement =
     Boolean(signedInEmail) && !hasAcceptedBetaAgreement;
   const needsOnboarding =
-    Boolean(signedInEmail) && hasAcceptedBetaAgreement && !onboardingCompletedAt;
+    Boolean(signedInEmail) &&
+    hasAcceptedBetaAgreement &&
+    (!onboardingCompletedAt || requiresEmailUpdate);
   const verifiedAccountEmail = signedInEmail ?? profileDraft.email;
   const passwordsMismatch =
     (authMode === "signUp" || authMode === "updatePassword") &&
@@ -2917,6 +3419,7 @@ export default function Home() {
               await Promise.all([
                 loadAiInstructions(initialUiState.selectedAiWorkflow),
                 loadAppContent(),
+                loadAgentKnowledgeProposals(),
               ]);
             } else if (initialUiState.adminTab === "product") {
               await loadProductMgmt();
@@ -3016,6 +3519,21 @@ export default function Home() {
 
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
+
+  useEffect(() => {
+    if (!adminReadonlySnapshot) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      adminReadonlyPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [adminReadonlySnapshot]);
 
   useEffect(() => {
     if (!signedInEmail || needsBetaAgreement || needsOnboarding) {
@@ -3322,6 +3840,8 @@ export default function Home() {
       throw new Error("Please sign in before loading appointments.");
     }
 
+    const userRequiresEmailUpdate =
+      user.user_metadata?.requires_email_update === true;
     const profileEmail = user.email ?? signedInEmail ?? "";
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
@@ -3335,13 +3855,20 @@ export default function Home() {
       throw profileError;
     }
 
-    const loadedProfileDraft = profileDraftFromRow(profileRow, profileEmail);
+    const loadedProfileDraft = {
+      ...profileDraftFromRow(profileRow, profileEmail),
+      email: userRequiresEmailUpdate ? "" : profileRow?.email ?? profileEmail,
+    };
     setProfileDraft(loadedProfileDraft);
+    setSavedProfileDraft(loadedProfileDraft);
     setSavedProfileLabel(profileDisplayName(loadedProfileDraft));
+    setRequiresEmailUpdate(userRequiresEmailUpdate);
     const userIsAdmin = profileRow?.is_admin === true;
     setIsAdmin(userIsAdmin);
     if (userIsAdmin) {
       void loadAdminSupportTickets();
+      void loadAdminViewStates();
+      void loadAdminAttentionSummary();
     }
     if (!userIsAdmin) {
       setMainTab((currentTab) =>
@@ -3361,11 +3888,6 @@ export default function Home() {
     setSampleDataDeclinedAt(
       typeof profileRow?.sample_data_declined_at === "string"
         ? profileRow.sample_data_declined_at
-        : null
-    );
-    setSampleDataSeedVersion(
-      typeof profileRow?.sample_data_seed_version === "string"
-        ? profileRow.sample_data_seed_version
         : null
     );
     setBetaDisclaimerAcknowledgedAt(
@@ -3403,7 +3925,7 @@ export default function Home() {
       return;
     }
 
-    if (!profileRow?.onboarding_completed_at) {
+    if (userRequiresEmailUpdate || !profileRow?.onboarding_completed_at) {
       setAppointments([]);
       setHomeNextAppointment(null);
       setHomeNextGuidance(null);
@@ -3414,7 +3936,11 @@ export default function Home() {
       setGuidance([]);
       setCarePrepHistory([]);
       setHistoryAppointmentId("");
-      setMessage("Finish profile setup to continue.");
+      setMessage(
+        userRequiresEmailUpdate
+          ? "Enter an email you can access to continue."
+          : "Finish profile setup to continue."
+      );
       return;
     }
 
@@ -3735,6 +4261,79 @@ export default function Home() {
       setMessage(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadAdminViewStates() {
+    try {
+      const { data, error } = await supabase
+        .from("admin_view_states")
+        .select("admin_user_id,scope_type,scope_key,last_viewed_at,updated_at");
+
+      if (error) {
+        throw error;
+      }
+
+      const states = (data ?? []) as AdminViewState[];
+      setAdminViewStates(
+        Object.fromEntries(
+          states.map((state) => [
+            adminViewStateKey(state.scope_type, state.scope_key),
+            state,
+          ])
+        )
+      );
+    } catch (error) {
+      console.warn("Unable to load admin view states", error);
+    }
+  }
+
+  async function loadAdminAttentionSummary() {
+    try {
+      const { data, error } = await supabase.rpc(
+        "get_admin_attention_summary"
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      const summaries = (data ?? []) as AdminAttentionSummary[];
+      setAdminAttentionSummaries(
+        Object.fromEntries(
+          summaries.map((summary) => [
+            adminViewStateKey(summary.scope_type, summary.scope_key),
+            summary,
+          ])
+        )
+      );
+    } catch (error) {
+      console.warn("Unable to load admin attention summary", error);
+    }
+  }
+
+  async function markAdminScopeViewed(
+    scopeType: AdminViewScopeType,
+    scopeKey: string
+  ) {
+    try {
+      const { data, error } = await supabase.rpc("mark_admin_view_state", {
+        p_scope_key: scopeKey,
+        p_scope_type: scopeType,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const updatedState = data as AdminViewState;
+      setAdminViewStates((currentStates) => ({
+        ...currentStates,
+        [adminViewStateKey(scopeType, scopeKey)]: updatedState,
+      }));
+      await loadAdminAttentionSummary();
+    } catch (error) {
+      console.warn("Unable to mark admin scope viewed", error);
     }
   }
 
@@ -4117,6 +4716,13 @@ export default function Home() {
             version.is_current
         )?.body ?? appContentDefaults.support_agent_escalation_guidance
       );
+      setAgentVoiceGuidance(
+        versions.find(
+          (version) =>
+            version.content_key === "support_agent_voice_guidance" &&
+            version.is_current
+        )?.body ?? appContentDefaults.support_agent_voice_guidance
+      );
 
       const currentVersion =
         versions.find(
@@ -4256,6 +4862,11 @@ export default function Home() {
         changeNote,
         contentKey: "support_agent_escalation_guidance",
       });
+      await saveAppContentBlock({
+        body: agentVoiceGuidance,
+        changeNote,
+        contentKey: "support_agent_voice_guidance",
+      });
 
       setAgentKnowledgeChangeNote("");
       await loadAppContent("support_agent_product_facts");
@@ -4264,6 +4875,249 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setSavingAgentKnowledge(false);
+    }
+  }
+
+  async function loadAgentKnowledgeProposals() {
+    setLoadingAgentKnowledgeProposals(true);
+
+    try {
+      const { data: proposalRows, error: proposalError } = await supabase
+        .from("agent_knowledge_proposals")
+        .select(
+          "id,title,summary,source_type,status,review_note,created_at,updated_at,reviewed_at,published_at"
+        )
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (proposalError) {
+        throw proposalError;
+      }
+
+      const proposals = (proposalRows ?? []) as AgentKnowledgeProposal[];
+      setAgentKnowledgeProposals(proposals);
+
+      const { data: settingsRows, error: settingsError } = await supabase
+        .from("agent_knowledge_automation_settings")
+        .select(
+          "settings_key,auto_generation_enabled,software_update_checks_enabled,scheduled_checks_enabled,background_generation_period_days,feedback_clustering_enabled,feedback_push_to_proposal_enabled,feedback_min_not_helpful_count,feedback_min_admin_flags,feedback_window_days,severity_threshold,updated_at"
+        )
+        .eq("settings_key", "default")
+        .limit(1);
+
+      if (!settingsError && settingsRows?.[0]) {
+        setAgentKnowledgeAutomationSettings(
+          settingsRows[0] as AgentKnowledgeAutomationSettings
+        );
+      }
+
+      const { data: runRows, error: runError } = await supabase
+        .from("agent_knowledge_check_runs")
+        .select(
+          "id,run_type,status,proposal_id,error_message,created_at,completed_at"
+        )
+        .order("created_at", { ascending: false })
+        .limit(12);
+
+      if (!runError) {
+        setAgentKnowledgeCheckRuns((runRows ?? []) as AgentKnowledgeCheckRun[]);
+      }
+
+      if (proposals.length === 0) {
+        setSelectedAgentKnowledgeProposalId("");
+        setAgentKnowledgeProposalItems([]);
+        setAgentKnowledgeProposalDrafts({});
+        setAgentKnowledgeProposalNotes({});
+        return;
+      }
+
+      const selectedProposalId = proposals.some(
+        (proposal) => proposal.id === selectedAgentKnowledgeProposalId
+      )
+        ? selectedAgentKnowledgeProposalId
+        : proposals[0].id;
+      setSelectedAgentKnowledgeProposalId(selectedProposalId);
+
+      const { data: itemRows, error: itemError } = await supabase
+        .from("agent_knowledge_proposal_items")
+        .select(
+          "id,proposal_id,content_key,content_label,source_version_id,source_version_number,original_body,ai_proposed_body,admin_final_body,justification,evidence,risk_category,confidence,review_status,admin_note,created_at,updated_at"
+        )
+        .in(
+          "proposal_id",
+          proposals.map((proposal) => proposal.id)
+        )
+        .order("created_at", { ascending: true });
+
+      if (itemError) {
+        throw itemError;
+      }
+
+      const items = (itemRows ?? []) as AgentKnowledgeProposalItem[];
+      setAgentKnowledgeProposalItems(items);
+      setAgentKnowledgeProposalDrafts(
+        Object.fromEntries(
+          items.map((item) => [
+            item.id,
+            item.admin_final_body ?? item.ai_proposed_body,
+          ])
+        )
+      );
+      setAgentKnowledgeProposalNotes(
+        Object.fromEntries(
+          items.map((item) => [item.id, item.admin_note ?? ""])
+        )
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAgentKnowledgeProposals(false);
+    }
+  }
+
+  async function handleReviewAgentKnowledgeProposalItem(
+    item: AgentKnowledgeProposalItem,
+    reviewStatus: AgentKnowledgeProposalItemReviewStatus
+  ) {
+    setSavingAgentKnowledgeProposalItemId(item.id);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc(
+        "review_agent_knowledge_proposal_item",
+        {
+          p_admin_final_body:
+            reviewStatus === "edited"
+              ? agentKnowledgeProposalDrafts[item.id] ?? item.ai_proposed_body
+              : null,
+          p_admin_note: agentKnowledgeProposalNotes[item.id] ?? "",
+          p_item_id: item.id,
+          p_review_status: reviewStatus,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      showToast("Proposal item reviewed.", { type: "success" });
+      await loadAgentKnowledgeProposals();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAgentKnowledgeProposalItemId(null);
+    }
+  }
+
+  async function handlePublishAgentKnowledgeProposal(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (!selectedAgentKnowledgeProposal) {
+      return;
+    }
+
+    setPublishingAgentKnowledgeProposalId(selectedAgentKnowledgeProposal.id);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("publish_agent_knowledge_proposal", {
+        p_change_note:
+          agentKnowledgeProposalPublishNote.trim() ||
+          `Published Agent Knowledge proposal: ${selectedAgentKnowledgeProposal.title}`,
+        p_proposal_id: selectedAgentKnowledgeProposal.id,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setAgentKnowledgeProposalPublishNote("");
+      await Promise.all([
+        loadAgentKnowledgeProposals(),
+        loadAppContent("support_agent_product_facts"),
+      ]);
+      showToast("Agent Knowledge proposal published.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setPublishingAgentKnowledgeProposalId(null);
+    }
+  }
+
+  async function handleSaveAgentKnowledgeAutomationSettings(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+    setSavingAgentKnowledgeAutomationSettings(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc(
+        "update_agent_knowledge_automation_settings",
+        {
+          p_auto_generation_enabled:
+            agentKnowledgeAutomationSettings.auto_generation_enabled,
+          p_background_generation_period_days:
+            agentKnowledgeAutomationSettings.background_generation_period_days,
+          p_feedback_clustering_enabled:
+            agentKnowledgeAutomationSettings.feedback_clustering_enabled,
+          p_feedback_min_admin_flags:
+            agentKnowledgeAutomationSettings.feedback_min_admin_flags,
+          p_feedback_min_not_helpful_count:
+            agentKnowledgeAutomationSettings.feedback_min_not_helpful_count,
+          p_feedback_push_to_proposal_enabled:
+            agentKnowledgeAutomationSettings.feedback_push_to_proposal_enabled,
+          p_feedback_window_days:
+            agentKnowledgeAutomationSettings.feedback_window_days,
+          p_scheduled_checks_enabled:
+            agentKnowledgeAutomationSettings.scheduled_checks_enabled,
+          p_severity_threshold:
+            agentKnowledgeAutomationSettings.severity_threshold,
+          p_software_update_checks_enabled:
+            agentKnowledgeAutomationSettings.software_update_checks_enabled,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      showToast("Agent Knowledge automation settings saved.", {
+        type: "success",
+      });
+      await loadAgentKnowledgeProposals();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAgentKnowledgeAutomationSettings(false);
+    }
+  }
+
+  async function handleQueueAgentKnowledgeManualCheck() {
+    setQueueingAgentKnowledgeRun(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("queue_agent_knowledge_check_run", {
+        p_run_type: "manual",
+        p_source_context: {
+          requested_from: "admin_ai_proposals",
+          requested_at: new Date().toISOString(),
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      showToast("Manual Agent Knowledge check queued.", { type: "success" });
+      await loadAgentKnowledgeProposals();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setQueueingAgentKnowledgeRun(false);
     }
   }
 
@@ -4366,6 +5220,11 @@ export default function Home() {
     setProductMgmtItemDraft((currentDraft) =>
       currentDraft ? { ...currentDraft, [field]: value } : currentDraft
     );
+  }
+
+  async function handleChangeProductMgmtSection(sectionKey: ProductMgmtSection) {
+    setSelectedProductMgmtSection(sectionKey);
+    await markAdminScopeViewed("product_area", sectionKey);
   }
 
   async function handleUpdateProductMgmtItem(
@@ -4647,7 +5506,12 @@ export default function Home() {
     }
 
     if (tab === "admin") {
-      await Promise.all([loadAiInstructions(), loadAppContent()]);
+      await Promise.all([
+        loadAiInstructions(),
+        loadAppContent(),
+        loadAdminViewStates(),
+        loadAdminAttentionSummary(),
+      ]);
     }
   }
 
@@ -4728,6 +5592,80 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setLoadingAdminUserActivity(false);
+    }
+  }
+
+  async function openAdminReadonlyUserView(userId: string) {
+    setLoadingAdminReadonlyUserId(userId);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "get_admin_user_readonly_snapshot",
+        {
+          p_reason: "Adalo/test account pre-flight or admin troubleshooting",
+          p_target_user_id: userId,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      setAdminReadonlySnapshot(data as AdminReadonlySnapshot);
+      setAdminRevealedSensitiveData({});
+      setMessage("Loaded read-only user view. Sensitive details are hidden.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAdminReadonlyUserId(null);
+    }
+  }
+
+  function closeAdminReadonlyUserView() {
+    setAdminReadonlySnapshot(null);
+    setAdminRevealedSensitiveData({});
+    setRevealingAdminSensitiveKey(null);
+    setMessage("");
+  }
+
+  async function revealAdminSensitiveData({
+    resourceId = null,
+    resourceType,
+    targetUserId,
+  }: {
+    resourceId?: string | null;
+    resourceType: AdminSensitiveResourceType;
+    targetUserId: string;
+  }) {
+    const revealKey = adminSensitiveKey(resourceType, resourceId);
+    setRevealingAdminSensitiveKey(revealKey);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "reveal_admin_user_sensitive_data",
+        {
+          p_reason: "Admin read-only user view troubleshooting",
+          p_resource_id: resourceId,
+          p_resource_type: resourceType,
+          p_target_user_id: targetUserId,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      setAdminRevealedSensitiveData((currentData) => ({
+        ...currentData,
+        [revealKey]: (data ?? {}) as AdminRevealedSensitiveData,
+      }));
+      setMessage("Sensitive details revealed and logged.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setRevealingAdminSensitiveKey(null);
     }
   }
 
@@ -5612,7 +6550,11 @@ export default function Home() {
     setMessage("");
 
     if (tab === "ai") {
-      await Promise.all([loadAiInstructions(), loadAppContent()]);
+      await Promise.all([
+        loadAiInstructions(),
+        loadAppContent(),
+        loadAgentKnowledgeProposals(),
+      ]);
     }
 
     if (tab === "content" || tab === "messages") {
@@ -5638,6 +6580,8 @@ export default function Home() {
     if (tab === "assistantReview") {
       await loadAssistantReviewInteractions();
     }
+
+    await markAdminScopeViewed("admin_tab", tab);
   }
 
   async function handleChangeAiAdminTab(tab: AiAdminTab) {
@@ -5647,11 +6591,15 @@ export default function Home() {
       await loadAiInstructions();
     } else if (tab === "agentKnowledge") {
       await loadAppContent("support_agent_product_facts");
+    } else if (tab === "proposals") {
+      await loadAgentKnowledgeProposals();
     } else if (selectedAiWorkflow === "careprep_generation") {
       await loadCarePrepHistory();
     } else {
       await loadIntakeHistory();
     }
+
+    await markAdminScopeViewed("ai_admin_tab", tab);
   }
 
   async function handleChangeHistoryAppointment(appointmentId: string) {
@@ -5891,6 +6839,16 @@ export default function Home() {
   }
 
   async function handleSignOut() {
+    if (
+      shouldWarnBeforeProfileSignOut &&
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "You have unsaved Profile changes. Sign out and discard them?"
+      )
+    ) {
+      return;
+    }
+
     await supabase.auth.signOut();
     if (typeof window !== "undefined") {
       removeStoredValue(window.localStorage, appUiStateStorageKey);
@@ -5905,14 +6863,15 @@ export default function Home() {
     setBetaTermsAcknowledgedAt(null);
     setSampleDataSeededAt(null);
     setSampleDataDeclinedAt(null);
-    setSampleDataSeedVersion(null);
     setAdminSampleEmail("");
     setAdminSampleStatus(null);
     setAdminSampleForceDeclined(false);
     setWelcomeGuideDismissed(false);
     setIsAdmin(false);
+    setRequiresEmailUpdate(false);
     setOnboardingCompletedAt(null);
     setProfileDraft(emptyProfileDraft);
+    setSavedProfileDraft(emptyProfileDraft);
     setSavedProfileLabel("");
     setAuthMode("signIn");
     setActiveAppointmentPanel(null);
@@ -5973,7 +6932,9 @@ export default function Home() {
       }
 
       const acknowledgedAt = new Date().toISOString();
-      const profileEmail = user.email ?? profileDraft.email.trim();
+      const profileEmail = requiresEmailUpdate
+        ? profileDraft.email.trim()
+        : user.email ?? profileDraft.email.trim();
       const { error } = await supabase.from("profiles").upsert({
         beta_agreement_version: betaAgreementVersion,
         beta_disclaimer_acknowledged_at: acknowledgedAt,
@@ -6033,6 +6994,14 @@ export default function Home() {
         throw new Error("Enter a valid email address.");
       }
 
+      if (
+        requiresEmailUpdate &&
+        user.email &&
+        profileEmail.toLowerCase() === user.email.toLowerCase()
+      ) {
+        throw new Error("Enter an email you can access.");
+      }
+
       if (!profileDraft.givenName.trim()) {
         throw new Error("First name is required.");
       }
@@ -6063,6 +7032,20 @@ export default function Home() {
         throw new Error("Enter a valid 10-digit U.S. phone number.");
       }
 
+      if (requiresEmailUpdate) {
+        const { error: authUpdateError } = await supabase.auth.updateUser({
+          data: {
+            ...(user.user_metadata ?? {}),
+            requires_email_update: false,
+          },
+          email: profileEmail,
+        });
+
+        if (authUpdateError) {
+          throw authUpdateError;
+        }
+      }
+
       const completedAt = new Date().toISOString();
       const storedDisplayName = profileDraft.displayName.trim() || null;
       const visibleDisplayName = profileDisplayName({
@@ -6071,6 +7054,20 @@ export default function Home() {
         familyName: profileDraft.familyName,
         givenName: profileDraft.givenName,
       });
+      const savedDraft: ProfileDraft = {
+        addressLine1: profileDraft.addressLine1.trim(),
+        addressLine2: profileDraft.addressLine2.trim(),
+        city: profileDraft.city.trim(),
+        country: profileDraft.country.trim(),
+        displayName: profileDraft.displayName.trim(),
+        email: profileEmail,
+        familyName: profileDraft.familyName.trim(),
+        givenName: profileDraft.givenName.trim(),
+        phone: normalizedPhone.display,
+        postalCode: profileDraft.postalCode.trim(),
+        region: profileDraft.region.trim(),
+        timezone: profileDraft.timezone.trim(),
+      };
       const { error } = await supabase.from("profiles").upsert({
         address_line1: profileDraft.addressLine1.trim() || null,
         address_line2: profileDraft.addressLine2.trim() || null,
@@ -6113,6 +7110,10 @@ export default function Home() {
       }
 
       setOnboardingCompletedAt(completedAt);
+      setRequiresEmailUpdate(false);
+      setSignedInEmail(profileEmail);
+      setProfileDraft(savedDraft);
+      setSavedProfileDraft(savedDraft);
       setSavedProfileLabel(visibleDisplayName);
       await loadAppointments();
       setMessage("Profile saved.");
@@ -6146,7 +7147,6 @@ export default function Home() {
           status.seeded_at ?? new Date().toISOString()
         );
         setSampleDataDeclinedAt(null);
-        setSampleDataSeedVersion(status.seed_version ?? null);
         await loadAppointments("upcoming", ALL_SUBJECTS);
         showToast(sampleDataStatusText(status), {
           durationMs: 7000,
@@ -6226,7 +7226,6 @@ export default function Home() {
 
       setSampleDataSeededAt(null);
       setSampleDataDeclinedAt(declinedAt);
-      setSampleDataSeedVersion(null);
       await loadAppointments(appointmentView, selectedSubjectId);
       showToast(
         removedCount > 0
@@ -6798,6 +7797,16 @@ export default function Home() {
     const currentModifier = currentAppointmentModifier(appointment.id);
 
     if (currentModifier === target) {
+      if (hasUnsavedAppointmentModifierChanges(appointment, currentModifier)) {
+        setPendingModifierSwitch({
+          appointmentId: appointment.id,
+          target: null,
+        });
+        return;
+      }
+
+      discardAppointmentModifier(appointment.id, currentModifier);
+      setPendingModifierSwitch(null);
       return;
     }
 
@@ -6825,7 +7834,9 @@ export default function Home() {
     const currentModifier = currentAppointmentModifier(appointment.id);
 
     discardAppointmentModifier(appointment.id, currentModifier);
-    openAppointmentModifier(appointment, pendingModifierSwitch.target);
+    if (pendingModifierSwitch.target) {
+      openAppointmentModifier(appointment, pendingModifierSwitch.target);
+    }
     setPendingModifierSwitch(null);
   }
 
@@ -7972,6 +8983,11 @@ export default function Home() {
 
   async function handleGenerateCarePrep(appointment: Appointment) {
     setGeneratingCarePrepForId(appointment.id);
+    setCarePrepGenerationErrors((currentErrors) => {
+      const nextErrors = { ...currentErrors };
+      delete nextErrors[appointment.id];
+      return nextErrors;
+    });
     setMessage("");
 
     try {
@@ -8007,9 +9023,19 @@ export default function Home() {
       }
 
       await loadAppointments();
+      setCarePrepGenerationErrors((currentErrors) => {
+        const nextErrors = { ...currentErrors };
+        delete nextErrors[appointment.id];
+        return nextErrors;
+      });
       setMessage(result.message ?? "CarePrep generated with AI.");
     } catch (error) {
-      setMessage(getErrorMessage(error));
+      const message = getErrorMessage(error);
+      setCarePrepGenerationErrors((currentErrors) => ({
+        ...currentErrors,
+        [appointment.id]: message,
+      }));
+      setMessage(message);
     } finally {
       setGeneratingCarePrepForId(null);
     }
@@ -8653,6 +9679,79 @@ export default function Home() {
     );
   }
 
+  function renderPublicPricingView() {
+    return (
+      <div className="mt-8 space-y-6">
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-sm font-semibold text-blue-700">
+            CarePland plans
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold text-slate-950">
+            More support when the system does more of the remembering.
+          </h1>
+          <p className="mt-3 max-w-2xl text-slate-600">
+            CarePland tiers are meant to increase continuity support,
+            automation, and care coordination without turning the product into a
+            pile of technical limits.
+          </p>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2">
+          {pricingTiers.map((tier) => (
+            <article
+              className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+              key={tier.id}
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {tier.label}
+              </p>
+              <h2 className="mt-2 text-xl font-semibold text-slate-950">
+                {tier.name}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">{tier.bestFor}</p>
+
+              <dl className="mt-5 space-y-3 text-sm text-slate-700">
+                <div>
+                  <dt className="font-semibold text-slate-900">CarePrep</dt>
+                  <dd className="mt-1">{tier.carePrep}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold text-slate-900">Automation</dt>
+                  <dd className="mt-1">{tier.automation}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold text-slate-900">Imports</dt>
+                  <dd className="mt-1">{tier.imports}</dd>
+                </div>
+                <div>
+                  <dt className="font-semibold text-slate-900">Care VIPs</dt>
+                  <dd className="mt-1">{tier.careVips}</dd>
+                </div>
+              </dl>
+
+              <ul className="mt-5 space-y-2 text-sm text-slate-600">
+                {tier.highlights.map((highlight) => (
+                  <li key={highlight}>- {highlight}</li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </section>
+
+        <section className="rounded-lg border border-blue-100 bg-blue-50 p-5">
+          <h2 className="text-xl font-semibold text-slate-950">
+            Trial and upgrade philosophy
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            Free users may temporarily experience selected higher-tier
+            automation so they can feel the value of proactive preparation. The
+            goal is simple: CarePland quietly helps you stay prepared.
+          </p>
+        </section>
+      </div>
+    );
+  }
+
   const isSignedInAppShell =
     Boolean(signedInEmail) &&
     authMode !== "updatePassword" &&
@@ -8661,7 +9760,11 @@ export default function Home() {
   const signedInDisplayName = savedProfileLabel || signedInEmail;
 
   return (
-    <main className="min-h-screen overflow-x-clip bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6 lg:py-8">
+    <main
+      className={`min-h-screen overflow-x-clip bg-slate-50 px-3 text-slate-900 sm:px-4 lg:px-6 lg:py-8 ${
+        isSignedInAppShell ? "pb-6 pt-2 sm:pt-4" : "py-6"
+      }`}
+    >
       <section
         className={`mx-auto w-full ${
           isSignedInAppShell
@@ -8672,18 +9775,18 @@ export default function Home() {
         }`}
       >
         <header
-          className="sticky top-0 z-50 grid gap-3 border-b border-slate-200 bg-slate-50/95 py-3 backdrop-blur"
+          className="sticky top-0 z-50 grid gap-2 bg-slate-50 py-1.5 sm:gap-3 sm:py-3"
           ref={mainHeaderRef}
         >
-          <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 lg:gap-3">
+          <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 sm:gap-2 lg:gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <button
                 aria-label="Home"
-                className="rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300"
+                className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300"
                 onClick={() =>
                   isSignedInAppShell
                     ? void handleChangeMainTab("home")
-                    : undefined
+                    : setPublicSiteTab("access")
                 }
                 type="button"
               >
@@ -8691,7 +9794,7 @@ export default function Home() {
                   alt="CarePland"
                   className={
                     isSignedInAppShell
-                      ? "h-auto w-11 sm:w-12"
+                      ? "h-auto w-9 min-[390px]:w-10 sm:w-12"
                       : "h-auto w-20 sm:w-24"
                   }
                   height={isSignedInAppShell ? 460 : 100}
@@ -8719,13 +9822,13 @@ export default function Home() {
 
             {isSignedInAppShell ? (
               <nav
-                className={`flex min-w-0 gap-2 ${
+                className={`flex min-w-0 items-center gap-1 sm:gap-2 ${
                   isAdmin ? "justify-center" : "justify-start"
                 }`}
                 aria-label="Main navigation"
               >
               <button
-                className={`h-11 rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
+                className={`h-10 shrink-0 rounded-md px-2.5 text-sm font-semibold leading-none sm:h-11 sm:px-3 md:px-4 md:text-base ${
                   mainTab === "appointments"
                     ? "bg-blue-700 text-white"
                     : "border border-slate-300 bg-white text-slate-700"
@@ -8740,7 +9843,7 @@ export default function Home() {
               </button>
               <button
                 aria-label="Profile"
-                className={`hidden h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold md:flex md:px-4 md:text-base ${
+                className={`hidden h-11 min-w-11 shrink-0 items-center justify-center rounded-md px-3 text-sm font-semibold md:flex md:px-4 md:text-base ${
                   mainTab === "profile"
                     ? "bg-blue-700 text-white"
                     : "border border-slate-300 bg-white text-slate-700"
@@ -8755,7 +9858,7 @@ export default function Home() {
               {isAdmin ? (
                 <button
                   aria-label="Admin"
-                  className={`flex h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
+                  className={`flex h-10 min-w-10 shrink-0 items-center justify-center rounded-md px-2.5 text-sm font-semibold sm:h-11 sm:min-w-11 sm:px-3 md:px-4 md:text-base ${
                     mainTab === "admin"
                       ? "bg-blue-700 text-white"
                       : "border border-slate-300 bg-white text-slate-700"
@@ -8769,18 +9872,46 @@ export default function Home() {
                 </button>
               ) : null}
               </nav>
+            ) : authMode !== "updatePassword" ? (
+              <nav
+                aria-label="Public website navigation"
+                className="flex min-w-0 justify-start gap-2"
+              >
+                <button
+                  className={`h-11 rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
+                    publicSiteTab === "access"
+                      ? "bg-blue-700 text-white"
+                      : "border border-slate-300 bg-white text-slate-700"
+                  }`}
+                  onClick={() => setPublicSiteTab("access")}
+                  type="button"
+                >
+                  Access
+                </button>
+                <button
+                  className={`h-11 rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
+                    publicSiteTab === "pricing"
+                      ? "bg-blue-700 text-white"
+                      : "border border-slate-300 bg-white text-slate-700"
+                  }`}
+                  onClick={() => setPublicSiteTab("pricing")}
+                  type="button"
+                >
+                  Pricing
+                </button>
+              </nav>
             ) : null}
 
-            <div className="flex min-w-0 items-center justify-end gap-2 text-sm text-slate-600">
-            {isSignedInAppShell ? (
-              <span className="hidden min-w-0 truncate font-semibold text-slate-900 md:inline xl:max-w-60 2xl:max-w-none">
-                {signedInDisplayName}
+	            <div className="flex min-w-0 items-center justify-end gap-1 text-sm text-slate-600 sm:gap-2">
+	            {isSignedInAppShell ? (
+	              <span className="hidden min-w-0 truncate font-semibold text-slate-900 md:inline xl:max-w-60 2xl:max-w-none">
+	                {signedInDisplayName}
               </span>
             ) : null}
             {isSignedInAppShell ? (
               <button
                 aria-label="Profile"
-                className={`inline-flex h-11 min-w-11 items-center justify-center rounded-md border px-3 md:hidden ${
+                className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-md border px-2.5 sm:h-11 sm:min-w-11 sm:px-3 md:hidden ${
                   mainTab === "profile"
                     ? "border-blue-700 bg-blue-700 text-white"
                     : "border-slate-300 bg-white text-slate-700"
@@ -8795,7 +9926,7 @@ export default function Home() {
             {isSignedInAppShell ? (
               isAdmin ? (
                 <button
-                  className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm"
+                  className="hidden items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm min-[410px]:inline-flex"
                   onClick={async () => {
                     setMainTab("admin");
                     await handleChangeAdminTab("tickets");
@@ -8824,7 +9955,7 @@ export default function Home() {
               ) : (
                 <button
                   aria-label="Ask support"
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-blue-200 bg-white text-2xl font-semibold leading-none text-blue-700 hover:border-blue-300 hover:bg-blue-50"
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-white text-xl font-semibold leading-none text-blue-700 hover:border-blue-300 hover:bg-blue-50 sm:h-11 sm:w-11 sm:text-2xl"
                   onClick={() => {
                     setAskingSupportQuestion(true);
                     setSupportQuestionExpanded(true);
@@ -8835,10 +9966,26 @@ export default function Home() {
                   ?
                 </button>
               )
-            ) : null}
-            </div>
-          </div>
-        </header>
+	            ) : null}
+	            </div>
+	          </div>
+	          {adminReadonlySnapshot ? (
+	            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-100 px-3 py-2 text-sm text-amber-950">
+	              <p className="font-semibold">
+	                Admin read-only view: you&apos;re viewing{" "}
+	                {adminReadonlySnapshot.profile.display_name || "this user"},
+	                not your own account.
+	              </p>
+	              <button
+	                className="rounded-md border border-amber-400 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-amber-900"
+	                onClick={closeAdminReadonlyUserView}
+	                type="button"
+	              >
+	                Exit view
+	              </button>
+	            </div>
+	          ) : null}
+	        </header>
 
         {authMode === "updatePassword" ? (
           <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -8999,8 +10146,9 @@ export default function Home() {
               <div>
                 <h2 className="text-2xl font-semibold">Set up your profile</h2>
                 <p className="mt-1 text-slate-600">
-                  Confirm the basics CP Pers needs for dates, contact, and later
-                  billing setup.
+                  {requiresEmailUpdate
+                    ? "Start by adding an email you can access, then confirm the basics CP Pers needs for dates and contact."
+                    : "Confirm the basics CP Pers needs for dates, contact, and later billing setup."}
                 </p>
               </div>
               <button
@@ -9023,9 +10171,28 @@ export default function Home() {
                     required
                   </span>
                 </span>
-                <div className="mt-2 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-base text-slate-700">
-                  {verifiedAccountEmail || "Verified account email"}
-                </div>
+                {requiresEmailUpdate ? (
+                  <>
+                    <input
+                      autoComplete="email"
+                      className="mt-2 w-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-base"
+                      onChange={(event) =>
+                        updateProfileDraft("email", event.target.value)
+                      }
+                      placeholder="you@example.com"
+                      required
+                      type="email"
+                      value={profileDraft.email}
+                    />
+                    <span className="mt-2 block text-xs font-normal text-amber-800">
+                      Enter an email you can access for account recovery.
+                    </span>
+                  </>
+                ) : (
+                  <div className="mt-2 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-base text-slate-700">
+                    {verifiedAccountEmail || "Verified account email"}
+                  </div>
+                )}
               </label>
               <label className="block text-sm font-medium text-slate-700">
                 <span className="flex items-center justify-between gap-3">
@@ -9215,174 +10382,207 @@ export default function Home() {
         ) : mainTab === "home" ? (
           renderHomeView()
         ) : mainTab === "profile" ? (
-          <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-semibold">Profile</h2>
-                <p className="mt-1 text-slate-600">
-                  Account details, contact basics, and current CarePland plan.
-                </p>
-              </div>
-              <button
-                className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
-                onClick={handleSignOut}
-                type="button"
-              >
-                Sign out
-              </button>
-            </div>
-
-            <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
-                <p className="font-semibold text-slate-900">Current plan</p>
-                <p className="mt-2">
-                  {entitlement.plan_name} · Care VIPs {careSubjects.length}/
-                  {careVipLimit}
-                </p>
-                {sampleDataSeededAt ? (
-                  <p className="mt-2 text-xs text-slate-500">
-                    Demo data: {sampleDataSeedVersion ?? "added"}
-                  </p>
-                ) : null}
-              </div>
-              <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
-                <p className="font-semibold text-slate-900">Plan changes</p>
+          <div className="mt-6 space-y-5">
+            <section className="rounded-lg bg-blue-50 px-5 py-5 ring-1 ring-blue-100">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 className="break-words text-xl font-semibold text-slate-950">
+                    {savedProfileLabel
+                      ? `${savedProfileLabel}'s CarePland account`
+                      : "Your CarePland account"}
+                  </h2>
+                  {verifiedAccountEmail ? (
+                    <p className="mt-1 break-words text-sm font-normal text-slate-600">
+                      {verifiedAccountEmail}
+                    </p>
+                  ) : null}
+                </div>
                 <button
-                  className="mt-2 rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
-                  onClick={() =>
-                    setMessage("Plan changes are not wired up yet.")
-                  }
+                  className="rounded-md border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                  onClick={handleSignOut}
                   type="button"
                 >
-                  Change plan
+                  Sign out
                 </button>
               </div>
-              <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
-                <p className="font-semibold text-slate-900">Beta support</p>
-                <p className="mt-2 text-slate-600">
-                  {appContentText("support_contact_note")}
-                </p>
-                <a
-                  className="mt-2 inline-block rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
-                  href={supportMailtoHref(signedInEmail, "profile")}
-                >
-                  Contact support
-                </a>
-              </div>
-              <div className="rounded-md border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
-                <p className="font-semibold text-slate-900">Account security</p>
-                <button
-                  className="mt-2 rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 disabled:bg-slate-200"
-                  disabled={sendingPasswordReset}
-                  onClick={handleSendProfilePasswordReset}
-                  type="button"
-                >
-                  {sendingPasswordReset ? "Sending..." : "Send reset email"}
-                </button>
-              </div>
-            </div>
 
-            {sampleDataSeededAt ? (
-              <section className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold text-amber-950">
-                      Demo data
-                    </h3>
-                    <p className="mt-1 max-w-3xl text-sm text-amber-900">
-                      {appContentText("demo_profile_remove_body")}
-                    </p>
+              <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
+                <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-1">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Plan
                   </div>
-                  <button
-                    className="rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 disabled:text-slate-400"
-                    disabled={removingSampleData}
-                    onClick={handleRemoveSampleData}
-                    type="button"
-                  >
-                    {removingSampleData ? "Removing..." : "Remove demo data"}
-                  </button>
-                </div>
-              </section>
-            ) : (
-              <section className="mt-5 rounded-md border border-slate-200 bg-white p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-900">
-                      Demo data
-                    </h3>
-                    <p className="mt-1 max-w-3xl text-sm text-slate-600">
-                      {appContentText("demo_profile_add_body")}
-                    </p>
-                  </div>
-                  <button
-                    className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
-                    disabled={seedingSampleData}
-                    onClick={() => handleSeedSampleDataForCurrentUser(true)}
-                    type="button"
-                    >
-                      {seedingSampleData ? "Adding..." : "Add demo data"}
-                  </button>
-                </div>
-              </section>
-            )}
-
-            {canUseMultipleCareVips ? (
-              <section className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-4">
-                <h3 className="text-lg font-semibold">Care VIPs</h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  Manage the people, pets, and important lives connected to this
-                  account.
-                </p>
-                {careSubjects.length > 0 ? (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {careSubjects.map((subject) => (
-                      <span
-                        className="rounded-full bg-white px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
-                        key={subject.id}
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-2 font-semibold text-slate-950">
+                      <span>{currentPricingTier.name}</span>
+                      <button
+                        aria-expanded={planHelpExpanded}
+                        aria-label="Explain CarePland plan tiers"
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-blue-200 bg-white text-xs font-bold text-blue-700"
+                        onClick={() =>
+                          setPlanHelpExpanded((isExpanded) => !isExpanded)
+                        }
+                        type="button"
                       >
-                        {subject.display_name}
-                      </span>
-                    ))}
+                        ?
+                      </button>
+                    </span>
+                    <button
+                      className="whitespace-nowrap text-sm font-semibold text-slate-400"
+                      disabled
+                      type="button"
+                    >
+                      Upgrade plan
+                    </button>
                   </div>
-                ) : null}
-                <form
-                  className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]"
-                  onSubmit={handleCreateCareVip}
-                >
-                  <label className="block text-sm font-medium text-slate-700">
-                    Add Care VIP
-                    <input
-                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                      disabled={!canAddCareVip}
-                      onChange={(event) =>
-                        setNewCareVipName(event.target.value)
-                      }
-                      placeholder="e.g. Dixie"
-                      type="text"
-                      value={newCareVipName}
-                    />
-                  </label>
-                  <button
-                    className="self-end rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                    disabled={creatingCareVip || !canAddCareVip}
-                    type="submit"
+                  <div
+                    aria-hidden={!planHelpExpanded}
+                    className={`mt-3 rounded-md border border-blue-100 bg-white p-3 text-sm leading-6 text-slate-700 ${
+                      planHelpExpanded ? "" : "invisible"
+                    }`}
                   >
-                    {creatingCareVip ? "Adding..." : "+ Add Care VIP"}
-                  </button>
-                </form>
-                {!canAddCareVip ? (
-                  <p className="mt-3 text-sm text-slate-500">
-                    {entitlement.plan_name} includes {careVipLimit} active Care
-                    VIPs.
+                    <ul className="space-y-2">
+                      {formattedHelpLines(
+                        appContentText("profile_plan_tier_help_body")
+                      ).map((line) => (
+                        <li className="flex gap-2" key={line}>
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-300" />
+                          <span>{renderBasicInlineMarkup(line)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </section>
+
+                <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-3 sm:col-span-2 xl:order-2 xl:col-span-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      CARE VIPs
+                    </h3>
+                    <p className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      {careSubjects.length}/{careVipLimit}
+                    </p>
+                  </div>
+                  <p className="mt-3 text-sm text-slate-600">
+                    Manage everyone whose appointments
+                    <br />
+                    are connected to your account.
                   </p>
-                ) : null}
-              </section>
-            ) : null}
+                  {careSubjects.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {careSubjects.map((subject) => (
+                        <span
+                          className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
+                          key={subject.id}
+                        >
+                          {subject.display_name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {canUseMultipleCareVips ? (
+                    <form className="mt-4" onSubmit={handleCreateCareVip}>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Add Care VIP
+                        <input
+                          className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                          disabled={!canAddCareVip}
+                          onChange={(event) =>
+                            setNewCareVipName(event.target.value)
+                          }
+                          placeholder="Name"
+                          type="text"
+                          value={newCareVipName}
+                        />
+                      </label>
+                      <button
+                        className="mt-3 w-full rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                        disabled={creatingCareVip || !canAddCareVip}
+                        type="submit"
+                      >
+                        {creatingCareVip ? "Adding..." : "Add Care VIP"}
+                      </button>
+                      {!canAddCareVip ? (
+                        <p className="mt-3 text-sm text-slate-500">
+                          {entitlement.plan_name} includes {careVipLimit}{" "}
+                          active Care VIPs.
+                        </p>
+                      ) : null}
+                    </form>
+                  ) : null}
+                </section>
+
+                <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-2 xl:order-3">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Account tools
+                  </h3>
+                  <div className="mt-3 border-b border-blue-100 pb-4">
+                    <p className="text-sm text-slate-600">
+                      Send reset link to your verified email.
+                    </p>
+                    <button
+                      className="mt-3 w-full rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                      disabled={sendingPasswordReset}
+                      onClick={handleSendProfilePasswordReset}
+                      type="button"
+                    >
+                      {sendingPasswordReset ? "Sending..." : "Reset password"}
+                    </button>
+                  </div>
+                  <div className="mt-4">
+                    {sampleDataSeededAt ? (
+                      <p className="text-sm text-slate-600">
+                        Remove sample data only.
+                        <br />
+                        Your own appointments are safe.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-slate-600">
+                        Add sample appointments and data to quickly try out
+                        CarePland features.
+                      </p>
+                    )}
+                    {sampleDataSeededAt ? (
+                      <button
+                        className="mt-3 w-full rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 disabled:text-slate-400"
+                        disabled={removingSampleData}
+                        onClick={handleRemoveSampleData}
+                        type="button"
+                      >
+                        {removingSampleData
+                          ? "Removing..."
+                          : "Remove demo data"}
+                      </button>
+                    ) : (
+                      <button
+                        className="mt-3 w-full rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                        disabled={seedingSampleData}
+                        onClick={() => handleSeedSampleDataForCurrentUser(true)}
+                        type="button"
+                      >
+                        {seedingSampleData ? "Adding..." : "Add demo data"}
+                      </button>
+                    )}
+                  </div>
+                </section>
+              </div>
+            </section>
 
             <form
-              className="mt-6 grid gap-4 md:grid-cols-2"
+              className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
               onSubmit={handleSaveProfile}
             >
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    Contact details
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Required basics are used to keep appointment timing and
+                    support follow-up accurate.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
               <label className="block text-sm font-medium text-slate-700">
                 <span className="flex items-center justify-between gap-3">
                   <span>Email</span>
@@ -9390,9 +10590,28 @@ export default function Home() {
                     required
                   </span>
                 </span>
-                <div className="mt-2 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-base text-slate-700">
-                  {verifiedAccountEmail || "Verified account email"}
-                </div>
+                {requiresEmailUpdate ? (
+                  <>
+                    <input
+                      autoComplete="email"
+                      className="mt-2 w-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-base"
+                      onChange={(event) =>
+                        updateProfileDraft("email", event.target.value)
+                      }
+                      placeholder="you@example.com"
+                      required
+                      type="email"
+                      value={profileDraft.email}
+                    />
+                    <span className="mt-2 block text-xs font-normal text-amber-800">
+                      Enter an email you can access for account recovery.
+                    </span>
+                  </>
+                ) : (
+                  <div className="mt-2 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-base text-slate-700">
+                    {verifiedAccountEmail || "Verified account email"}
+                  </div>
+                )}
               </label>
               <label className="block text-sm font-medium text-slate-700">
                 <span className="flex items-center justify-between gap-3">
@@ -9571,14 +10790,17 @@ export default function Home() {
                   {savingProfile ? "Saving..." : "Save profile"}
                 </button>
               </div>
+              </div>
             </form>
 
             {message ? (
-              <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
+              <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-700">
                 {message}
               </p>
             ) : null}
-          </section>
+          </div>
+        ) : publicSiteTab === "pricing" ? (
+          renderPublicPricingView()
         ) : (
         <div className="mt-8 space-y-4">
           <aside
@@ -11244,51 +12466,55 @@ export default function Home() {
                     ["messages", "Messages"],
                     ["product", "Prod Mgmt"],
                     ["tickets", "Tickets"],
-                  ].map(([tab, label]) => (
-                    <button
-                      className={`rounded-md px-4 py-2 text-sm font-semibold ${
-                        adminTab === tab
-                          ? "bg-blue-700 text-white"
-                          : "border border-slate-300 bg-white text-slate-700"
-                      }`}
-                      key={tab}
-                      onClick={() => handleChangeAdminTab(tab as AdminTab)}
-                      type="button"
-                    >
-                      {tab === "tickets" ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs ${
-                              adminNewTickets.length > 0
-                                ? adminTab === "tickets"
-                                  ? "bg-red-100 text-red-700"
-                                  : "bg-red-50 text-red-700"
-                                : adminTab === "tickets"
-                                  ? "bg-white/20 text-white"
-                                  : "bg-slate-100 text-slate-500"
-                            }`}
-                          >
-                            {adminNewTickets.length} New
+                  ].map(([tab, label]) => {
+                    const tabKey = tab as AdminTab;
+                    const attention =
+                      adminAttentionFor("admin_tab", tabKey)?.attention_count ??
+                      0;
+                    const isSelected = adminTab === tabKey;
+
+                    return (
+                      <AdminNavButton
+                        hasAttention={attention > 0}
+                        isSelected={isSelected}
+                        key={tab}
+                        onClick={() => handleChangeAdminTab(tabKey)}
+                      >
+                        {tab === "tickets" ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs ${
+                                adminNewTickets.length > 0
+                                  ? isSelected
+                                    ? "bg-red-100 text-red-700"
+                                    : "bg-red-50 text-red-700"
+                                  : isSelected
+                                    ? "bg-white/20 text-white"
+                                    : "bg-slate-100 text-slate-500"
+                              }`}
+                            >
+                              {adminNewTickets.length} New
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs ${
+                                adminTicketsNeedingFollowup.length > 0
+                                  ? isSelected
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-amber-50 text-amber-800"
+                                  : isSelected
+                                    ? "bg-white/20 text-white"
+                                    : "bg-slate-100 text-slate-500"
+                              }`}
+                            >
+                              {adminTicketsNeedingFollowup.length} Followup
+                            </span>
                           </span>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs ${
-                              adminTicketsNeedingFollowup.length > 0
-                                ? adminTab === "tickets"
-                                  ? "bg-amber-100 text-amber-800"
-                                  : "bg-amber-50 text-amber-800"
-                                : adminTab === "tickets"
-                                  ? "bg-white/20 text-white"
-                                  : "bg-slate-100 text-slate-500"
-                            }`}
-                          >
-                            {adminTicketsNeedingFollowup.length} Followup
-                          </span>
-                        </span>
-                      ) : (
-                        label
-                      )}
-                    </button>
-                  ))}
+                        ) : (
+                          label
+                        )}
+                      </AdminNavButton>
+                    );
+                  })}
                 </div>
               </section>
 
@@ -11390,6 +12616,608 @@ export default function Home() {
                   </button>
                 </div>
 
+                {adminReadonlySnapshot ? (
+                  <section
+                    className="mt-5 scroll-mt-24 rounded-md border border-blue-200 bg-blue-50 p-4"
+                    ref={adminReadonlyPanelRef}
+                    tabIndex={-1}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                          Read-only admin view
+                        </p>
+                        <h3 className="mt-1 text-xl font-semibold text-slate-950">
+                          Viewing {adminReadonlySnapshot.profile.display_name || "User"}
+                        </h3>
+                        <p className="mt-1 max-w-3xl text-sm text-blue-950">
+                          Sensitive profile, appointment, Notes, and CarePrep details
+                          are hidden until revealed. Reveals are logged for audit.
+                        </p>
+                      </div>
+                      <button
+                        className="rounded-md border border-blue-300 bg-white px-4 py-2 font-semibold text-blue-800"
+                        onClick={closeAdminReadonlyUserView}
+                        type="button"
+                      >
+                        Exit view
+                      </button>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                      <div className="rounded-md border border-blue-100 bg-white p-3">
+                        <h4 className="font-semibold text-slate-900">Account</h4>
+                        <dl className="mt-3 space-y-2 text-sm">
+                          <div>
+                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Email
+                            </dt>
+                            <dd className="text-slate-800">
+                              {adminReadonlySnapshot.profile.masked_email || "Not set"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Onboarding
+                            </dt>
+                            <dd className="text-slate-800">
+                              {adminReadonlySnapshot.profile.onboarding_completed_at
+                                ? `Complete ${formatAdminDate(
+                                    adminReadonlySnapshot.profile.onboarding_completed_at
+                                  )}`
+                                : "Not complete"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Beta acknowledgements
+                            </dt>
+                            <dd className="text-slate-800">
+                              {adminReadonlySnapshot.profile.beta_terms_acknowledged_at &&
+                              adminReadonlySnapshot.profile.beta_privacy_acknowledged_at &&
+                              adminReadonlySnapshot.profile.beta_disclaimer_acknowledged_at
+                                ? "Complete"
+                                : "Incomplete"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Flags
+                            </dt>
+                            <dd className="mt-1 flex flex-wrap gap-1">
+                              {adminReadonlySnapshot.profile.requires_email_update ? (
+                                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                                  Needs email update
+                                </span>
+                              ) : null}
+                              {adminReadonlySnapshot.profile.is_test_user ? (
+                                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                                  Test
+                                </span>
+                              ) : null}
+                              {adminReadonlySnapshot.profile.is_admin ? (
+                                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                                  Admin
+                                </span>
+                              ) : null}
+                            </dd>
+                          </div>
+                        </dl>
+
+                        {adminReadonlySnapshot.profile.has_contact_details ? (
+                          <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+                            {adminRevealedSensitiveData[
+                              adminSensitiveKey("profile_contact")
+                            ] ? (
+                              <div className="space-y-1 text-sm text-slate-700">
+                                {[
+                                  ["Email", "email"],
+                                  ["Phone", "phone"],
+                                  ["Time zone", "timezone"],
+                                  ["Address", "address_line1"],
+                                  ["Address 2", "address_line2"],
+                                  ["City", "city"],
+                                  ["State", "region"],
+                                  ["ZIP", "postal_code"],
+                                  ["Country", "country"],
+                                ].map(([label, key]) => {
+                                  const value = textValue(
+                                    adminRevealedSensitiveData[
+                                      adminSensitiveKey("profile_contact")
+                                    ]?.[key]
+                                  );
+
+                                  return value ? (
+                                    <p key={key}>
+                                      <span className="font-semibold">{label}:</span>{" "}
+                                      {value}
+                                    </p>
+                                  ) : null;
+                                })}
+                              </div>
+                            ) : (
+                              <>
+                                <p className="text-sm text-slate-600">
+                                  Contact and address details are hidden.
+                                </p>
+                                <button
+                                  className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                                  disabled={
+                                    revealingAdminSensitiveKey ===
+                                    adminSensitiveKey("profile_contact")
+                                  }
+                                  onClick={() =>
+                                    revealAdminSensitiveData({
+                                      resourceType: "profile_contact",
+                                      targetUserId:
+                                        adminReadonlySnapshot.profile.id,
+                                    })
+                                  }
+                                  type="button"
+                                >
+                                  {revealingAdminSensitiveKey ===
+                                  adminSensitiveKey("profile_contact")
+                                    ? "Revealing..."
+                                    : "Reveal contact details"}
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="rounded-md border border-blue-100 bg-white p-3">
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          {[
+                            [
+                              "Appointments",
+                              adminReadonlySnapshot.counts.appointment_count,
+                            ],
+                            ["Notes", adminReadonlySnapshot.counts.note_count],
+                            [
+                              "CarePrep",
+                              adminReadonlySnapshot.counts.careprep_count,
+                            ],
+                          ].map(([label, value]) => (
+                            <div className="rounded-md bg-slate-50 p-3" key={label}>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                {label}
+                              </p>
+                              <p className="mt-1 text-2xl font-semibold text-slate-900">
+                                {value}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2 text-sm">
+                          {adminReadonlySnapshot.entitlements.length > 0 ? (
+                            adminReadonlySnapshot.entitlements.map((entitlement) => (
+                              <span
+                                className="rounded-full bg-blue-100 px-3 py-1 font-semibold text-blue-800"
+                                key={`${entitlement.care_circle_id}-${entitlement.plan_id}`}
+                              >
+                                {entitlement.plan_name ||
+                                  entitlement.plan_id ||
+                                  "Plan unknown"}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">
+                              No active plan found
+                            </span>
+                          )}
+                          {adminReadonlySnapshot.care_subjects.map((subject) => (
+                            <span
+                              className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700"
+                              key={subject.id}
+                            >
+                              Care VIP: {subject.display_name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      <h4 className="font-semibold text-slate-900">
+                        Appointment preview
+                      </h4>
+                      {adminReadonlySnapshot.appointments.length === 0 ? (
+                        <p className="rounded-md border border-dashed border-blue-200 bg-white p-3 text-sm text-slate-600">
+                          No appointments found for this account.
+                        </p>
+                      ) : (
+                        adminReadonlySnapshot.appointments.map((appointment) => {
+                          const detailKey = adminSensitiveKey(
+                            "appointment_details",
+                            appointment.id
+                          );
+                          const noteKey = appointment.current_note_id
+                            ? adminSensitiveKey(
+                                "appointment_note",
+                                appointment.current_note_id
+                              )
+                            : "";
+                          const carePrepKey = appointment.current_guidance_id
+                            ? adminSensitiveKey(
+                                "careprep_guidance",
+                                appointment.current_guidance_id
+                              )
+                            : "";
+                          const appointmentDetails =
+                            adminRevealedSensitiveData[detailKey];
+                          const noteDetails = noteKey
+                            ? adminRevealedSensitiveData[noteKey]
+                            : null;
+                          const carePrepDetails = carePrepKey
+                            ? adminRevealedSensitiveData[carePrepKey]
+                            : null;
+
+                          return (
+                            <article
+                              className="rounded-md border border-blue-100 bg-white p-3"
+                              key={appointment.id}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <h5 className="font-semibold text-slate-950">
+                                    {appointmentDetails
+                                      ? textValue(appointmentDetails.title) ||
+                                        "Appointment"
+                                      : appointment.title_preview ||
+                                        "Appointment"}
+                                  </h5>
+                                  <p className="text-sm text-slate-600">
+                                    {appointmentDetails &&
+                                    textValue(appointmentDetails.starts_at)
+                                      ? formatDate(
+                                          textValue(appointmentDetails.starts_at)
+                                        )
+                                      : appointment.starts_on
+                                        ? `${formatDateOnly(
+                                            appointment.starts_on
+                                          )} · time hidden`
+                                        : "Date not set"}{" "}
+                                    · {appointment.status}
+                                  </p>
+                                  <p className="mt-1 text-sm text-slate-700">
+                                    {appointmentDetails
+                                      ? [
+                                          textValue(
+                                            appointmentDetails.provider_name
+                                          ),
+                                          textValue(
+                                            appointmentDetails.provider_organization
+                                          ),
+                                          textValue(
+                                            appointmentDetails.location_name
+                                          ),
+                                        ]
+                                          .filter(Boolean)
+                                          .join(" · ") ||
+                                        "Provider/location not set"
+                                      : [
+                                          appointment.has_provider_name ||
+                                          appointment.has_provider_organization
+                                            ? [
+                                                appointment.provider_name_preview,
+                                                appointment.provider_organization_preview,
+                                              ]
+                                                .filter(Boolean)
+                                                .join(" · ") || "Provider hidden"
+                                            : "",
+                                          appointment.has_location_name
+                                            ? appointment.location_name_preview ||
+                                              "Location hidden"
+                                            : "",
+                                        ]
+                                          .filter(Boolean)
+                                          .join(" · ") ||
+                                        "Provider/location not set"}
+                                  </p>
+                                </div>
+                                <div className="text-right text-xs text-slate-500">
+                                  {appointment.is_sample_data ? (
+                                    <span className="mb-1 inline-flex rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-800">
+                                      Sample
+                                    </span>
+                                  ) : null}
+                                  <p>
+                                    <span className="font-semibold">Created:</span>{" "}
+                                    {formatAdminDate(appointment.created_at)}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">Updated:</span>{" "}
+                                    {formatAdminDate(appointment.updated_at)}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">Appt ID:</span>{" "}
+                                    {shortId(appointment.id)}
+                                  </p>
+                                  <p>
+                                    <span className="font-semibold">Care VIP:</span>{" "}
+                                    {careSubjectNameForId(
+                                      adminReadonlySnapshot.care_subjects,
+                                      appointment.care_subject_id
+                                    )}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                                <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">
+                                  {appointment.has_note
+                                    ? "Has notes"
+                                    : "No current note"}
+                                </span>
+                                <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">
+                                  {appointment.has_careprep
+                                    ? appointment.current_guidance_review_status ===
+                                      "draft"
+                                      ? "CarePrep draft"
+                                      : "Has CarePrep"
+                                    : "No CarePrep"}
+                                </span>
+                                {appointment.current_note_id ? (
+                                  <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">
+                                    Note ID {shortId(appointment.current_note_id)}
+                                  </span>
+                                ) : null}
+                                {appointment.current_guidance_id ? (
+                                  <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">
+                                    CarePrep ID{" "}
+                                    {shortId(appointment.current_guidance_id)}
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                                <div className="rounded-md bg-slate-50 p-3 text-sm">
+                                  <p className="font-semibold text-slate-800">
+                                    Details
+                                  </p>
+                                  {appointmentDetails ? (
+                                    <div className="mt-2 space-y-1 text-slate-700">
+                                      {textValue(appointmentDetails.reason) ? (
+                                        <p>
+                                          <span className="font-semibold">
+                                            Reason:
+                                          </span>{" "}
+                                          {textValue(appointmentDetails.reason)}
+                                        </p>
+                                      ) : null}
+                                      {textValue(
+                                        appointmentDetails.location_address
+                                      ) ? (
+                                        <p>
+                                          <span className="font-semibold">
+                                            Address:
+                                          </span>{" "}
+                                          {textValue(
+                                            appointmentDetails.location_address
+                                          )}
+                                        </p>
+                                      ) : null}
+                                      {textValue(appointmentDetails.starts_at) ? (
+                                        <p>
+                                          <span className="font-semibold">
+                                            Date/time:
+                                          </span>{" "}
+                                          {formatDate(
+                                            textValue(appointmentDetails.starts_at)
+                                          )}
+                                        </p>
+                                      ) : null}
+                                      {textValue(
+                                        appointmentDetails.provider_name
+                                      ) ? (
+                                        <p>
+                                          <span className="font-semibold">
+                                            Provider:
+                                          </span>{" "}
+                                          {textValue(
+                                            appointmentDetails.provider_name
+                                          )}
+                                        </p>
+                                      ) : null}
+                                      {textValue(
+                                        appointmentDetails.provider_organization
+                                      ) ? (
+                                        <p>
+                                          <span className="font-semibold">
+                                            Practice:
+                                          </span>{" "}
+                                          {textValue(
+                                            appointmentDetails.provider_organization
+                                          )}
+                                        </p>
+                                      ) : null}
+                                      {textValue(
+                                        appointmentDetails.location_name
+                                      ) ? (
+                                        <p>
+                                          <span className="font-semibold">
+                                            Location:
+                                          </span>{" "}
+                                          {textValue(
+                                            appointmentDetails.location_name
+                                          )}
+                                        </p>
+                                      ) : null}
+                                      {textValue(
+                                        appointmentDetails.location_phone
+                                      ) ? (
+                                        <p>
+                                          <span className="font-semibold">
+                                            Phone:
+                                          </span>{" "}
+                                          {textValue(
+                                            appointmentDetails.location_phone
+                                          )}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <p className="mt-1 text-slate-600">
+                                        {adminAppointmentPrivacyLabel(appointment)}
+                                      </p>
+                                      <button
+                                        className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:text-slate-400"
+                                        disabled={
+                                          revealingAdminSensitiveKey === detailKey
+                                        }
+                                        onClick={() =>
+                                          revealAdminSensitiveData({
+                                            resourceId: appointment.id,
+                                            resourceType:
+                                              "appointment_details",
+                                            targetUserId:
+                                              adminReadonlySnapshot.profile.id,
+                                          })
+                                        }
+                                        type="button"
+                                      >
+                                        {revealingAdminSensitiveKey === detailKey
+                                          ? "Revealing..."
+                                          : "Reveal full title/details"}
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+
+                                <div className="rounded-md bg-slate-50 p-3 text-sm">
+                                  <p className="font-semibold text-slate-800">
+                                    Notes
+                                  </p>
+                                  {noteDetails ? (
+                                    <div className="mt-2 space-y-2 text-slate-700">
+                                      {textValue(noteDetails.summary_short) ? (
+                                        <p>{textValue(noteDetails.summary_short)}</p>
+                                      ) : null}
+                                      <p className="font-semibold text-slate-800">
+                                        Takeaways
+                                      </p>
+                                      <DetailList
+                                        emptyLabel="No takeaways saved."
+                                        items={asTextList(noteDetails.takeaways)}
+                                      />
+                                      <p className="font-semibold text-slate-800">
+                                        Follow-ups
+                                      </p>
+                                      <DetailList
+                                        emptyLabel="No follow-ups saved."
+                                        items={asTextList(noteDetails.followups)}
+                                      />
+                                    </div>
+                                  ) : appointment.current_note_id ? (
+                                    <>
+                                      <p className="mt-1 text-slate-600">
+                                        Note content is hidden.
+                                      </p>
+                                      <button
+                                        className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:text-slate-400"
+                                        disabled={
+                                          revealingAdminSensitiveKey === noteKey
+                                        }
+                                        onClick={() =>
+                                          revealAdminSensitiveData({
+                                            resourceId:
+                                              appointment.current_note_id,
+                                            resourceType: "appointment_note",
+                                            targetUserId:
+                                              adminReadonlySnapshot.profile.id,
+                                          })
+                                        }
+                                        type="button"
+                                      >
+                                        {revealingAdminSensitiveKey === noteKey
+                                          ? "Revealing..."
+                                          : "Reveal notes"}
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <p className="mt-1 text-slate-600">
+                                      No current note.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="rounded-md bg-slate-50 p-3 text-sm">
+                                  <p className="font-semibold text-slate-800">
+                                    CarePrep
+                                  </p>
+                                  {carePrepDetails ? (
+                                    <div className="mt-2 space-y-2 text-slate-700">
+                                      {textValue(carePrepDetails.summary) ? (
+                                        <p>{textValue(carePrepDetails.summary)}</p>
+                                      ) : null}
+                                      <p className="font-semibold text-slate-800">
+                                        Questions
+                                      </p>
+                                      <DetailList
+                                        emptyLabel="No questions saved."
+                                        items={asTextList(
+                                          carePrepDetails.key_questions
+                                        )}
+                                      />
+                                      <p className="font-semibold text-slate-800">
+                                        Bring
+                                      </p>
+                                      <DetailList
+                                        emptyLabel="No bring list saved."
+                                        items={asTextList(carePrepDetails.bring_list)}
+                                      />
+                                      <p className="font-semibold text-slate-800">
+                                        Watchouts
+                                      </p>
+                                      <DetailList
+                                        emptyLabel="No watchouts saved."
+                                        items={asTextList(carePrepDetails.watchouts)}
+                                      />
+                                    </div>
+                                  ) : appointment.current_guidance_id ? (
+                                    <>
+                                      <p className="mt-1 text-slate-600">
+                                        CarePrep content is hidden.
+                                      </p>
+                                      <button
+                                        className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:text-slate-400"
+                                        disabled={
+                                          revealingAdminSensitiveKey === carePrepKey
+                                        }
+                                        onClick={() =>
+                                          revealAdminSensitiveData({
+                                            resourceId:
+                                              appointment.current_guidance_id,
+                                            resourceType: "careprep_guidance",
+                                            targetUserId:
+                                              adminReadonlySnapshot.profile.id,
+                                          })
+                                        }
+                                        type="button"
+                                      >
+                                        {revealingAdminSensitiveKey === carePrepKey
+                                          ? "Revealing..."
+                                          : "Reveal CarePrep"}
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <p className="mt-1 text-slate-600">
+                                      No current CarePrep.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })
+                      )}
+                    </div>
+                  </section>
+                ) : null}
+
                 <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   {[
                     ["Total users", adminUserActivityStats.totalUsers],
@@ -11473,6 +13301,9 @@ export default function Home() {
                           <th className="border-b border-slate-200 px-3 py-2">
                             Flags
                           </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            Actions
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -11484,8 +13315,16 @@ export default function Home() {
                             row.last_appointment_created_at ??
                             row.last_seen_at;
 
+                          const isReadonlyViewTarget =
+                            adminReadonlySnapshot?.profile.id === row.user_id;
+
                           return (
-                            <tr key={row.user_id}>
+                            <tr
+                              className={
+                                isReadonlyViewTarget ? "bg-blue-50" : undefined
+                              }
+                              key={row.user_id}
+                            >
                               <td className="border-b border-slate-100 px-3 py-3 align-top">
                                 <p className="font-semibold text-slate-900">
                                   {row.display_name || row.email || "Unknown user"}
@@ -11552,6 +13391,24 @@ export default function Home() {
                                     </span>
                                   ) : null}
                                 </div>
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top">
+                                <button
+                                  className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:text-slate-400 ${
+                                    isReadonlyViewTarget
+                                      ? "border-blue-300 bg-blue-100 text-blue-800"
+                                      : "border-slate-300 text-slate-700"
+                                  }`}
+                                  disabled={loadingAdminReadonlyUserId === row.user_id}
+                                  onClick={() => openAdminReadonlyUserView(row.user_id)}
+                                  type="button"
+                                >
+                                  {loadingAdminReadonlyUserId === row.user_id
+                                    ? "Loading..."
+                                    : isReadonlyViewTarget
+                                      ? "Viewing"
+                                      : "View as user"}
+                                </button>
                               </td>
                             </tr>
                           );
@@ -11690,6 +13547,10 @@ export default function Home() {
                           const rowKey = adminIntegrationErrorRowKey(row);
                           const selected =
                             selectedAdminIntegrationErrorKeys.includes(rowKey);
+                          const isNewToAdmin = isNewForAdmin(
+                            row.latest_occurred_at,
+                            adminLastViewedAt("admin_tab", "errors")
+                          );
 
                           return (
                             <tr key={rowKey}>
@@ -11713,7 +13574,12 @@ export default function Home() {
                                 </p>
                               </td>
                               <td className="border-b border-slate-100 px-3 py-3 align-top font-semibold text-slate-900">
-                                {row.integration_key.replaceAll("_", " ")}
+                                <span>{row.integration_key.replaceAll("_", " ")}</span>
+                                {isNewToAdmin ? (
+                                  <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                                    New to me
+                                  </span>
+                                ) : null}
                               </td>
                               <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
                                 {row.error_key.replaceAll("_", " ")}
@@ -11772,6 +13638,10 @@ export default function Home() {
                     ) : (
                       adminSupportTickets.map((ticket) => {
                         const selected = selectedAdminTicket?.id === ticket.id;
+                        const isNewToAdmin = isNewForAdmin(
+                          ticket.updated_at,
+                          adminLastViewedAt("admin_tab", "tickets")
+                        );
 
                         return (
                           <button
@@ -11793,6 +13663,11 @@ export default function Home() {
                               {ticket.needs_admin_followup ? (
                                 <span className="shrink-0 rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
                                   Follow up
+                                </span>
+                              ) : null}
+                              {isNewToAdmin ? (
+                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+                                  New to me
                                 </span>
                               ) : null}
                             </div>
@@ -12187,6 +14062,10 @@ export default function Home() {
                         const hasAdminReview = assistantReviewAdminReviews.some(
                           (review) => review.interaction_id === interaction.id
                         );
+                        const isNewToAdmin = isNewForAdmin(
+                          interaction.updated_at || interaction.created_at,
+                          adminLastViewedAt("admin_tab", "assistantReview")
+                        );
 
                         return (
                           <button
@@ -12210,6 +14089,11 @@ export default function Home() {
                               {hasAdminReview ? (
                                 <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
                                   Reviewed
+                                </span>
+                              ) : null}
+                              {isNewToAdmin ? (
+                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+                                  New to me
                                 </span>
                               ) : null}
                             </div>
@@ -12840,17 +14724,27 @@ export default function Home() {
                   </div>
                   <button
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                    disabled={loadingInstructions || loadingCarePrepHistory}
+                    disabled={
+                      loadingInstructions ||
+                      loadingCarePrepHistory ||
+                      loadingAgentKnowledgeProposals
+                    }
                     onClick={() =>
                       aiAdminTab === "instructions"
                         ? loadAiInstructions()
-                        : selectedAiWorkflow === "careprep_generation"
-                          ? loadCarePrepHistory()
-                          : loadIntakeHistory()
+                        : aiAdminTab === "agentKnowledge"
+                          ? loadAppContent("support_agent_product_facts")
+                          : aiAdminTab === "proposals"
+                            ? loadAgentKnowledgeProposals()
+                            : selectedAiWorkflow === "careprep_generation"
+                              ? loadCarePrepHistory()
+                              : loadIntakeHistory()
                     }
                     type="button"
                   >
-                    {loadingInstructions || loadingCarePrepHistory
+                    {loadingInstructions ||
+                    loadingCarePrepHistory ||
+                    loadingAgentKnowledgeProposals
                       ? "Loading..."
                       : "Reload"}
                   </button>
@@ -12864,35 +14758,42 @@ export default function Home() {
                     {[
                       ["instructions", "Instructions", "Prompt versions"],
                       ["agentKnowledge", "Agent Knowledge", "Product truth"],
+                      ["proposals", "Proposals", "Review updates"],
                       ["history", selectedAiWorkflowConfig.historyLabel, "Audit trail"],
                     ].map(([tabKey, label, description]) => {
                       const isSelected = aiAdminTab === tabKey;
+                      const attention =
+                        adminAttentionFor(
+                          "ai_admin_tab",
+                          tabKey
+                        )?.attention_count ?? 0;
 
                       return (
-                        <button
-                          className={`w-full rounded-md border px-3 py-3 text-left transition ${
-                            isSelected
-                              ? "border-blue-300 bg-blue-50 text-blue-950"
-                              : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50"
-                          }`}
-                          disabled={loadingInstructions || loadingCarePrepHistory}
+                        <AdminNavButton
+                          className="w-full px-3 py-3 text-left"
+                          disabled={
+                            loadingInstructions ||
+                            loadingCarePrepHistory ||
+                            loadingAgentKnowledgeProposals
+                          }
+                          hasAttention={attention > 0}
+                          isSelected={isSelected}
                           key={tabKey}
                           onClick={() =>
                             handleChangeAiAdminTab(tabKey as AiAdminTab)
                           }
-                          type="button"
                         >
                           <span className="block font-semibold">{label}</span>
                           <span className="mt-1 block text-xs text-slate-500">
                             {description}
                           </span>
-                        </button>
+                        </AdminNavButton>
                       );
                     })}
                   </aside>
 
                   <div>
-                {aiAdminTab !== "agentKnowledge" ? (
+                {aiAdminTab !== "agentKnowledge" && aiAdminTab !== "proposals" ? (
                   <label className="block max-w-xl text-sm font-medium text-slate-700">
                   AI workflow
                   <select
@@ -13102,6 +15003,16 @@ export default function Home() {
                         />
                       </label>
                       <label className="block text-sm font-medium text-slate-700">
+                        Voice guidance
+                        <textarea
+                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          onChange={(event) =>
+                            setAgentVoiceGuidance(event.target.value)
+                          }
+                          value={agentVoiceGuidance}
+                        />
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
                         Change note
                         <input
                           className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
@@ -13162,6 +15073,54 @@ export default function Home() {
                       )}
                     </section>
                   </section>
+                ) : aiAdminTab === "proposals" ? (
+                  <AgentKnowledgeProposalsPanel
+                    automationSettings={agentKnowledgeAutomationSettings}
+                    checkRuns={agentKnowledgeCheckRuns}
+                    drafts={agentKnowledgeProposalDrafts}
+                    formatDate={formatDate}
+                    loading={loadingAgentKnowledgeProposals}
+                    notes={agentKnowledgeProposalNotes}
+                    onDraftChange={(itemId, value) =>
+                      setAgentKnowledgeProposalDrafts((current) => ({
+                        ...current,
+                        [itemId]: value,
+                      }))
+                    }
+                    onNoteChange={(itemId, value) =>
+                      setAgentKnowledgeProposalNotes((current) => ({
+                        ...current,
+                        [itemId]: value,
+                      }))
+                    }
+                    onPublish={handlePublishAgentKnowledgeProposal}
+                    onPublishNoteChange={setAgentKnowledgeProposalPublishNote}
+                    onQueueManualCheck={handleQueueAgentKnowledgeManualCheck}
+                    onReviewItem={handleReviewAgentKnowledgeProposalItem}
+                    onSaveAutomationSettings={
+                      handleSaveAgentKnowledgeAutomationSettings
+                    }
+                    onSelectProposal={setSelectedAgentKnowledgeProposalId}
+                    onSettingsChange={(patch) =>
+                      setAgentKnowledgeAutomationSettings((current) => ({
+                        ...current,
+                        ...patch,
+                      }))
+                    }
+                    proposals={agentKnowledgeProposals}
+                    publishableCount={
+                      selectedAgentKnowledgeProposalPublishableCount
+                    }
+                    publishingProposalId={publishingAgentKnowledgeProposalId}
+                    publishNote={agentKnowledgeProposalPublishNote}
+                    queueingRun={queueingAgentKnowledgeRun}
+                    savingAutomationSettings={
+                      savingAgentKnowledgeAutomationSettings
+                    }
+                    savingItemId={savingAgentKnowledgeProposalItemId}
+                    selectedItems={selectedAgentKnowledgeProposalItems}
+                    selectedProposal={selectedAgentKnowledgeProposal}
+                  />
                 ) : selectedAiWorkflow === "careprep_generation" ? (
                   <section className="mt-5 space-y-4">
                     <div className="flex flex-wrap items-end gap-3">
@@ -13395,21 +15354,23 @@ export default function Home() {
                           const itemCount = productMgmtItems.filter(
                             (item) => item.area_id === area?.id
                           ).length;
+                          const attention =
+                            adminAttentionFor(
+                              "product_area",
+                              section.key
+                            )?.attention_count ?? 0;
 
                           return (
-                            <button
-                              className={`w-full rounded-md border px-3 py-3 text-left transition ${
-                                isSelected
-                                  ? "border-blue-300 bg-blue-50 text-blue-950"
-                                  : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50"
-                              }`}
+                            <AdminNavButton
+                              className="w-full px-3 py-3 text-left"
+                              hasAttention={attention > 0}
+                              isSelected={isSelected}
                               key={section.key}
                               onClick={() =>
-                                setSelectedProductMgmtSection(
+                                handleChangeProductMgmtSection(
                                   section.key as ProductMgmtSection
                                 )
                               }
-                              type="button"
                             >
                               <span className="block font-semibold">
                                 {section.label}
@@ -13419,7 +15380,7 @@ export default function Home() {
                                   ? `${itemCount} item${itemCount === 1 ? "" : "s"}`
                                   : "Run SQL to enable entries"}
                               </span>
-                            </button>
+                            </AdminNavButton>
                           );
                         })}
                       </div>
@@ -13652,6 +15613,13 @@ export default function Home() {
                                 productMgmtItemDraft !== null;
                               const isSavingEdit =
                                 savingProductMgmtEditItemId === item.id;
+                              const isNewToAdmin = isNewForAdmin(
+                                item.updated_at,
+                                adminLastViewedAt(
+                                  "product_area",
+                                  selectedProductMgmtSection
+                                )
+                              );
                               const statusLabel = item.status
                                 .replace("_", " ")
                                 .replace(/^./, (letter) => letter.toUpperCase());
@@ -13687,6 +15655,11 @@ export default function Home() {
                                     >
                                       {statusLabel}
                                     </span>
+                                    {isNewToAdmin ? (
+                                      <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+                                        New to me
+                                      </span>
+                                    ) : null}
                                   </div>
                                   {item.body ? (
                                     <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
@@ -14190,7 +16163,13 @@ export default function Home() {
 
             {signedInEmail && mainTab === "appointments" ? (
               appointments.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600">
+              <div
+                className={`rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600 ${
+                  appointmentView === "upcoming" && notesReminderAppointment
+                    ? ""
+                    : "-mt-4"
+                }`}
+              >
                 {appointmentView === "archived"
                   ? "No archived appointments found."
                   : appointmentView === "logged"
@@ -14198,12 +16177,21 @@ export default function Home() {
                     : "No upcoming appointments found yet."}
               </div>
             ) : (
-              appointments.map((appointment) => {
+              <div
+                className={`overflow-hidden rounded-xl border border-slate-200/80 bg-white ${
+                  appointmentView === "upcoming" && notesReminderAppointment
+                    ? ""
+                    : "-mt-4"
+                }`}
+              >
+              {appointments.map((appointment) => {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
                 const carePrepDraft = draftGuidanceByAppointment.get(
                   appointment.id
                 );
+                const carePrepGenerationError =
+                  carePrepGenerationErrors[appointment.id];
                 const appointmentSubject = appointment.care_subject_id
                   ? subjectsById.get(appointment.care_subject_id)
                   : null;
@@ -14258,7 +16246,7 @@ export default function Home() {
                   "";
                 return (
                   <article
-                    className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+                    className="relative px-5 py-7 before:absolute before:left-5 before:right-5 before:top-0 before:h-0.5 before:rounded-full before:bg-slate-300 first:before:hidden"
                     key={appointment.id}
                   >
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
@@ -14456,7 +16444,9 @@ export default function Home() {
                       <section className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <p className="text-sm font-medium text-amber-950">
-                            Switching will discard your unsaved changes. Proceed?
+                            {pendingModifierSwitch.target
+                              ? "Switching will discard your unsaved changes. Proceed?"
+                              : "Closing will discard your unsaved changes. Proceed?"}
                           </p>
                           <div className="flex flex-wrap gap-2">
                             <button
@@ -14466,7 +16456,9 @@ export default function Home() {
                               }
                               type="button"
                             >
-                              Discard and switch
+                              {pendingModifierSwitch.target
+                                ? "Discard and switch"
+                                : "Discard and close"}
                             </button>
                             <button
                               className="rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950"
@@ -15205,6 +17197,12 @@ export default function Home() {
                             ) : null}
                           </div>
                         </div>
+                        {carePrepGenerationError ? (
+                          <p className="mt-3 rounded-md border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-800">
+                            CarePrep could not be generated.{" "}
+                            {carePrepGenerationError}
+                          </p>
+                        ) : null}
                         {!prep?.summary ? (
                           <p className="mt-2 text-sm text-slate-700">
                             Generate a prep view when you are ready to review
@@ -15408,6 +17406,8 @@ export default function Home() {
                   </article>
                 );
               })
+              }
+              </div>
               )
             ) : null}
           </div>

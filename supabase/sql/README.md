@@ -44,6 +44,27 @@ Supabase SQL editor history.
 - `2026-05-20_seed_support_assistant_instruction.sql`
   Admin utility: seeds the editable Support Assistant AI prompt/instruction set for existing care circles.
 
+- `2026-05-22_agent_knowledge_proposals.sql`
+  Migration/admin utility: stores reviewable Agent Knowledge update proposals, per-block review decisions, Admin-edited final text, evidence, and feedback links before publication.
+
+- `2026-05-22_agent_knowledge_automation_settings.sql`
+  Migration/admin utility: stores Agent Knowledge proposal-generation settings and queued check runs for manual, software-update, scheduled, and feedback-cluster cycles.
+
+- `2026-05-22_pricing_tiers.sql`
+  Admin utility: aligns beta plan ids and public names for Free, Active Use, Premium Individual, and Group.
+
+- `2026-05-22_plan_feature_metering.sql`
+  Migration/admin utility: adds plan feature definitions, Care Circle usage counters, and feature usage check/consume/refund functions.
+
+- `2026-05-22_profile_plan_tier_help_content.sql`
+  Admin utility: seeds editable Profile plan-tier helper text.
+
+- `2026-05-22_careprep_limit_message_content.sql`
+  Admin utility: seeds the editable manual CarePrep plan-limit message for Admin > Content > Messages.
+
+- `2026-05-22_seed_plan_metering_agent_knowledge.sql`
+  Admin utility: seeds Agent Knowledge updates for pricing tiers, metering, and beta plan-change limitations.
+
 ## Supabase SQL History Triage
 
 Recommended categories for the visible Supabase SQL editor history.
@@ -90,6 +111,11 @@ as named utility scripts if they are still useful.
 
 - Reset Beta Acknowledgements for Profile
 - Assign personal_plus entitlement plan
+- Align beta pricing tiers
+- Add plan feature metering
+- Seed Profile plan tier help content
+- Seed CarePrep limit message content
+- Seed plan metering Agent Knowledge
 - Activate Care Circle Entitlement
 - Add Member and Upgrade Care Circle Plan
 - Seed manual appointments for a user
