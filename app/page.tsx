@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
+import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import {
   favoriteLocationLabel,
   FavoriteLocation,
@@ -2766,6 +2767,7 @@ export default function Home() {
 
   const careVipLimit = Math.max(entitlement.max_active_subjects || 1, 1);
   const canUseMultipleCareVips = careVipLimit > 1;
+  const canFilterCareVips = careSubjects.length > 1;
   const canAddCareVip = careSubjects.length < careVipLimit;
   const hasAcceptedBetaAgreement =
     Boolean(betaDisclaimerAcknowledgedAt) &&
@@ -3696,7 +3698,6 @@ export default function Home() {
             null
         : null
     );
-    setMessage(`Loaded ${visibleAppointments.length} appointment(s).`);
   }
 
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
@@ -9318,8 +9319,8 @@ export default function Home() {
                     disabled={seedingSampleData}
                     onClick={() => handleSeedSampleDataForCurrentUser(true)}
                     type="button"
-                  >
-                    {seedingSampleData ? "Adding..." : "Add demo data"}
+                    >
+                      {seedingSampleData ? "Adding..." : "Add demo data"}
                   </button>
                 </div>
               </section>
@@ -10643,86 +10644,10 @@ export default function Home() {
               </section>
             ) : null}
 
-            {signedInEmail && mainTab === "appointments" ? (
+            {signedInEmail &&
+            mainTab === "appointments" &&
+            activeAppointmentPanel ? (
               <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-wrap items-end justify-between gap-4">
-                  <div className="min-w-60 flex-1">
-                    {canUseMultipleCareVips ? (
-                      <label className="block text-sm font-medium text-slate-700">
-                        Showing appointments
-                        <select
-                          className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                          disabled={loading || careSubjects.length === 0}
-                          onChange={(event) =>
-                            handleChangeSubject(event.target.value)
-                          }
-                          value={selectedSubjectId}
-                        >
-                          <option value={ALL_SUBJECTS}>All Care VIPs</option>
-                          {careSubjects.map((subject) => (
-                            <option key={subject.id} value={subject.id}>
-                              {subject.display_name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : (
-                      <div>
-                        <p className="text-sm font-medium text-slate-700">
-                          Showing appointments
-                        </p>
-                        <p className="mt-2 rounded-md bg-slate-100 px-3 py-2 text-base text-slate-700">
-                          All appointments
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
-                      disabled={loading}
-                      onClick={handleRefresh}
-                      type="button"
-                    >
-                      ↻ Refresh
-                    </button>
-                    <button
-                      className={`rounded-md px-4 py-2 text-sm font-semibold ${
-                        activeAppointmentPanel === "add"
-                          ? "bg-blue-700 text-white"
-                          : "border border-slate-300 bg-white text-slate-700"
-                      }`}
-                      onClick={() => {
-                        cancelTextIntake();
-                        resetPlaceLookup();
-                        setActiveAppointmentPanel((currentPanel) =>
-                          currentPanel === "add" ? null : "add"
-                        );
-                      }}
-                      type="button"
-                    >
-                      Add appointment
-                    </button>
-                    <button
-                      className={`rounded-md px-4 py-2 text-sm font-semibold ${
-                        activeAppointmentPanel === "quickAdd"
-                          ? "bg-blue-700 text-white"
-                          : "border border-slate-300 bg-white text-slate-700"
-                      }`}
-                      onClick={() => {
-                        cancelTextIntake();
-                        resetPlaceLookup();
-                        setActiveAppointmentPanel((currentPanel) =>
-                          currentPanel === "quickAdd" ? null : "quickAdd"
-                        );
-                      }}
-                      type="button"
-                    >
-                      Import
-                    </button>
-                  </div>
-                </div>
-
                 {activeAppointmentPanel === "add" ? (
                   <form
                     className="mt-4 grid gap-4 rounded-md border border-blue-100 bg-blue-50 p-4 md:grid-cols-2"
@@ -13976,47 +13901,18 @@ export default function Home() {
             ) : null}
 
             {signedInEmail && mainTab === "appointments" ? (
-              <div
-                className="sticky z-40 flex flex-wrap gap-2 bg-slate-50/95 py-3 backdrop-blur"
-                style={{ top: stickySecondaryOffset }}
-              >
-                <button
-                  className={`rounded-md px-4 py-2 text-sm font-semibold ${
-                    appointmentView === "upcoming"
-                      ? "bg-blue-700 text-white"
-                      : "border border-slate-300 bg-white text-slate-700"
-                  }`}
-                  disabled={loading}
-                  onClick={() => handleChangeAppointmentView("upcoming")}
-                  type="button"
-                >
-                  Upcoming
-                </button>
-                <button
-                  className={`rounded-md px-4 py-2 text-sm font-semibold ${
-                    appointmentView === "logged"
-                      ? "bg-blue-700 text-white"
-                      : "border border-slate-300 bg-white text-slate-700"
-                  }`}
-                  disabled={loading}
-                  onClick={() => handleChangeAppointmentView("logged")}
-                  type="button"
-                >
-                  Logged
-                </button>
-                <button
-                  className={`rounded-md px-4 py-2 text-sm font-semibold ${
-                    appointmentView === "archived"
-                      ? "bg-blue-700 text-white"
-                      : "border border-slate-300 bg-white text-slate-700"
-                  }`}
-                  disabled={loading}
-                  onClick={() => handleChangeAppointmentView("archived")}
-                  type="button"
-                >
-                  Archived
-                </button>
-              </div>
+              <AppointmentViewToolbar
+                allSubjectsValue={ALL_SUBJECTS}
+                canFilterCareVips={canFilterCareVips}
+                careSubjects={careSubjects}
+                disabled={loading}
+                onChangeSubject={handleChangeSubject}
+                onChangeView={handleChangeAppointmentView}
+                onRefresh={handleRefresh}
+                selectedSubjectId={selectedSubjectId}
+                stickyTop={stickySecondaryOffset}
+                view={appointmentView}
+              />
             ) : null}
 
             {signedInEmail &&
@@ -14053,7 +13949,7 @@ export default function Home() {
                       }
                       type="button"
                     >
-                      Type
+                      Add
                     </button>
                     <button
                       className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
@@ -14063,7 +13959,7 @@ export default function Home() {
                       }
                       type="button"
                     >
-                      Paste
+                      Paste / Import
                     </button>
                   </div>
                 </div>
@@ -14356,6 +14252,10 @@ export default function Home() {
                   "bg-white text-blue-700 hover:bg-blue-50";
                 const mapsLink = googleMapsUrl(appointment.location_address);
                 const calendarLink = agicalUrl(appointment);
+                const practiceLabel =
+                  appointment.provider_organization ||
+                  appointment.location_name ||
+                  "";
                 return (
                   <article
                     className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
@@ -14387,14 +14287,26 @@ export default function Home() {
                             Note: This is not an actual appointment.
                           </p>
                         ) : null}
-                        {appointment.location_name ||
+                        {practiceLabel ||
                         appointment.location_address ||
                         appointment.location_phone ? (
                           <div className="mt-2 text-sm text-slate-600">
-                            {appointment.location_name ? (
-                              <p>{appointment.location_name}</p>
+                            {practiceLabel ? (
+                              mapsLink && !isArchived ? (
+                                <a
+                                  className="inline-flex items-center gap-1 font-medium text-slate-700 hover:text-blue-800"
+                                  href={mapsLink}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  <MapPinIcon className="h-4 w-4" />
+                                  {practiceLabel}
+                                </a>
+                              ) : (
+                                <p>{practiceLabel}</p>
+                              )
                             ) : null}
-                            {!appointment.location_name &&
+                            {!practiceLabel &&
                             appointment.location_address ? (
                               <p>{appointment.location_address}</p>
                             ) : null}
@@ -14406,30 +14318,6 @@ export default function Home() {
 
                         {!isArchived ? (
                           <div className="mt-4 flex flex-wrap gap-3">
-                            {mapsLink ? (
-                              <a
-                                aria-label="Open in Google Maps"
-                                className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300"
-                                href={mapsLink}
-                                rel="noreferrer"
-                                target="_blank"
-                                title="Open in Google Maps"
-                              >
-                                <MapPinIcon className="h-5 w-5" />
-                              </a>
-                            ) : null}
-                            {calendarLink ? (
-                              <a
-                                aria-label="Add to Calendar"
-                                className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300"
-                                href={calendarLink}
-                                rel="noreferrer"
-                                target="_blank"
-                                title="Add to Calendar"
-                              >
-                                <CalendarIcon className="h-5 w-5" />
-                              </a>
-                            ) : null}
                             {canPasteContextualNotes ? (
                               <div
                                 aria-label="Appointment modifier actions"
@@ -14536,8 +14424,20 @@ export default function Home() {
                         ) : null}
                       </div>
                       <div className="text-left md:min-w-64 md:text-right">
-                        <p className="text-lg font-medium text-slate-700">
+                        <p className="flex items-center gap-2 text-lg font-medium text-slate-700 md:justify-end">
                           {formatDate(appointment.starts_at)}
+                          {calendarLink && !isArchived ? (
+                            <a
+                              aria-label="Add to Calendar"
+                              className="inline-flex text-slate-500 hover:text-blue-700"
+                              href={calendarLink}
+                              rel="noreferrer"
+                              target="_blank"
+                              title="Add to Calendar"
+                            >
+                              <CalendarIcon className="h-5 w-5" />
+                            </a>
+                          ) : null}
                         </p>
                         {appointment.provider_name ? (
                           <p className="mt-1 text-sm font-medium text-slate-700">
@@ -15022,25 +14922,6 @@ export default function Home() {
                       </section>
                     ) : null}
 
-                    {canGenerateCarePrep ? (
-                      <div className="mt-5">
-                        <button
-                          className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
-                          disabled={generatingCarePrepForId === appointment.id}
-                          onClick={() => handleGenerateCarePrep(appointment)}
-                          type="button"
-                        >
-                          {generatingCarePrepForId === appointment.id
-                            ? "Generating CarePrep..."
-                            : carePrepDraft
-                              ? "Regenerate CarePrep"
-                              : prep
-                                ? "Generate new CarePrep"
-                                : "Generate CarePrep"}
-                        </button>
-                      </div>
-                    ) : null}
-
                     {carePrepDraft && !isArchived ? (
                       <section className="mt-5 rounded-md border border-blue-200 bg-blue-50 p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -15269,19 +15150,44 @@ export default function Home() {
                       </section>
                     </div>
 
-                    {prep?.summary ? (
+                    {prep?.summary ||
+                    canGenerateCarePrep ||
+                    generatingCarePrepForId === appointment.id ? (
                       <section className="mt-5 rounded-md bg-blue-50 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div>
                             <h3 className="text-lg font-semibold text-blue-900">
                               CarePrep
                             </h3>
-                            <p className="mt-1 text-xs font-medium text-blue-700">
-                              Current version {prep.version_number}
-                            </p>
+                            {prep?.summary ? (
+                              <p className="mt-1 text-xs font-medium text-blue-700">
+                                Current version {prep.version_number}
+                              </p>
+                            ) : null}
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            {!isArchived && !isEditingCarePrep ? (
+                            {!prep?.summary && canGenerateCarePrep ? (
+                              <>
+                                <button
+                                  className="rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800 disabled:text-slate-400"
+                                  disabled={
+                                    generatingCarePrepForId === appointment.id
+                                  }
+                                  onClick={() =>
+                                    handleGenerateCarePrep(appointment)
+                                  }
+                                  type="button"
+                                >
+                                  Generate CarePrep
+                                </button>
+                                {generatingCarePrepForId === appointment.id ? (
+                                  <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
+                                    Generating...
+                                  </span>
+                                ) : null}
+                              </>
+                            ) : null}
+                            {prep?.summary && !isArchived && !isEditingCarePrep ? (
                               <button
                                 className="rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800"
                                 onClick={() =>
@@ -15292,12 +15198,19 @@ export default function Home() {
                                 Edit CarePrep
                               </button>
                             ) : null}
-                            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                            {prep?.summary ? (
+                              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
                               Prep for visit
-                            </span>
+                              </span>
+                            ) : null}
                           </div>
                         </div>
-                        {isEditingCarePrep ? (
+                        {!prep?.summary ? (
+                          <p className="mt-2 text-sm text-slate-700">
+                            Generate a prep view when you are ready to review
+                            this appointment.
+                          </p>
+                        ) : isEditingCarePrep ? (
                           <div className="mt-4 grid gap-4">
                             <label className="block text-sm font-medium text-slate-700">
                               Summary
