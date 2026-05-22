@@ -108,6 +108,7 @@ Current assumptions:
 
 - A user can have one or more Care VIPs depending on entitlement.
 - If only one Care VIP exists, patient-facing selectors should usually be hidden to reduce noise.
+- Profile Care VIP management controls should only appear for entitlements that support multiple active Care VIPs.
 - If more than one Care VIP exists, filtering controls can appear as "Showing: [All appts]".
 - Appointment records may reference a `care_subject_id`.
 - Multi-user access, role-based family sharing, and permission management are future work.

@@ -10391,11 +10391,6 @@ export default function Home() {
                       ? `${savedProfileLabel}'s CarePland account`
                       : "Your CarePland account"}
                   </h2>
-                  {verifiedAccountEmail ? (
-                    <p className="mt-1 break-words text-sm font-normal text-slate-600">
-                      {verifiedAccountEmail}
-                    </p>
-                  ) : null}
                 </div>
                 <button
                   className="rounded-md border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
@@ -10453,33 +10448,33 @@ export default function Home() {
                   </div>
                 </section>
 
-                <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-3 sm:col-span-2 xl:order-2 xl:col-span-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      CARE VIPs
-                    </h3>
-                    <p className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {careSubjects.length}/{careVipLimit}
-                    </p>
-                  </div>
-                  <p className="mt-3 text-sm text-slate-600">
-                    Manage everyone whose appointments
-                    <br />
-                    are connected to your account.
-                  </p>
-                  {careSubjects.length > 0 ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {careSubjects.map((subject) => (
-                        <span
-                          className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
-                          key={subject.id}
-                        >
-                          {subject.display_name}
-                        </span>
-                      ))}
+                {canUseMultipleCareVips ? (
+                  <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-3 sm:col-span-2 xl:order-2 xl:col-span-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        CARE VIPs
+                      </h3>
+                      <p className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {careSubjects.length}/{careVipLimit}
+                      </p>
                     </div>
-                  ) : null}
-                  {canUseMultipleCareVips ? (
+                    <p className="mt-3 text-sm text-slate-600">
+                      Manage everyone whose appointments
+                      <br />
+                      are connected to your account.
+                    </p>
+                    {careSubjects.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {careSubjects.map((subject) => (
+                          <span
+                            className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
+                            key={subject.id}
+                          >
+                            {subject.display_name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                     <form className="mt-4" onSubmit={handleCreateCareVip}>
                       <label className="block text-sm font-medium text-slate-700">
                         Add Care VIP
@@ -10508,8 +10503,8 @@ export default function Home() {
                         </p>
                       ) : null}
                     </form>
-                  ) : null}
-                </section>
+                  </section>
+                ) : null}
 
                 <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-2 xl:order-3">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
