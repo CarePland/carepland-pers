@@ -399,7 +399,7 @@ type AiWorkflowKey =
 type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
 type AppointmentModifier = "add" | "edit" | "import";
-type MainTab = "admin" | "appointments" | "profile";
+type MainTab = "admin" | "appointments" | "home" | "profile";
 type ProductMgmtSection = string;
 type ProductMgmtStatus = "deferred" | "in_progress" | "open" | "resolved";
 type ProductMgmtPriority = "high" | "low" | "medium";
@@ -2048,7 +2048,7 @@ export default function Home() {
       initialUiState?.activeAppointmentPanel ?? null
     );
   const [mainTab, setMainTab] = useState<MainTab>(
-    initialUiState?.mainTab ?? "appointments"
+    initialUiState?.mainTab ?? "home"
   );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -2420,6 +2420,10 @@ export default function Home() {
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [homeNextAppointment, setHomeNextAppointment] =
+    useState<Appointment | null>(null);
+  const [homeNextGuidance, setHomeNextGuidance] =
+    useState<CarePrepGuidance | null>(null);
   const [notesReminderAppointment, setNotesReminderAppointment] =
     useState<NotesReminderAppointment | null>(null);
   const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
@@ -2732,6 +2736,22 @@ export default function Home() {
     !needsOnboarding &&
     !sampleDataSeededAt &&
     !sampleDataDeclinedAt;
+  const homeCarePrepHighlights = useMemo(() => {
+    if (!homeNextGuidance) {
+      return [];
+    }
+
+    return [
+      { items: asTextList(homeNextGuidance.key_questions), label: "Ask" },
+      { items: asTextList(homeNextGuidance.bring_list), label: "Bring" },
+      { items: asTextList(homeNextGuidance.watchouts), label: "Watch" },
+    ]
+      .map((section) => ({
+        ...section,
+        items: section.items.filter(Boolean).slice(0, 2),
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [homeNextGuidance]);
 
   async function establishPasswordRecoverySession(): Promise<string | null> {
     if (typeof window === "undefined") {
@@ -3263,7 +3283,7 @@ export default function Home() {
     }
     if (!userIsAdmin) {
       setMainTab((currentTab) =>
-        currentTab === "admin" ? "appointments" : currentTab
+        currentTab === "admin" ? "home" : currentTab
       );
     }
     setOnboardingCompletedAt(
@@ -3308,6 +3328,8 @@ export default function Home() {
       !profileRow?.beta_terms_acknowledged_at
     ) {
       setAppointments([]);
+      setHomeNextAppointment(null);
+      setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
       setCareSubjects([]);
       setEntitlement(defaultEntitlement);
@@ -3321,6 +3343,8 @@ export default function Home() {
 
     if (!profileRow?.onboarding_completed_at) {
       setAppointments([]);
+      setHomeNextAppointment(null);
+      setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
       setCareSubjects([]);
       setEntitlement(defaultEntitlement);
@@ -3344,6 +3368,8 @@ export default function Home() {
 
     if (circleIds.length === 0) {
       setAppointments([]);
+      setHomeNextAppointment(null);
+      setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
       setCareSubjects([]);
       setEntitlement(defaultEntitlement);
@@ -3477,6 +3503,38 @@ export default function Home() {
     }
 
     setNotesReminderAppointment(reminderRows?.[0] ?? null);
+    const nextHomeAppointment =
+      appointmentRows
+        ?.filter((item) => {
+          if (item.status === "archived" || item.current_note_id) {
+            return false;
+          }
+
+          if (!item.starts_at) {
+            return true;
+          }
+
+          return new Date(item.starts_at) >= upcomingStart;
+        })
+        .sort((firstAppointment, secondAppointment) => {
+          if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
+            return 0;
+          }
+
+          if (!firstAppointment.starts_at) {
+            return 1;
+          }
+
+          if (!secondAppointment.starts_at) {
+            return -1;
+          }
+
+          return (
+            new Date(firstAppointment.starts_at).getTime() -
+            new Date(secondAppointment.starts_at).getTime()
+          );
+        })[0] ?? null;
+    setHomeNextAppointment(nextHomeAppointment);
 
     const visibleAppointments =
       appointmentRows?.filter((item) =>
@@ -3512,11 +3570,18 @@ export default function Home() {
       return secondTime - firstTime;
     });
     const appointmentIds = visibleAppointments.map((item) => item.id);
+    const appointmentIdsForDetails = Array.from(
+      new Set([
+        ...appointmentIds,
+        ...(nextHomeAppointment ? [nextHomeAppointment.id] : []),
+      ])
+    );
     setAppointments(visibleAppointments);
 
-    if (appointmentIds.length === 0) {
+    if (appointmentIdsForDetails.length === 0) {
       setNotes([]);
       setGuidance([]);
+      setHomeNextGuidance(null);
       setMessage(
         view === "archived"
           ? "No archived appointments found."
@@ -3534,14 +3599,14 @@ export default function Home() {
           .select(
             "id,appointment_id,summary_short,takeaways,followups,is_current,version_number,superseded_at,superseded_by_note_id"
           )
-          .in("appointment_id", appointmentIds)
+          .in("appointment_id", appointmentIdsForDetails)
           .eq("is_current", true),
         supabase
           .from("careprep_guidance")
           .select(
             "id,appointment_id,generated_at,summary,key_questions,bring_list,watchouts,med_review,since_last_visit,next_steps,is_current,version_number,review_status,source,superseded_at,superseded_by_guidance_id,edited_from_guidance_id,ai_generated_guidance_id"
           )
-          .in("appointment_id", appointmentIds)
+          .in("appointment_id", appointmentIdsForDetails)
           .or("is_current.eq.true,review_status.eq.draft")
           .order("generated_at", { ascending: true }),
       ]);
@@ -3554,8 +3619,23 @@ export default function Home() {
       throw guidanceError;
     }
 
+    const loadedGuidanceRows = guidanceRows ?? [];
     setNotes(noteRows ?? []);
-    setGuidance(guidanceRows ?? []);
+    setGuidance(loadedGuidanceRows);
+    setHomeNextGuidance(
+      nextHomeAppointment
+        ? loadedGuidanceRows.find(
+            (row) =>
+              row.appointment_id === nextHomeAppointment.id &&
+              row.review_status === "draft"
+          ) ??
+            loadedGuidanceRows.find(
+              (row) =>
+                row.appointment_id === nextHomeAppointment.id && row.is_current
+            ) ??
+            null
+        : null
+    );
     setMessage(`Loaded ${visibleAppointments.length} appointment(s).`);
   }
 
@@ -8266,6 +8346,226 @@ export default function Home() {
     );
   }
 
+  function renderHomeView() {
+    const nextSubject = homeNextAppointment?.care_subject_id
+      ? subjectsById.get(homeNextAppointment.care_subject_id)?.display_name
+      : "";
+    const needsNotesSubject = notesReminderAppointment?.care_subject_id
+      ? subjectsById.get(notesReminderAppointment.care_subject_id)?.display_name
+      : "";
+
+    return (
+      <div className="mt-6 space-y-5">
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
+                Next appointment
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold text-slate-950">
+                {homeNextAppointment?.title || "Nothing scheduled"}
+              </h2>
+              {homeNextAppointment ? (
+                <p className="mt-2 text-slate-600">
+                  {formatDate(homeNextAppointment.starts_at)}
+                  {nextSubject ? ` · ${nextSubject}` : ""}
+                </p>
+              ) : (
+                <p className="mt-2 text-slate-600">
+                  Add an appointment when something is coming up.
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {homeNextAppointment ? (
+                <>
+                  <button
+                    className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                    disabled={generatingCarePrepForId === homeNextAppointment.id}
+                    onClick={() => handleGenerateCarePrep(homeNextAppointment)}
+                    type="button"
+                  >
+                    {homeNextGuidance ? "Refresh CarePrep" : "Prep for visit"}
+                  </button>
+                  <button
+                    className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                    onClick={() => {
+                      void handleChangeMainTab("appointments");
+                      void handleChangeAppointmentView("upcoming");
+                    }}
+                    type="button"
+                  >
+                    Open
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white"
+                  onClick={() => {
+                    void handleChangeMainTab("appointments");
+                    setActiveAppointmentPanel("add");
+                  }}
+                  type="button"
+                >
+                  Add appointment
+                </button>
+              )}
+            </div>
+          </div>
+
+          {homeNextAppointment &&
+          (homeNextAppointment.provider_name ||
+            homeNextAppointment.provider_organization ||
+            homeNextAppointment.location_name) ? (
+            <div className="mt-4 flex flex-wrap gap-2 text-sm text-slate-600">
+              {[
+                homeNextAppointment.provider_name,
+                homeNextAppointment.provider_organization,
+                homeNextAppointment.location_name,
+              ]
+                .filter(Boolean)
+                .map((item) => (
+                  <span
+                    className="rounded-full bg-slate-100 px-3 py-1"
+                    key={item}
+                  >
+                    {item}
+                  </span>
+                ))}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="grid gap-5 lg:grid-cols-[1.35fr_0.9fr]">
+          <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
+                  CarePrep
+                </p>
+                <h3 className="mt-1 text-xl font-semibold text-slate-950">
+                  {homeNextGuidance
+                    ? homeNextGuidance.review_status === "draft"
+                      ? "Review draft"
+                      : "Highlights"
+                    : "Ready when you are"}
+                </h3>
+              </div>
+              {homeNextAppointment ? (
+                <button
+                  className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
+                  disabled={generatingCarePrepForId === homeNextAppointment.id}
+                  onClick={() => handleGenerateCarePrep(homeNextAppointment)}
+                  type="button"
+                >
+                  {homeNextGuidance ? "Regenerate" : "Generate"}
+                </button>
+              ) : null}
+            </div>
+
+            {homeNextGuidance ? (
+              <>
+                <p className="mt-4 text-sm leading-6 text-slate-700">
+                  {homeNextGuidance.summary}
+                </p>
+                {homeCarePrepHighlights.length > 0 ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    {homeCarePrepHighlights.map((section) => (
+                      <div
+                        className="rounded-md border border-blue-100 bg-blue-50 p-3"
+                        key={section.label}
+                      >
+                        <p className="text-sm font-semibold text-blue-950">
+                          {section.label}
+                        </p>
+                        <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                          {section.items.map((item, index) => (
+                            <li key={`${section.label}-${index}`}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="mt-4 text-sm leading-6 text-slate-600">
+                Generate a short prep view for your next appointment.
+              </p>
+            )}
+          </article>
+
+          <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
+              Needs notes
+            </p>
+            <h3 className="mt-2 text-xl font-semibold text-slate-950">
+              {notesReminderAppointment
+                ? notesReminderAppointment.title || "Untitled appointment"
+                : "All caught up"}
+            </h3>
+            {notesReminderAppointment ? (
+              <>
+                <p className="mt-2 text-sm text-slate-600">
+                  {formatDate(notesReminderAppointment.starts_at)}
+                  {needsNotesSubject ? ` · ${needsNotesSubject}` : ""}
+                </p>
+                <button
+                  className="mt-4 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                  onClick={() =>
+                    handleStartReminderNotes(notesReminderAppointment)
+                  }
+                  type="button"
+                >
+                  Add notes
+                </button>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-slate-600">
+                No past visits are waiting for notes.
+              </p>
+            )}
+          </article>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <button
+              className="rounded-md border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:border-blue-300 hover:bg-blue-50"
+              onClick={() => {
+                void handleChangeMainTab("appointments");
+                setActiveAppointmentPanel("quickAdd");
+              }}
+              type="button"
+            >
+              Import
+            </button>
+            <button
+              className="rounded-md border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:border-blue-300 hover:bg-blue-50"
+              onClick={() => {
+                void handleChangeMainTab("appointments");
+                setActiveAppointmentPanel("add");
+              }}
+              type="button"
+            >
+              Add appointment
+            </button>
+            <button
+              className="rounded-md border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:border-blue-300 hover:bg-blue-50"
+              onClick={() => {
+                setAskingSupportQuestion(true);
+                setSupportQuestionExpanded(true);
+              }}
+              type="button"
+            >
+              Ask support
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   const isSignedInAppShell =
     Boolean(signedInEmail) &&
     authMode !== "updatePassword" &&
@@ -8286,14 +8586,25 @@ export default function Home() {
         >
           <div className="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-2 sm:gap-3 xl:grid-cols-[auto_auto_1fr]">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-              <Image
-                alt="CarePland"
-                className="h-auto w-20 sm:w-24"
-                height={100}
-                priority
-                src="/carepland-logo.png"
-                width={160}
-              />
+              <button
+                aria-label="Home"
+                className="rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300"
+                onClick={() =>
+                  isSignedInAppShell
+                    ? void handleChangeMainTab("home")
+                    : undefined
+                }
+                type="button"
+              >
+                <Image
+                  alt="CarePland"
+                  className="h-auto w-20 sm:w-24"
+                  height={100}
+                  priority
+                  src="/carepland-logo.png"
+                  width={160}
+                />
+              </button>
               <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 sm:inline-flex">
                 Personal
               </span>
@@ -8776,6 +9087,8 @@ export default function Home() {
               </p>
             ) : null}
           </section>
+        ) : mainTab === "home" ? (
+          renderHomeView()
         ) : mainTab === "profile" ? (
           <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
