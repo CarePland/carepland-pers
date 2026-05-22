@@ -8663,7 +8663,11 @@ export default function Home() {
     <main className="min-h-screen overflow-x-clip bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6 lg:py-8">
       <section
         className={`mx-auto w-full ${
-          isSignedInAppShell ? "max-w-5xl 2xl:max-w-6xl" : "max-w-3xl"
+          isSignedInAppShell
+            ? isAdmin
+              ? "max-w-5xl 2xl:max-w-6xl"
+              : "max-w-[900px]"
+            : "max-w-3xl"
         }`}
       >
         <header
