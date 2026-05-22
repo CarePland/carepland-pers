@@ -8048,7 +8048,7 @@ export default function Home() {
         </div>
 
         <input
-          className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+          className="mt-3 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
           onChange={(event) => {
             const nextQuery = event.target.value;
             setPlaceLookupQuery(nextQuery);
@@ -9078,7 +9078,7 @@ export default function Home() {
                 <label className="mt-5 block text-sm font-medium text-slate-700">
                   Email
                   <input
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                     onChange={(event) => setEmail(event.target.value)}
                     required
                     type="email"
@@ -9581,7 +9581,7 @@ export default function Home() {
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Title
                   <input
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                     onChange={(event) => setNewAppointmentTitle(event.target.value)}
                     placeholder="e.g. Follow-up with Dr. Smith"
                     type="text"
@@ -9591,7 +9591,7 @@ export default function Home() {
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Date & time
                   <input
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                     onChange={(event) =>
                       setNewAppointmentStartsAt(event.target.value)
                     }
@@ -9602,7 +9602,7 @@ export default function Home() {
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Provider
                   <input
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                     onChange={(event) =>
                       setNewAppointmentProviderName(event.target.value)
                     }
@@ -9614,7 +9614,7 @@ export default function Home() {
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Practice
                   <input
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                     onChange={(event) =>
                       setNewAppointmentProviderOrganization(event.target.value)
                     }
@@ -9626,7 +9626,7 @@ export default function Home() {
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Address
                   <input
-                    className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                     onChange={(event) =>
                       setNewAppointmentLocationAddress(event.target.value)
                     }
@@ -9638,7 +9638,7 @@ export default function Home() {
                 <label className="mt-4 block text-sm font-medium text-slate-700">
                   Reason
                   <textarea
-                    className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                    className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                     onChange={(event) => setNewAppointmentReason(event.target.value)}
                     placeholder="What is this appointment for?"
                     value={newAppointmentReason}
@@ -10245,7 +10245,7 @@ export default function Home() {
                     <label className="block text-sm font-medium text-slate-700">
                       Title
                       <input
-                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
                           setNewAppointmentTitle(event.target.value)
                         }
@@ -10257,7 +10257,7 @@ export default function Home() {
                     <label className="block text-sm font-medium text-slate-700">
                       Date & time
                       <input
-                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
                           setNewAppointmentStartsAt(event.target.value)
                         }
@@ -10268,7 +10268,7 @@ export default function Home() {
                     <label className="block text-sm font-medium text-slate-700">
                       Provider
                       <input
-                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
                           setNewAppointmentProviderName(event.target.value)
                         }
@@ -10280,7 +10280,7 @@ export default function Home() {
                     <label className="block text-sm font-medium text-slate-700">
                       Practice
                       <input
-                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
                           setNewAppointmentProviderOrganization(
                             event.target.value
@@ -10294,7 +10294,7 @@ export default function Home() {
                     <label className="block text-sm font-medium text-slate-700">
                       Address
                       <input
-                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
                           setNewAppointmentLocationAddress(event.target.value)
                         }
@@ -10306,7 +10306,7 @@ export default function Home() {
                     <label className="block text-sm font-medium text-slate-700 md:col-span-2">
                       Reason
                       <textarea
-                        className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
                           setNewAppointmentReason(event.target.value)
                         }
