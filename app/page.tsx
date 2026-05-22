@@ -2219,6 +2219,12 @@ export default function Home() {
   >([]);
   const [loadingAdminIntegrationErrors, setLoadingAdminIntegrationErrors] =
     useState(false);
+  const [
+    selectedAdminIntegrationErrorKeys,
+    setSelectedAdminIntegrationErrorKeys,
+  ] = useState<string[]>([]);
+  const [deletingAdminIntegrationErrors, setDeletingAdminIntegrationErrors] =
+    useState(false);
   const [userSupportTickets, setUserSupportTickets] = useState<SupportTicket[]>([]);
   const [userSupportTicketMessages, setUserSupportTicketMessages] = useState<
     SupportTicketMessage[]
@@ -2613,6 +2619,21 @@ export default function Home() {
   const allBulkAppointmentsSelected =
     bulkAppointmentDrafts.length > 0 &&
     selectedBulkAppointmentCount === bulkAppointmentDrafts.length;
+  const adminIntegrationErrorKeys = useMemo(
+    () => adminIntegrationErrors.map((row) => adminIntegrationErrorRowKey(row)),
+    [adminIntegrationErrors]
+  );
+  const selectedVisibleAdminIntegrationErrorKeys = useMemo(
+    () =>
+      adminIntegrationErrorKeys.filter((key) =>
+        selectedAdminIntegrationErrorKeys.includes(key)
+      ),
+    [adminIntegrationErrorKeys, selectedAdminIntegrationErrorKeys]
+  );
+  const allAdminIntegrationErrorsSelected =
+    adminIntegrationErrorKeys.length > 0 &&
+    selectedVisibleAdminIntegrationErrorKeys.length ===
+      adminIntegrationErrorKeys.length;
   const filteredFavoriteLocations = useMemo(() => {
     const query = placeLookupQuery.trim().toLowerCase();
 
@@ -4500,11 +4521,95 @@ export default function Home() {
 
       const rows = (data ?? []) as AdminIntegrationErrorSummaryRow[];
       setAdminIntegrationErrors(rows);
+      setSelectedAdminIntegrationErrorKeys([]);
       setMessage(`Loaded ${rows.length} integration error summary row(s).`);
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
       setLoadingAdminIntegrationErrors(false);
+    }
+  }
+
+  function adminIntegrationErrorRowKey(row: AdminIntegrationErrorSummaryRow) {
+    return [
+      row.window_grain,
+      row.window_start,
+      row.integration_key,
+      row.error_key,
+    ].join("|");
+  }
+
+  function toggleAdminIntegrationErrorSelection(
+    row: AdminIntegrationErrorSummaryRow
+  ) {
+    const rowKey = adminIntegrationErrorRowKey(row);
+
+    setSelectedAdminIntegrationErrorKeys((currentKeys) =>
+      currentKeys.includes(rowKey)
+        ? currentKeys.filter((key) => key !== rowKey)
+        : [...currentKeys, rowKey]
+    );
+  }
+
+  function toggleAllAdminIntegrationErrors() {
+    setSelectedAdminIntegrationErrorKeys((currentKeys) => {
+      if (allAdminIntegrationErrorsSelected) {
+        return currentKeys.filter(
+          (key) => !adminIntegrationErrorKeys.includes(key)
+        );
+      }
+
+      return Array.from(
+        new Set([...currentKeys, ...adminIntegrationErrorKeys])
+      );
+    });
+  }
+
+  async function deleteSelectedAdminIntegrationErrors() {
+    const rowsToDelete = adminIntegrationErrors.filter((row) =>
+      selectedAdminIntegrationErrorKeys.includes(
+        adminIntegrationErrorRowKey(row)
+      )
+    );
+
+    if (rowsToDelete.length === 0) {
+      setMessage("Select at least one integration error row to delete.");
+      return;
+    }
+
+    setDeletingAdminIntegrationErrors(true);
+    setMessage("");
+
+    try {
+      let deletedEventCount = 0;
+
+      for (const row of rowsToDelete) {
+        const { data, error } = await supabase.rpc(
+          "delete_admin_integration_error_window",
+          {
+            p_error_key: row.error_key,
+            p_integration_key: row.integration_key,
+            p_window_grain: row.window_grain,
+            p_window_start: row.window_start,
+          }
+        );
+
+        if (error) {
+          throw error;
+        }
+
+        deletedEventCount += typeof data === "number" ? data : 0;
+      }
+
+      setSelectedAdminIntegrationErrorKeys([]);
+      await loadAdminIntegrationErrors();
+      setMessage(
+        `Deleted ${rowsToDelete.length} integration error row(s), covering ${deletedEventCount} event(s).`
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setDeletingAdminIntegrationErrors(false);
     }
   }
 
@@ -11128,14 +11233,39 @@ export default function Home() {
                       Review rolled-up integration limit and availability events.
                     </p>
                   </div>
-                  <button
-                    className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
-                    disabled={loadingAdminIntegrationErrors}
-                    onClick={() => loadAdminIntegrationErrors()}
-                    type="button"
-                  >
-                    {loadingAdminIntegrationErrors ? "Refreshing..." : "Refresh"}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedVisibleAdminIntegrationErrorKeys.length > 0 ? (
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+                        {selectedVisibleAdminIntegrationErrorKeys.length} selected
+                      </span>
+                    ) : null}
+                    <button
+                      className="rounded-md border border-red-200 bg-white px-4 py-2 font-semibold text-red-700 disabled:text-slate-400"
+                      disabled={
+                        deletingAdminIntegrationErrors ||
+                        selectedVisibleAdminIntegrationErrorKeys.length === 0
+                      }
+                      onClick={() => deleteSelectedAdminIntegrationErrors()}
+                      type="button"
+                    >
+                      {deletingAdminIntegrationErrors
+                        ? "Deleting..."
+                        : "Delete selected"}
+                    </button>
+                    <button
+                      className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
+                      disabled={
+                        loadingAdminIntegrationErrors ||
+                        deletingAdminIntegrationErrors
+                      }
+                      onClick={() => loadAdminIntegrationErrors()}
+                      type="button"
+                    >
+                      {loadingAdminIntegrationErrors
+                        ? "Refreshing..."
+                        : "Refresh"}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -11176,9 +11306,20 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="mt-5 overflow-x-auto">
-                    <table className="min-w-[900px] w-full border-separate border-spacing-0 text-left text-sm">
+                    <table className="min-w-[980px] w-full border-separate border-spacing-0 text-left text-sm">
                       <thead>
                         <tr className="text-xs uppercase tracking-wide text-slate-500">
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            <label className="flex items-center gap-2">
+                              <input
+                                checked={allAdminIntegrationErrorsSelected}
+                                disabled={deletingAdminIntegrationErrors}
+                                onChange={() => toggleAllAdminIntegrationErrors()}
+                                type="checkbox"
+                              />
+                              Select
+                            </label>
+                          </th>
                           <th className="border-b border-slate-200 px-3 py-2">
                             Window
                           </th>
@@ -11206,41 +11347,57 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody>
-                        {adminIntegrationErrors.map((row) => (
-                          <tr
-                            key={`${row.window_grain}-${row.window_start}-${row.integration_key}-${row.error_key}`}
-                          >
-                            <td className="border-b border-slate-100 px-3 py-3 align-top">
-                              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
-                                {row.window_grain}
-                              </span>
-                              <p className="mt-2 text-slate-700">
-                                {formatAdminDate(row.window_start)}
-                              </p>
-                            </td>
-                            <td className="border-b border-slate-100 px-3 py-3 align-top font-semibold text-slate-900">
-                              {row.integration_key.replaceAll("_", " ")}
-                            </td>
-                            <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                              {row.error_key.replaceAll("_", " ")}
-                            </td>
-                            <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
-                              {row.occurrence_count}
-                            </td>
-                            <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
-                              {row.affected_user_count}
-                            </td>
-                            <td className="border-b border-slate-100 px-3 py-3 text-right align-top text-slate-700">
-                              {row.max_attempted_call_count ?? "Unknown"}
-                            </td>
-                            <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                              {formatAdminDate(row.latest_occurred_at)}
-                            </td>
-                            <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                              {row.latest_error_message || "No detail recorded"}
-                            </td>
-                          </tr>
-                        ))}
+                        {adminIntegrationErrors.map((row) => {
+                          const rowKey = adminIntegrationErrorRowKey(row);
+                          const selected =
+                            selectedAdminIntegrationErrorKeys.includes(rowKey);
+
+                          return (
+                            <tr key={rowKey}>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top">
+                                <input
+                                  aria-label={`Select ${row.integration_key} ${row.error_key} error row`}
+                                  checked={selected}
+                                  disabled={deletingAdminIntegrationErrors}
+                                  onChange={() =>
+                                    toggleAdminIntegrationErrorSelection(row)
+                                  }
+                                  type="checkbox"
+                                />
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top">
+                                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
+                                  {row.window_grain}
+                                </span>
+                                <p className="mt-2 text-slate-700">
+                                  {formatAdminDate(row.window_start)}
+                                </p>
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top font-semibold text-slate-900">
+                                {row.integration_key.replaceAll("_", " ")}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                                {row.error_key.replaceAll("_", " ")}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
+                                {row.occurrence_count}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
+                                {row.affected_user_count}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top text-slate-700">
+                                {row.max_attempted_call_count ?? "Unknown"}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                                {formatAdminDate(row.latest_occurred_at)}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                                {row.latest_error_message ||
+                                  "No detail recorded"}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
