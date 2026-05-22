@@ -8720,12 +8720,14 @@ export default function Home() {
                 onClick={() => handleChangeMainTab("appointments")}
                 type="button"
               >
-                <span className="hidden lg:inline">Appointments</span>
-                <span className="lg:hidden">Appts</span>
+                <span className="hidden min-[340px]:inline">
+                  Appointments
+                </span>
+                <span className="min-[340px]:hidden">Appts</span>
               </button>
               <button
                 aria-label="Profile"
-                className={`flex h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
+                className={`hidden h-11 min-w-11 items-center justify-center rounded-md px-3 text-sm font-semibold md:flex md:px-4 md:text-base ${
                   mainTab === "profile"
                     ? "bg-blue-700 text-white"
                     : "border border-slate-300 bg-white text-slate-700"
@@ -8761,6 +8763,21 @@ export default function Home() {
               <span className="hidden min-w-0 truncate font-semibold text-slate-900 md:inline xl:max-w-60 2xl:max-w-none">
                 {signedInDisplayName}
               </span>
+            ) : null}
+            {isSignedInAppShell ? (
+              <button
+                aria-label="Profile"
+                className={`inline-flex h-11 min-w-11 items-center justify-center rounded-md border px-3 md:hidden ${
+                  mainTab === "profile"
+                    ? "border-blue-700 bg-blue-700 text-white"
+                    : "border-slate-300 bg-white text-slate-700"
+                }`}
+                onClick={() => handleChangeMainTab("profile")}
+                title="Profile"
+                type="button"
+              >
+                <UserIcon className="h-5 w-5" />
+              </button>
             ) : null}
             {isSignedInAppShell ? (
               isAdmin ? (
