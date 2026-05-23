@@ -171,6 +171,19 @@ Current appointment-card direction:
 - CarePrep draft review actions should protect user edits: unchanged drafts can be accepted as-is, while changed drafts must be saved as an edited version.
 - CarePrep draft review and saved CarePrep headers can offer a small Refresh action to generate a new draft instead of encouraging discard. Refresh frequency/comparison eligibility rules are future backend policy work.
 
+## Home Workflow
+
+Home is the signed-in first surface for CarePland Personal. It should welcome new users, make the next useful action obvious, and surface lightweight continuity reminders without feeling like a dashboard.
+
+Current Home direction:
+
+- First-run welcome guidance belongs on Home, not on the Appointments list.
+- Primary first-run actions should help users add their first real appointment or import details they already have.
+- Demo data should be offered as clearly labeled examples to explore, not as a required setup step.
+- Demo-data copy should reassure users that examples are fictional/clearly labeled and removable without affecting real appointments.
+- The last-appointment notes reminder should stay gentle and compact on Home.
+- The next appointment and CarePrep preview should remain the main recurring Home utility after setup.
+
 ## Notes Workflow
 
 Notes capture what happened during or after an appointment.
@@ -500,6 +513,7 @@ Header rules:
 
 - Signed-in header uses compact mark-only CarePland logo.
 - Signed-out/login header can use fuller logo/wordmark.
+- On initial app load, wait for Supabase session restore before rendering signed-in or public/signed-out content so stale public shells do not flash for signed-in users.
 - On narrow screens, Profile and Support are icon-only utility actions on the right.
 - `Appointments` should remain spelled out down to narrow widths where feasible.
 - Product/environment pills are low priority and can hide first.

@@ -81,8 +81,6 @@ type PricingTier = {
   highlights: string[];
 };
 
-type PublicSiteTab = "access" | "pricing";
-
 type AppointmentNote = {
   id: string;
   appointment_id: string;
@@ -956,8 +954,8 @@ const appContentDefaults = {
   demo_profile_remove_body:
     "Demo appointments are not real appointments. Removing demo data deletes only items marked as demo data and keeps your real information.",
   demo_prompt_body:
-    "Add a few demo appointments, notes, and CarePrep examples. You can skip this if you want to start clean.",
-  demo_prompt_title: "Want demo data to explore?",
+    "CarePland can add a few fictional appointments, notes, and CarePrep examples so you can explore before entering your own information.",
+  demo_prompt_title: "Want examples to explore?",
   profile_plan_tier_help_body:
     "- <b>Free</b> is for light use.\n- <b>Active Use</b> adds larger manual CarePrep and import allowances.\n- <b>Premium Individual</b> adds automatic appointment preparation for one Care VIP.\n- <b>Group</b> supports multiple Care VIPs.",
   careprep_manual_limit_message:
@@ -2512,7 +2510,6 @@ export default function Home() {
     );
   });
   const [authMode, setAuthMode] = useState<AuthMode>("signIn");
-  const [publicSiteTab, setPublicSiteTab] = useState<PublicSiteTab>("access");
   const [planHelpExpanded, setPlanHelpExpanded] = useState(false);
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
     useState<AppointmentPanel | null>(
@@ -2879,6 +2876,7 @@ export default function Home() {
   const [pendingModifierSwitch, setPendingModifierSwitch] =
     useState<PendingModifierSwitch | null>(null);
   const [loading, setLoading] = useState(false);
+  const [sessionRestored, setSessionRestored] = useState(false);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [processingTextIntake, setProcessingTextIntake] = useState(false);
   const [extractingImageText, setExtractingImageText] = useState(false);
@@ -3355,7 +3353,7 @@ export default function Home() {
     Boolean(signedInEmail) &&
     !needsBetaAgreement &&
     !needsOnboarding &&
-    mainTab === "appointments" &&
+    mainTab === "home" &&
     !welcomeGuideDismissed;
   const shouldOfferSampleData =
     Boolean(signedInEmail) &&
@@ -3457,6 +3455,7 @@ export default function Home() {
           );
         } finally {
           setLoading(false);
+          setSessionRestored(true);
         }
 
         return;
@@ -3506,7 +3505,10 @@ export default function Home() {
           setMessage(getErrorMessage(error));
         } finally {
           setLoading(false);
+          setSessionRestored(true);
         }
+      } else {
+        setSessionRestored(true);
       }
     }
 
@@ -5568,6 +5570,16 @@ export default function Home() {
         loadAdminAttentionSummary(),
       ]);
     }
+  }
+
+  function startAppointmentPanel(panel: AppointmentPanel) {
+    setMessage("");
+    setAppointmentView("upcoming");
+    setSelectedSubjectId(ALL_SUBJECTS);
+    cancelTextIntake();
+    resetPlaceLookup();
+    setActiveAppointmentPanel(panel);
+    setMainTab("appointments");
   }
 
   async function loadCurrentUserSupportTickets() {
@@ -9636,6 +9648,99 @@ export default function Home() {
 
     return (
       <div className="mt-6 space-y-5">
+        {showWelcomeGuide ? (
+          <section className="rounded-lg bg-blue-50 px-5 py-5 ring-1 ring-blue-100">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-2xl">
+                <p className="text-sm font-semibold text-blue-700">
+                  Welcome
+                </p>
+                <h1 className="mt-2 text-2xl font-semibold text-slate-950">
+                  {appContentText("welcome_guide_title")}
+                </h1>
+                <p className="mt-2 text-sm leading-6 text-blue-950">
+                  {appContentText("welcome_guide_body")}
+                </p>
+              </div>
+              <button
+                className="rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700"
+                onClick={dismissWelcomeGuide}
+                type="button"
+              >
+                Dismiss
+              </button>
+            </div>
+
+            <div className="mx-auto mt-5 w-full max-w-[495px] overflow-hidden rounded-lg border-4 border-black bg-black shadow-sm">
+              <iframe
+                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+                allowFullScreen
+                className="aspect-video w-full border-0"
+                src="https://player.mux.com/Ypm2KjtOwCsiE6Kb6vexjyJFm7jpSI005jadJyOHW4VU?autoplay=muted&muted=true&playsinline=true&loop=false&controls=false&poster=https%3A%2F%2Fimage.mux.com%2FYpm2KjtOwCsiE6Kb6vexjyJFm7jpSI005jadJyOHW4VU%2Fthumbnail.png%3Fwidth%3D214%26height%3D121%26time%3D0"
+                title="CarePland - The Gap"
+              />
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+              <button
+                className="rounded-md bg-blue-700 px-4 py-3 text-left text-sm font-semibold text-white shadow-sm disabled:bg-slate-400"
+                onClick={() => startAppointmentPanel("add")}
+                type="button"
+              >
+                <span className="block text-base">Add your first appointment</span>
+                <span className="mt-1 block text-sm font-medium text-blue-50">
+                  Start with a real visit you want CarePland to remember.
+                </span>
+              </button>
+              <button
+                className="rounded-md border border-blue-200 bg-white px-4 py-3 text-left text-sm font-semibold text-blue-800"
+                onClick={() => startAppointmentPanel("quickAdd")}
+                type="button"
+              >
+                <span className="block text-base">Import details you have</span>
+                <span className="mt-1 block text-sm font-medium text-slate-600">
+                  Paste appointment text, notes, or calendar details for review.
+                </span>
+              </button>
+            </div>
+
+            {shouldOfferSampleData ? (
+              <div className="mt-4 rounded-lg border border-blue-100 bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="max-w-xl">
+                    <h2 className="font-semibold text-slate-950">
+                      We&apos;ll add examples for you to explore
+                    </h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                      {appContentText("demo_prompt_body")} The examples are
+                      clearly labeled as demo data, and you can remove them
+                      later without touching your own appointments.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="rounded-md border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 disabled:text-slate-400"
+                      disabled={seedingSampleData || decliningSampleData}
+                      onClick={() => handleSeedSampleDataForCurrentUser()}
+                      type="button"
+                    >
+                      {seedingSampleData ? "Adding..." : "Add demo examples"}
+                    </button>
+                    <button
+                      className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                      disabled={seedingSampleData || decliningSampleData}
+                      onClick={handleDeclineSampleData}
+                      type="button"
+                    >
+                      {decliningSampleData ? "Skipping..." : "Start clean"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -9666,10 +9771,19 @@ export default function Home() {
                   }}
                   type="button"
 	                >
-	                  Open
-	                </button>
-	              ) : null}
-	            </div>
+                  Open
+                </button>
+              ) : null}
+              {!homeNextAppointment ? (
+                <button
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                  onClick={() => startAppointmentPanel("add")}
+                  type="button"
+                >
+                  Add appointment
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {homeNextAppointment ? (
@@ -9897,79 +10011,6 @@ export default function Home() {
     );
   }
 
-  function renderPublicPricingView() {
-    return (
-      <div className="mt-8 space-y-6">
-        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-semibold text-blue-700">
-            CarePland plans
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold text-slate-950">
-            More support when the system does more of the remembering.
-          </h1>
-          <p className="mt-3 max-w-2xl text-slate-600">
-            CarePland tiers are meant to increase continuity support,
-            automation, and care coordination without turning the product into a
-            pile of technical limits.
-          </p>
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-2">
-          {pricingTiers.map((tier) => (
-            <article
-              className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-              key={tier.id}
-            >
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {tier.label}
-              </p>
-              <h2 className="mt-2 text-xl font-semibold text-slate-950">
-                {tier.name}
-              </h2>
-              <p className="mt-2 text-sm text-slate-600">{tier.bestFor}</p>
-
-              <dl className="mt-5 space-y-3 text-sm text-slate-700">
-                <div>
-                  <dt className="font-semibold text-slate-900">CarePrep</dt>
-                  <dd className="mt-1">{tier.carePrep}</dd>
-                </div>
-                <div>
-                  <dt className="font-semibold text-slate-900">Automation</dt>
-                  <dd className="mt-1">{tier.automation}</dd>
-                </div>
-                <div>
-                  <dt className="font-semibold text-slate-900">Imports</dt>
-                  <dd className="mt-1">{tier.imports}</dd>
-                </div>
-                <div>
-                  <dt className="font-semibold text-slate-900">Care VIPs</dt>
-                  <dd className="mt-1">{tier.careVips}</dd>
-                </div>
-              </dl>
-
-              <ul className="mt-5 space-y-2 text-sm text-slate-600">
-                {tier.highlights.map((highlight) => (
-                  <li key={highlight}>- {highlight}</li>
-                ))}
-              </ul>
-            </article>
-          ))}
-        </section>
-
-        <section className="rounded-lg border border-blue-100 bg-blue-50 p-5">
-          <h2 className="text-xl font-semibold text-slate-950">
-            Trial and upgrade philosophy
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-slate-700">
-            Free users may temporarily experience selected higher-tier
-            automation so they can feel the value of proactive preparation. The
-            goal is simple: CarePland quietly helps you stay prepared.
-          </p>
-        </section>
-      </div>
-    );
-  }
-
   const isSignedInAppShell =
     Boolean(signedInEmail) &&
     authMode !== "updatePassword" &&
@@ -9996,6 +10037,28 @@ export default function Home() {
   const locationSheetPhoneHref = locationSheetAppointment?.location_phone
     ? `tel:${locationSheetAppointment.location_phone.replace(/[^\d+]/g, "")}`
     : null;
+
+  if (!sessionRestored) {
+    return (
+      <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900">
+        <section className="mx-auto flex min-h-[60vh] max-w-3xl items-center justify-center">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <Image
+              alt="CarePland"
+              className="h-auto w-20 sm:w-24"
+              height={100}
+              priority
+              src="/carepland-logo.png"
+              width={160}
+            />
+            <p className="text-sm font-medium text-slate-500">
+              Opening CarePland...
+            </p>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main
@@ -10024,7 +10087,7 @@ export default function Home() {
                 onClick={() =>
                   isSignedInAppShell
                     ? void handleChangeMainTab("home")
-                    : setPublicSiteTab("access")
+                    : setAuthMode("signIn")
                 }
                 type="button"
               >
@@ -10045,6 +10108,24 @@ export default function Home() {
                   width={isSignedInAppShell ? 460 : 160}
                 />
               </button>
+              {isSignedInAppShell ? (
+                <button
+                  aria-label="Show the first-time welcome screen"
+                  className={`hidden rounded-md px-2 py-1 text-xs font-semibold sm:inline-flex ${
+                    mainTab === "home"
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-slate-500 hover:bg-white hover:text-blue-700"
+                  }`}
+                  onClick={() => {
+                    setWelcomeGuideDismissed(false);
+                    void handleChangeMainTab("home");
+                  }}
+                  title="Show welcome screen"
+                  type="button"
+                >
+                  Home
+                </button>
+              ) : null}
               <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 xl:inline-flex">
                 Personal
               </span>
@@ -10109,34 +10190,6 @@ export default function Home() {
                   <span className="hidden md:inline">Admin</span>
                 </button>
               ) : null}
-              </nav>
-            ) : authMode !== "updatePassword" ? (
-              <nav
-                aria-label="Public website navigation"
-                className="flex min-w-0 justify-start gap-2"
-              >
-                <button
-                  className={`h-11 rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
-                    publicSiteTab === "access"
-                      ? "bg-blue-700 text-white"
-                      : "border border-slate-300 bg-white text-slate-700"
-                  }`}
-                  onClick={() => setPublicSiteTab("access")}
-                  type="button"
-                >
-                  Access
-                </button>
-                <button
-                  className={`h-11 rounded-md px-3 text-sm font-semibold md:px-4 md:text-base ${
-                    publicSiteTab === "pricing"
-                      ? "bg-blue-700 text-white"
-                      : "border border-slate-300 bg-white text-slate-700"
-                  }`}
-                  onClick={() => setPublicSiteTab("pricing")}
-                  type="button"
-                >
-                  Pricing
-                </button>
               </nav>
             ) : null}
 
@@ -10617,9 +10670,9 @@ export default function Home() {
               </p>
             ) : null}
           </section>
-        ) : mainTab === "home" ? (
+        ) : signedInEmail && mainTab === "home" ? (
           renderHomeView()
-        ) : mainTab === "profile" ? (
+        ) : signedInEmail && mainTab === "profile" ? (
           <div className="mt-6 space-y-5">
             <section className="rounded-lg bg-blue-50 px-5 py-5 ring-1 ring-blue-100">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -11032,8 +11085,6 @@ export default function Home() {
               </p>
             ) : null}
           </div>
-        ) : publicSiteTab === "pricing" ? (
-          renderPublicPricingView()
         ) : (
         <div className="mt-8 space-y-4">
           <aside
@@ -12037,54 +12088,6 @@ export default function Home() {
                       </form>
                     )}
                   </div>
-                ) : null}
-              </section>
-            ) : null}
-
-            {showWelcomeGuide ? (
-              <section className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-xl font-semibold text-blue-950">
-                      {appContentText("welcome_guide_title")}
-                    </h2>
-                    <p className="mt-1 max-w-3xl text-sm text-blue-900">
-                      {appContentText("welcome_guide_body")}
-                    </p>
-                    {shouldOfferSampleData ? (
-                      <p className="mt-3 max-w-3xl text-sm text-blue-900">
-                        Add some demo appointments, notes, and CarePrep examples
-                        to quickly get acquainted, or skip and enter your own.
-                      </p>
-                    ) : null}
-                  </div>
-                  <button
-                    className="rounded-md border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-700"
-                    onClick={dismissWelcomeGuide}
-                    type="button"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-                {shouldOfferSampleData ? (
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
-                        disabled={seedingSampleData || decliningSampleData}
-                        onClick={() => handleSeedSampleDataForCurrentUser()}
-                        type="button"
-                      >
-                        {seedingSampleData ? "Adding..." : "Add demo data"}
-                      </button>
-                      <button
-                        className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
-                        disabled={seedingSampleData || decliningSampleData}
-                        onClick={handleDeclineSampleData}
-                        type="button"
-                      >
-                        {decliningSampleData ? "Skipping..." : "Skip demo data"}
-                      </button>
-                    </div>
                 ) : null}
               </section>
             ) : null}
