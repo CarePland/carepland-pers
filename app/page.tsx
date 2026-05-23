@@ -44,6 +44,7 @@ type Appointment = {
   starts_at: string | null;
   status: string;
   archived_at?: string | null;
+  deleted_at?: string | null;
 };
 
 type NotesReminderAppointment = Appointment & {
@@ -486,6 +487,29 @@ function UserIcon({ className = "h-5 w-5" }: { className?: string }) {
     >
       <path d="M20 21a8 8 0 0 0-16 0" />
       <path d="M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z" />
+    </svg>
+  );
+}
+
+function EllipsisVerticalIcon({
+  className = "h-5 w-5",
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="12" cy="5" r="1" />
+      <circle cx="12" cy="19" r="1" />
     </svg>
   );
 }
@@ -2841,12 +2865,17 @@ export default function Home() {
   const [editingCarePrepIds, setEditingCarePrepIds] = useState<
     Record<string, boolean>
   >(initialDraftState?.editingCarePrepIds ?? {});
+  const [expandedCarePrepIds, setExpandedCarePrepIds] = useState<
+    Record<string, boolean>
+  >({});
   const [editingAppointmentIds, setEditingAppointmentIds] = useState<
     Record<string, boolean>
   >(initialDraftState?.editingAppointmentIds ?? {});
   const [editingNoteIds, setEditingNoteIds] = useState<Record<string, boolean>>(
     initialDraftState?.editingNoteIds ?? {}
   );
+  const [expandedVisitNotesAppointmentId, setExpandedVisitNotesAppointmentId] =
+    useState<string | null>(null);
   const [pendingModifierSwitch, setPendingModifierSwitch] =
     useState<PendingModifierSwitch | null>(null);
   const [loading, setLoading] = useState(false);
@@ -2868,6 +2897,18 @@ export default function Home() {
   const [archivingAppointmentForId, setArchivingAppointmentForId] = useState<
     string | null
   >(null);
+  const [openAppointmentMenuId, setOpenAppointmentMenuId] = useState<
+    string | null
+  >(null);
+  const [locationSheetAppointmentId, setLocationSheetAppointmentId] = useState<
+    string | null
+  >(null);
+  const [pendingDeleteAppointmentId, setPendingDeleteAppointmentId] = useState<
+    string | null
+  >(null);
+  const [deletingAppointmentForId, setDeletingAppointmentForId] = useState<
+    string | null
+  >(null);
   const [savingNoteForId, setSavingNoteForId] = useState<string | null>(null);
   const [generatingCarePrepForId, setGeneratingCarePrepForId] = useState<
     string | null
@@ -2878,9 +2919,6 @@ export default function Home() {
   const [savingCarePrepForId, setSavingCarePrepForId] = useState<string | null>(
     null
   );
-  const [discardingCarePrepForId, setDiscardingCarePrepForId] = useState<
-    string | null
-  >(null);
   const [profileDraft, setProfileDraft] =
     useState<ProfileDraft>(emptyProfileDraft);
   const [savedProfileDraft, setSavedProfileDraft] =
@@ -2892,6 +2930,34 @@ export default function Home() {
   const [sampleDataDeclinedAt, setSampleDataDeclinedAt] = useState<
     string | null
   >(null);
+
+  useEffect(() => {
+    if (!openAppointmentMenuId) {
+      return;
+    }
+
+    function closeAppointmentMenuOnOutsideClick(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest("[data-appointment-menu]")
+      ) {
+        return;
+      }
+
+      setOpenAppointmentMenuId(null);
+    }
+
+    document.addEventListener("pointerdown", closeAppointmentMenuOnOutsideClick);
+
+    return () => {
+      document.removeEventListener(
+        "pointerdown",
+        closeAppointmentMenuOnOutsideClick
+      );
+    };
+  }, [openAppointmentMenuId]);
   const [seedingSampleData, setSeedingSampleData] = useState(false);
   const [decliningSampleData, setDecliningSampleData] = useState(false);
   const [removingSampleData, setRemovingSampleData] = useState(false);
@@ -4051,8 +4117,9 @@ export default function Home() {
 
     let appointmentQuery = supabase
       .from("appointments")
-      .select("id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data")
+      .select("id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data,deleted_at")
       .in("care_circle_id", circleIds)
+      .is("deleted_at", null)
       .order("starts_at", { ascending: true });
 
     if (effectiveSubjectId !== ALL_SUBJECTS) {
@@ -4061,8 +4128,9 @@ export default function Home() {
 
     let notesReminderQuery = supabase
       .from("appointments")
-      .select("id,care_circle_id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data")
+      .select("id,care_circle_id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data,deleted_at")
       .in("care_circle_id", circleIds)
+      .is("deleted_at", null)
       .neq("status", "archived")
       .is("current_note_id", null)
       .lt("starts_at", startOfToday().toISOString())
@@ -4534,19 +4602,6 @@ export default function Home() {
       setMessage(getAuthErrorMessage(error));
     } finally {
       setSendingPasswordReset(false);
-    }
-  }
-
-  async function handleRefresh() {
-    setLoading(true);
-    setMessage("");
-
-    try {
-      await loadAppointments();
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -7906,10 +7961,11 @@ export default function Home() {
     const { data: appointmentRows, error: appointmentError } = await supabase
       .from("appointments")
       .select(
-            "id,care_subject_id,current_note_id,title,reason,starts_at,status,archived_at,provider_name,provider_organization,location_name,location_address,location_phone"
+            "id,care_subject_id,current_note_id,title,reason,starts_at,status,archived_at,deleted_at,provider_name,provider_organization,location_name,location_address,location_phone"
       )
       .eq("care_circle_id", careCircleId)
       .eq("care_subject_id", careSubjectId)
+      .is("deleted_at", null)
       .order("starts_at", { ascending: false, nullsFirst: false })
       .limit(80);
 
@@ -8920,6 +8976,7 @@ export default function Home() {
 
   async function handleArchiveAppointment(appointment: Appointment) {
     setArchivingAppointmentForId(appointment.id);
+    setOpenAppointmentMenuId(null);
     setMessage("");
 
     try {
@@ -8952,6 +9009,43 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setArchivingAppointmentForId(null);
+    }
+  }
+
+  async function handleDeleteAppointment(appointment: Appointment) {
+    setDeletingAppointmentForId(appointment.id);
+    setOpenAppointmentMenuId(null);
+    setMessage("");
+
+    try {
+      const { error } = await supabase
+        .from("appointments")
+        .update({
+          deleted_at: new Date().toISOString(),
+        })
+        .eq("id", appointment.id);
+
+      if (error) {
+        throw error;
+      }
+
+      discardAppointmentModifier(
+        appointment.id,
+        currentAppointmentModifier(appointment.id)
+      );
+      setPendingDeleteAppointmentId(null);
+      if (locationSheetAppointmentId === appointment.id) {
+        setLocationSheetAppointmentId(null);
+      }
+      await loadAppointments();
+      showToast("Appointment deleted.", {
+        durationMs: 8000,
+        type: "success",
+      });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setDeletingAppointmentForId(null);
     }
   }
 
@@ -9023,6 +9117,10 @@ export default function Home() {
       }
 
       await loadAppointments();
+      setExpandedCarePrepIds((currentIds) => ({
+        ...currentIds,
+        [appointment.id]: true,
+      }));
       setCarePrepGenerationErrors((currentErrors) => {
         const nextErrors = { ...currentErrors };
         delete nextErrors[appointment.id];
@@ -9041,28 +9139,41 @@ export default function Home() {
     }
   }
 
+  function carePrepBaseFormValues(draft: CarePrepGuidance) {
+    return {
+      bringList: asTextList(draft.bring_list).join("\n"),
+      keyQuestions: asTextList(draft.key_questions).join("\n"),
+      medReview: asTextList(draft.med_review).join("\n"),
+      nextSteps: asTextList(draft.next_steps).join("\n"),
+      sinceLastVisit: asTextList(draft.since_last_visit).join("\n"),
+      summary: draft.summary ?? "",
+      watchouts: asTextList(draft.watchouts).join("\n"),
+    };
+  }
+
   function carePrepFormValues(appointmentId: string, draft: CarePrepGuidance) {
     return {
-      bringList:
-        carePrepDrafts[appointmentId]?.bringList ??
-        asTextList(draft.bring_list).join("\n"),
-      keyQuestions:
-        carePrepDrafts[appointmentId]?.keyQuestions ??
-        asTextList(draft.key_questions).join("\n"),
-      medReview:
-        carePrepDrafts[appointmentId]?.medReview ??
-        asTextList(draft.med_review).join("\n"),
-      nextSteps:
-        carePrepDrafts[appointmentId]?.nextSteps ??
-        asTextList(draft.next_steps).join("\n"),
-      sinceLastVisit:
-        carePrepDrafts[appointmentId]?.sinceLastVisit ??
-        asTextList(draft.since_last_visit).join("\n"),
-      summary: carePrepDrafts[appointmentId]?.summary ?? draft.summary ?? "",
-      watchouts:
-        carePrepDrafts[appointmentId]?.watchouts ??
-        asTextList(draft.watchouts).join("\n"),
+      ...carePrepBaseFormValues(draft),
+      ...carePrepDrafts[appointmentId],
     };
+  }
+
+  function hasCarePrepDraftChanges(
+    appointmentId: string,
+    draft: CarePrepGuidance
+  ) {
+    const baseValues = carePrepBaseFormValues(draft);
+    const currentValues = carePrepFormValues(appointmentId, draft);
+
+    return (
+      currentValues.bringList !== baseValues.bringList ||
+      currentValues.keyQuestions !== baseValues.keyQuestions ||
+      currentValues.medReview !== baseValues.medReview ||
+      currentValues.nextSteps !== baseValues.nextSteps ||
+      currentValues.sinceLastVisit !== baseValues.sinceLastVisit ||
+      currentValues.summary !== baseValues.summary ||
+      currentValues.watchouts !== baseValues.watchouts
+    );
   }
 
   function updateCarePrepDraft(
@@ -9168,15 +9279,11 @@ export default function Home() {
     appointmentId,
     draft,
   }: {
-    action: "accept" | "discard" | "save_edit";
+    action: "accept" | "save_edit";
     appointmentId: string;
     draft: CarePrepGuidance;
   }) {
-    if (action === "discard") {
-      setDiscardingCarePrepForId(appointmentId);
-    } else {
-      setSavingCarePrepForId(appointmentId);
-    }
+    setSavingCarePrepForId(appointmentId);
     setMessage("");
 
     try {
@@ -9230,12 +9337,15 @@ export default function Home() {
         return nextDrafts;
       });
       await loadAppointments();
+      setExpandedCarePrepIds((currentIds) => ({
+        ...currentIds,
+        [appointmentId]: true,
+      }));
       setMessage(result.message ?? "CarePrep reviewed.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
       setSavingCarePrepForId(null);
-      setDiscardingCarePrepForId(null);
     }
   }
 
@@ -9285,11 +9395,6 @@ export default function Home() {
       ...currentDrafts,
       [appointmentId]: emptyNoteDraft,
     }));
-  }
-
-  async function handleStartReminderNotes(appointment: NotesReminderAppointment) {
-    setMessage("");
-    startTypingNote(appointment.id);
   }
 
   async function handleSaveNote(
@@ -9405,7 +9510,7 @@ export default function Home() {
           ) : null}
         </div>
 
-        <input
+	        <input
           className="mt-3 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
           onChange={(event) => {
             const nextQuery = event.target.value;
@@ -9508,13 +9613,13 @@ export default function Home() {
                     setFavoriteLocationNickname(event.target.value)
                   }
                   placeholder="e.g. Mom's cardiologist"
-                  type="text"
-                  value={favoriteLocationNickname}
-                />
-              </label>
-            ) : null}
-          </div>
-        ) : null}
+	                  type="text"
+	                  value={favoriteLocationNickname}
+	                />
+	              </label>
+	            ) : null}
+	          </div>
+	        ) : null}
       </section>
     );
   }
@@ -9560,11 +9665,11 @@ export default function Home() {
                     void handleChangeAppointmentView("upcoming");
                   }}
                   type="button"
-                >
-                  Open
-                </button>
-              ) : null}
-            </div>
+	                >
+	                  Open
+	                </button>
+	              ) : null}
+	            </div>
           </div>
 
           {homeNextAppointment ? (
@@ -9654,25 +9759,138 @@ export default function Home() {
         </section>
 
         {notesReminderAppointment ? (
-          <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
-            <div>
-              <p className="text-sm font-semibold text-blue-700">Needs notes</p>
-              <p className="mt-1 text-slate-900">
-                <span className="font-semibold">
-                  {notesReminderAppointment.title || "Untitled appointment"}
-                </span>{" "}
-                <span className="text-slate-600">
-                  {formatDate(notesReminderAppointment.starts_at)}
-                </span>
-              </p>
-            </div>
+          <section>
             <button
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
-              onClick={() => handleStartReminderNotes(notesReminderAppointment)}
+              className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-left text-sm font-semibold text-blue-800 hover:bg-blue-100"
+              onClick={() => startContextualTextIntake(notesReminderAppointment)}
               type="button"
             >
-              Add notes
+              <span>Add notes to:</span>
+              <span className="truncate text-blue-950">
+                {notesReminderAppointment.title || "Untitled appointment"}
+              </span>
+              <span className="font-medium text-blue-700">
+                {formatDate(notesReminderAppointment.starts_at)}
+              </span>
+              {notesReminderAppointment.is_sample_data ? (
+                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
+                  Demo
+                </span>
+              ) : null}
             </button>
+            {textIntakeTargetAppointmentId === notesReminderAppointment.id ? (
+              <form
+                className="mt-3 rounded-lg border border-blue-100 bg-white p-4 shadow-sm"
+                onSubmit={
+                  textIntakeDraft
+                    ? handleSaveTextIntakeDraft
+                    : handleInterpretTextIntake
+                }
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-blue-950">
+                      Notes for this appointment
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Type or paste what happened. CarePland will organize it
+                      before saving.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    onClick={cancelTextIntake}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                {!textIntakeDraft ? (
+                  <>
+                    <label className="mt-4 block text-sm font-medium text-slate-700">
+                      Visit notes
+                      <textarea
+                        className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        onChange={(event) =>
+                          setContextualTextIntakeValue(event.target.value)
+                        }
+                        placeholder="Type or paste portal notes, after-visit summaries, or anything you want to remember."
+                        value={contextualTextIntakeValue}
+                      />
+                    </label>
+                    <button
+                      className="mt-4 rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                      disabled={processingTextIntake}
+                      type="submit"
+                    >
+                      {processingTextIntake ? "Interpreting..." : "Review notes"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <AppointmentDetailUpdateOption
+                      checked={applyTextIntakeAppointmentDetails}
+                      changes={appointmentDetailChanges(
+                        notesReminderAppointment,
+                        textIntakeDraft
+                      )}
+                      onChange={setApplyTextIntakeAppointmentDetails}
+                    />
+                    <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                      <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                        Visit summary
+                        <textarea
+                          className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          onChange={(event) =>
+                            updateTextIntakeDraft(
+                              "notesSummary",
+                              event.target.value
+                            )
+                          }
+                          value={textIntakeDraft.notesSummary}
+                        />
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Takeaways
+                        <textarea
+                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          onChange={(event) =>
+                            updateTextIntakeDraft(
+                              "takeaways",
+                              event.target.value
+                            )
+                          }
+                          value={textIntakeDraft.takeaways}
+                        />
+                      </label>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Follow-ups
+                        <textarea
+                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                          onChange={(event) =>
+                            updateTextIntakeDraft(
+                              "followups",
+                              event.target.value
+                            )
+                          }
+                          value={textIntakeDraft.followups}
+                        />
+                      </label>
+                      <div className="flex items-end">
+                        <button
+                          className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                          disabled={savingTextIntake}
+                          type="submit"
+                        >
+                          {savingTextIntake ? "Saving..." : "Save notes"}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </form>
+            ) : null}
           </section>
         ) : null}
       </div>
@@ -9758,6 +9976,26 @@ export default function Home() {
     !needsBetaAgreement &&
     !needsOnboarding;
   const signedInDisplayName = savedProfileLabel || signedInEmail;
+  const locationSheetAppointment =
+    locationSheetAppointmentId
+      ? appointments.find(
+          (appointment) => appointment.id === locationSheetAppointmentId
+        ) ??
+        (notesReminderAppointment?.id === locationSheetAppointmentId
+          ? notesReminderAppointment
+          : null)
+      : null;
+  const locationSheetPracticeLabel = locationSheetAppointment
+    ? locationSheetAppointment.provider_organization ||
+      locationSheetAppointment.location_name ||
+      ""
+    : "";
+  const locationSheetMapsLink = locationSheetAppointment
+    ? googleMapsUrl(locationSheetAppointment.location_address)
+    : null;
+  const locationSheetPhoneHref = locationSheetAppointment?.location_phone
+    ? `tel:${locationSheetAppointment.location_phone.replace(/[^\d+]/g, "")}`
+    : null;
 
   return (
     <main
@@ -10807,16 +11045,6 @@ export default function Home() {
               <div>
                 <h2 className="text-xl font-semibold">Signed in</h2>
                 <p className="mt-2 break-words text-slate-600">{signedInEmail}</p>
-                <div className="mt-5 space-y-3">
-                  <button
-                    className="w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                    disabled={loading}
-                    onClick={handleRefresh}
-                    type="button"
-                  >
-                    {loading ? "Refreshing..." : "Refresh appointments"}
-                  </button>
-                </div>
               </div>
             ) : (
               <form
@@ -12756,10 +12984,10 @@ export default function Home() {
                                     : "Reveal contact details"}
                                 </button>
                               </>
-                            )}
-                          </div>
-                        ) : null}
-                      </div>
+	                            )}
+	                          </div>
+	                        ) : null}
+	                      </div>
 
                       <div className="rounded-md border border-blue-100 bg-white p-3">
                         <div className="grid gap-3 sm:grid-cols-3">
@@ -15435,11 +15663,11 @@ export default function Home() {
                               }
                               type="submit"
                             >
-                              {savingProductMgmtArea ? "Adding..." : "Add lane"}
-                            </button>
-                          </form>
-                        ) : null}
-                      </div>
+	                              {savingProductMgmtArea ? "Adding..." : "Add lane"}
+	                            </button>
+	                          </form>
+	                        ) : null}
+	                      </div>
                     </aside>
 
                     <div className="space-y-4">
@@ -15876,295 +16104,15 @@ export default function Home() {
                 disabled={loading}
                 onChangeSubject={handleChangeSubject}
                 onChangeView={handleChangeAppointmentView}
-                onRefresh={handleRefresh}
                 selectedSubjectId={selectedSubjectId}
                 stickyTop={stickySecondaryOffset}
                 view={appointmentView}
               />
             ) : null}
 
-            {signedInEmail &&
-            mainTab === "appointments" &&
-            appointmentView === "upcoming" &&
-            notesReminderAppointment ? (
-              <section className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="font-semibold text-blue-950">
-                      Add notes for your last appointment
-                    </h2>
-                    <p className="mt-1 text-sm text-blue-900">
-                      {notesReminderAppointment.title || "Untitled appointment"} ·{" "}
-                      {formatDate(notesReminderAppointment.starts_at)}
-                      {notesReminderAppointment.is_sample_data ? (
-                        <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
-                          Demo
-                        </span>
-                      ) : null}
-                    </p>
-                    {notesReminderAppointment.is_sample_data ? (
-                      <p className="mt-1 text-xs italic text-blue-800">
-                        Note: This is not an actual appointment.
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
-                      disabled={loading}
-                      onClick={() =>
-                        handleStartReminderNotes(notesReminderAppointment)
-                      }
-                      type="button"
-                    >
-                      Add
-                    </button>
-                    <button
-                      className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
-                      disabled={loading}
-                      onClick={() =>
-                        startContextualTextIntake(notesReminderAppointment)
-                      }
-                      type="button"
-                    >
-                      Paste / Import
-                    </button>
-                  </div>
-                </div>
-                {editingNoteIds[notesReminderAppointment.id] ? (
-                  <form
-                    className="mt-4 rounded-md border border-blue-100 bg-white p-4"
-                    onSubmit={(event) =>
-                      handleSaveNote(event, notesReminderAppointment)
-                    }
-                  >
-                    <div className="grid gap-4 lg:grid-cols-3">
-                      <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
-                        Visit summary
-                        <textarea
-                          className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                          onChange={(event) =>
-                            updateNoteDraft(
-                              notesReminderAppointment.id,
-                              "summary",
-                              event.target.value
-                            )
-                          }
-                          placeholder="What happened in the visit?"
-                          value={
-                            noteDrafts[notesReminderAppointment.id]?.summary ?? ""
-                          }
-                        />
-                      </label>
-                      <label className="block text-sm font-medium text-slate-700">
-                        Takeaways
-                        <textarea
-                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                          onChange={(event) =>
-                            updateNoteDraft(
-                              notesReminderAppointment.id,
-                              "takeaways",
-                              event.target.value
-                            )
-                          }
-                          placeholder={"One per line\nExample: Medication changed"}
-                          value={
-                            noteDrafts[notesReminderAppointment.id]?.takeaways ??
-                            ""
-                          }
-                        />
-                      </label>
-                      <label className="block text-sm font-medium text-slate-700">
-                        Follow-ups
-                        <textarea
-                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                          onChange={(event) =>
-                            updateNoteDraft(
-                              notesReminderAppointment.id,
-                              "followups",
-                              event.target.value
-                            )
-                          }
-                          placeholder={"One per line\nExample: Schedule labs"}
-                          value={
-                            noteDrafts[notesReminderAppointment.id]?.followups ??
-                            ""
-                          }
-                        />
-                      </label>
-                      <div className="flex items-end gap-3">
-                        <button
-                          className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                          disabled={savingNoteForId === notesReminderAppointment.id}
-                          type="submit"
-                        >
-                          {savingNoteForId === notesReminderAppointment.id
-                            ? "Saving..."
-                            : "Save notes"}
-                        </button>
-                        <button
-                          className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
-                          onClick={() =>
-                            cancelEditingNote(notesReminderAppointment.id)
-                          }
-                          type="button"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  </form>
-                ) : null}
-                {textIntakeTargetAppointmentId ===
-                notesReminderAppointment.id ? (
-                  <form
-                    className="mt-4 rounded-md border border-blue-100 bg-white p-4"
-                    onSubmit={
-                      textIntakeDraft
-                        ? handleSaveTextIntakeDraft
-                        : handleInterpretTextIntake
-                    }
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h3 className="font-semibold text-blue-950">
-                          Paste notes for this appointment
-                        </h3>
-                        <p className="mt-1 text-sm text-blue-800">
-                          The interpreted notes will be attached here.
-                        </p>
-                      </div>
-                      <button
-                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-                        onClick={cancelTextIntake}
-                        type="button"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-
-                    {!textIntakeDraft ? (
-                      <>
-                        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-                          <label className="block text-sm font-medium text-slate-700">
-                            Image to text
-                            <input
-                              accept="image/gif,image/jpeg,image/png,image/webp"
-                              className="mt-2 block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
-                              disabled={extractingImageText}
-                              multiple
-                              onChange={(event) => {
-                                void handleExtractImageText(
-                                  event.target.files,
-                                  "appointmentNotes"
-                                );
-                                event.target.value = "";
-                              }}
-                              type="file"
-                            />
-                          </label>
-                          <p className="mt-2 text-xs text-slate-500">
-                            {fileImportStatus ||
-                              "Up to 10 images are converted to text only and are not stored."}
-                          </p>
-                        </div>
-                        <label className="mt-4 block text-sm font-medium text-slate-700">
-                          Text
-                          <textarea
-                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                            onChange={(event) =>
-                              setContextualTextIntakeValue(event.target.value)
-                            }
-                            placeholder="Paste portal notes, after-visit summaries, or visit details."
-                            value={contextualTextIntakeValue}
-                          />
-                        </label>
-                        <button
-                          className="mt-4 rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                          disabled={processingTextIntake}
-                          type="submit"
-                        >
-                          {processingTextIntake
-                            ? "Interpreting..."
-                            : "Interpret notes"}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                      <AppointmentDetailUpdateOption
-                        checked={applyTextIntakeAppointmentDetails}
-                        changes={appointmentDetailChanges(
-                          notesReminderAppointment,
-                          textIntakeDraft
-                        )}
-                        onChange={setApplyTextIntakeAppointmentDetails}
-                      />
-                      <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                        <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
-                          Visit summary
-                          <textarea
-                            className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                            onChange={(event) =>
-                              updateTextIntakeDraft(
-                                "notesSummary",
-                                event.target.value
-                              )
-                            }
-                            value={textIntakeDraft.notesSummary}
-                          />
-                        </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                          Takeaways
-                          <textarea
-                            className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                            onChange={(event) =>
-                              updateTextIntakeDraft(
-                                "takeaways",
-                                event.target.value
-                              )
-                            }
-                            value={textIntakeDraft.takeaways}
-                          />
-                        </label>
-                        <label className="block text-sm font-medium text-slate-700">
-                          Follow-ups
-                          <textarea
-                            className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                            onChange={(event) =>
-                              updateTextIntakeDraft(
-                                "followups",
-                                event.target.value
-                              )
-                            }
-                            value={textIntakeDraft.followups}
-                          />
-                        </label>
-                        <div className="flex items-end">
-                          <button
-                            className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                            disabled={savingTextIntake}
-                            type="submit"
-                          >
-                            {savingTextIntake ? "Saving..." : "Save notes"}
-                          </button>
-                        </div>
-                      </div>
-                      </>
-                    )}
-                  </form>
-                ) : null}
-              </section>
-            ) : null}
-
             {signedInEmail && mainTab === "appointments" ? (
               appointments.length === 0 ? (
-              <div
-                className={`rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600 ${
-                  appointmentView === "upcoming" && notesReminderAppointment
-                    ? ""
-                    : "-mt-4"
-                }`}
-              >
+              <div className="-mt-4 rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600">
                 {appointmentView === "archived"
                   ? "No archived appointments found."
                   : appointmentView === "logged"
@@ -16172,13 +16120,7 @@ export default function Home() {
                     : "No upcoming appointments found yet."}
               </div>
             ) : (
-              <div
-                className={`overflow-hidden rounded-xl border border-slate-200/80 bg-white ${
-                  appointmentView === "upcoming" && notesReminderAppointment
-                    ? ""
-                    : "-mt-4"
-                }`}
-              >
+              <div className="-mt-4 overflow-hidden rounded-xl border border-slate-200/80 bg-white">
               {appointments.map((appointment) => {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
@@ -16187,9 +16129,6 @@ export default function Home() {
                 );
                 const carePrepGenerationError =
                   carePrepGenerationErrors[appointment.id];
-                const appointmentSubject = appointment.care_subject_id
-                  ? subjectsById.get(appointment.care_subject_id)
-                  : null;
                 const appointmentDraft =
                   appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
                 const isEditingAppointment =
@@ -16198,6 +16137,10 @@ export default function Home() {
                 const isEditingNote = editingNoteIds[appointment.id] ?? false;
                 const isEditingCarePrep =
                   editingCarePrepIds[appointment.id] ?? false;
+                const isCarePrepExpanded =
+                  expandedCarePrepIds[appointment.id] ||
+                  isEditingCarePrep ||
+                  Boolean(carePrepDraft);
                 const takeaways = asTextList(note?.takeaways);
                 const followups = asTextList(note?.followups);
                 const bringList = asTextList(prep?.bring_list);
@@ -16208,11 +16151,21 @@ export default function Home() {
                 const draftValues = carePrepDraft
                   ? carePrepFormValues(appointment.id, carePrepDraft)
                   : emptyCarePrepDraft;
+                const hasReviewCarePrepEdits = carePrepDraft
+                  ? hasCarePrepDraftChanges(appointment.id, carePrepDraft)
+                  : false;
                 const prepEditValues = prep
                   ? carePrepFormValues(appointment.id, prep)
                   : emptyCarePrepDraft;
                 const isArchived = appointment.status === "archived";
                 const isLogged = Boolean(appointment.current_note_id);
+                const isVisitNotesExpandableView =
+                  appointmentView === "logged" || appointmentView === "archived";
+                const isVisitNotesExpanded =
+                  expandedVisitNotesAppointmentId === appointment.id;
+                const shouldShowCarePrep = appointmentView === "upcoming";
+                const shouldShowPostVisitSections =
+                  appointmentView !== "upcoming" && !isVisitNotesExpandableView;
                 const isFutureOrUndated =
                   !appointment.starts_at ||
                   new Date(appointment.starts_at) >= startOfToday();
@@ -16228,12 +16181,6 @@ export default function Home() {
                     : isEditingNote
                       ? "add"
                       : null;
-                const modifierButtonBase =
-                  "h-11 px-4 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-300";
-                const modifierButtonActive = "bg-blue-700 text-white";
-                const modifierButtonInactive =
-                  "bg-white text-blue-700 hover:bg-blue-50";
-                const mapsLink = googleMapsUrl(appointment.location_address);
                 const calendarLink = agicalUrl(appointment);
                 const practiceLabel =
                   appointment.provider_organization ||
@@ -16241,11 +16188,74 @@ export default function Home() {
                   "";
                 return (
                   <article
-                    className="relative px-5 py-7 before:absolute before:left-5 before:right-5 before:top-0 before:h-0.5 before:rounded-full before:bg-slate-300 first:before:hidden"
+                    className="relative flex flex-col px-5 py-7 before:absolute before:left-5 before:right-5 before:top-0 before:h-0.5 before:rounded-full before:bg-slate-300 first:before:hidden"
                     key={appointment.id}
                   >
+                    <div
+                      className="absolute right-4 top-6 z-10"
+                      data-appointment-menu
+                    >
+                      <button
+                        aria-expanded={openAppointmentMenuId === appointment.id}
+                        aria-label="Appointment options"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                        onClick={() =>
+                          setOpenAppointmentMenuId((currentId) =>
+                            currentId === appointment.id ? null : appointment.id
+                          )
+                        }
+                        type="button"
+                      >
+                        <EllipsisVerticalIcon className="h-5 w-5" />
+                      </button>
+                      {openAppointmentMenuId === appointment.id ? (
+                        <div className="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-md border border-slate-200 bg-white text-left shadow-lg">
+                          {!isArchived ? (
+                            <>
+                              <button
+                                className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                onClick={() => {
+                                  setOpenAppointmentMenuId(null);
+                                  requestAppointmentModifier(
+                                    appointment,
+                                    "edit"
+                                  );
+                                }}
+                                type="button"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:text-slate-400"
+                                disabled={
+                                  archivingAppointmentForId === appointment.id
+                                }
+                                onClick={() =>
+                                  handleArchiveAppointment(appointment)
+                                }
+                                type="button"
+                              >
+                                {archivingAppointmentForId === appointment.id
+                                  ? "Archiving..."
+                                  : "Archive"}
+                              </button>
+                            </>
+                          ) : null}
+                          <button
+                            className="block w-full px-3 py-2 text-left text-sm font-semibold text-rose-700 hover:bg-rose-50"
+                            onClick={() => {
+                              setOpenAppointmentMenuId(null);
+                              setPendingDeleteAppointmentId(appointment.id);
+                            }}
+                            type="button"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-                      <div className="min-w-0">
+                      <div className="min-w-0 pr-12">
                         <div className="flex flex-wrap items-center gap-2">
                           <h2
                             className={`text-2xl font-semibold ${
@@ -16261,153 +16271,33 @@ export default function Home() {
                               Demo
                             </span>
                           ) : null}
-                          <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
-                            {appointment.status}
-                          </span>
+                          {isArchived ? (
+                            <button
+                              className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700 ring-1 ring-blue-100 hover:ring-blue-200 disabled:text-slate-400"
+                              disabled={
+                                restoringAppointmentForId === appointment.id
+                              }
+                              onClick={() => restoreAppointment(appointment.id)}
+                              type="button"
+                            >
+                              {restoringAppointmentForId === appointment.id
+                                ? "Restoring..."
+                                : "Restore"}
+                            </button>
+                          ) : appointment.status !== "scheduled" ? (
+                            <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
+                              {appointment.status}
+                            </span>
+                          ) : null}
                         </div>
                         {appointment.is_sample_data ? (
                           <p className="mt-1 text-sm italic text-slate-500">
                             Note: This is not an actual appointment.
                           </p>
                         ) : null}
-                        {practiceLabel ||
-                        appointment.location_address ||
-                        appointment.location_phone ? (
-                          <div className="mt-2 text-sm text-slate-600">
-                            {practiceLabel ? (
-                              mapsLink && !isArchived ? (
-                                <a
-                                  className="inline-flex items-center gap-1 font-medium text-slate-700 hover:text-blue-800"
-                                  href={mapsLink}
-                                  rel="noreferrer"
-                                  target="_blank"
-                                >
-                                  <MapPinIcon className="h-4 w-4" />
-                                  {practiceLabel}
-                                </a>
-                              ) : (
-                                <p>{practiceLabel}</p>
-                              )
-                            ) : null}
-                            {!practiceLabel &&
-                            appointment.location_address ? (
-                              <p>{appointment.location_address}</p>
-                            ) : null}
-                            {appointment.location_phone ? (
-                              <p>{appointment.location_phone}</p>
-                            ) : null}
-                          </div>
-                        ) : null}
-
-                        {!isArchived ? (
-                          <div className="mt-4 flex flex-wrap gap-3">
-                            {canPasteContextualNotes ? (
-                              <div
-                                aria-label="Appointment modifier actions"
-                                className="inline-flex h-11 overflow-hidden rounded-md border border-blue-300 bg-white"
-                              >
-                                <button
-                                  className={`${modifierButtonBase} ${
-                                    activeModifier === "add"
-                                      ? modifierButtonActive
-                                      : modifierButtonInactive
-                                  }`}
-                                  onClick={() =>
-                                    requestAppointmentModifier(
-                                      appointment,
-                                      "add"
-                                    )
-                                  }
-                                  title="Type appointment notes"
-                                  type="button"
-                                >
-                                  Add Notes
-                                </button>
-                                <button
-                                  className={`${modifierButtonBase} border-l border-blue-300 ${
-                                    activeModifier === "import"
-                                      ? modifierButtonActive
-                                      : modifierButtonInactive
-                                  }`}
-                                  onClick={() =>
-                                    requestAppointmentModifier(
-                                      appointment,
-                                      "import"
-                                    )
-                                  }
-                                  title="Paste or upload notes"
-                                  type="button"
-                                >
-                                  Import Notes
-                                </button>
-                                <button
-                                  aria-label="Edit Appointment"
-                                  className={`${modifierButtonBase} inline-flex items-center gap-2 border-l border-blue-300 ${
-                                    activeModifier === "edit"
-                                      ? modifierButtonActive
-                                      : modifierButtonInactive
-                                  }`}
-                                  onClick={() =>
-                                    requestAppointmentModifier(
-                                      appointment,
-                                      "edit"
-                                    )
-                                  }
-                                  title="Edit appointment"
-                                  type="button"
-                                >
-                                  <PencilSquareIcon className="h-5 w-5" />
-                                  Edit
-                                </button>
-                              </div>
-                            ) : null}
-                            {!canPasteContextualNotes ? (
-                              <button
-                                aria-label="Edit Appointment"
-                                className={`inline-flex h-11 items-center gap-2 rounded-md border px-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-300 ${
-                                  activeModifier === "edit"
-                                    ? "border-blue-700 bg-blue-700 text-white"
-                                    : "border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
-                                }`}
-                                onClick={() =>
-                                  requestAppointmentModifier(appointment, "edit")
-                                }
-                                title="Edit appointment"
-                                type="button"
-                              >
-                                <PencilSquareIcon className="h-5 w-5" />
-                                Edit
-                              </button>
-                            ) : null}
-                            <button
-                              aria-label="Archive Appointment"
-                              className={`inline-flex h-11 items-center justify-center rounded-md border px-4 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-300 ${
-                                archivingAppointmentForId === appointment.id
-                                  ? "border-blue-300 bg-blue-50 text-blue-800"
-                                  : "border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
-                              }`}
-                              disabled={
-                                archivingAppointmentForId === appointment.id
-                              }
-                              onClick={() =>
-                                handleArchiveAppointment(appointment)
-                              }
-                              title={
-                                archivingAppointmentForId === appointment.id
-                                  ? "Archiving..."
-                                  : "Archive Appointment"
-                              }
-                              type="button"
-                            >
-                              {archivingAppointmentForId === appointment.id
-                                ? "Archiving..."
-                                : "Archive"}
-                            </button>
-                          </div>
-                        ) : null}
                       </div>
                       <div className="text-left md:min-w-64 md:text-right">
-                        <p className="flex items-center gap-2 text-lg font-medium text-slate-700 md:justify-end">
+                        <p className="flex items-center gap-2 text-lg font-medium text-slate-700 md:justify-end md:pr-12">
                           {formatDate(appointment.starts_at)}
                           {calendarLink && !isArchived ? (
                             <a
@@ -16422,15 +16312,27 @@ export default function Home() {
                             </a>
                           ) : null}
                         </p>
-                        {appointment.provider_name ? (
-                          <p className="mt-1 text-sm font-medium text-slate-700">
-                            {appointment.provider_name}
-                          </p>
-                        ) : null}
-                        {appointmentSubject ? (
-                          <p className="mt-1 text-sm font-medium text-slate-500">
-                            for {appointmentSubject.display_name}
-                          </p>
+                        {practiceLabel ||
+                        appointment.location_address ||
+                        appointment.location_phone ? (
+                          <div className="mt-2 text-sm text-slate-600 md:pr-12">
+                            {practiceLabel ? (
+                              <button
+                                className="inline-flex items-center gap-1 text-left font-medium text-slate-700 hover:text-blue-800 md:justify-end md:text-right"
+                                onClick={() =>
+                                  setLocationSheetAppointmentId(appointment.id)
+                                }
+                                type="button"
+                              >
+                                <MapPinIcon className="h-4 w-4 shrink-0" />
+                                <span>{practiceLabel}</span>
+                              </button>
+                            ) : null}
+                            {!practiceLabel &&
+                            appointment.location_address ? (
+                              <p>{appointment.location_address}</p>
+                            ) : null}
+                          </div>
                         ) : null}
                       </div>
                     </div>
@@ -16467,41 +16369,85 @@ export default function Home() {
                       </section>
                     ) : null}
 
+                    {pendingDeleteAppointmentId === appointment.id ? (
+                      <section className="mt-4 rounded-md border border-rose-200 bg-rose-50 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <p className="text-sm font-medium text-rose-950">
+                            Delete this appointment? It will be hidden from your
+                            appointment views.
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              className="rounded-md bg-rose-700 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                              disabled={
+                                deletingAppointmentForId === appointment.id
+                              }
+                              onClick={() => handleDeleteAppointment(appointment)}
+                              type="button"
+                            >
+                              {deletingAppointmentForId === appointment.id
+                                ? "Deleting..."
+                                : "Delete appointment"}
+                            </button>
+                            <button
+                              className="rounded-md border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-950"
+                              onClick={() => setPendingDeleteAppointmentId(null)}
+                              type="button"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {!isArchived &&
+                    canPasteContextualNotes &&
+                    activeModifier !== "import" ? (
+                      <div className="order-30 mt-4 flex flex-wrap gap-3">
+                        <button
+                          className="inline-flex w-36 items-center justify-center rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                          onClick={() =>
+                            requestAppointmentModifier(appointment, "import")
+                          }
+                          title="Add visit notes"
+                          type="button"
+                        >
+                          Visit notes
+                        </button>
+                      </div>
+                    ) : null}
+
                     {isContextualTextIntake && canPasteContextualNotes ? (
                       <form
-                        className="mt-5 rounded-md border border-blue-200 bg-blue-50 p-4"
+                        className="order-30 mt-4 rounded-md border border-blue-100 bg-blue-50 p-4"
                         onSubmit={
                           textIntakeDraft
                             ? handleSaveTextIntakeDraft
                             : handleInterpretTextIntake
                         }
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <h3 className="text-lg font-semibold text-blue-950">
-                              Import notes for this appointment
-                            </h3>
-                            <p className="mt-1 text-sm text-blue-800">
-                              The notes will be attached here and versioned.
-                            </p>
-                          </div>
-                          <button
-                            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
-                            onClick={cancelTextIntake}
-                            type="button"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-
                         {!textIntakeDraft ? (
                           <>
-                            <div className="mt-4 rounded-md border border-blue-100 bg-white p-3">
-                              <label className="block text-sm font-medium text-slate-700">
-                                Image to text
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <button
+                                className="-ml-4 inline-flex w-36 items-center justify-center rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                onClick={() =>
+                                  requestAppointmentModifier(
+                                    appointment,
+                                    "import"
+                                  )
+                                }
+                                title="Close visit notes"
+                                type="button"
+                              >
+                                Visit notes
+                              </button>
+                              <label className="inline-flex cursor-pointer items-center rounded-md border border-blue-200 bg-white/80 px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50">
+                                Add screenshots (max 10)
                                 <input
                                   accept="image/gif,image/jpeg,image/png,image/webp"
-                                  className="mt-2 block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold file:text-slate-700"
+                                  className="sr-only"
                                   disabled={extractingImageText}
                                   multiple
                                   onChange={(event) => {
@@ -16514,31 +16460,38 @@ export default function Home() {
                                   type="file"
                                 />
                               </label>
-                              <p className="mt-2 text-xs text-slate-500">
-                                {fileImportStatus ||
-                                  "Up to 10 images are converted to text only and are not stored."}
-                              </p>
                             </div>
-                            <label className="mt-4 block text-sm font-medium text-slate-700">
-                              Text
-                              <textarea
-                                className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                                onChange={(event) =>
-                                  setContextualTextIntakeValue(event.target.value)
-                                }
-                                placeholder="Paste portal notes, after-visit summaries, or visit details."
-                                value={contextualTextIntakeValue}
-                              />
-                            </label>
-                            <button
-                              className="mt-4 rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                              disabled={processingTextIntake}
-                              type="submit"
-                            >
-                              {processingTextIntake
-                                ? "Interpreting..."
-                                : "Interpret notes"}
-                            </button>
+                            <textarea
+                              className="mt-3 min-h-56 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-base leading-7"
+                              onChange={(event) =>
+                                setContextualTextIntakeValue(event.target.value)
+                              }
+                              placeholder="Type or paste what happened, portal notes, after-visit summaries, or follow-up details."
+                              value={contextualTextIntakeValue}
+                            />
+                            {fileImportStatus ? (
+                              <p className="mt-2 text-xs text-slate-500">
+                                {fileImportStatus}
+                              </p>
+                            ) : null}
+                            <div className="mt-4 flex flex-wrap items-center gap-4">
+                              <button
+                                className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                                disabled={processingTextIntake}
+                                type="submit"
+                              >
+                                {processingTextIntake
+                                  ? "Creating..."
+                                  : "Create summary"}
+                              </button>
+                              <button
+                                className="text-sm font-semibold text-slate-500 hover:text-slate-800"
+                                onClick={cancelTextIntake}
+                                type="button"
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </>
                         ) : (
                           <>
@@ -16619,7 +16572,7 @@ export default function Home() {
                     !isContextualTextIntake &&
                     isEditingNote ? (
                       <form
-                        className="mt-5 rounded-md border border-blue-100 bg-blue-50 p-4"
+                        className="order-30 mt-5 rounded-md border border-blue-100 bg-blue-50 p-4"
                         onSubmit={(event) => handleSaveNote(event, appointment)}
                       >
                         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -16705,21 +16658,6 @@ export default function Home() {
                           </div>
                         </div>
                       </form>
-                    ) : null}
-
-                    {isArchived ? (
-                      <div className="mt-4">
-                        <button
-                          className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
-                          disabled={restoringAppointmentForId === appointment.id}
-                          onClick={() => restoreAppointment(appointment.id)}
-                          type="button"
-                        >
-                          {restoringAppointmentForId === appointment.id
-                            ? "Restoring..."
-                            : "Restore appointment"}
-                        </button>
-                      </div>
                     ) : null}
 
                     {isEditingAppointment && !isArchived ? (
@@ -16903,44 +16841,44 @@ export default function Home() {
                     ) : null}
 
                     {appointment.reason ? (
-                      <section className="mt-5">
+                      <section
+                        className={`order-10 ${
+                          appointment.is_sample_data ? "mt-5" : "mt-3"
+                        }`}
+                      >
                         <h3 className="font-semibold text-slate-900">Reason</h3>
                         <p className="mt-1 text-slate-700">{appointment.reason}</p>
                       </section>
                     ) : null}
 
-                    {carePrepDraft && !isArchived ? (
-                      <section className="mt-5 rounded-md border border-blue-200 bg-blue-50 p-4">
+                    {shouldShowCarePrep && carePrepDraft && !isArchived ? (
+                      <section className="order-20 mt-5 rounded-md border border-blue-200 bg-blue-50 p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <h3 className="text-lg font-semibold text-blue-900">
                               Review new CarePrep
                             </h3>
                             <p className="mt-1 text-sm text-blue-800">
-                              AI prepared this version. Accept it as-is, edit it
-                              into your version, or discard it.
+                              AI prepared this version. Accept it as-is, or edit
+                              it and save your version.
                             </p>
                           </div>
                           <button
-                            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
-                            disabled={
-                              savingCarePrepForId === appointment.id ||
-                              discardingCarePrepForId === appointment.id
-                            }
-                            onClick={() =>
-                              submitCarePrepReview({
-                                action: "discard",
-                                appointmentId: appointment.id,
-                                draft: carePrepDraft,
-                              })
-                            }
+                            className="rounded-md border border-blue-200 bg-white/80 px-3 py-2 text-sm font-semibold text-blue-800 hover:border-blue-300 disabled:text-slate-400"
+                            disabled={generatingCarePrepForId === appointment.id}
+                            onClick={() => handleGenerateCarePrep(appointment)}
                             type="button"
                           >
-                            {discardingCarePrepForId === appointment.id
-                              ? "Discarding..."
-                              : "Discard"}
+                            {generatingCarePrepForId === appointment.id
+                              ? "Refreshing..."
+                              : "Refresh"}
                           </button>
                         </div>
+                        {generatingCarePrepForId === appointment.id ? (
+                          <span className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
+                            Generating...
+                          </span>
+                        ) : null}
 
                         <div className="mt-4 grid gap-4">
                           <label className="block text-sm font-medium text-slate-700">
@@ -17056,7 +16994,10 @@ export default function Home() {
                         <div className="mt-4 flex flex-wrap gap-3">
                           <button
                             className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
-                            disabled={savingCarePrepForId === appointment.id}
+                            disabled={
+                              savingCarePrepForId === appointment.id ||
+                              hasReviewCarePrepEdits
+                            }
                             onClick={() =>
                               submitCarePrepReview({
                                 action: "accept",
@@ -17065,6 +17006,11 @@ export default function Home() {
                               })
                             }
                             type="button"
+                            title={
+                              hasReviewCarePrepEdits
+                                ? "Save edited version to keep your changes."
+                                : "Accept the generated version without edits."
+                            }
                           >
                             {savingCarePrepForId === appointment.id
                               ? "Accepting..."
@@ -17072,7 +17018,10 @@ export default function Home() {
                           </button>
                           <button
                             className="rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
-                            disabled={savingCarePrepForId === appointment.id}
+                            disabled={
+                              savingCarePrepForId === appointment.id ||
+                              !hasReviewCarePrepEdits
+                            }
                             onClick={() =>
                               submitCarePrepReview({
                                 action: "save_edit",
@@ -17081,6 +17030,11 @@ export default function Home() {
                               })
                             }
                             type="button"
+                            title={
+                              hasReviewCarePrepEdits
+                                ? "Save your edited CarePrep version."
+                                : "Make an edit before saving an edited version."
+                            }
                           >
                             {savingCarePrepForId === appointment.id
                               ? "Saving..."
@@ -17090,8 +17044,89 @@ export default function Home() {
                       </section>
                     ) : null}
 
-                    {note ? (
-                      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                    {note && isVisitNotesExpandableView && !isEditingNote ? (
+                      !isVisitNotesExpanded ? (
+                        <div className="order-30 mt-5 flex flex-wrap gap-3">
+                          <button
+                            className="inline-flex w-36 items-center justify-center rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                            onClick={() =>
+                              setExpandedVisitNotesAppointmentId(appointment.id)
+                            }
+                            title="Open Visit notes"
+                            type="button"
+                          >
+                            Visit notes
+                          </button>
+                        </div>
+                      ) : (
+                        <section className="order-30 mt-5 overflow-hidden rounded-md border border-blue-200 bg-blue-50">
+                          <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+                            <button
+                              className="-ml-4 inline-flex w-36 items-center justify-center rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                              onClick={() =>
+                                setExpandedVisitNotesAppointmentId(null)
+                              }
+                              title="Close Visit notes"
+                              type="button"
+                            >
+                              Visit notes
+                            </button>
+                            {!isEditingNote && !isArchived ? (
+                              <button
+                                className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                onClick={() =>
+                                  startEditingNote(appointment.id, note)
+                                }
+                                type="button"
+                              >
+                                <PencilSquareIcon className="h-4 w-4" />
+                                Edit
+                              </button>
+                            ) : null}
+                            <span className="text-xs font-medium text-blue-700">
+                              Current version {note.version_number}
+                            </span>
+                          </div>
+                          <div className="border-t border-blue-100 p-4">
+                            <div className="rounded-md bg-white p-4">
+                              {note.summary_short ? (
+                                <section>
+                                  <h4 className="font-semibold text-slate-900">
+                                    Visit summary
+                                  </h4>
+                                  <p className="mt-1 text-slate-700">
+                                    {note.summary_short}
+                                  </p>
+                                </section>
+                              ) : null}
+                              <div className="mt-5 grid gap-5 md:grid-cols-2">
+                                <section>
+                                  <h4 className="font-semibold text-slate-900">
+                                    Takeaways
+                                  </h4>
+                                  <DetailList
+                                    emptyLabel="No takeaways saved yet."
+                                    items={takeaways}
+                                  />
+                                </section>
+                                <section>
+                                  <h4 className="font-semibold text-slate-900">
+                                    Follow-ups
+                                  </h4>
+                                  <DetailList
+                                    emptyLabel="No follow-ups saved yet."
+                                    items={followups}
+                                  />
+                                </section>
+                              </div>
+                            </div>
+                          </div>
+                        </section>
+                      )
+                    ) : null}
+
+                    {note && !isVisitNotesExpandableView ? (
+                      <div className="order-30 mt-5 flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <h3 className="font-semibold text-blue-800">
                             Visit notes
@@ -17112,51 +17147,110 @@ export default function Home() {
                       </div>
                     ) : null}
 
-                    {note?.summary_short ? (
-                      <section className="mt-5">
+                    {note?.summary_short && !isVisitNotesExpandableView ? (
+                      <section className="order-30 mt-5">
                         <h3 className="font-semibold text-blue-800">Visit summary</h3>
                         <p className="mt-1 text-slate-700">{note.summary_short}</p>
                       </section>
                     ) : null}
 
-                    <div className="mt-5 grid gap-4 md:grid-cols-2">
-                      <section className="rounded-md border border-slate-200 p-4">
-                        <h3 className="font-semibold text-blue-800">Takeaways</h3>
-                        <DetailList
-                          emptyLabel="No takeaways saved yet."
-                          items={takeaways}
-                        />
-                      </section>
+                    {shouldShowPostVisitSections ? (
+                      <div className="order-30 mt-5 grid gap-4 md:grid-cols-2">
+                        <section className="rounded-md border border-slate-200 p-4">
+                          <h3 className="font-semibold text-blue-800">
+                            Takeaways
+                          </h3>
+                          <DetailList
+                            emptyLabel="No takeaways saved yet."
+                            items={takeaways}
+                          />
+                        </section>
 
-                      <section className="rounded-md border border-slate-200 p-4">
-                        <h3 className="font-semibold text-blue-800">Follow-ups</h3>
-                        <DetailList
-                          emptyLabel="No follow-ups saved yet."
-                          items={followups}
-                        />
-                      </section>
-                    </div>
+                        <section className="rounded-md border border-slate-200 p-4">
+                          <h3 className="font-semibold text-blue-800">
+                            Follow-ups
+                          </h3>
+                          <DetailList
+                            emptyLabel="No follow-ups saved yet."
+                            items={followups}
+                          />
+                        </section>
+                      </div>
+                    ) : null}
 
-                    {prep?.summary ||
-                    canGenerateCarePrep ||
-                    generatingCarePrepForId === appointment.id ? (
-                      <section className="mt-5 rounded-md bg-blue-50 p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <h3 className="text-lg font-semibold text-blue-900">
+                    {shouldShowCarePrep &&
+                    (prep?.summary ||
+                      canGenerateCarePrep ||
+                      generatingCarePrepForId === appointment.id ||
+                      carePrepGenerationError) ? (
+                      <>
+                        {!isCarePrepExpanded ? (
+                          <div className="order-20 mt-5 flex flex-wrap items-center gap-3">
+                            <button
+                              className="inline-flex w-36 items-center justify-center rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:text-slate-400"
+                              disabled={generatingCarePrepForId === appointment.id}
+                              onClick={() => {
+                                if (prep?.summary) {
+                                  setExpandedCarePrepIds((currentIds) => ({
+                                    ...currentIds,
+                                    [appointment.id]: true,
+                                  }));
+                                  return;
+                                }
+
+                                handleGenerateCarePrep(appointment);
+                              }}
+                              title="Open CarePrep"
+                              type="button"
+                            >
                               CarePrep
-                            </h3>
-                            {prep?.summary ? (
-                              <p className="mt-1 text-xs font-medium text-blue-700">
-                                Current version {prep.version_number}
-                              </p>
+                            </button>
+                            {generatingCarePrepForId === appointment.id ? (
+                              <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
+                                Generating...
+                              </span>
                             ) : null}
                           </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {!prep?.summary && canGenerateCarePrep ? (
-                              <>
+                        ) : null}
+                        {carePrepGenerationError && !isCarePrepExpanded ? (
+                          <p className="order-20 mt-3 rounded-md border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-800">
+                            CarePrep could not be generated.{" "}
+                            {carePrepGenerationError}
+                          </p>
+                        ) : null}
+                        {isCarePrepExpanded && prep?.summary ? (
+                          <section className="order-20 mt-5 overflow-hidden rounded-md border border-blue-200 bg-blue-50">
+                            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <button
-                                  className="rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800 disabled:text-slate-400"
+                                  className="-ml-4 inline-flex w-36 items-center justify-center rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                  onClick={() =>
+                                    setExpandedCarePrepIds((currentIds) => ({
+                                      ...currentIds,
+                                      [appointment.id]: false,
+                                    }))
+                                  }
+                                  title="Close CarePrep"
+                                  type="button"
+                                >
+                                  CarePrep
+                                </button>
+                                {!isArchived && !isEditingCarePrep ? (
+                                  <button
+                                    className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                    onClick={() =>
+                                      startEditingCarePrep(appointment.id, prep)
+                                    }
+                                    type="button"
+                                  >
+                                    <PencilSquareIcon className="h-4 w-4" />
+                                    Edit
+                                  </button>
+                                ) : null}
+                              </div>
+                              {!isArchived && !isEditingCarePrep ? (
+                                <button
+                                  className="rounded-md border border-blue-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:border-blue-300 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300"
                                   disabled={
                                     generatingCarePrepForId === appointment.id
                                   }
@@ -17165,46 +17259,19 @@ export default function Home() {
                                   }
                                   type="button"
                                 >
-                                  Generate CarePrep
+                                  {generatingCarePrepForId === appointment.id
+                                    ? "Refreshing..."
+                                    : "Refresh"}
                                 </button>
-                                {generatingCarePrepForId === appointment.id ? (
-                                  <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
-                                    Generating...
-                                  </span>
-                                ) : null}
-                              </>
-                            ) : null}
-                            {prep?.summary && !isArchived && !isEditingCarePrep ? (
-                              <button
-                                className="rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800"
-                                onClick={() =>
-                                  startEditingCarePrep(appointment.id, prep)
-                                }
-                                type="button"
-                              >
-                                Edit CarePrep
-                              </button>
-                            ) : null}
-                            {prep?.summary ? (
-                              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-                              Prep for visit
+                              ) : null}
+                            </div>
+                            {generatingCarePrepForId === appointment.id ? (
+                              <span className="mx-4 mb-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
+                                Generating...
                               </span>
                             ) : null}
-                          </div>
-                        </div>
-                        {carePrepGenerationError ? (
-                          <p className="mt-3 rounded-md border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-800">
-                            CarePrep could not be generated.{" "}
-                            {carePrepGenerationError}
-                          </p>
-                        ) : null}
-                        {!prep?.summary ? (
-                          <p className="mt-2 text-sm text-slate-700">
-                            Generate a prep view when you are ready to review
-                            this appointment.
-                          </p>
-                        ) : isEditingCarePrep ? (
-                          <div className="mt-4 grid gap-4">
+                            {isEditingCarePrep ? (
+                              <div className="grid gap-4 border-t border-blue-100 p-4">
                             <label className="block text-sm font-medium text-slate-700">
                               Summary
                               <textarea
@@ -17339,19 +17406,29 @@ export default function Home() {
                             </div>
                           </div>
                         ) : (
-                          <>
-                            <p className="mt-2 text-slate-700">{prep.summary}</p>
+                          <div className="border-t border-blue-100 p-4">
+                            <div className="rounded-md bg-white p-4">
+                              <section>
+                                <h4 className="font-semibold text-slate-900">
+                                  Summary
+                                </h4>
+                                <p className="mt-1 text-slate-700">
+                                  {prep.summary}
+                                </p>
+                              </section>
 
-                            <div className="mt-5 grid gap-4 lg:grid-cols-3">
-                              <section className="rounded-md bg-white p-4">
-                                <h4 className="font-semibold text-slate-900">Bring</h4>
+                              <div className="mt-5 grid gap-5 lg:grid-cols-3">
+                              <section>
+                                <h4 className="font-semibold text-slate-900">
+                                  Bring
+                                </h4>
                                 <DetailList
                                   emptyLabel="No bring-list items saved yet."
                                   items={bringList}
                                 />
                               </section>
 
-                              <section className="rounded-md bg-white p-4">
+                              <section>
                                 <h4 className="font-semibold text-slate-900">Ask</h4>
                                 <DetailList
                                   emptyLabel="No questions saved yet."
@@ -17359,7 +17436,7 @@ export default function Home() {
                                 />
                               </section>
 
-                              <section className="rounded-md bg-white p-4">
+                              <section>
                                 <h4 className="font-semibold text-slate-900">
                                   Watch for
                                 </h4>
@@ -17371,8 +17448,8 @@ export default function Home() {
                             </div>
 
                             {(medReview.length > 0 || sinceLastVisit.length > 0) && (
-                              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                                <section className="rounded-md bg-white p-4">
+                              <div className="mt-5 grid gap-5 md:grid-cols-2">
+                                <section>
                                   <h4 className="font-semibold text-slate-900">
                                     Medication review
                                   </h4>
@@ -17382,7 +17459,7 @@ export default function Home() {
                                   />
                                 </section>
 
-                                <section className="rounded-md bg-white p-4">
+                                <section>
                                   <h4 className="font-semibold text-slate-900">
                                     Since last visit
                                   </h4>
@@ -17393,9 +17470,12 @@ export default function Home() {
                                 </section>
                               </div>
                             )}
-                          </>
+                            </div>
+                          </div>
                         )}
                       </section>
+                        ) : null}
+                      </>
                     ) : null}
 
                   </article>
@@ -17415,6 +17495,66 @@ export default function Home() {
           </footer>
         ) : null}
       </section>
+      {locationSheetAppointment ? (
+        <div className="fixed inset-0 z-[70] flex items-end bg-slate-950/20 px-3 pb-3">
+          <button
+            aria-label="Close location details"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setLocationSheetAppointmentId(null)}
+            type="button"
+          />
+          <section className="relative mx-auto w-full max-w-[900px] rounded-t-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-slate-300" />
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-950">
+                  {locationSheetPracticeLabel || "Appointment location"}
+                </h2>
+                {locationSheetAppointment.provider_name ? (
+                  <p className="mt-1 text-sm font-medium text-slate-700">
+                    {locationSheetAppointment.provider_name}
+                  </p>
+                ) : null}
+              </div>
+              <button
+                className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600"
+                onClick={() => setLocationSheetAppointmentId(null)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-4 space-y-2 text-sm text-slate-700">
+              {locationSheetAppointment.location_address ? (
+                <p>{locationSheetAppointment.location_address}</p>
+              ) : null}
+              {locationSheetAppointment.location_phone ? (
+                <p>{locationSheetAppointment.location_phone}</p>
+              ) : null}
+            </div>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {locationSheetMapsLink ? (
+                <a
+                  className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white"
+                  href={locationSheetMapsLink}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Maps
+                </a>
+              ) : null}
+              {locationSheetPhoneHref ? (
+                <a
+                  className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                  href={locationSheetPhoneHref}
+                >
+                  Call
+                </a>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

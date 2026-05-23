@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 export type AppointmentView = "archived" | "logged" | "upcoming";
 
 type AppointmentViewToolbarProps = {
@@ -7,11 +9,33 @@ type AppointmentViewToolbarProps = {
   disabled: boolean;
   onChangeSubject: (subjectId: string) => void;
   onChangeView: (view: AppointmentView) => void;
-  onRefresh: () => void;
   selectedSubjectId: string;
   stickyTop: number;
   view: AppointmentView;
 };
+
+function EllipsisVerticalIcon({
+  className = "h-5 w-5",
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="12" cy="5" r="1" />
+      <circle cx="12" cy="19" r="1" />
+    </svg>
+  );
+}
 
 export function AppointmentViewToolbar({
   allSubjectsValue,
@@ -20,23 +44,52 @@ export function AppointmentViewToolbar({
   disabled,
   onChangeSubject,
   onChangeView,
-  onRefresh,
   selectedSubjectId,
   stickyTop,
   view,
 }: AppointmentViewToolbarProps) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const viewOptions: Array<{ label: string; value: AppointmentView }> = [
     { label: "Upcoming", value: "upcoming" },
     { label: "Logged", value: "logged" },
     { label: "Archived", value: "archived" },
   ];
 
+  useEffect(() => {
+    if (!mobileMenuOpen) {
+      return;
+    }
+
+    function closeMobileMenuOnOutsideClick(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Node &&
+        mobileMenuRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setMobileMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeMobileMenuOnOutsideClick);
+
+    return () => {
+      document.removeEventListener(
+        "pointerdown",
+        closeMobileMenuOnOutsideClick
+      );
+    };
+  }, [mobileMenuOpen]);
+
   return (
     <div
       className="sticky z-40 bg-slate-50 pb-0 pt-0.5 before:absolute before:-top-2 before:left-0 before:right-0 before:h-2 before:bg-slate-50 md:-mt-6"
       style={{ top: stickyTop }}
     >
-      <div className="px-3 pt-2">
+      <div className="relative px-3 pt-2">
         <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
           <div className="order-2 flex flex-wrap items-end gap-1 md:order-1">
             {viewOptions.map((option) => {
@@ -62,7 +115,48 @@ export function AppointmentViewToolbar({
           </div>
 
           {canFilterCareVips ? (
-            <div className="order-1 flex w-full flex-wrap items-center gap-2 pb-2 text-sm text-slate-500 md:order-2 md:w-auto">
+            <div
+              className="absolute right-4 top-2 z-10 flex items-end pb-px md:hidden"
+              ref={mobileMenuRef}
+            >
+              <button
+                aria-expanded={mobileMenuOpen}
+                aria-label="Appointment view options"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 hover:bg-white/80 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                disabled={disabled}
+                onClick={() => setMobileMenuOpen((isOpen) => !isOpen)}
+                type="button"
+              >
+                <EllipsisVerticalIcon className="h-5 w-5" />
+              </button>
+              {mobileMenuOpen ? (
+                <div className="absolute right-0 top-11 z-20 w-56 rounded-md border border-slate-200 bg-white p-3 text-left shadow-lg">
+                  <label className="block text-sm font-medium text-slate-600">
+                    Showing
+                    <select
+                      className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                      disabled={disabled || careSubjects.length === 0}
+                      onChange={(event) => {
+                        onChangeSubject(event.target.value);
+                        setMobileMenuOpen(false);
+                      }}
+                      value={selectedSubjectId}
+                    >
+                      <option value={allSubjectsValue}>All appts</option>
+                      {careSubjects.map((subject) => (
+                        <option key={subject.id} value={subject.id}>
+                          {subject.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {canFilterCareVips ? (
+            <div className="order-1 hidden w-full flex-wrap items-center gap-2 pb-2 text-sm text-slate-500 md:order-2 md:flex md:w-auto">
               <label className="flex items-center gap-2">
                 <span>Showing:</span>
                 <select
@@ -79,14 +173,6 @@ export function AppointmentViewToolbar({
                   ))}
                 </select>
               </label>
-              <button
-                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 disabled:text-slate-400"
-                disabled={disabled}
-                onClick={onRefresh}
-                type="button"
-              >
-                Refresh
-              </button>
             </div>
           ) : null}
         </div>

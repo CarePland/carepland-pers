@@ -128,6 +128,7 @@ Appointments can be:
 - Imported from `.ics` calendar files after review.
 - Edited.
 - Archived and restored.
+- Deleted through a soft-delete marker (`deleted_at`) so the appointment is hidden from normal user views without physically removing the record.
 - Logged by adding notes.
 
 Appointment views:
@@ -141,20 +142,34 @@ Current user-facing appointment page direction:
 - Reduce status bars and load-count messages.
 - Keep `Upcoming / Logged / Archived` as the primary view controls.
 - Move filtering/refresh beside view controls when useful.
+- On mobile, keep `Upcoming / Logged / Archived` primary and place secondary toolbar utilities such as Care VIP filtering behind a small vertical-dot overflow menu aligned with card action menus; tablet/desktop can keep the filter visible.
+- Do not expose page-level refresh buttons on patient-facing pages; keep manual refresh controls only where they are content-specific, such as CarePrep refresh, or admin-facing.
 - Hide Care VIP filter if only one Care VIP exists.
 - Avoid heavy "Showing appointments" panels.
 - Avoid showing Add Appointment / Import as always-dominant controls on the appointment list.
+- Do not show the last-appointment notes reminder as a large panel on the Appointments page; surface it gently on Home instead.
 - Use map/calendar affordances inline with meaningful text rather than as repeated bordered utility buttons.
 - Keep patient-facing appointment cards calmer than admin tools.
 
 Current appointment-card direction:
 
-- Practice/location name can link to Google Maps with a small map pin when an address exists.
+- Omit redundant `scheduled` badges in Upcoming; show status only when it adds meaning, such as Archived.
+- Collapse appointment notes entry into a single `Notes` action that accepts typed, pasted, or uploaded context and interprets it into summary, takeaways, and follow-ups for user review before saving.
+- Keep appointment management actions such as Edit, Archive, and Delete in a secondary three-dot menu.
+- Delete is user-facing deletion but implementation should be soft-delete/hide, not physical removal.
+- Practice/location name opens a lightweight location details bottom sheet with provider, address, phone, and actions such as Maps and Call.
 - Calendar icon belongs near the appointment date/time, unboxed.
-- Takeaways and Follow-ups should appear before CarePrep.
-- CarePrep generation belongs inside the CarePrep section.
-- If no CarePrep exists, show `Generate CarePrep` inside the CarePrep area.
-- While generating, show an amber `Generating...` message until the CarePrep appears.
+- Appointment card content should read in workflow order: Reason first, CarePrep second, Visit Notes and post-visit note content third.
+- Takeaways and Follow-ups belong with Visit Notes after CarePrep.
+- Do not show empty Takeaways or Follow-ups regions on Upcoming appointments; those are post-visit notes surfaces.
+- Hide CarePrep entirely on Logged and Archived views; it is pre-visit preparation and should not invite comparison against completed appointment notes.
+- Logged and Archived views should allow only one expanded Visit Notes panel at a time; opening one appointment's Visit Notes minimizes the others.
+- Expanded Visit Notes on Logged and Archived uses the same blue-shell/white-interior pattern as CarePrep, with summary, takeaways, and follow-ups grouped inside the white interior.
+- CarePrep should behave like an expandable sibling to Visit Notes: a soft-blue `CarePrep` button triggers generation when no prep exists, then opens the generated panel.
+- While generating, show an amber `Generating...` message near the CarePrep button until the generated panel appears.
+- Expanded CarePrep uses a blue header/border shell with content grouped inside a white area; the `CarePrep` title collapses the panel, and Edit appears beside the title as a faint bordered icon button.
+- CarePrep draft review actions should protect user edits: unchanged drafts can be accepted as-is, while changed drafts must be saved as an edited version.
+- CarePrep draft review and saved CarePrep headers can offer a small Refresh action to generate a new draft instead of encouraging discard. Refresh frequency/comparison eligibility rules are future backend policy work.
 
 ## Notes Workflow
 
@@ -174,7 +189,7 @@ Rules:
 - Blank overwrites should be blocked.
 - The current note reference lives on the appointment.
 - AI-generated drafts and user-saved/edited results should be distinguishable.
-- For a last-appointment notes prompt, use concise actions such as `Add` and `Paste / Import`.
+- For a last-appointment notes prompt, prefer a gentle Home reminder such as `Add notes to: [appointment]` that opens the interpreted notes flow.
 
 ## CarePrep Workflow Definitions
 
@@ -555,6 +570,7 @@ Demo/test users:
 - Cap normal signed-in user-facing pages at 900px; allow Admin to be wider.
 - Appointment toolbar extracted to `app/components/AppointmentViewToolbar.tsx` because it has a clean low-coupling boundary.
 - Do not extract the full appointment card yet; it is too coupled to page-local state and would create a large prop bundle.
+- Appointment records use one white workspace with divider-separated records rather than individual card borders/shadows.
 - Public website CTA should point to beta signup during beta rather than repeatedly sending users to the app.
 - Public website video should be embedded from a hosted video service/CDN rather than committed as a large deployment asset.
 - Admin `View as user` is implemented as read-only admin snapshot/reveal RPCs with audit logging rather than true session impersonation. Sensitive data should be fetched only after an explicit reveal action.
