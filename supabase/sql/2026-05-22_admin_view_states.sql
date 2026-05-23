@@ -270,18 +270,6 @@ as $$
     union all
     select
       'admin_tab'::text,
-      'messages'::text,
-      max(created_at),
-      count(*) filter (
-        where created_at > coalesce(
-          (select last_viewed_at from states where scope_type = 'admin_tab' and scope_key = 'messages'),
-          '-infinity'::timestamptz
-        )
-      )
-    from public.app_content_versions
-    union all
-    select
-      'admin_tab'::text,
       'product'::text,
       max(updated_at),
       count(*) filter (

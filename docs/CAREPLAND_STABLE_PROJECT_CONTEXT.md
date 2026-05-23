@@ -87,7 +87,7 @@ Current implemented assumptions:
 - Backend plan-feature metering foundation exists as SQL patches: `plan_features`, `care_circle_feature_usage`, `check_feature_access`, `consume_feature_usage`, and `refund_feature_usage`.
 - Manual CarePrep generation is the first metered workflow and uses feature key `careprep_manual`; automatic CarePrep entitlement uses feature key `careprep_auto` for future automation work.
 - Metering reserves usage before expensive work and refunds it if generation fails before a CarePrep draft is saved.
-- Manual CarePrep plan-limit copy is editable in Admin > Content > Messages via `careprep_manual_limit_message`; `plan_features.limit_message` remains a backend fallback.
+- Manual CarePrep plan-limit copy is editable in Admin > Dynamic Text via `careprep_manual_limit_message`; `plan_features.limit_message` remains a backend fallback.
 - Multi-user/group permissioning is future expansion, not a fully implemented role system.
 - CP Family is a separate future app direction for deeper caregiving support and should not be used as the Tier 4 label for CarePland Personal.
 - Plan changes during beta may be mediated through support/admin rather than self-service billing.
@@ -187,8 +187,11 @@ Current Home direction:
 - Demo-data copy should reassure users that examples are fictional/clearly labeled and removable without affecting real appointments.
 - Regular user-facing Home, Appointments, and Profile pages should include a tiny soft-gray footer with centered `© 2026 CarePland` and a subtle `Why CarePland` pill on the right that opens the welcome explanation. Keep it off the welcome page itself.
 - For admins viewing user-facing pages, show build metadata quietly on the left side of the same footer rather than as a separate patient-facing footer block.
+- Welcome dismissal is database-backed on `profiles` with `welcome_guide_dismissed_at` and `welcome_guide_dismissed_version`, not browser-local storage. Reset by clearing the fields or bumping the app's current welcome version. Deliberate clicks away from Welcome, including Dismiss, main navigation, and get-started actions, mark it read; closing the browser/window without action should leave it unread.
 - The last-appointment notes reminder should stay gentle and compact on Home.
 - The next appointment and CarePrep preview should remain the main recurring Home utility after setup.
+- The Home next-appointment panel should share the Appointments page visual language: appointment title/details at the top, with CarePrep presented as a blue-shell panel and white content interior.
+- Home CarePrep can start expanded by default; clicking its `CarePrep` header may collapse or expand it.
 
 ## Notes Workflow
 
@@ -331,10 +334,11 @@ Support:
 
 Admin:
 
-- Admin tabs include tools, users/activity, integration errors, content, AI, assistant review, messages, product management, and tickets.
+- Admin tabs include tools, users/activity, integration errors, Dynamic Text, AI, assistant review, product management, and tickets. Do not add a separate top-level Messages tab; short messages belong in Dynamic Text.
 - Admin header/ticket indicators should show actionable counts with words, e.g. `New` and `Followup`, not mystery fractions.
 - Admin tools may be denser than patient-facing pages.
 - Admin pages may use wider layouts than user-facing pages.
+- Admin-only Auth maintenance that touches `auth.users`, such as updating a tester's login email, must run through protected server routes using `SUPABASE_SERVICE_ROLE_KEY`; never expose service-role keys or Auth admin operations to browser/client code.
 - Admin Users / Activity supports a read-only `View as user` workflow for test-account pre-flight and troubleshooting. It is not auth impersonation and should not create a Supabase session as the target user.
 - Read-only admin user views should default to metadata and account/workflow shape. Sensitive profile/contact details, full appointment titles, appointment times, full provider/practice/location details, appointment details, Notes, CarePrep bodies, support message bodies, imported text, and extracted content should stay hidden until deliberately revealed. Appointment previews may show dates plus short prefixes of title/provider/practice/location so the view remains operationally useful without exposing full details.
 - Non-sensitive appointment metadata such as created/updated timestamps, short record IDs, Care VIP assignment, note/CarePrep presence, and draft/current state can be shown in Admin read-only views to support import QA and troubleshooting.

@@ -60,10 +60,13 @@ Supabase SQL editor history.
   Admin utility: seeds editable Profile plan-tier helper text.
 
 - `2026-05-22_careprep_limit_message_content.sql`
-  Admin utility: seeds the editable manual CarePrep plan-limit message for Admin > Content > Messages.
+  Admin utility: seeds the editable manual CarePrep plan-limit message for Admin > Dynamic Text.
 
 - `2026-05-22_seed_plan_metering_agent_knowledge.sql`
   Admin utility: seeds Agent Knowledge updates for pricing tiers, metering, and beta plan-change limitations.
+
+- `2026-05-23_welcome_guide_dismissal.sql`
+  Migration/reset utility: stores welcome-guide dismissal state on `profiles` and resets the current rollout for all users.
 
 ## Supabase SQL History Triage
 

@@ -524,11 +524,11 @@ type AdminTab =
   | "assistantReview"
   | "content"
   | "errors"
-  | "messages"
   | "product"
   | "tickets"
   | "tools"
   | "users";
+type StoredAdminTab = AdminTab | "messages";
 type AdminViewScopeType = "admin_tab" | "ai_admin_tab" | "product_area";
 type AdminViewState = {
   admin_user_id: string;
@@ -722,7 +722,7 @@ type SampleDataStatus = {
 
 type StoredUiState = {
   activeAppointmentPanel?: AppointmentPanel | null;
-  adminTab?: AdminTab;
+  adminTab?: StoredAdminTab;
   aiAdminTab?: AiAdminTab;
   appointmentView?: AppointmentView;
   mainTab?: MainTab;
@@ -1186,7 +1186,7 @@ const productMgmtSections = [
 ] as const;
 
 const betaAgreementVersion = "beta-2026-05-19";
-const welcomeGuideStoragePrefix = "carepland-welcome-guide-dismissed:";
+const currentWelcomeGuideVersion = "welcome-2026-05-23";
 
 const emptyProfileDraft: ProfileDraft = {
   addressLine1: "",
@@ -2184,17 +2184,6 @@ function nonProductionEnvironmentLabel(hostname: string, configuredEnv = "") {
   return "";
 }
 
-function welcomeGuideWasDismissed(email: string | null) {
-  if (!email || typeof window === "undefined") {
-    return false;
-  }
-
-  return (
-    window.localStorage.getItem(`${welcomeGuideStoragePrefix}${email}`) ===
-    "true"
-  );
-}
-
 function readStoredJson<T>(storage: Storage, key: string): T | null {
   try {
     const rawValue = storage.getItem(key);
@@ -2608,7 +2597,9 @@ export default function Home() {
     initialUiState?.aiAdminTab ?? "instructions"
   );
   const [adminTab, setAdminTab] = useState<AdminTab>(
-    initialUiState?.adminTab ?? "tools"
+    initialUiState?.adminTab === "messages"
+      ? "content"
+      : initialUiState?.adminTab ?? "tools"
   );
   const [adminViewStates, setAdminViewStates] = useState<
     Record<string, AdminViewState>
@@ -2968,6 +2959,11 @@ export default function Home() {
   const [loadingAdminSampleStatus, setLoadingAdminSampleStatus] =
     useState(false);
   const [seedingAdminSampleData, setSeedingAdminSampleData] = useState(false);
+  const [adminEmailUpdateCurrentEmail, setAdminEmailUpdateCurrentEmail] =
+    useState("");
+  const [adminEmailUpdateNewEmail, setAdminEmailUpdateNewEmail] = useState("");
+  const [adminEmailUpdateResult, setAdminEmailUpdateResult] = useState("");
+  const [updatingAdminUserEmail, setUpdatingAdminUserEmail] = useState(false);
   const [acceptBetaDisclaimer, setAcceptBetaDisclaimer] = useState(false);
   const [acceptBetaPrivacy, setAcceptBetaPrivacy] = useState(false);
   const [acceptBetaTerms, setAcceptBetaTerms] = useState(false);
@@ -3000,6 +2996,7 @@ export default function Home() {
     useState<Appointment | null>(null);
   const [homeNextGuidance, setHomeNextGuidance] =
     useState<CarePrepGuidance | null>(null);
+  const [homeCarePrepExpanded, setHomeCarePrepExpanded] = useState(true);
   const [notesReminderAppointment, setNotesReminderAppointment] =
     useState<NotesReminderAppointment | null>(null);
   const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
@@ -3440,7 +3437,7 @@ export default function Home() {
 
           if (recoveryEmail) {
             setSignedInEmail(recoveryEmail);
-            setWelcomeGuideDismissed(welcomeGuideWasDismissed(recoveryEmail));
+            setWelcomeGuideDismissed(false);
             setEmail(recoveryEmail);
           }
 
@@ -3467,7 +3464,7 @@ export default function Home() {
 
       if (sessionEmail) {
         setSignedInEmail(sessionEmail);
-        setWelcomeGuideDismissed(welcomeGuideWasDismissed(sessionEmail));
+        setWelcomeGuideDismissed(false);
         setEmail(sessionEmail);
 
         setLoading(true);
@@ -3495,10 +3492,7 @@ export default function Home() {
               await loadAdminUserActivity();
             } else if (initialUiState.adminTab === "errors") {
               await loadAdminIntegrationErrors();
-            } else if (
-              initialUiState.adminTab === "content" ||
-              initialUiState.adminTab === "messages"
-            ) {
+            } else if (initialUiState.adminTab === "content") {
               await loadAppContent(initialUiState.selectedAppContentKey);
             }
           }
@@ -3794,15 +3788,35 @@ export default function Home() {
     });
   }
 
-  function dismissWelcomeGuide() {
-    if (signedInEmail) {
-      window.localStorage.setItem(
-        `${welcomeGuideStoragePrefix}${signedInEmail}`,
-        "true"
-      );
-    }
-
+  async function markWelcomeGuideRead() {
     setWelcomeGuideDismissed(true);
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError) {
+        throw userError;
+      }
+
+      const userId = userData.user?.id;
+
+      if (!userId) {
+        return;
+      }
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          welcome_guide_dismissed_at: new Date().toISOString(),
+          welcome_guide_dismissed_version: currentWelcomeGuideVersion,
+        })
+        .eq("id", userId);
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
   }
 
   async function getPrimaryCareContext(preferredSubjectId?: string) {
@@ -3915,7 +3929,7 @@ export default function Home() {
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
       .select(
-        "id,email,display_name,given_name,family_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,beta_terms_acknowledged_at,beta_privacy_acknowledged_at,beta_disclaimer_acknowledged_at,beta_agreement_version,onboarding_completed_at,is_admin,sample_data_seeded_at,sample_data_declined_at,sample_data_seed_version"
+        "id,email,display_name,given_name,family_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,beta_terms_acknowledged_at,beta_privacy_acknowledged_at,beta_disclaimer_acknowledged_at,beta_agreement_version,onboarding_completed_at,is_admin,sample_data_seeded_at,sample_data_declined_at,sample_data_seed_version,welcome_guide_dismissed_at,welcome_guide_dismissed_version"
       )
       .eq("id", user.id)
       .maybeSingle();
@@ -3932,6 +3946,9 @@ export default function Home() {
     setSavedProfileDraft(loadedProfileDraft);
     setSavedProfileLabel(profileDisplayName(loadedProfileDraft));
     setRequiresEmailUpdate(userRequiresEmailUpdate);
+    setWelcomeGuideDismissed(
+      profileRow?.welcome_guide_dismissed_version === currentWelcomeGuideVersion
+    );
     const userIsAdmin = profileRow?.is_admin === true;
     setIsAdmin(userIsAdmin);
     if (userIsAdmin) {
@@ -4324,7 +4341,7 @@ export default function Home() {
 
       const trimmedEmail = email.trim();
       setSignedInEmail(trimmedEmail);
-      setWelcomeGuideDismissed(welcomeGuideWasDismissed(trimmedEmail));
+      setWelcomeGuideDismissed(false);
       await loadAppContent();
       await loadAppointments();
     } catch (error) {
@@ -4448,7 +4465,7 @@ export default function Home() {
 
       if (data.session) {
         setSignedInEmail(trimmedEmail);
-        setWelcomeGuideDismissed(welcomeGuideWasDismissed(trimmedEmail));
+        setWelcomeGuideDismissed(false);
         setMessage("Account created and signed in. Finish profile setup to continue.");
         await loadAppContent();
         await loadAppointments();
@@ -6625,7 +6642,7 @@ export default function Home() {
       ]);
     }
 
-    if (tab === "content" || tab === "messages") {
+    if (tab === "content") {
       await loadAppContent();
     }
 
@@ -6934,6 +6951,10 @@ export default function Home() {
     setAdminSampleEmail("");
     setAdminSampleStatus(null);
     setAdminSampleForceDeclined(false);
+    setAdminEmailUpdateCurrentEmail("");
+    setAdminEmailUpdateNewEmail("");
+    setAdminEmailUpdateResult("");
+    setUpdatingAdminUserEmail(false);
     setWelcomeGuideDismissed(false);
     setIsAdmin(false);
     setRequiresEmailUpdate(false);
@@ -7378,6 +7399,64 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setSeedingAdminSampleData(false);
+    }
+  }
+
+  async function handleAdminUpdateUserEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setUpdatingAdminUserEmail(true);
+    setAdminEmailUpdateResult("");
+    setMessage("");
+
+    try {
+      const currentEmail = adminEmailUpdateCurrentEmail.trim();
+      const newEmail = adminEmailUpdateNewEmail.trim();
+
+      if (!isLikelyEmail(currentEmail) || !isLikelyEmail(newEmail)) {
+        throw new Error("Enter a valid current email and replacement email.");
+      }
+
+      if (currentEmail.toLowerCase() === newEmail.toLowerCase()) {
+        throw new Error("The replacement email must be different.");
+      }
+
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before updating user email.");
+      }
+
+      const response = await fetch("/api/admin/update-user-email", {
+        body: JSON.stringify({ currentEmail, newEmail }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "User email update failed.");
+      }
+
+      const successMessage = `Updated ${currentEmail} to ${result.email ?? newEmail}.`;
+      setAdminEmailUpdateCurrentEmail("");
+      setAdminEmailUpdateNewEmail("");
+      setAdminEmailUpdateResult(successMessage);
+      showToast(successMessage, { type: "success" });
+    } catch (error) {
+      setAdminEmailUpdateResult(getErrorMessage(error));
+      setMessage(getErrorMessage(error));
+    } finally {
+      setUpdatingAdminUserEmail(false);
     }
   }
 
@@ -9662,7 +9741,7 @@ export default function Home() {
               </div>
               <button
                 className="rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700"
-                onClick={dismissWelcomeGuide}
+                onClick={markWelcomeGuideRead}
                 type="button"
               >
                 Dismiss
@@ -9744,14 +9823,20 @@ export default function Home() {
             <div className="mt-4 flex flex-wrap justify-center gap-3">
               <button
                 className="rounded-full bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:bg-slate-400"
-                onClick={() => startAppointmentPanel("add")}
+                onClick={async () => {
+                  await markWelcomeGuideRead();
+                  startAppointmentPanel("add");
+                }}
                 type="button"
               >
                 Add your first appointment
               </button>
               <button
                 className="rounded-full border border-blue-200 bg-white px-5 py-2.5 text-sm font-semibold text-blue-800"
-                onClick={() => startAppointmentPanel("quickAdd")}
+                onClick={async () => {
+                  await markWelcomeGuideRead();
+                  startAppointmentPanel("quickAdd");
+                }}
                 type="button"
               >
                 Import appointments or Visit Notes
@@ -9760,7 +9845,10 @@ export default function Home() {
                 <button
                   className="rounded-full border border-blue-200 bg-white px-5 py-2.5 text-sm font-semibold text-blue-800 disabled:text-slate-400"
                   disabled={seedingSampleData || decliningSampleData}
-                  onClick={() => handleSeedSampleDataForCurrentUser()}
+                  onClick={async () => {
+                    await markWelcomeGuideRead();
+                    await handleSeedSampleDataForCurrentUser();
+                  }}
                   type="button"
                 >
                   {seedingSampleData ? "Adding..." : "Provide some examples"}
@@ -9770,7 +9858,10 @@ export default function Home() {
                 <button
                   className="rounded-full px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-white disabled:text-slate-400"
                   disabled={seedingSampleData || decliningSampleData}
-                  onClick={handleDeclineSampleData}
+                  onClick={async () => {
+                    await markWelcomeGuideRead();
+                    await handleDeclineSampleData();
+                  }}
                   type="button"
                 >
                   {decliningSampleData ? "Starting..." : "Start clean"}
@@ -9791,39 +9882,43 @@ export default function Home() {
           </section>
         ) : (
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-blue-700">
                 Next appointment
               </p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-950">
                 {homeNextAppointment?.title || "Nothing scheduled"}
               </h2>
-              {homeNextAppointment ? (
-                <p className="mt-2 text-slate-600">
-                  {formatDate(homeNextAppointment.starts_at)}
-                  {nextSubject ? ` * ${nextSubject}` : ""}
-                </p>
-              ) : (
+              {!homeNextAppointment ? (
                 <p className="mt-2 text-slate-600">
                   Add an appointment when something is coming up.
                 </p>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {homeNextAppointment ? (
-                <button
-                  className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-                  onClick={() => {
-                    void handleChangeMainTab("appointments");
-                    void handleChangeAppointmentView("upcoming");
-                  }}
-                  type="button"
-	                >
-                  Open
-                </button>
               ) : null}
-              {!homeNextAppointment ? (
+            </div>
+            <div className="text-left md:min-w-64 md:text-right">
+              {homeNextAppointment ? (
+                <>
+                  <p className="text-lg font-medium text-slate-700">
+                    {formatDate(homeNextAppointment.starts_at)}
+                  </p>
+                  {nextSubject ? (
+                    <p className="mt-1 text-sm font-medium text-slate-500">
+                      for {nextSubject}
+                    </p>
+                  ) : null}
+                  <button
+                    className="mt-3 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                    onClick={() => {
+                      void handleChangeMainTab("appointments");
+                      void handleChangeAppointmentView("upcoming");
+                    }}
+                    type="button"
+                  >
+                    Open
+                  </button>
+                </>
+              ) : (
                 <button
                   className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
                   onClick={() => startAppointmentPanel("add")}
@@ -9831,7 +9926,7 @@ export default function Home() {
                 >
                   Add appointment
                 </button>
-              ) : null}
+              )}
             </div>
           </div>
 
@@ -9862,23 +9957,20 @@ export default function Home() {
             </div>
           ) : null}
 
-          <div className="mt-5 rounded-lg border border-blue-100 bg-blue-50 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-blue-800">
-                  CarePrep
-                </p>
-                <h3 className="mt-1 text-xl font-semibold text-slate-950">
-                  {homeNextGuidance
-                    ? homeNextGuidance.review_status === "draft"
-                      ? "Review draft"
-                      : "Highlights"
-                    : "Ready when you are"}
-                </h3>
-              </div>
+          <div className="mt-5 overflow-hidden rounded-md border border-blue-200 bg-blue-50">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+              <button
+                className="-ml-4 inline-flex w-36 items-center justify-center rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                onClick={() =>
+                  setHomeCarePrepExpanded((isExpanded) => !isExpanded)
+                }
+                type="button"
+              >
+                CarePrep
+              </button>
               {homeNextAppointment ? (
                 <button
-                  className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
+                  className="rounded-md border border-blue-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:border-blue-300 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300"
                   disabled={generatingCarePrepForId === homeNextAppointment.id}
                   onClick={() => handleGenerateCarePrep(homeNextAppointment)}
                   type="button"
@@ -9888,36 +9980,53 @@ export default function Home() {
               ) : null}
             </div>
 
-            {homeNextGuidance ? (
-              <>
-                <p className="mt-4 text-sm leading-6 text-slate-700">
-                  {homeNextGuidance.summary}
-                </p>
-                {homeCarePrepHighlights.length > 0 ? (
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    {homeCarePrepHighlights.map((section) => (
-                      <div
-                        className="rounded-md border border-blue-100 bg-white p-3"
-                        key={section.label}
-                      >
-                        <p className="text-sm font-semibold text-blue-950">
-                          {section.label}
-                        </p>
-                        <ul className="mt-2 space-y-1 text-sm text-slate-700">
-                          {section.items.map((item, index) => (
-                            <li key={`${section.label}-${index}`}>{item}</li>
+            {homeCarePrepExpanded ? (
+              <div className="border-t border-blue-100 p-4">
+                <div className="rounded-md bg-white p-4">
+                  <h3 className="text-lg font-semibold text-slate-950">
+                    {homeNextGuidance
+                      ? homeNextGuidance.review_status === "draft"
+                        ? "Review draft"
+                        : "Highlights"
+                      : "Ready when you are"}
+                  </h3>
+                  {homeNextGuidance ? (
+                    <>
+                      <p className="mt-3 text-sm leading-6 text-slate-700">
+                        {homeNextGuidance.summary}
+                      </p>
+                      {homeCarePrepHighlights.length > 0 ? (
+                        <div className="mt-5 grid gap-5 md:grid-cols-3">
+                          {homeCarePrepHighlights.map((section) => (
+                            <section key={section.label}>
+                              <h4 className="font-semibold text-slate-900">
+                                {section.label}
+                              </h4>
+                              <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                                {section.items.map((item, index) => (
+                                  <li key={`${section.label}-${index}`}>
+                                    {item}
+                                  </li>
+                                ))}
+                              </ul>
+                            </section>
                           ))}
-                        </ul>
-                      </div>
-                    ))}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                      Generate a short prep view for your next appointment.
+                    </p>
+                  )}
+                  {generatingCarePrepForId === homeNextAppointment?.id ? (
+                    <span className="mt-4 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
+                      Generating...
+                    </span>
+                  ) : null}
                   </div>
-                ) : null}
-              </>
-            ) : (
-              <p className="mt-4 text-sm leading-6 text-slate-600">
-                Generate a short prep view for your next appointment.
-              </p>
-            )}
+              </div>
+            ) : null}
           </div>
         </section>
         )}
@@ -10143,9 +10252,11 @@ export default function Home() {
               <button
                 aria-label="Home"
                 className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300"
-                onClick={() => {
+                onClick={async () => {
                   if (isSignedInAppShell) {
-                    setWelcomeGuideDismissed(true);
+                    if (showWelcomeGuide) {
+                      await markWelcomeGuideRead();
+                    }
                     void handleChangeMainTab("home");
                     return;
                   }
@@ -10197,7 +10308,12 @@ export default function Home() {
                     ? "bg-blue-700 text-white"
                     : "border border-slate-300 bg-white text-slate-700"
                 }`}
-                onClick={() => handleChangeMainTab("appointments")}
+                onClick={async () => {
+                  if (showWelcomeGuide) {
+                    await markWelcomeGuideRead();
+                  }
+                  await handleChangeMainTab("appointments");
+                }}
                 type="button"
               >
                 <span className="hidden min-[340px]:inline">
@@ -10212,7 +10328,12 @@ export default function Home() {
                     ? "bg-blue-700 text-white"
                     : "border border-slate-300 bg-white text-slate-700"
                 }`}
-                onClick={() => handleChangeMainTab("profile")}
+                onClick={async () => {
+                  if (showWelcomeGuide) {
+                    await markWelcomeGuideRead();
+                  }
+                  await handleChangeMainTab("profile");
+                }}
                 type="button"
                 title="Profile"
               >
@@ -10227,7 +10348,12 @@ export default function Home() {
                       ? "bg-blue-700 text-white"
                       : "border border-slate-300 bg-white text-slate-700"
                   }`}
-                  onClick={() => handleChangeMainTab("admin")}
+                  onClick={async () => {
+                    if (showWelcomeGuide) {
+                      await markWelcomeGuideRead();
+                    }
+                    await handleChangeMainTab("admin");
+                  }}
                   type="button"
                   title="Admin"
                 >
@@ -10252,7 +10378,12 @@ export default function Home() {
                     ? "border-blue-700 bg-blue-700 text-white"
                     : "border-slate-300 bg-white text-slate-700"
                 }`}
-                onClick={() => handleChangeMainTab("profile")}
+                onClick={async () => {
+                  if (showWelcomeGuide) {
+                    await markWelcomeGuideRead();
+                  }
+                  await handleChangeMainTab("profile");
+                }}
                 title="Profile"
                 type="button"
               >
@@ -12731,10 +12862,9 @@ export default function Home() {
                     ["tools", "Tools"],
                     ["users", "Users"],
                     ["errors", "Errors"],
-                    ["content", "Content"],
+                    ["content", "Dynamic Text"],
                     ["ai", "AI Prompts"],
                     ["assistantReview", "Asst Review"],
-                    ["messages", "Messages"],
                     ["product", "Prod Mgmt"],
                     ["tickets", "Tickets"],
                   ].map(([tab, label]) => {
@@ -12790,81 +12920,137 @@ export default function Home() {
               </section>
 
               {adminTab === "tools" ? (
-              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-semibold">Admin tools</h2>
-                    <p className="mt-1 text-slate-600">
-                      Add sample data for beta testers and review account setup
-                      state.
-                    </p>
+              <div className="space-y-4">
+                <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-2xl font-semibold">Admin tools</h2>
+                      <p className="mt-1 text-slate-600">
+                        Add sample data for beta testers, update account emails,
+                        and review account setup state.
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <form
-                  className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]"
-                  onSubmit={handleLoadAdminSampleStatus}
-                >
-                  <label className="block text-sm font-medium text-slate-700">
-                    User email
-                    <input
-                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                      onChange={(event) => {
-                        setAdminSampleEmail(event.target.value);
-                        setAdminSampleStatus(null);
-                        setAdminSampleForceDeclined(false);
-                      }}
-                      placeholder="tester@example.com"
-                      type="email"
-                      value={adminSampleEmail}
-                    />
-                  </label>
-                  <button
-                    className="self-end rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
-                    disabled={loadingAdminSampleStatus}
-                    type="submit"
+                  <form
+                    className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr_auto]"
+                    onSubmit={handleAdminUpdateUserEmail}
                   >
-                    {loadingAdminSampleStatus ? "Checking..." : "Check status"}
+                    <label className="block text-sm font-medium text-slate-700">
+                      Current email
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) => {
+                          setAdminEmailUpdateCurrentEmail(event.target.value);
+                          setAdminEmailUpdateResult("");
+                        }}
+                        placeholder="alias@example.com"
+                        type="email"
+                        value={adminEmailUpdateCurrentEmail}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Replacement email
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) => {
+                          setAdminEmailUpdateNewEmail(event.target.value);
+                          setAdminEmailUpdateResult("");
+                        }}
+                        placeholder="user@example.com"
+                        type="email"
+                        value={adminEmailUpdateNewEmail}
+                      />
+                    </label>
+                    <button
+                      className="self-end rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                      disabled={updatingAdminUserEmail}
+                      type="submit"
+                    >
+                      {updatingAdminUserEmail ? "Updating..." : "Update email"}
+                    </button>
+                  </form>
+
+                  {adminEmailUpdateResult ? (
+                    <div className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
+                      {adminEmailUpdateResult}
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    Sample data
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Check whether a beta tester can receive demo examples.
+                  </p>
+
+                  <form
+                    className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]"
+                    onSubmit={handleLoadAdminSampleStatus}
+                  >
+                    <label className="block text-sm font-medium text-slate-700">
+                      User email
+                      <input
+                        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) => {
+                          setAdminSampleEmail(event.target.value);
+                          setAdminSampleStatus(null);
+                          setAdminSampleForceDeclined(false);
+                        }}
+                        placeholder="tester@example.com"
+                        type="email"
+                        value={adminSampleEmail}
+                      />
+                    </label>
+                    <button
+                      className="self-end rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
+                      disabled={loadingAdminSampleStatus}
+                      type="submit"
+                    >
+                      {loadingAdminSampleStatus ? "Checking..." : "Check status"}
+                    </button>
+                  </form>
+
+                  <div className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
+                    {sampleDataStatusText(adminSampleStatus)}
+                  </div>
+
+                  {adminSampleStatus?.status === "declined" ? (
+                    <label className="mt-4 flex gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      <input
+                        checked={adminSampleForceDeclined}
+                        className="mt-1"
+                        onChange={(event) =>
+                          setAdminSampleForceDeclined(event.target.checked)
+                        }
+                        type="checkbox"
+                      />
+                      <span>
+                        This user previously declined sample data. Add it anyway.
+                      </span>
+                    </label>
+                  ) : null}
+
+                  <button
+                    className="mt-4 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                    disabled={
+                      seedingAdminSampleData ||
+                      !adminSampleStatus ||
+                      adminSampleStatus.status === "already_seeded" ||
+                      adminSampleStatus.status === "no_profile" ||
+                      adminSampleStatus.status === "missing_care_circle" ||
+                      (adminSampleStatus.status === "declined" &&
+                        !adminSampleForceDeclined)
+                    }
+                    onClick={handleSeedAdminSampleData}
+                    type="button"
+                  >
+                    {seedingAdminSampleData ? "Adding..." : "Add sample data"}
                   </button>
-                </form>
-
-                <div className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
-                  {sampleDataStatusText(adminSampleStatus)}
-                </div>
-
-                {adminSampleStatus?.status === "declined" ? (
-                  <label className="mt-4 flex gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                    <input
-                      checked={adminSampleForceDeclined}
-                      className="mt-1"
-                      onChange={(event) =>
-                        setAdminSampleForceDeclined(event.target.checked)
-                      }
-                      type="checkbox"
-                    />
-                    <span>
-                      This user previously declined sample data. Add it anyway.
-                    </span>
-                  </label>
-                ) : null}
-
-                <button
-                  className="mt-4 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                  disabled={
-                    seedingAdminSampleData ||
-                    !adminSampleStatus ||
-                    adminSampleStatus.status === "already_seeded" ||
-                    adminSampleStatus.status === "no_profile" ||
-                    adminSampleStatus.status === "missing_care_circle" ||
-                    (adminSampleStatus.status === "declined" &&
-                      !adminSampleForceDeclined)
-                  }
-                  onClick={handleSeedAdminSampleData}
-                  type="button"
-                >
-                  {seedingAdminSampleData ? "Adding..." : "Add sample data"}
-                </button>
-              </section>
+                </section>
+              </div>
               ) : null}
 
               {adminTab === "users" ? (
@@ -14752,7 +14938,7 @@ export default function Home() {
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-2xl font-semibold">Content admin</h2>
+                    <h2 className="text-2xl font-semibold">Dynamic Text</h2>
                     <p className="mt-1 text-slate-600">
                       Edit beta, legal, support, and other app text without a
                       code change.
@@ -14774,7 +14960,7 @@ export default function Home() {
                 <div className="mt-5 grid gap-5 lg:grid-cols-[16rem_minmax(0,1fr)]">
                   <aside className="space-y-2">
                     <p className="text-sm font-medium text-slate-700">
-                      Content area
+                      Text area
                     </p>
                     <div className="space-y-2">
                       {appContentCategories.map((category) => {
@@ -14823,7 +15009,7 @@ export default function Home() {
 
                     {filteredAppContentOptions.length ? (
                       <label className="mt-5 block max-w-xl text-sm font-medium text-slate-700">
-                        Content block
+                        Text block
                         <select
                           className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                           disabled={loadingAppContent}
@@ -15585,18 +15771,6 @@ export default function Home() {
                   </div>
                 </div>
               </section>
-              ) : null}
-
-              {adminTab === "messages" ? (
-                <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <h2 className="text-2xl font-semibold">Messages</h2>
-                  <p className="mt-1 max-w-3xl text-slate-600">
-                    Short app messages will live here: success notices, warning
-                    text, validation messages, and toast wording. This tab is
-                    ready for the message catalog once we promote those strings
-                    into managed content.
-                  </p>
-                </section>
               ) : null}
 
               {adminTab === "product" ? (
