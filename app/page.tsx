@@ -9360,6 +9360,19 @@ export default function Home() {
     }
 
     try {
+      const { data: sourceAppointment, error: sourceAppointmentError } =
+        await supabase
+          .from("appointments")
+          .select(
+            "id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data,deleted_at"
+          )
+          .eq("id", sourceAppointmentId)
+          .single();
+
+      if (sourceAppointmentError) {
+        throw sourceAppointmentError;
+      }
+
       const { data: futureAppointments, error: futureAppointmentsError } =
         await supabase
           .from("appointments")
@@ -9378,13 +9391,66 @@ export default function Home() {
       }
 
       const todayStart = startOfToday();
-      const nextAppointment = ((futureAppointments ?? []) as Appointment[])
+      const datedFutureAppointments = ((futureAppointments ?? []) as Appointment[])
         .filter(
           (appointment) =>
             !appointment.starts_at ||
             new Date(appointment.starts_at).getTime() >= todayStart.getTime()
-        )
-        .sort((firstAppointment, secondAppointment) => {
+        );
+      const textTokens = (value: string | null | undefined) =>
+        new Set(
+          String(value ?? "")
+            .toLowerCase()
+            .replace(/sample:/g, "")
+            .split(/[^a-z0-9]+/)
+            .map((token) => token.trim())
+            .filter((token) => token.length >= 4)
+        );
+      const sourceTokens = textTokens(
+        [sourceAppointment.title, sourceAppointment.reason]
+          .filter(Boolean)
+          .join(" ")
+      );
+      const overlapCount = (appointment: Appointment) => {
+        const appointmentTokens = textTokens(
+          [appointment.title, appointment.reason].filter(Boolean).join(" ")
+        );
+        return Array.from(appointmentTokens).filter((token) =>
+          sourceTokens.has(token)
+        ).length;
+      };
+      const normalized = (value: string | null | undefined) =>
+        String(value ?? "").trim().toLowerCase();
+      const contextualScore = (appointment: Appointment) => {
+        let score = overlapCount(appointment);
+
+        if (
+          normalized(sourceAppointment.provider_organization) &&
+          normalized(sourceAppointment.provider_organization) ===
+            normalized(appointment.provider_organization)
+        ) {
+          score += 4;
+        }
+
+        if (
+          normalized(sourceAppointment.location_name) &&
+          normalized(sourceAppointment.location_name) ===
+            normalized(appointment.location_name)
+        ) {
+          score += 3;
+        }
+
+        if (
+          normalized(sourceAppointment.provider_name) &&
+          normalized(sourceAppointment.provider_name) ===
+            normalized(appointment.provider_name)
+        ) {
+          score += 2;
+        }
+
+        return score;
+      };
+      const byDate = (firstAppointment: Appointment, secondAppointment: Appointment) => {
           if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
             return 0;
           }
@@ -9401,7 +9467,22 @@ export default function Home() {
             new Date(firstAppointment.starts_at).getTime() -
             new Date(secondAppointment.starts_at).getTime()
           );
-        })[0];
+        };
+      const contextualAppointment = datedFutureAppointments
+        .map((appointment) => ({
+          appointment,
+          score: contextualScore(appointment),
+        }))
+        .filter(({ score }) => score > 0)
+        .sort((first, second) => {
+          if (second.score !== first.score) {
+            return second.score - first.score;
+          }
+
+          return byDate(first.appointment, second.appointment);
+        })[0]?.appointment;
+      const nextAppointment =
+        contextualAppointment ?? datedFutureAppointments.sort(byDate)[0];
 
       if (!nextAppointment) {
         return;
@@ -17024,7 +17105,7 @@ export default function Home() {
                     activeModifier !== "import" ? (
                       <div className="order-30 mt-4 flex flex-wrap gap-3">
                         <button
-                          className="inline-flex w-36 items-center justify-center rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                          className="inline-flex w-36 items-center justify-center gap-1.5 rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
                           onClick={() =>
                             requestAppointmentModifier(appointment, "import")
                           }
@@ -17032,6 +17113,14 @@ export default function Home() {
                           type="button"
                         >
                           Visit notes
+                          {note ? (
+                            <span
+                              aria-hidden="true"
+                              className="text-sm leading-none text-blue-950"
+                            >
+                              ✓
+                            </span>
+                          ) : null}
                         </button>
                       </div>
                     ) : null}
@@ -17049,7 +17138,7 @@ export default function Home() {
                           <>
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <button
-                                className="-ml-4 inline-flex w-36 items-center justify-center rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                className="-ml-4 inline-flex w-36 items-center justify-center gap-1.5 rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
                                 onClick={() =>
                                   requestAppointmentModifier(
                                     appointment,
@@ -17060,6 +17149,14 @@ export default function Home() {
                                 type="button"
                               >
                                 Visit notes
+                                {note ? (
+                                  <span
+                                    aria-hidden="true"
+                                    className="text-sm leading-none text-blue-950"
+                                  >
+                                    ✓
+                                  </span>
+                                ) : null}
                               </button>
                               <label className="inline-flex cursor-pointer items-center rounded-md border border-blue-200 bg-white/80 px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50">
                                 Add screenshots (max 10)
@@ -17674,6 +17771,12 @@ export default function Home() {
                             type="button"
                           >
                             Visit notes
+                            <span
+                              aria-hidden="true"
+                              className="text-sm leading-none text-blue-950"
+                            >
+                              ✓
+                            </span>
                           </button>
                         </div>
                       ) : (
@@ -17688,6 +17791,12 @@ export default function Home() {
                               type="button"
                             >
                               Visit notes
+                              <span
+                                aria-hidden="true"
+                                className="text-sm leading-none text-blue-950"
+                              >
+                                ✓
+                              </span>
                             </button>
                             {!isEditingNote && !isArchived ? (
                               <button
@@ -17821,6 +17930,7 @@ export default function Home() {
                               title="Open CarePrep"
                               type="button"
                             >
+                              CarePrep
                               {prep?.summary ? (
                                 <span
                                   aria-hidden="true"
@@ -17829,7 +17939,6 @@ export default function Home() {
                                   ✓
                                 </span>
                               ) : null}
-                              CarePrep
                             </button>
                             {generatingCarePrepForId === appointment.id ? (
                               <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
@@ -17858,13 +17967,13 @@ export default function Home() {
                                   title="Close CarePrep"
                                   type="button"
                                 >
+                                  CarePrep
                                   <span
                                     aria-hidden="true"
                                     className="text-sm leading-none text-blue-950"
                                   >
                                     ✓
                                   </span>
-                                  CarePrep
                                 </button>
                                 {!isArchived && !isEditingCarePrep ? (
                                   <button
