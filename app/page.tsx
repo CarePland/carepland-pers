@@ -21,6 +21,7 @@ import {
 import { AdminNavButton } from "./components/admin/AdminAttention";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
+import { UserFacingFooter } from "./components/UserFacingFooter";
 import {
   favoriteLocationLabel,
   FavoriteLocation,
@@ -9649,17 +9650,14 @@ export default function Home() {
     return (
       <div className="mt-6 space-y-5">
         {showWelcomeGuide ? (
-          <section className="rounded-lg bg-blue-50 px-5 py-5 ring-1 ring-blue-100">
+          <section className="rounded-lg bg-blue-50 px-5 py-6 ring-1 ring-blue-100">
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="max-w-2xl">
-                <p className="text-sm font-semibold text-blue-700">
-                  Welcome
-                </p>
-                <h1 className="mt-2 text-2xl font-semibold text-slate-950">
-                  {appContentText("welcome_guide_title")}
+              <div className="max-w-3xl">
+                <h1 className="text-3xl font-semibold text-slate-950">
+                  Welcome to CarePland
                 </h1>
-                <p className="mt-2 text-sm leading-6 text-blue-950">
-                  {appContentText("welcome_guide_body")}
+                <p className="mt-2 text-xl font-medium text-blue-800">
+                  Appointment context, simply.
                 </p>
               </div>
               <button
@@ -9681,66 +9679,117 @@ export default function Home() {
               />
             </div>
 
-            <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <p className="mx-auto mt-5 max-w-2xl text-center text-base leading-7 text-slate-700">
+              CarePland helps carry forward important context between
+              appointments, helping you remember what changed, what mattered,
+              and what comes next.
+            </p>
+
+            <div className="mt-8 grid gap-8 lg:grid-cols-3">
+              <article className="mx-auto max-w-sm text-center">
+                <div className="overflow-hidden rounded-md bg-white shadow-sm ring-1 ring-blue-100">
+                  <Image
+                    alt="A care loop with the words we all do in the gap"
+                    className="h-auto w-full"
+                    height={768}
+                    src="/welcome/gap-we-all-do.png"
+                    width={1366}
+                  />
+                </div>
+                <p className="mt-4 text-sm leading-6 text-slate-600">
+                  Important context is often lost over time.
+                </p>
+                <p className="mt-1 text-lg font-semibold text-slate-950">
+                  We all live in this gap.
+                </p>
+              </article>
+              <article className="mx-auto max-w-sm text-center">
+                <div className="overflow-hidden rounded-md bg-white shadow-sm ring-1 ring-blue-100">
+                  <Image
+                    alt="A continuity loop with context in the center"
+                    className="h-auto w-full"
+                    height={768}
+                    src="/welcome/context-connection.png"
+                    width={1366}
+                  />
+                </div>
+                <p className="mt-4 text-sm leading-6 text-slate-700">
+                  Context is what connects one visit to the next.
+                </p>
+              </article>
+              <article className="mx-auto max-w-sm text-center">
+                <div className="overflow-hidden rounded-md bg-white shadow-sm ring-1 ring-blue-100">
+                  <Image
+                    alt="The CarePland mark inside a continuity loop"
+                    className="h-auto w-full"
+                    height={768}
+                    src="/welcome/carepland-loop.png"
+                    width={1366}
+                  />
+                </div>
+                <p className="mt-4 text-sm leading-6 text-slate-700">
+                  Visit Notes help CarePland create CarePrep and carry forward
+                  context into future visits.
+                </p>
+              </article>
+            </div>
+
+            <div className="mt-8 text-center">
+              <h2 className="text-xl font-semibold text-slate-950">
+                Get started
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">You can:</p>
+            </div>
+
+            <div className="mt-4 flex flex-wrap justify-center gap-3">
               <button
-                className="rounded-md bg-blue-700 px-4 py-3 text-left text-sm font-semibold text-white shadow-sm disabled:bg-slate-400"
+                className="rounded-full bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:bg-slate-400"
                 onClick={() => startAppointmentPanel("add")}
                 type="button"
               >
-                <span className="block text-base">Add your first appointment</span>
-                <span className="mt-1 block text-sm font-medium text-blue-50">
-                  Start with a real visit you want CarePland to remember.
-                </span>
+                Add your first appointment
               </button>
               <button
-                className="rounded-md border border-blue-200 bg-white px-4 py-3 text-left text-sm font-semibold text-blue-800"
+                className="rounded-full border border-blue-200 bg-white px-5 py-2.5 text-sm font-semibold text-blue-800"
                 onClick={() => startAppointmentPanel("quickAdd")}
                 type="button"
               >
-                <span className="block text-base">Import details you have</span>
-                <span className="mt-1 block text-sm font-medium text-slate-600">
-                  Paste appointment text, notes, or calendar details for review.
-                </span>
+                Import appointments or Visit Notes
               </button>
+              {shouldOfferSampleData ? (
+                <button
+                  className="rounded-full border border-blue-200 bg-white px-5 py-2.5 text-sm font-semibold text-blue-800 disabled:text-slate-400"
+                  disabled={seedingSampleData || decliningSampleData}
+                  onClick={() => handleSeedSampleDataForCurrentUser()}
+                  type="button"
+                >
+                  {seedingSampleData ? "Adding..." : "Provide some examples"}
+                </button>
+              ) : null}
+              {shouldOfferSampleData ? (
+                <button
+                  className="rounded-full px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-white disabled:text-slate-400"
+                  disabled={seedingSampleData || decliningSampleData}
+                  onClick={handleDeclineSampleData}
+                  type="button"
+                >
+                  {decliningSampleData ? "Starting..." : "Start clean"}
+                </button>
+              ) : null}
             </div>
 
             {shouldOfferSampleData ? (
-              <div className="mt-4 rounded-lg border border-blue-100 bg-white p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="max-w-xl">
-                    <h2 className="font-semibold text-slate-950">
-                      We&apos;ll add examples for you to explore
-                    </h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">
-                      {appContentText("demo_prompt_body")} The examples are
-                      clearly labeled as demo data, and you can remove them
-                      later without touching your own appointments.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      className="rounded-md border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 disabled:text-slate-400"
-                      disabled={seedingSampleData || decliningSampleData}
-                      onClick={() => handleSeedSampleDataForCurrentUser()}
-                      type="button"
-                    >
-                      {seedingSampleData ? "Adding..." : "Add demo examples"}
-                    </button>
-                    <button
-                      className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
-                      disabled={seedingSampleData || decliningSampleData}
-                      onClick={handleDeclineSampleData}
-                      type="button"
-                    >
-                      {decliningSampleData ? "Skipping..." : "Start clean"}
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <p className="mt-3 text-center text-sm text-slate-600">
+                Or have us add a few clearly labeled examples to help you get
+                started.
+              </p>
             ) : null}
+            <p className="mt-5 text-center text-sm text-slate-600">
+              Need help? Support is always nearby in the top-right corner of
+              the screen.
+            </p>
           </section>
-        ) : null}
-
+        ) : (
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -9871,8 +9920,9 @@ export default function Home() {
             )}
           </div>
         </section>
+        )}
 
-        {notesReminderAppointment ? (
+        {!showWelcomeGuide && notesReminderAppointment ? (
           <section>
             <button
               className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-left text-sm font-semibold text-blue-800 hover:bg-blue-100"
@@ -10037,6 +10087,15 @@ export default function Home() {
   const locationSheetPhoneHref = locationSheetAppointment?.location_phone
     ? `tel:${locationSheetAppointment.location_phone.replace(/[^\d+]/g, "")}`
     : null;
+  const isUserFacingTab =
+    mainTab === "home" || mainTab === "appointments" || mainTab === "profile";
+  const showUserFacingFooter =
+    isSignedInAppShell &&
+    isUserFacingTab &&
+    !(mainTab === "home" && showWelcomeGuide);
+  const userFacingFooterBuildInfo = isAdmin
+    ? `Build Number ${careplandBuildNumber} * Build dttm: ${careplandBuildDttm}`
+    : null;
 
   if (!sessionRestored) {
     return (
@@ -10084,11 +10143,15 @@ export default function Home() {
               <button
                 aria-label="Home"
                 className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300"
-                onClick={() =>
-                  isSignedInAppShell
-                    ? void handleChangeMainTab("home")
-                    : setAuthMode("signIn")
-                }
+                onClick={() => {
+                  if (isSignedInAppShell) {
+                    setWelcomeGuideDismissed(true);
+                    void handleChangeMainTab("home");
+                    return;
+                  }
+
+                  setAuthMode("signIn");
+                }}
                 type="button"
               >
                 <Image
@@ -10108,24 +10171,6 @@ export default function Home() {
                   width={isSignedInAppShell ? 460 : 160}
                 />
               </button>
-              {isSignedInAppShell ? (
-                <button
-                  aria-label="Show the first-time welcome screen"
-                  className={`hidden rounded-md px-2 py-1 text-xs font-semibold sm:inline-flex ${
-                    mainTab === "home"
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-slate-500 hover:bg-white hover:text-blue-700"
-                  }`}
-                  onClick={() => {
-                    setWelcomeGuideDismissed(false);
-                    void handleChangeMainTab("home");
-                  }}
-                  title="Show welcome screen"
-                  type="button"
-                >
-                  Home
-                </button>
-              ) : null}
               <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 xl:inline-flex">
                 Personal
               </span>
@@ -17491,7 +17536,16 @@ export default function Home() {
           </div>
         </div>
         )}
-        {isAdmin && isSignedInAppShell ? (
+        {showUserFacingFooter ? (
+          <UserFacingFooter
+            buildInfo={userFacingFooterBuildInfo}
+            onWhyCarePland={() => {
+              setWelcomeGuideDismissed(false);
+              void handleChangeMainTab("home");
+            }}
+          />
+        ) : null}
+        {isAdmin && isSignedInAppShell && mainTab === "admin" ? (
           <footer className="mt-8 pb-2 text-center text-xs text-slate-400">
             Build Number {careplandBuildNumber} * Build dttm:{" "}
             {careplandBuildDttm}

@@ -178,9 +178,15 @@ Home is the signed-in first surface for CarePland Personal. It should welcome ne
 Current Home direction:
 
 - First-run welcome guidance belongs on Home, not on the Appointments list.
+- The first-run welcome page should stay short and philosophical rather than readme-like: `Welcome to CarePland`, `Appointment context, simply.`, a small orientation video, one concise explanation, three visual panels, and a compact get-started section.
+- Welcome-page visuals can use a few stills from the orientation video as placeholders, but should not become a full storyboard or heavy tutorial.
+- The three welcome panels should explain the gap between appointments, context as the missing connection, and the CarePland loop from Visit Notes to CarePrep to future context.
+- Desktop/tablet welcome panels should sit in three calm columns with generous whitespace and equal visual weight; mobile should stack the panels with relaxed spacing.
 - Primary first-run actions should help users add their first real appointment or import details they already have.
 - Demo data should be offered as clearly labeled examples to explore, not as a required setup step.
 - Demo-data copy should reassure users that examples are fictional/clearly labeled and removable without affecting real appointments.
+- Regular user-facing Home, Appointments, and Profile pages should include a tiny soft-gray footer with centered `© 2026 CarePland` and a subtle `Why CarePland` pill on the right that opens the welcome explanation. Keep it off the welcome page itself.
+- For admins viewing user-facing pages, show build metadata quietly on the left side of the same footer rather than as a separate patient-facing footer block.
 - The last-appointment notes reminder should stay gentle and compact on Home.
 - The next appointment and CarePrep preview should remain the main recurring Home utility after setup.
 
