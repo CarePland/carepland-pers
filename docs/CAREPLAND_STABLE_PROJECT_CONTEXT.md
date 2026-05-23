@@ -88,6 +88,10 @@ Current implemented assumptions:
 - Manual CarePrep generation is the first metered workflow and uses feature key `careprep_manual`; automatic CarePrep entitlement uses feature key `careprep_auto` for future automation work.
 - Metering reserves usage before expensive work and refunds it if generation fails before a CarePrep draft is saved.
 - Manual CarePrep plan-limit copy is editable in Admin > Dynamic Text via `careprep_manual_limit_message`; `plan_features.limit_message` remains a backend fallback.
+- When a user reaches a metered CarePrep limit, keep the CarePrep action visible and show the plan-limit message in place. Do not hide the feature or remove the path, because that creates confusion.
+- Automatic CarePrep after saved Visit Notes uses `careprep_auto`: after notes are saved on a completed/logged appointment, CarePland should try to prepare the next upcoming appointment for the same Care VIP. The notes save must remain successful even if automatic CarePrep is unavailable or fails.
+- CarePrep refresh should be gated before metering/model work when the latest saved/draft CarePrep already considered the same total count of relevant prior appointments. The editable Dynamic Text key `careprep_refresh_not_ready_message` explains this case; current default: `CarePrep can't be run yet because you have no additional appointments to consider.`
+- Outlier monitoring for CarePrep generation should track short-window generation volume and repeat/refresh-like generation volume by Care Circle/user. Start with Admin-visible tracking and soft review before adding hard throttles, unless abuse or runaway cost appears in real usage.
 - Multi-user/group permissioning is future expansion, not a fully implemented role system.
 - CP Family is a separate future app direction for deeper caregiving support and should not be used as the Tier 4 label for CarePland Personal.
 - Plan changes during beta may be mediated through support/admin rather than self-service billing.
@@ -336,6 +340,8 @@ Admin:
 
 - Admin tabs include tools, users/activity, integration errors, Dynamic Text, AI, assistant review, product management, and tickets. Do not add a separate top-level Messages tab; short messages belong in Dynamic Text.
 - Admin header/ticket indicators should show actionable counts with words, e.g. `New` and `Followup`, not mystery fractions.
+- Admin navigation uses durable per-admin freshness state for breadcrumb-style attention indicators. Red means new/unseen by that admin and takes priority over yellow. Yellow means known but still needs follow-up/action. The same red/yellow logic should carry from top Admin tabs into contextual menus and item rows where practical so admins can follow the trail to the relevant work.
+- Voluntary development halt: Admin HQ/dashboard prioritization and further Admin attention/polish work should pause until real operational data accumulates from actual use. Future chats should remind Andrew of this pause if he starts expanding Admin dashboards, prioritization agents, extra alert layers, or related polish without a concrete real-world signal. Existing scaffold can remain, but avoid deeper implementation based only on imagined needs.
 - Admin tools may be denser than patient-facing pages.
 - Admin pages may use wider layouts than user-facing pages.
 - Admin-only Auth maintenance that touches `auth.users`, such as updating a tester's login email, must run through protected server routes using `SUPABASE_SERVICE_ROLE_KEY`; never expose service-role keys or Auth admin operations to browser/client code.

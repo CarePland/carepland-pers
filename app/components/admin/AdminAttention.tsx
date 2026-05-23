@@ -6,29 +6,39 @@ type AdminAttentionBadgeProps = {
   count?: number;
   label?: string;
   selected?: boolean;
+  tone?: "followup" | "new";
 };
 
 type AdminNavButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   children: ReactNode;
   description?: ReactNode;
-  hasAttention?: boolean;
+  followupCount?: number;
   isSelected?: boolean;
+  newCount?: number;
 };
 
 export function AdminAttentionBadge({
   count,
   label = "New",
   selected = false,
+  tone = "new",
 }: AdminAttentionBadgeProps) {
   if (!count || count <= 0) {
     return null;
   }
 
+  const toneClasses =
+    tone === "new"
+      ? selected
+        ? "bg-red-100 text-red-700"
+        : "bg-red-50 text-red-700"
+      : selected
+        ? "bg-amber-100 text-amber-800"
+        : "bg-amber-50 text-amber-800";
+
   return (
     <span
-      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-        selected ? "bg-white/20 text-white" : "bg-amber-100 text-amber-900"
-      }`}
+      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${toneClasses}`}
     >
       {count > 1 ? `${count} ${label}` : label}
     </span>
@@ -39,17 +49,36 @@ export function AdminNavButton({
   children,
   className = "",
   description,
-  hasAttention = false,
+  followupCount = 0,
   isSelected = false,
+  newCount = 0,
   ...buttonProps
 }: AdminNavButtonProps) {
-  const stateClasses = isSelected
-    ? hasAttention
-      ? "border-amber-600 bg-amber-600 text-white"
-      : "border-blue-700 bg-blue-700 text-white"
-    : hasAttention
-      ? "border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400 hover:bg-amber-100"
-      : "border-slate-300 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50";
+  const attentionTone =
+    newCount > 0 ? "new" : followupCount > 0 ? "followup" : "none";
+  const stateClasses = (() => {
+    if (isSelected && attentionTone === "new") {
+      return "border-red-700 bg-red-700 text-white";
+    }
+
+    if (isSelected && attentionTone === "followup") {
+      return "border-amber-500 bg-amber-500 text-slate-950";
+    }
+
+    if (isSelected) {
+      return "border-blue-700 bg-blue-700 text-white";
+    }
+
+    if (attentionTone === "new") {
+      return "border-red-300 bg-red-50 text-red-950 hover:border-red-400 hover:bg-red-100";
+    }
+
+    if (attentionTone === "followup") {
+      return "border-amber-300 bg-amber-50 text-amber-950 hover:border-amber-400 hover:bg-amber-100";
+    }
+
+    return "border-slate-300 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50";
+  })();
 
   return (
     <button
@@ -59,7 +88,18 @@ export function AdminNavButton({
     >
       <span className="flex items-center gap-2">
         <span className="min-w-0">{children}</span>
-        <AdminAttentionBadge count={hasAttention ? 1 : 0} selected={isSelected} />
+        <AdminAttentionBadge
+          count={newCount}
+          label="New"
+          selected={isSelected}
+          tone="new"
+        />
+        <AdminAttentionBadge
+          count={followupCount}
+          label="Followup"
+          selected={isSelected}
+          tone="followup"
+        />
       </span>
       {description ? (
         <span

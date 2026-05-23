@@ -62,11 +62,23 @@ Supabase SQL editor history.
 - `2026-05-22_careprep_limit_message_content.sql`
   Admin utility: seeds the editable manual CarePrep plan-limit message for Admin > Dynamic Text.
 
+- `2026-05-23_careprep_refresh_not_ready_content.sql`
+  Admin utility: seeds the editable message shown when CarePrep refresh has no additional appointment history to consider.
+
+- `2026-05-23_careprep_generation_outlier_tracking.sql`
+  Admin utility: adds an admin RPC for finding short-window CarePrep generation and refresh-like outliers by Care Circle/user.
+
 - `2026-05-22_seed_plan_metering_agent_knowledge.sql`
   Admin utility: seeds Agent Knowledge updates for pricing tiers, metering, and beta plan-change limitations.
 
 - `2026-05-23_welcome_guide_dismissal.sql`
   Migration/reset utility: stores welcome-guide dismissal state on `profiles` and resets the current rollout for all users.
+
+- `2026-05-23_seed_admin_attention_demo.sql`
+  Admin utility: seeds clearly labeled demo records across Admin tabs so red/yellow attention breadcrumbs can be reviewed, including nested Product Mgmt lanes.
+
+- `2026-05-23_seed_admin_hq_prioritization_instruction.sql`
+  Admin utility: seeds the editable Admin HQ prioritization prompt/instruction set for existing care circles.
 
 ## Supabase SQL History Triage
 
@@ -118,6 +130,8 @@ as named utility scripts if they are still useful.
 - Add plan feature metering
 - Seed Profile plan tier help content
 - Seed CarePrep limit message content
+- Seed CarePrep refresh not-ready message
+- Add CarePrep generation outlier tracking
 - Seed plan metering Agent Knowledge
 - Activate Care Circle Entitlement
 - Add Member and Upgrade Care Circle Plan

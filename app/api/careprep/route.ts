@@ -19,6 +19,7 @@ type ReviewAction =
   | "edit_current"
   | "generate"
   | "save_edit";
+type GenerationMode = "auto_after_notes" | "manual";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -141,6 +142,20 @@ function carePrepPayload(output: JsonObject) {
   };
 }
 
+function snapshotPastAppointmentCount(snapshot: unknown): number | null {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    return null;
+  }
+
+  const pastAppointments = (snapshot as JsonObject).past_appointments;
+
+  if (typeof (snapshot as JsonObject).past_appointment_total_count === "number") {
+    return (snapshot as JsonObject).past_appointment_total_count as number;
+  }
+
+  return Array.isArray(pastAppointments) ? pastAppointments.length : null;
+}
+
 export async function POST(request: NextRequest) {
   let reservedMeteredFeature:
     | { careCircleId: string; featureKey: string; quantity: number }
@@ -175,6 +190,8 @@ export async function POST(request: NextRequest) {
       body.action === "save_edit"
         ? body.action
         : "generate";
+    const generationMode: GenerationMode =
+      body.generationMode === "auto_after_notes" ? "auto_after_notes" : "manual";
 
     if (!appointmentId) {
       throw new Error("Missing appointment id.");
@@ -497,43 +514,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const meteredFeatureKey = "careprep_manual";
-    const { data: meteringResult, error: meteringError } = await supabase.rpc(
-      "consume_feature_usage",
-      {
-        p_care_circle_id: appointment.care_circle_id,
-        p_feature_key: meteredFeatureKey,
-        p_quantity: 1,
-      }
-    );
-
-    if (meteringError) {
-      throw meteringError;
-    }
-
-    const metering = (meteringResult ?? {}) as JsonObject;
-
-    if (!jsonBoolean(metering.allowed)) {
-      const dynamicLimitMessage = await currentAppContentText(
-        supabase as unknown as AppContentReader,
-        "careprep_manual_limit_message"
-      );
-
-      throw new Error(
-        dynamicLimitMessage ||
-          jsonString(
-            metering.message,
-            "This CarePrep generation is not available on your current plan."
-          )
-      );
-    }
-
-    reservedMeteredFeature = {
-      careCircleId: appointment.care_circle_id,
-      featureKey: meteredFeatureKey,
-      quantity: 1,
-    };
-
     const { data: instructionSets, error: instructionSetError } = await supabase
       .from("ai_instruction_sets")
       .select("id,instruction_key,name,description")
@@ -617,6 +597,30 @@ export async function POST(request: NextRequest) {
       throw priorAppointmentsError;
     }
 
+    let priorAppointmentsCountQuery = supabase
+      .from("appointments")
+      .select("id", { count: "exact", head: true })
+      .eq("care_circle_id", appointment.care_circle_id)
+      .eq("care_subject_id", appointment.care_subject_id)
+      .neq("id", appointment.id)
+      .neq("status", "archived");
+
+    if (appointment.starts_at) {
+      priorAppointmentsCountQuery = priorAppointmentsCountQuery.lt(
+        "starts_at",
+        appointment.starts_at
+      );
+    }
+
+    const {
+      count: priorAppointmentTotalCount,
+      error: priorAppointmentCountError,
+    } = await priorAppointmentsCountQuery;
+
+    if (priorAppointmentCountError) {
+      throw priorAppointmentCountError;
+    }
+
     const priorAppointmentRows = priorAppointments ?? [];
     const priorAppointmentIds = priorAppointmentRows.map(
       (priorAppointment) => priorAppointment.id
@@ -651,8 +655,89 @@ export async function POST(request: NextRequest) {
     const inputContextSnapshot = {
       future_appointment: futureAppointment,
       generator: "openai-responses",
+      generation_mode: generationMode,
+      past_appointment_total_count:
+        priorAppointmentTotalCount ?? pastAppointments.length,
       past_appointments: pastAppointments,
     };
+
+    const { data: latestGuidanceRows, error: latestGuidanceError } =
+      await supabase
+        .from("careprep_guidance")
+        .select("id,input_context_snapshot")
+        .eq("appointment_id", appointment.id)
+        .in("review_status", ["accepted", "draft"])
+        .order("generated_at", { ascending: false })
+        .limit(1);
+
+    if (latestGuidanceError) {
+      throw latestGuidanceError;
+    }
+
+    const previousPastAppointmentCount = snapshotPastAppointmentCount(
+      latestGuidanceRows?.[0]?.input_context_snapshot
+    );
+    const currentPastAppointmentCount =
+      priorAppointmentTotalCount ?? pastAppointments.length;
+
+    if (
+      previousPastAppointmentCount !== null &&
+      currentPastAppointmentCount <= previousPastAppointmentCount
+    ) {
+      const refreshNotReadyMessage = await currentAppContentText(
+        supabase as unknown as AppContentReader,
+        "careprep_refresh_not_ready_message"
+      );
+
+      throw new Error(
+        refreshNotReadyMessage ||
+          "CarePrep can't be run yet because you have no additional appointments to consider."
+      );
+    }
+
+    const meteredFeatureKey =
+      generationMode === "auto_after_notes" ? "careprep_auto" : "careprep_manual";
+    const { data: meteringResult, error: meteringError } = await supabase.rpc(
+      "consume_feature_usage",
+      {
+        p_care_circle_id: appointment.care_circle_id,
+        p_feature_key: meteredFeatureKey,
+        p_quantity: 1,
+      }
+    );
+
+    if (meteringError) {
+      throw meteringError;
+    }
+
+    const metering = (meteringResult ?? {}) as JsonObject;
+
+    if (!jsonBoolean(metering.allowed)) {
+      const dynamicLimitMessage =
+        generationMode === "manual"
+          ? await currentAppContentText(
+              supabase as unknown as AppContentReader,
+              "careprep_manual_limit_message"
+            )
+          : "";
+
+      throw new Error(
+        dynamicLimitMessage ||
+          jsonString(
+            metering.message,
+            generationMode === "auto_after_notes"
+              ? "Automatic appointment preparation is not available on your current plan."
+              : "This CarePrep generation is not available on your current plan."
+          )
+      );
+    }
+
+    reservedMeteredFeature = {
+      careCircleId: appointment.care_circle_id,
+      featureKey: meteredFeatureKey,
+      quantity: 1,
+    };
+
     const schema =
       instructionVersion.output_schema &&
       typeof instructionVersion.output_schema === "object"
@@ -797,8 +882,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       message: existingDrafts.length > 0
-        ? "New AI CarePrep draft generated."
-        : "AI CarePrep draft generated.",
+        ? generationMode === "auto_after_notes"
+          ? "CarePrep was refreshed for the next appointment."
+          : "New AI CarePrep draft generated."
+        : generationMode === "auto_after_notes"
+          ? "CarePrep was prepared for the next appointment."
+          : "AI CarePrep draft generated.",
     });
   } catch (error) {
     if (

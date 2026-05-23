@@ -52,6 +52,8 @@ type NotesReminderAppointment = Appointment & {
   care_circle_id: string;
 };
 
+type CarePrepGenerationMode = "auto_after_notes" | "manual";
+
 type CareSubject = {
   id: string;
   care_circle_id: string;
@@ -520,6 +522,7 @@ type AiAdminTab =
   | "instructions"
   | "proposals";
 type AdminTab =
+  | "dashboard"
   | "ai"
   | "assistantReview"
   | "content"
@@ -538,12 +541,14 @@ type AdminViewState = {
   updated_at: string;
 };
 type AdminAttentionSummary = {
-  attention_count: number;
+  followup_count: number;
   latest_activity_at: string | null;
+  new_count: number;
   scope_key: string;
   scope_type: AdminViewScopeType;
 };
 type AiWorkflowKey =
+  | "admin_hq_prioritization"
   | "bulk_appointment_intake"
   | "careprep_generation"
   | "note_intake_interpretation"
@@ -961,6 +966,8 @@ const appContentDefaults = {
     "- <b>Free</b> is for light use.\n- <b>Active Use</b> adds larger manual CarePrep and import allowances.\n- <b>Premium Individual</b> adds automatic appointment preparation for one Care VIP.\n- <b>Group</b> supports multiple Care VIPs.",
   careprep_manual_limit_message:
     "You have used this month's manual CarePrep generations. Plan changes are not wired up yet, but support can help during beta.",
+  careprep_refresh_not_ready_message:
+    "CarePrep can't be run yet because you have no additional appointments to consider.",
   support_contact_note:
     "Need help or want to report an issue? Contact support from the app and include what you were trying to do.",
   support_reply_email_body:
@@ -973,7 +980,7 @@ const appContentDefaults = {
   support_agent_known_limitations:
     "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests. Self-service billing and plan changes are not wired up yet; plan questions or account-specific tier issues should be escalated to support.",
   support_agent_product_facts:
-    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Beta plan tiers are Free, Active Use, Premium Individual, and Group. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual and Group tiers.",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Beta plan tiers are Free, Active Use, Premium Individual, and Group. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual and Group tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
   support_agent_voice_guidance:
     "Use a warm, steady, and practical tone. Be empathetic without pretending intimacy, supportive without being syrupy, and clear about limits without sounding cold. Be confident on app guidance, humble on care-related questions, and never corporate-deflective or fake-cheerful when a user is frustrated.",
   welcome_guide_body:
@@ -1110,6 +1117,13 @@ const appContentOptions = [
     description:
       "Message shown when a user has used the current plan allowance for manual CarePrep generations.",
     label: "Manual CarePrep limit message",
+  },
+  {
+    category: "messages",
+    contentKey: "careprep_refresh_not_ready_message",
+    description:
+      "Message shown when a user tries to refresh CarePrep before new appointment history is available.",
+    label: "CarePrep refresh not-ready message",
   },
 ];
 
@@ -1355,16 +1369,141 @@ const defaultSupportAssistantOutputSchema = {
   type: "object",
 };
 
+const defaultAdminHqPrioritizationOutputSchema = {
+  additionalProperties: false,
+  properties: {
+    engagementWatchlist: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          sourceCount: { type: "number" },
+          suggestedAction: { type: "string" },
+          title: { type: "string" },
+          whyItMatters: { type: "string" },
+        },
+        required: ["title", "whyItMatters", "suggestedAction", "sourceCount"],
+        type: "object",
+      },
+      type: "array",
+    },
+    highestPriority: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          category: { type: "string" },
+          rank: { type: "number" },
+          severity: { enum: ["critical", "high", "medium", "low"], type: "string" },
+          sourceCount: { type: "number" },
+          sourceRefs: { items: { type: "string" }, type: "array" },
+          suggestedAction: { type: "string" },
+          title: { type: "string" },
+          whyItMatters: { type: "string" },
+        },
+        required: [
+          "rank",
+          "category",
+          "title",
+          "whyItMatters",
+          "suggestedAction",
+          "severity",
+          "sourceCount",
+          "sourceRefs",
+        ],
+        type: "object",
+      },
+      type: "array",
+    },
+    lowerPrioritySignals: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          category: { type: "string" },
+          sourceCount: { type: "number" },
+          summary: { type: "string" },
+          title: { type: "string" },
+        },
+        required: ["category", "title", "summary", "sourceCount"],
+        type: "object",
+      },
+      type: "array",
+    },
+    openQuestions: { items: { type: "string" }, type: "array" },
+    overallSummary: { type: "string" },
+  },
+  required: [
+    "overallSummary",
+    "highestPriority",
+    "engagementWatchlist",
+    "lowerPrioritySignals",
+    "openQuestions",
+  ],
+  type: "object",
+};
+
+const defaultAdminHqPrioritizationSystemPrompt = `You are the CarePland Personal Admin HQ prioritization assistant.
+
+Your job is to help the admin understand what deserves attention first across the Admin area. You are not a product strategist, medical advisor, support agent, or autonomous operator. You do not change data, close tickets, publish content, alter priorities, or make decisions on behalf of the admin.
+
+Core philosophy:
+CarePland Personal is a calm appointment memory and preparation system. Admin should help a solo operator see what matters without creating more noise. Your output should reduce cognitive load, not add another dashboard maze. Be concrete, concise, and operational.
+
+Prioritization order:
+1. Operational failure: system errors, integration failures, broken imports, failed CarePrep/OCR/AI workflows, email notification failures, or anything that may block normal app use.
+2. User-reported problems: support tickets, reported bugs, user confusion that prevents task completion, urgent or repeated user complaints.
+3. Beta readiness blockers: open regressions, onboarding blockers, high-priority bugs, unresolved issues that reduce confidence in inviting or supporting beta testers.
+4. AI / quality review: assistant answers needing review, not-helpful feedback, Agent Knowledge proposals, OCR/import/CarePrep quality concerns, stale prompt or product-knowledge risks.
+5. Stale follow-ups: old open product items, unresolved tickets, long-running review items, forgotten admin tasks.
+6. User engagement / continuity health: users who have not logged in, have not completed onboarding, have appointments without Notes or CarePrep, imported but did not review/save, or are not using the system in a way that gives them continuity value.
+7. Product direction / wishlist: feature ideas, UX improvements, wishlist clusters, non-urgent polish.
+
+Rules:
+- Prioritize user harm, app failure, and beta confidence over general product ideas.
+- Prefer clear explanations over dramatic language.
+- Do not overstate certainty. If a pattern is only suggested by the data, say so.
+- Group related items when useful, but preserve the source categories.
+- Always explain why an item is ranked high.
+- Always include counts or source references when available.
+- Do not invent records, user behavior, or error causes.
+- Do not expose sensitive user details unless they are included in the provided Admin-safe input.
+- Keep recommendations practical and short.
+
+Output style:
+Use calm, direct Admin language. The admin should be able to scan the result in under a minute.`;
+
+const defaultAdminHqPrioritizationUserPrompt = `Review the following Admin-safe CarePland data and produce an Admin HQ prioritization brief.
+
+Use the priority hierarchy from the system instructions. Focus on what deserves attention first.
+
+Admin data:
+{{admin_attention_payload}}
+
+Current date:
+{{current_date}}
+
+Return concise JSON matching the schema.`;
+
 const aiWorkflows: Record<
   AiWorkflowKey,
   {
     defaultChangeNote: string;
     defaultSchema: unknown;
+    defaultSystemPrompt?: string;
+    defaultUserPrompt?: string;
     description: string;
     historyLabel: string;
     label: string;
   }
 > = {
+  admin_hq_prioritization: {
+    defaultChangeNote: "Initial Admin HQ prioritization instruction set",
+    defaultSchema: defaultAdminHqPrioritizationOutputSchema,
+    defaultSystemPrompt: defaultAdminHqPrioritizationSystemPrompt,
+    defaultUserPrompt: defaultAdminHqPrioritizationUserPrompt,
+    description:
+      "Instructions used to summarize and prioritize Admin operational signals.",
+    historyLabel: "Admin HQ History",
+    label: "Admin HQ prioritization",
+  },
   careprep_generation: {
     defaultChangeNote: "Initial CarePrep instruction set",
     defaultSchema: defaultCarePrepOutputSchema,
@@ -2148,8 +2287,12 @@ function resetInstructionDraft(
       null,
       2
     ),
-    systemPrompt: version?.system_prompt ?? "",
-    userPrompt: version?.user_prompt_template ?? "",
+    systemPrompt:
+      version?.system_prompt ?? aiWorkflows[workflowKey].defaultSystemPrompt ?? "",
+    userPrompt:
+      version?.user_prompt_template ??
+      aiWorkflows[workflowKey].defaultUserPrompt ??
+      "",
   };
 }
 
@@ -2216,29 +2359,6 @@ function removeStoredValue(storage: Storage, key: string) {
 
 function adminViewStateKey(scopeType: AdminViewScopeType, scopeKey: string) {
   return `${scopeType}:${scopeKey}`;
-}
-
-function latestIsoTimestamp(
-  values: Array<string | null | undefined>
-): string | null {
-  let latestTime = 0;
-  let latestValue: string | null = null;
-
-  values.forEach((value) => {
-    if (!value) {
-      return;
-    }
-
-    const time = new Date(value).getTime();
-    if (!Number.isFinite(time) || time <= latestTime) {
-      return;
-    }
-
-    latestTime = time;
-    latestValue = value;
-  });
-
-  return latestValue;
 }
 
 function isNewForAdmin(
@@ -3952,9 +4072,7 @@ export default function Home() {
     const userIsAdmin = profileRow?.is_admin === true;
     setIsAdmin(userIsAdmin);
     if (userIsAdmin) {
-      void loadAdminSupportTickets();
-      void loadAdminViewStates();
-      void loadAdminAttentionSummary();
+      void loadAdminAttentionOverview();
     }
     if (!userIsAdmin) {
       setMainTab((currentTab) =>
@@ -4398,6 +4516,18 @@ export default function Home() {
     } catch (error) {
       console.warn("Unable to load admin attention summary", error);
     }
+  }
+
+  async function loadAdminAttentionOverview() {
+    await Promise.allSettled([
+      loadAdminViewStates(),
+      loadAdminAttentionSummary(),
+      loadAdminSupportTickets(),
+      loadAdminIntegrationErrors(),
+      loadProductMgmt(),
+      loadAgentKnowledgeProposals(),
+      loadAssistantReviewInteractions(),
+    ]);
   }
 
   async function markAdminScopeViewed(
@@ -4971,6 +5101,7 @@ export default function Home() {
 
       const proposals = (proposalRows ?? []) as AgentKnowledgeProposal[];
       setAgentKnowledgeProposals(proposals);
+      void loadAdminAttentionSummary();
 
       const { data: settingsRows, error: settingsError } = await supabase
         .from("agent_knowledge_automation_settings")
@@ -5263,6 +5394,7 @@ export default function Home() {
       }
 
       setProductMgmtItems((items ?? []) as ProductMgmtItem[]);
+      void loadAdminAttentionSummary();
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -5584,8 +5716,7 @@ export default function Home() {
       await Promise.all([
         loadAiInstructions(),
         loadAppContent(),
-        loadAdminViewStates(),
-        loadAdminAttentionSummary(),
+        loadAdminAttentionOverview(),
       ]);
     }
   }
@@ -5770,6 +5901,7 @@ export default function Home() {
       const rows = (data ?? []) as AdminIntegrationErrorSummaryRow[];
       setAdminIntegrationErrors(rows);
       setSelectedAdminIntegrationErrorKeys([]);
+      void loadAdminAttentionSummary();
       setMessage(`Loaded ${rows.length} integration error summary row(s).`);
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -5948,6 +6080,7 @@ export default function Home() {
       }
 
       setAdminSupportTicketMessages((messageRows ?? []) as SupportTicketMessage[]);
+      void loadAdminAttentionSummary();
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -6077,6 +6210,7 @@ export default function Home() {
         (reviewRows ?? []) as SupportAssistantAdminReview[]
       );
       await loadAssistantAnalysisRuns();
+      void loadAdminAttentionSummary();
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -6633,6 +6767,10 @@ export default function Home() {
   async function handleChangeAdminTab(tab: AdminTab) {
     setAdminTab(tab);
     setMessage("");
+
+    if (tab === "dashboard") {
+      await loadAdminAttentionOverview();
+    }
 
     if (tab === "ai") {
       await Promise.all([
@@ -8522,6 +8660,13 @@ export default function Home() {
       setActiveAppointmentPanel(null);
       setAppointmentView(shouldSaveNotes ? "logged" : "upcoming");
       await loadAppointments(shouldSaveNotes ? "logged" : "upcoming");
+      if (shouldSaveNotes) {
+        void triggerAutoCarePrepAfterNotes({
+          careCircleId,
+          careSubjectId,
+          sourceAppointmentId: appointmentId,
+        });
+      }
       setMessage("Intake saved.");
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -9167,6 +9312,131 @@ export default function Home() {
     }
   }
 
+  async function requestCarePrepGeneration(
+    appointmentId: string,
+    generationMode: CarePrepGenerationMode
+  ) {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      throw new Error("Please sign in before generating CarePrep.");
+    }
+
+    const response = await fetch("/api/careprep", {
+      body: JSON.stringify({ appointmentId, generationMode }),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error ?? "CarePrep generation failed.");
+    }
+
+    return result as { message?: string };
+  }
+
+  async function triggerAutoCarePrepAfterNotes({
+    careCircleId,
+    careSubjectId,
+    sourceAppointmentId,
+  }: {
+    careCircleId: string;
+    careSubjectId: string | null;
+    sourceAppointmentId: string;
+  }) {
+    if (!careSubjectId) {
+      return;
+    }
+
+    try {
+      const { data: futureAppointments, error: futureAppointmentsError } =
+        await supabase
+          .from("appointments")
+          .select(
+            "id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data,deleted_at"
+          )
+          .eq("care_circle_id", careCircleId)
+          .eq("care_subject_id", careSubjectId)
+          .neq("id", sourceAppointmentId)
+          .neq("status", "archived")
+          .is("current_note_id", null)
+          .is("deleted_at", null);
+
+      if (futureAppointmentsError) {
+        throw futureAppointmentsError;
+      }
+
+      const todayStart = startOfToday();
+      const nextAppointment = ((futureAppointments ?? []) as Appointment[])
+        .filter(
+          (appointment) =>
+            !appointment.starts_at ||
+            new Date(appointment.starts_at).getTime() >= todayStart.getTime()
+        )
+        .sort((firstAppointment, secondAppointment) => {
+          if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
+            return 0;
+          }
+
+          if (!firstAppointment.starts_at) {
+            return 1;
+          }
+
+          if (!secondAppointment.starts_at) {
+            return -1;
+          }
+
+          return (
+            new Date(firstAppointment.starts_at).getTime() -
+            new Date(secondAppointment.starts_at).getTime()
+          );
+        })[0];
+
+      if (!nextAppointment) {
+        return;
+      }
+
+      setGeneratingCarePrepForId(nextAppointment.id);
+      setCarePrepGenerationErrors((currentErrors) => {
+        const nextErrors = { ...currentErrors };
+        delete nextErrors[nextAppointment.id];
+        return nextErrors;
+      });
+
+      const result = await requestCarePrepGeneration(
+        nextAppointment.id,
+        "auto_after_notes"
+      );
+
+      await loadAppointments();
+      setCarePrepGenerationErrors((currentErrors) => {
+        const nextErrors = { ...currentErrors };
+        delete nextErrors[nextAppointment.id];
+        return nextErrors;
+      });
+      showToast(
+        result.message ?? "CarePrep was prepared for the next appointment.",
+        { type: "success" }
+      );
+    } catch (error) {
+      const message = getErrorMessage(error);
+      showToast(message, { type: "error" });
+    } finally {
+      setGeneratingCarePrepForId(null);
+    }
+  }
+
   async function handleGenerateCarePrep(appointment: Appointment) {
     setGeneratingCarePrepForId(appointment.id);
     setCarePrepGenerationErrors((currentErrors) => {
@@ -9181,32 +9451,7 @@ export default function Home() {
         throw new Error("This appointment needs a Care VIP before CarePrep can run.");
       }
 
-      const { data: sessionData, error: sessionError } =
-        await supabase.auth.getSession();
-
-      if (sessionError) {
-        throw sessionError;
-      }
-
-      const accessToken = sessionData.session?.access_token;
-
-      if (!accessToken) {
-        throw new Error("Please sign in before generating CarePrep.");
-      }
-
-      const response = await fetch("/api/careprep", {
-        body: JSON.stringify({ appointmentId: appointment.id }),
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error ?? "CarePrep generation failed.");
-      }
+      const result = await requestCarePrepGeneration(appointment.id, "manual");
 
       await loadAppointments();
       setExpandedCarePrepIds((currentIds) => ({
@@ -9569,6 +9814,11 @@ export default function Home() {
       }));
       await loadAppointments();
       setMessage(existingNote ? "Notes updated. Previous version archived." : "Notes added.");
+      void triggerAutoCarePrepAfterNotes({
+        careCircleId,
+        careSubjectId: appointment.care_subject_id,
+        sourceAppointmentId: appointment.id,
+      });
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -9725,6 +9975,9 @@ export default function Home() {
       homeNextAppointment?.provider_organization ||
       homeNextAppointment?.location_name ||
       "";
+    const homeCarePrepGenerationError = homeNextAppointment
+      ? carePrepGenerationErrors[homeNextAppointment.id]
+      : null;
 
     return (
       <div className="mt-6 space-y-5">
@@ -10023,6 +10276,11 @@ export default function Home() {
                     <span className="mt-4 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
                       Generating...
                     </span>
+                  ) : null}
+                  {homeCarePrepGenerationError ? (
+                    <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+                      {homeCarePrepGenerationError}
+                    </p>
                   ) : null}
                   </div>
               </div>
@@ -12859,6 +13117,7 @@ export default function Home() {
               >
                 <div className="flex flex-wrap gap-2">
                   {[
+                    ["dashboard", "Dashboard"],
                     ["tools", "Tools"],
                     ["users", "Users"],
                     ["errors", "Errors"],
@@ -12869,55 +13128,143 @@ export default function Home() {
                     ["tickets", "Tickets"],
                   ].map(([tab, label]) => {
                     const tabKey = tab as AdminTab;
-                    const attention =
-                      adminAttentionFor("admin_tab", tabKey)?.attention_count ??
-                      0;
+                    const attention = adminAttentionFor("admin_tab", tabKey);
                     const isSelected = adminTab === tabKey;
+                    let fallbackNewCount = 0;
+                    let fallbackFollowupCount = 0;
+
+                    if (tabKey === "tickets") {
+                      fallbackNewCount = adminNewTickets.length;
+                      fallbackFollowupCount = adminTicketsNeedingFollowup.length;
+                    } else if (tabKey === "errors") {
+                      fallbackNewCount = adminIntegrationErrors.filter((row) =>
+                        isNewForAdmin(
+                          row.latest_occurred_at,
+                          adminLastViewedAt("admin_tab", "errors")
+                        )
+                      ).length;
+                      fallbackFollowupCount = adminIntegrationErrors.length;
+                    } else if (tabKey === "assistantReview") {
+                      fallbackNewCount = assistantReviewInteractions.filter(
+                        (interaction) =>
+                          isNewForAdmin(
+                            interaction.updated_at || interaction.created_at,
+                            adminLastViewedAt("admin_tab", "assistantReview")
+                          )
+                      ).length;
+                      fallbackFollowupCount = assistantReviewInteractions.filter(
+                        (interaction) =>
+                          !assistantReviewAdminReviews.some(
+                            (review) => review.interaction_id === interaction.id
+                          )
+                      ).length;
+                    } else if (tabKey === "product") {
+                      fallbackNewCount = productMgmtItems.filter((item) => {
+                        const area = productMgmtAreas.find(
+                          (productArea) => productArea.id === item.area_id
+                        );
+                        return isNewForAdmin(
+                          item.updated_at,
+                          area
+                            ? adminLastViewedAt("product_area", area.area_key)
+                            : null
+                        );
+                      }).length;
+                      fallbackFollowupCount = productMgmtItems.filter((item) =>
+                        ["open", "in_progress"].includes(item.status)
+                      ).length;
+                    }
+                    const newCount = Math.max(
+                      attention?.new_count ?? 0,
+                      fallbackNewCount
+                    );
+                    const followupCount = Math.max(
+                      attention?.followup_count ?? 0,
+                      fallbackFollowupCount
+                    );
 
                     return (
                       <AdminNavButton
-                        hasAttention={attention > 0}
+                        followupCount={followupCount}
                         isSelected={isSelected}
                         key={tab}
+                        newCount={newCount}
                         onClick={() => handleChangeAdminTab(tabKey)}
                       >
-                        {tab === "tickets" ? (
-                          <span className="inline-flex items-center gap-1.5">
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs ${
-                                adminNewTickets.length > 0
-                                  ? isSelected
-                                    ? "bg-red-100 text-red-700"
-                                    : "bg-red-50 text-red-700"
-                                  : isSelected
-                                    ? "bg-white/20 text-white"
-                                    : "bg-slate-100 text-slate-500"
-                              }`}
-                            >
-                              {adminNewTickets.length} New
-                            </span>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs ${
-                                adminTicketsNeedingFollowup.length > 0
-                                  ? isSelected
-                                    ? "bg-amber-100 text-amber-800"
-                                    : "bg-amber-50 text-amber-800"
-                                  : isSelected
-                                    ? "bg-white/20 text-white"
-                                    : "bg-slate-100 text-slate-500"
-                              }`}
-                            >
-                              {adminTicketsNeedingFollowup.length} Followup
-                            </span>
-                          </span>
-                        ) : (
-                          label
-                        )}
+                        {label}
                       </AdminNavButton>
                     );
                   })}
                 </div>
               </section>
+
+              {adminTab === "dashboard" ? (
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">Admin dashboard</h2>
+                    <p className="mt-1 text-slate-600">
+                      Read-only home for prioritized Admin HQ signals. The first
+                      version will summarize what deserves attention first and
+                      link back into the existing Admin tabs.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                    onClick={() => loadAdminAttentionOverview()}
+                    type="button"
+                  >
+                    Refresh signals
+                  </button>
+                </div>
+
+                <div className="mt-5 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-md border border-red-200 bg-red-50 p-4">
+                    <p className="text-sm font-semibold text-red-950">
+                      New / unseen
+                    </p>
+                    <p className="mt-2 text-3xl font-semibold text-red-700">
+                      {Object.values(adminAttentionSummaries).reduce(
+                        (total, item) => total + (item.new_count ?? 0),
+                        0
+                      )}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-sm font-semibold text-amber-950">
+                      Follow-up
+                    </p>
+                    <p className="mt-2 text-3xl font-semibold text-amber-800">
+                      {Object.values(adminAttentionSummaries).reduce(
+                        (total, item) => total + (item.followup_count ?? 0),
+                        0
+                      )}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-900">
+                      Prompt workflow
+                    </p>
+                    <button
+                      className="mt-2 text-left text-sm font-semibold text-blue-700 hover:text-blue-900"
+                      onClick={() => {
+                        setSelectedAiWorkflow("admin_hq_prioritization");
+                        void handleChangeAdminTab("ai");
+                      }}
+                      type="button"
+                    >
+                      Open Admin HQ prioritization prompt
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-5 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+                  Admin HQ is currently a read-only placeholder. Next step is to
+                  feed Admin-safe signals into the prioritization prompt and show
+                  a ranked brief here.
+                </div>
+              </section>
+              ) : null}
 
               {adminTab === "tools" ? (
               <div className="space-y-4">
@@ -14033,10 +14380,14 @@ export default function Home() {
                               <td className="border-b border-slate-100 px-3 py-3 align-top font-semibold text-slate-900">
                                 <span>{row.integration_key.replaceAll("_", " ")}</span>
                                 {isNewToAdmin ? (
-                                  <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                                  <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
                                     New to me
                                   </span>
-                                ) : null}
+                                ) : (
+                                  <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                                    Follow up
+                                  </span>
+                                )}
                               </td>
                               <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
                                 {row.error_key.replaceAll("_", " ")}
@@ -14104,9 +14455,15 @@ export default function Home() {
                           <button
                             className={`w-full rounded-md border p-3 text-left transition ${
                               selected
-                                ? "border-sky-300 bg-sky-50"
-                                : ticket.needs_admin_followup
+                                ? isNewToAdmin
+                                  ? "border-red-300 bg-red-50"
+                                  : ticket.needs_admin_followup
+                                    ? "border-amber-300 bg-amber-50"
+                                    : "border-sky-300 bg-sky-50"
+                                : isNewToAdmin
                                   ? "border-red-200 bg-red-50/70"
+                                  : ticket.needs_admin_followup
+                                    ? "border-amber-200 bg-amber-50/70"
                                   : "border-slate-200 bg-white hover:border-sky-200"
                             }`}
                             key={ticket.id}
@@ -14118,12 +14475,12 @@ export default function Home() {
                                 {ticket.subject}
                               </span>
                               {ticket.needs_admin_followup ? (
-                                <span className="shrink-0 rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
+                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
                                   Follow up
                                 </span>
                               ) : null}
                               {isNewToAdmin ? (
-                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+                                <span className="shrink-0 rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
                                   New to me
                                 </span>
                               ) : null}
@@ -14528,11 +14885,15 @@ export default function Home() {
                           <button
                             className={`w-full rounded-md border p-3 text-left transition ${
                               selected
-                                ? "border-sky-300 bg-sky-50"
-                                : interaction.outcome === "not_helpful"
-                                  ? "border-amber-200 bg-amber-50/70"
-                                  : interaction.outcome === "escalated"
-                                    ? "border-red-200 bg-red-50/70"
+                                ? isNewToAdmin
+                                  ? "border-red-300 bg-red-50"
+                                  : !hasAdminReview
+                                    ? "border-amber-300 bg-amber-50"
+                                    : "border-sky-300 bg-sky-50"
+                                : isNewToAdmin
+                                  ? "border-red-200 bg-red-50/70"
+                                  : !hasAdminReview
+                                    ? "border-amber-200 bg-amber-50/70"
                                     : "border-slate-200 bg-white hover:border-sky-200"
                             }`}
                             key={interaction.id}
@@ -14549,8 +14910,13 @@ export default function Home() {
                                 </span>
                               ) : null}
                               {isNewToAdmin ? (
-                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+                                <span className="shrink-0 rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
                                   New to me
+                                </span>
+                              ) : null}
+                              {!isNewToAdmin && !hasAdminReview ? (
+                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                                  Follow up
                                 </span>
                               ) : null}
                             </div>
@@ -15219,11 +15585,10 @@ export default function Home() {
                       ["history", selectedAiWorkflowConfig.historyLabel, "Audit trail"],
                     ].map(([tabKey, label, description]) => {
                       const isSelected = aiAdminTab === tabKey;
-                      const attention =
-                        adminAttentionFor(
-                          "ai_admin_tab",
-                          tabKey
-                        )?.attention_count ?? 0;
+                      const attention = adminAttentionFor(
+                        "ai_admin_tab",
+                        tabKey
+                      );
 
                       return (
                         <AdminNavButton
@@ -15233,9 +15598,10 @@ export default function Home() {
                             loadingCarePrepHistory ||
                             loadingAgentKnowledgeProposals
                           }
-                          hasAttention={attention > 0}
+                          followupCount={attention?.followup_count ?? 0}
                           isSelected={isSelected}
                           key={tabKey}
+                          newCount={attention?.new_count ?? 0}
                           onClick={() =>
                             handleChangeAiAdminTab(tabKey as AiAdminTab)
                           }
@@ -15799,18 +16165,36 @@ export default function Home() {
                           const itemCount = productMgmtItems.filter(
                             (item) => item.area_id === area?.id
                           ).length;
-                          const attention =
-                            adminAttentionFor(
-                              "product_area",
-                              section.key
-                            )?.attention_count ?? 0;
+                          const attention = adminAttentionFor(
+                            "product_area",
+                            section.key
+                          );
+                          const laneItems = productMgmtItems.filter(
+                            (item) => item.area_id === area?.id
+                          );
+                          const laneNewCount = laneItems.filter((item) =>
+                            isNewForAdmin(
+                              item.updated_at,
+                              adminLastViewedAt("product_area", section.key)
+                            )
+                          ).length;
+                          const laneFollowupCount = laneItems.filter((item) =>
+                            ["open", "in_progress"].includes(item.status)
+                          ).length;
 
                           return (
                             <AdminNavButton
                               className="w-full px-3 py-3 text-left"
-                              hasAttention={attention > 0}
+                              followupCount={Math.max(
+                                attention?.followup_count ?? 0,
+                                laneFollowupCount
+                              )}
                               isSelected={isSelected}
                               key={section.key}
+                              newCount={Math.max(
+                                attention?.new_count ?? 0,
+                                laneNewCount
+                              )}
                               onClick={() =>
                                 handleChangeProductMgmtSection(
                                   section.key as ProductMgmtSection
@@ -16065,6 +16449,9 @@ export default function Home() {
                                   selectedProductMgmtSection
                                 )
                               );
+                              const needsFollowup = ["open", "in_progress"].includes(
+                                item.status
+                              );
                               const statusLabel = item.status
                                 .replace("_", " ")
                                 .replace(/^./, (letter) => letter.toUpperCase());
@@ -16072,7 +16459,11 @@ export default function Home() {
                               return (
                                 <article
                                   className={`rounded-md border p-3 ${
-                                    isResolved
+                                    isNewToAdmin
+                                      ? "border-red-200 bg-red-50/70"
+                                      : needsFollowup
+                                        ? "border-amber-200 bg-amber-50/70"
+                                        : isResolved
                                       ? "border-slate-200 bg-slate-50"
                                       : "border-slate-200 bg-white"
                                   }`}
@@ -16101,8 +16492,13 @@ export default function Home() {
                                       {statusLabel}
                                     </span>
                                     {isNewToAdmin ? (
-                                      <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+                                      <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
                                         New to me
+                                      </span>
+                                    ) : null}
+                                    {!isNewToAdmin && needsFollowup ? (
+                                      <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                                        Follow up
                                       </span>
                                     ) : null}
                                   </div>
@@ -17409,7 +17805,7 @@ export default function Home() {
                         {!isCarePrepExpanded ? (
                           <div className="order-20 mt-5 flex flex-wrap items-center gap-3">
                             <button
-                              className="inline-flex w-36 items-center justify-center rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:text-slate-400"
+                              className="inline-flex w-36 items-center justify-center gap-1.5 rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:text-slate-400"
                               disabled={generatingCarePrepForId === appointment.id}
                               onClick={() => {
                                 if (prep?.summary) {
@@ -17425,6 +17821,14 @@ export default function Home() {
                               title="Open CarePrep"
                               type="button"
                             >
+                              {prep?.summary ? (
+                                <span
+                                  aria-hidden="true"
+                                  className="text-sm leading-none text-blue-950"
+                                >
+                                  ✓
+                                </span>
+                              ) : null}
                               CarePrep
                             </button>
                             {generatingCarePrepForId === appointment.id ? (
@@ -17435,8 +17839,7 @@ export default function Home() {
                           </div>
                         ) : null}
                         {carePrepGenerationError && !isCarePrepExpanded ? (
-                          <p className="order-20 mt-3 rounded-md border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-800">
-                            CarePrep could not be generated.{" "}
+                          <p className="order-20 mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
                             {carePrepGenerationError}
                           </p>
                         ) : null}
@@ -17445,7 +17848,7 @@ export default function Home() {
                             <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
                               <div className="flex flex-wrap items-center gap-2">
                                 <button
-                                  className="-ml-4 inline-flex w-36 items-center justify-center rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                  className="-ml-4 inline-flex w-36 items-center justify-center gap-1.5 rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
                                   onClick={() =>
                                     setExpandedCarePrepIds((currentIds) => ({
                                       ...currentIds,
@@ -17455,6 +17858,12 @@ export default function Home() {
                                   title="Close CarePrep"
                                   type="button"
                                 >
+                                  <span
+                                    aria-hidden="true"
+                                    className="text-sm leading-none text-blue-950"
+                                  >
+                                    ✓
+                                  </span>
                                   CarePrep
                                 </button>
                                 {!isArchived && !isEditingCarePrep ? (
@@ -17491,6 +17900,11 @@ export default function Home() {
                               <span className="mx-4 mb-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
                                 Generating...
                               </span>
+                            ) : null}
+                            {carePrepGenerationError ? (
+                              <p className="mx-4 mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+                                {carePrepGenerationError}
+                              </p>
                             ) : null}
                             {isEditingCarePrep ? (
                               <div className="grid gap-4 border-t border-blue-100 p-4">
