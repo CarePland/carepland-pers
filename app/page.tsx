@@ -20,6 +20,7 @@ import {
 } from "./components/AgentKnowledgeProposalsPanel";
 import { AdminNavButton } from "./components/admin/AdminAttention";
 import { AdminContactDetailsPanel } from "./components/admin/AdminContactDetailsPanel";
+import { AdminSessionSettingsPanel } from "./components/admin/AdminSessionSettingsPanel";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import { PublicWebsite } from "./components/PublicWebsite";
@@ -41,6 +42,12 @@ import {
   pricingTierForEntitlement,
   pricingTiers,
 } from "./lib/pricingTiers";
+import {
+  AppSessionSettings,
+  defaultAppSessionSettings,
+  normalizeAppSessionSettings,
+  sessionIdleTimeoutHours,
+} from "./lib/sessionSettings";
 
 type Appointment = {
   id: string;
@@ -833,6 +840,7 @@ type StoredDraftState = {
 const ALL_SUBJECTS = "all";
 const appUiStateStorageKey = "carepland-ui-state:v1";
 const appDraftStateStorageKey = "carepland-draft-state:v1";
+const appLastActivityStorageKey = "carepland-last-activity-at:v1";
 
 const defaultEntitlement: CareCircleEntitlement = {
   max_active_subjects: 1,
@@ -3141,6 +3149,10 @@ export default function Home() {
   const [adminEmailUpdateReason, setAdminEmailUpdateReason] = useState("");
   const [adminEmailUpdateResult, setAdminEmailUpdateResult] = useState("");
   const [updatingAdminUserEmail, setUpdatingAdminUserEmail] = useState(false);
+  const [appSessionSettings, setAppSessionSettings] =
+    useState<AppSessionSettings>(defaultAppSessionSettings);
+  const [savingAppSessionSettings, setSavingAppSessionSettings] =
+    useState(false);
   const [acceptBetaDisclaimer, setAcceptBetaDisclaimer] = useState(false);
   const [acceptBetaPrivacy, setAcceptBetaPrivacy] = useState(false);
   const [acceptBetaTerms, setAcceptBetaTerms] = useState(false);
@@ -3158,6 +3170,7 @@ export default function Home() {
     string | null
   >(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [sessionProfileLoaded, setSessionProfileLoaded] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [sendingPasswordReset, setSendingPasswordReset] = useState(false);
   const [welcomeGuideDismissed, setWelcomeGuideDismissed] = useState(false);
@@ -3172,6 +3185,11 @@ export default function Home() {
   } | null>(null);
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [requiresEmailUpdate, setRequiresEmailUpdate] = useState(false);
+  const signedInEmailRef = useRef<string | null>(null);
+  const isAdminRef = useRef(false);
+  const sessionProfileLoadedRef = useRef(false);
+  const appSessionSettingsRef = useRef(defaultAppSessionSettings);
+  const idleSigningOutRef = useRef(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [homeNextAppointment, setHomeNextAppointment] =
@@ -3662,6 +3680,23 @@ export default function Home() {
     !needsOnboarding &&
     mainTab === "home" &&
     !welcomeGuideDismissed;
+
+  useEffect(() => {
+    signedInEmailRef.current = signedInEmail;
+  }, [signedInEmail]);
+
+  useEffect(() => {
+    isAdminRef.current = isAdmin;
+  }, [isAdmin]);
+
+  useEffect(() => {
+    sessionProfileLoadedRef.current = sessionProfileLoaded;
+  }, [sessionProfileLoaded]);
+
+  useEffect(() => {
+    appSessionSettingsRef.current = appSessionSettings;
+  }, [appSessionSettings]);
+
   const homeCarePrepHighlights = useMemo(() => {
     if (!homeNextGuidance) {
       return [];
@@ -3678,6 +3713,74 @@ export default function Home() {
       }))
       .filter((section) => section.items.length > 0);
   }, [homeNextGuidance]);
+
+  function readLastSessionActivityAt() {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    const rawValue = window.localStorage.getItem(appLastActivityStorageKey);
+    const timestamp = rawValue ? Number(rawValue) : NaN;
+
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+
+  function recordSessionActivity() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        appLastActivityStorageKey,
+        String(Date.now())
+      );
+    } catch {
+      // Storage can be unavailable in private or locked-down browser contexts.
+    }
+  }
+
+  async function signOutIfIdleExpired() {
+    if (
+      idleSigningOutRef.current ||
+      !signedInEmailRef.current ||
+      !sessionProfileLoadedRef.current
+    ) {
+      return false;
+    }
+
+    const timeoutHours = sessionIdleTimeoutHours(
+      appSessionSettingsRef.current,
+      isAdminRef.current
+    );
+
+    if (timeoutHours === null) {
+      return false;
+    }
+
+    const lastActivityAt = readLastSessionActivityAt();
+
+    if (!lastActivityAt) {
+      recordSessionActivity();
+      return false;
+    }
+
+    const idleForMs = Date.now() - lastActivityAt;
+    const timeoutMs = timeoutHours * 60 * 60 * 1000;
+
+    if (idleForMs < timeoutMs) {
+      return false;
+    }
+
+    idleSigningOutRef.current = true;
+    await handleSignOut({
+      bypassUnsavedChangesWarning: true,
+      message: `For your privacy, CarePland signed you out after ${timeoutHours} hours without activity.`,
+    });
+    idleSigningOutRef.current = false;
+
+    return true;
+  }
 
   async function establishAuthRedirectSession(): Promise<string | null> {
     if (typeof window === "undefined") {
@@ -3796,6 +3899,7 @@ export default function Home() {
       const sessionEmail = data.session?.user.email ?? null;
 
       if (sessionEmail) {
+        setSessionProfileLoaded(false);
         setSignedInEmail(sessionEmail);
         setWelcomeGuideDismissed(false);
         setEmail(sessionEmail);
@@ -3803,7 +3907,7 @@ export default function Home() {
         setLoading(true);
 
         try {
-          await loadAppContent();
+          await Promise.all([loadAppContent(), loadAppSessionSettings()]);
           await loadAppointments(
             initialUiState?.appointmentView,
             initialUiState?.selectedSubjectId
@@ -4058,6 +4162,52 @@ export default function Home() {
       return;
     }
 
+    if (!signedInEmail || !sessionProfileLoaded) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const handleActivity = () => {
+      void signOutIfIdleExpired().then((signedOut) => {
+        if (!signedOut && !cancelled) {
+          recordSessionActivity();
+        }
+      });
+    };
+
+    const checkIdle = () => {
+      void signOutIfIdleExpired();
+    };
+
+    checkIdle();
+
+    window.addEventListener("pointerdown", handleActivity);
+    window.addEventListener("keydown", handleActivity);
+    window.addEventListener("touchstart", handleActivity);
+    window.addEventListener("focus", checkIdle);
+    document.addEventListener("visibilitychange", checkIdle);
+    const intervalId = window.setInterval(checkIdle, 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("pointerdown", handleActivity);
+      window.removeEventListener("keydown", handleActivity);
+      window.removeEventListener("touchstart", handleActivity);
+      window.removeEventListener("focus", checkIdle);
+      document.removeEventListener("visibilitychange", checkIdle);
+    };
+    // Idle enforcement reads current values from refs so the interval/listeners
+    // do not need to be recreated for every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appSessionSettings, isAdmin, sessionProfileLoaded, signedInEmail]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
     writeStoredJson(window.localStorage, appUiStateStorageKey, {
       activeAppointmentPanel,
       adminTab,
@@ -4277,6 +4427,58 @@ export default function Home() {
     }
   }
 
+  async function loadAppSessionSettings() {
+    try {
+      const { data, error } = await supabase
+        .from("app_session_settings")
+        .select(
+          "settings_key,user_idle_timeout_hours,admin_idle_timeout_hours,updated_at"
+        )
+        .eq("settings_key", "default")
+        .limit(1);
+
+      if (error) {
+        throw error;
+      }
+
+      setAppSessionSettings(normalizeAppSessionSettings(data?.[0]));
+    } catch (error) {
+      console.error("Could not load app session settings", error);
+      setAppSessionSettings(defaultAppSessionSettings);
+    }
+  }
+
+  async function handleSaveAppSessionSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingAppSessionSettings(true);
+    setMessage("");
+
+    try {
+      const normalizedSettings =
+        normalizeAppSessionSettings(appSessionSettings);
+      const { data, error } = await supabase.rpc(
+        "update_app_session_settings",
+        {
+          p_admin_idle_timeout_hours:
+            normalizedSettings.admin_idle_timeout_hours,
+          p_user_idle_timeout_hours:
+            normalizedSettings.user_idle_timeout_hours,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      setAppSessionSettings(normalizeAppSessionSettings(data));
+      showToast("Session settings saved.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAppSessionSettings(false);
+    }
+  }
+
   function profileDraftFromRow(
     row: Record<string, unknown> | null | undefined,
     fallbackEmail: string
@@ -4356,6 +4558,7 @@ export default function Home() {
     );
     const userIsAdmin = profileRow?.is_admin === true;
     setIsAdmin(userIsAdmin);
+    setSessionProfileLoaded(true);
     if (userIsAdmin) {
       void loadAdminAttentionOverview();
     }
@@ -4743,9 +4946,11 @@ export default function Home() {
       }
 
       const trimmedEmail = email.trim();
+      setSessionProfileLoaded(false);
       setSignedInEmail(trimmedEmail);
       setWelcomeGuideDismissed(false);
-      await loadAppContent();
+      recordSessionActivity();
+      await Promise.all([loadAppContent(), loadAppSessionSettings()]);
       await loadAppointments();
     } catch (error) {
       logAuthError("signIn", error);
@@ -4879,10 +5084,12 @@ export default function Home() {
       }
 
       if (data.session) {
+        setSessionProfileLoaded(false);
         setSignedInEmail(trimmedEmail);
         setWelcomeGuideDismissed(false);
         setMessage("Account created and signed in. Finish profile setup to continue.");
-        await loadAppContent();
+        recordSessionActivity();
+        await Promise.all([loadAppContent(), loadAppSessionSettings()]);
         await loadAppointments();
         return;
       }
@@ -7343,6 +7550,10 @@ export default function Home() {
       await loadAdminAttentionOverview();
     }
 
+    if (tab === "tools") {
+      await loadAppSessionSettings();
+    }
+
     if (tab === "ai") {
       await Promise.all([
         loadAiInstructions(),
@@ -7636,8 +7847,15 @@ export default function Home() {
     }
   }
 
-  async function handleSignOut() {
+  async function handleSignOut({
+    bypassUnsavedChangesWarning = false,
+    message: signOutMessage = "Signed out.",
+  }: {
+    bypassUnsavedChangesWarning?: boolean;
+    message?: string;
+  } = {}) {
     if (
+      !bypassUnsavedChangesWarning &&
       shouldWarnBeforeProfileSignOut &&
       typeof window !== "undefined" &&
       !window.confirm(
@@ -7670,6 +7888,7 @@ export default function Home() {
     setUpdatingAdminUserEmail(false);
     setWelcomeGuideDismissed(false);
     setIsAdmin(false);
+    setSessionProfileLoaded(false);
     setRequiresEmailUpdate(false);
     setOnboardingCompletedAt(null);
     setProfileDraft(emptyProfileDraft);
@@ -7708,7 +7927,7 @@ export default function Home() {
     setApplyTextIntakeAppointmentDetails(false);
     setNewCareVipName("");
     setManagingCareVips(false);
-    setMessage("Signed out.");
+    setMessage(signOutMessage);
   }
 
   async function handleAcceptBetaAgreement(event: FormEvent<HTMLFormElement>) {
@@ -11510,7 +11729,7 @@ export default function Home() {
               </div>
               <button
                 className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
-                onClick={handleSignOut}
+                onClick={() => void handleSignOut()}
                 type="button"
               >
                 Sign out
@@ -11586,7 +11805,7 @@ export default function Home() {
               </div>
               <button
                 className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
-                onClick={handleSignOut}
+                onClick={() => void handleSignOut()}
                 type="button"
               >
                 Sign out
@@ -11827,7 +12046,7 @@ export default function Home() {
                 </div>
                 <button
                   className="rounded-md border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-                  onClick={handleSignOut}
+                  onClick={() => void handleSignOut()}
                   type="button"
                 >
                   Sign out
@@ -14122,6 +14341,13 @@ export default function Home() {
                     </div>
                   ) : null}
                 </section>
+
+                <AdminSessionSettingsPanel
+                  onChange={setAppSessionSettings}
+                  onSave={handleSaveAppSessionSettings}
+                  saving={savingAppSessionSettings}
+                  settings={appSessionSettings}
+                />
 
                 <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                   <h3 className="text-lg font-semibold text-slate-900">

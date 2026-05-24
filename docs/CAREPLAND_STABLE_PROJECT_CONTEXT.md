@@ -354,6 +354,7 @@ Admin:
 - Admin tools may be denser than patient-facing pages.
 - Admin pages may use wider layouts than user-facing pages.
 - Admin-only Auth maintenance that touches `auth.users`, such as updating a tester's login email, must run through protected server routes using `SUPABASE_SERVICE_ROLE_KEY`; never expose service-role keys or Auth admin operations to browser/client code.
+- Admin Tools includes operational settings such as session idle timeouts. Keep these controls plain and scoped; use SQL-backed settings plus admin RPCs for values that should survive deploys.
 - Admin Users / Activity supports a read-only `View as user` workflow for test-account pre-flight and troubleshooting. It is not auth impersonation and should not create a Supabase session as the target user.
 - Admin Users / Activity rows can include lightweight operational helpers such as sortable column headers, a `User Group` column, and an expandable `View VIPs` row detail with Care VIP name pills. `User Group` should identify the Care Circle/account owner so users can be visually grouped by household/family-style account context; it should not mean pricing tier. These are admin metadata/navigation aids and should not reveal sensitive appointment, Notes, or CarePrep content.
 - Admin table sorting should become a reusable UI pattern. The default implementation should be client-side sorting for already-loaded Admin datasets: each sortable header is a button, clicking the same header toggles ascending/descending, clicking a different header applies that column's sensible default direction, and the active sort indicator is visible in the header. Prefer a small shared helper/component once at least two Admin tables need this behavior, e.g. `SortableHeader`, sort-state type, and value-accessor sort utility. Use server-side sorting only when result sets become too large, paginated, or expensive to fully load.
@@ -518,6 +519,7 @@ Current auth:
 - Profile setup after signup.
 - Required profile basics include name, phone, ZIP, and time zone.
 - Supabase signup confirmation and password-reset links must resolve to `https://app.carepland.com`, not `carepland.com` / `www.carepland.com` or the Vercel deployment URL. The public domains are the website/front door; auth handoff belongs in the app.
+- Browser sessions are persisted through Supabase, but CarePland adds an app-level idle timeout. Session timeout settings live in `app_session_settings` and are editable in Admin > Tools. Default behavior is 24 hours of no browser activity for normal users and no timeout for admins. A null timeout means no automatic sign-out for that role.
 
 MFA:
 
