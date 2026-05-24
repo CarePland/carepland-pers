@@ -3748,7 +3748,7 @@ export default function Home() {
       .filter((section) => section.items.length > 0);
   }, [homeNextGuidance]);
 
-  async function establishPasswordRecoverySession(): Promise<string | null> {
+  async function establishAuthRedirectSession(): Promise<string | null> {
     if (typeof window === "undefined") {
       return null;
     }
@@ -3806,7 +3806,7 @@ export default function Home() {
         setLoading(true);
 
         try {
-          const recoveryEmail = await establishPasswordRecoverySession();
+          const recoveryEmail = await establishAuthRedirectSession();
 
           if (recoveryEmail) {
             setSignedInEmail(recoveryEmail);
@@ -3824,6 +3824,35 @@ export default function Home() {
           setMessage(
             "This password reset link could not be opened. Please request a fresh reset email and use the newest link."
           );
+        } finally {
+          setLoading(false);
+          setSessionRestored(true);
+        }
+
+        return;
+      }
+
+      if (isConfirmationRedirect) {
+        setLoading(true);
+
+        try {
+          const confirmationEmail = await establishAuthRedirectSession();
+          await supabase.auth.signOut();
+          setSignedInEmail(null);
+          setWelcomeGuideDismissed(false);
+          if (confirmationEmail) {
+            setEmail(confirmationEmail);
+          }
+          setAuthMode("signIn");
+          setPassword("");
+          setConfirmPassword("");
+          setMessage("Account verified. Sign in to continue.");
+          clearAuthRedirectUrl();
+        } catch (error) {
+          logAuthError("emailConfirmationSession", error);
+          setAuthMode("signIn");
+          setMessage("Account verified. Sign in to continue.");
+          clearAuthRedirectUrl();
         } finally {
           setLoading(false);
           setSessionRestored(true);
@@ -3878,12 +3907,6 @@ export default function Home() {
           setSessionRestored(true);
         }
       } else {
-        if (isConfirmationRedirect) {
-          setAuthMode("signIn");
-          setMessage("Account verified. Sign in to continue.");
-          clearAuthRedirectUrl();
-        }
-
         setSessionRestored(true);
       }
     }
@@ -5014,7 +5037,7 @@ export default function Home() {
       const { data: sessionData } = await supabase.auth.getSession();
 
       if (!sessionData.session && isPasswordRecoveryRedirect()) {
-        await establishPasswordRecoverySession();
+        await establishAuthRedirectSession();
       }
 
       const { data: refreshedSessionData } = await supabase.auth.getSession();
