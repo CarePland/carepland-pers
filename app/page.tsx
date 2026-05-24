@@ -21,6 +21,7 @@ import {
 import { AdminNavButton } from "./components/admin/AdminAttention";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
+import { PublicWebsite } from "./components/PublicWebsite";
 import { UserFacingFooter } from "./components/UserFacingFooter";
 import {
   favoriteLocationLabel,
@@ -197,6 +198,48 @@ type AdminUserActivityRow = {
   last_support_ticket_at: string | null;
   is_admin: boolean;
   is_test_user: boolean;
+};
+
+type EarlyAccessIntakeStatus =
+  | "closed"
+  | "contacted"
+  | "converted"
+  | "interested"
+  | "invited"
+  | "new"
+  | "not_a_fit"
+  | "reviewing";
+
+type EarlyAccessIntakeRow = {
+  id: string;
+  admin_notes: string;
+  care_role: string;
+  communication_consent: boolean;
+  communication_preference: "either" | "email" | "phone";
+  converted_user_id: string | null;
+  created_at: string;
+  email: string;
+  first_name: string;
+  interest_context: string;
+  invited_at: string | null;
+  last_contacted_at: string | null;
+  last_name: string;
+  phone: string | null;
+  source: string;
+  status: EarlyAccessIntakeStatus;
+  updated_at: string;
+};
+
+type EarlyAccessIntakeDraft = {
+  adminNotes: string;
+  careRole: string;
+  communicationPreference: "either" | "email" | "phone";
+  email: string;
+  firstName: string;
+  interestContext: string;
+  lastName: string;
+  phone: string;
+  source: string;
 };
 
 type AdminReadonlyProfile = {
@@ -527,6 +570,7 @@ type AdminTab =
   | "assistantReview"
   | "content"
   | "errors"
+  | "intake"
   | "product"
   | "tickets"
   | "tools"
@@ -865,6 +909,24 @@ const pricingTiers: PricingTier[] = [
       "Group-oriented coordination support",
     ],
   },
+  {
+    id: "early_access",
+    aliases: ["early_adopter"],
+    name: "Early Access",
+    label: "Early Access",
+    purpose: "Full-access continuity support for early adopters.",
+    bestFor: "Early adopters who should retain broad Personal access",
+    careVips: "Multiple Care VIPs",
+    carePrep: "Automatic CarePrep across multiple people",
+    imports: "Highest upload, OCR, and calendar import allowances",
+    support: "Most generous support access",
+    automation: "Multi-person automatic preparation and continuity support",
+    highlights: [
+      "Group-level functionality",
+      "Early adopter differentiation",
+      "Ready for later subscription transition",
+    ],
+  },
 ];
 
 function pricingTierForEntitlement(entitlement: CareCircleEntitlement) {
@@ -948,13 +1010,13 @@ function renderBasicInlineMarkup(text: string): ReactNode[] {
 
 const appContentDefaults = {
   beta_disclaimer_ack:
-    "I understand this beta is not for emergencies or critical medical decisions.",
+    "I understand this Early Access version is not for emergencies or critical medical decisions.",
   beta_notice_intro:
-    "CarePland Personal is currently in testing. Formal Terms of Service and Privacy Policy pages are not enabled yet.",
+    "CarePland Personal is currently available through Early Access. Formal Terms of Service and Privacy Policy pages are not enabled yet.",
   beta_privacy_ack:
-    "I understand formal Privacy Policy review is not currently enabled for this testing version.",
+    "I understand formal Privacy Policy review is not currently enabled for this Early Access version.",
   beta_terms_ack:
-    "I understand formal Terms of Service are not currently enabled for this testing version.",
+    "I understand formal Terms of Service are not currently enabled for this Early Access version.",
   demo_profile_add_body:
     "Add a few fictional appointments, notes, and CarePrep examples if you want a guided workspace to explore.",
   demo_profile_remove_body:
@@ -963,11 +1025,13 @@ const appContentDefaults = {
     "CarePland can add a few fictional appointments, notes, and CarePrep examples so you can explore before entering your own information.",
   demo_prompt_title: "Want examples to explore?",
   profile_plan_tier_help_body:
-    "- <b>Free</b> is for light use.\n- <b>Active Use</b> adds larger manual CarePrep and import allowances.\n- <b>Premium Individual</b> adds automatic appointment preparation for one Care VIP.\n- <b>Group</b> supports multiple Care VIPs.",
+    "- <b>Free</b> is for light use.\n- <b>Active Use</b> adds larger manual CarePrep and import allowances.\n- <b>Premium Individual</b> adds automatic appointment preparation for one Care VIP.\n- <b>Group</b> supports multiple Care VIPs.\n- <b>Early Access</b> currently includes Group-level access for early adopters.",
   careprep_manual_limit_message:
-    "You have used this month's manual CarePrep generations. Plan changes are not wired up yet, but support can help during beta.",
+    "You have used this month's manual CarePrep generations. Plan changes are not wired up yet, but support can help while account changes are still handled manually.",
   careprep_refresh_not_ready_message:
     "CarePrep can't be run yet because you have no additional appointments to consider.",
+  careprep_auto_success_message:
+    "CarePrep generated for {appointmentTitle}.",
   support_contact_note:
     "Need help or want to report an issue? Contact support from the app and include what you were trying to do.",
   support_reply_email_body:
@@ -980,43 +1044,43 @@ const appContentDefaults = {
   support_agent_known_limitations:
     "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests. Self-service billing and plan changes are not wired up yet; plan questions or account-specific tier issues should be escalated to support.",
   support_agent_product_facts:
-    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Beta plan tiers are Free, Active Use, Premium Individual, and Group. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual and Group tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Early Access plan tiers are Free, Active Use, Premium Individual, Group, and Early Access. The Early Access plan is intended for early adopters and currently includes Group-level functionality; it is not the default assignment while account changes are still handled manually. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual, Group, and Early Access tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
   support_agent_voice_guidance:
     "Use a warm, steady, and practical tone. Be empathetic without pretending intimacy, supportive without being syrupy, and clear about limits without sounding cold. Be confident on app guidance, humble on care-related questions, and never corporate-deflective or fake-cheerful when a user is frustrated.",
   welcome_guide_body:
     "Help is always available in the upper right [?].",
-  welcome_guide_title: "Welcome to the CarePland beta",
+  welcome_guide_title: "Welcome to CarePland",
 };
 
 const appContentOptions = [
   {
     category: "beta",
     contentKey: "beta_notice_intro",
-    description: "Introductory text shown before beta acknowledgement checkboxes.",
-    label: "Beta testing notice intro",
+    description: "Introductory text shown before Early Access acknowledgement checkboxes.",
+    label: "Early Access notice intro",
   },
   {
     category: "beta",
     contentKey: "beta_terms_ack",
-    description: "Checkbox text confirming Terms of Service status during beta.",
-    label: "Beta terms acknowledgement",
+    description: "Checkbox text confirming Terms of Service status during Early Access.",
+    label: "Early Access terms acknowledgement",
   },
   {
     category: "beta",
     contentKey: "beta_privacy_ack",
-    description: "Checkbox text confirming Privacy Policy status during beta.",
-    label: "Beta privacy acknowledgement",
+    description: "Checkbox text confirming Privacy Policy status during Early Access.",
+    label: "Early Access privacy acknowledgement",
   },
   {
     category: "beta",
     contentKey: "beta_disclaimer_ack",
-    description: "Checkbox text confirming beta safety limitations.",
-    label: "Beta safety acknowledgement",
+    description: "Checkbox text confirming Early Access safety limitations.",
+    label: "Early Access safety acknowledgement",
   },
   {
     category: "support",
     contentKey: "support_contact_note",
-    description: "General support context for beta users.",
+    description: "General support context for Early Access users.",
     label: "Support contact note",
   },
   {
@@ -1125,13 +1189,20 @@ const appContentOptions = [
       "Message shown when a user tries to refresh CarePrep before new appointment history is available.",
     label: "CarePrep refresh not-ready message",
   },
+  {
+    category: "messages",
+    contentKey: "careprep_auto_success_message",
+    description:
+      "Expiring green status shown after automatic CarePrep prepares an appointment. Supported placeholder: {appointmentTitle}.",
+    label: "Automatic CarePrep success message",
+  },
 ];
 
 const appContentCategories = [
   {
     description: "Testing notices, temporary legal acknowledgements, and safety language.",
     key: "beta",
-    label: "Beta and legal",
+    label: "Early Access and legal",
   },
   {
     description: "Support guidance and help text shown to users.",
@@ -1173,9 +1244,9 @@ const productMgmtSections = [
     label: "Bugs",
   },
   {
-    description: "Must-have items before inviting beta testers over Memorial Day weekend.",
+    description: "Must-have items before inviting Early Access users.",
     key: "beta",
-    label: "Beta Readiness",
+    label: "Early Access Readiness",
   },
   {
     description: "A running note of visible changes, deployment notes, and known limitations.",
@@ -1450,14 +1521,14 @@ CarePland Personal is a calm appointment memory and preparation system. Admin sh
 Prioritization order:
 1. Operational failure: system errors, integration failures, broken imports, failed CarePrep/OCR/AI workflows, email notification failures, or anything that may block normal app use.
 2. User-reported problems: support tickets, reported bugs, user confusion that prevents task completion, urgent or repeated user complaints.
-3. Beta readiness blockers: open regressions, onboarding blockers, high-priority bugs, unresolved issues that reduce confidence in inviting or supporting beta testers.
+3. Early Access readiness blockers: open regressions, onboarding blockers, high-priority bugs, unresolved issues that reduce confidence in inviting or supporting Early Access users.
 4. AI / quality review: assistant answers needing review, not-helpful feedback, Agent Knowledge proposals, OCR/import/CarePrep quality concerns, stale prompt or product-knowledge risks.
 5. Stale follow-ups: old open product items, unresolved tickets, long-running review items, forgotten admin tasks.
 6. User engagement / continuity health: users who have not logged in, have not completed onboarding, have appointments without Notes or CarePrep, imported but did not review/save, or are not using the system in a way that gives them continuity value.
 7. Product direction / wishlist: feature ideas, UX improvements, wishlist clusters, non-urgent polish.
 
 Rules:
-- Prioritize user harm, app failure, and beta confidence over general product ideas.
+- Prioritize user harm, app failure, and Early Access confidence over general product ideas.
 - Prefer clear explanations over dramatic language.
 - Do not overstate certainty. If a pattern is only suggested by the data, say so.
 - Group related items when useful, but preserve the source categories.
@@ -2376,6 +2447,27 @@ function isNewForAdmin(
   return new Date(latestActivityAt).getTime() > new Date(lastViewedAt).getTime();
 }
 
+function isActionableAdminAttentionScope(
+  scopeType: AdminViewScopeType,
+  scopeKey: string
+) {
+  if (scopeType === "product_area") {
+    return false;
+  }
+
+  if (scopeType === "ai_admin_tab") {
+    return scopeKey === "proposals";
+  }
+
+  if (scopeType === "admin_tab") {
+    return !["dashboard", "tools", "users", "content", "product"].includes(
+      scopeKey
+    );
+  }
+
+  return true;
+}
+
 function intakeDraftFromResult(value: unknown): TextIntakeDraft {
   const draft =
     value && typeof value === "object" && !Array.isArray(value)
@@ -2620,6 +2712,7 @@ export default function Home() {
     );
   });
   const [authMode, setAuthMode] = useState<AuthMode>("signIn");
+  const [showAuthGateway, setShowAuthGateway] = useState(false);
   const [planHelpExpanded, setPlanHelpExpanded] = useState(false);
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
     useState<AppointmentPanel | null>(
@@ -2846,6 +2939,30 @@ export default function Home() {
     useState(false);
   const [adminUserActivityFilter, setAdminUserActivityFilter] =
     useState<AdminUserActivityFilter>("all");
+  const [earlyAccessIntakeRows, setEarlyAccessIntakeRows] = useState<
+    EarlyAccessIntakeRow[]
+  >([]);
+  const [loadingEarlyAccessIntake, setLoadingEarlyAccessIntake] =
+    useState(false);
+  const [savingEarlyAccessIntake, setSavingEarlyAccessIntake] = useState(false);
+  const [updatingEarlyAccessIntakeId, setUpdatingEarlyAccessIntakeId] =
+    useState<string | null>(null);
+  const [earlyAccessIntakeFilter, setEarlyAccessIntakeFilter] =
+    useState<"active" | "all" | EarlyAccessIntakeStatus>("active");
+  const [earlyAccessIntakeDraft, setEarlyAccessIntakeDraft] =
+    useState<EarlyAccessIntakeDraft>({
+      adminNotes: "",
+      careRole: "unspecified",
+      communicationPreference: "email",
+      email: "",
+      firstName: "",
+      interestContext: "",
+      lastName: "",
+      phone: "",
+      source: "admin",
+    });
+  const [earlyAccessIntakeAdminNotes, setEarlyAccessIntakeAdminNotes] =
+    useState<Record<string, string>>({});
   const [adminReadonlySnapshot, setAdminReadonlySnapshot] =
     useState<AdminReadonlySnapshot | null>(null);
   const [loadingAdminReadonlyUserId, setLoadingAdminReadonlyUserId] =
@@ -2989,6 +3106,7 @@ export default function Home() {
     useState<PendingModifierSwitch | null>(null);
   const [loading, setLoading] = useState(false);
   const [sessionRestored, setSessionRestored] = useState(false);
+  const [welcomePanelIndex, setWelcomePanelIndex] = useState(0);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [processingTextIntake, setProcessingTextIntake] = useState(false);
   const [extractingImageText, setExtractingImageText] = useState(false);
@@ -3037,9 +3155,7 @@ export default function Home() {
   const [sampleDataSeededAt, setSampleDataSeededAt] = useState<string | null>(
     null
   );
-  const [sampleDataDeclinedAt, setSampleDataDeclinedAt] = useState<
-    string | null
-  >(null);
+  const [, setSampleDataDeclinedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!openAppointmentMenuId) {
@@ -3069,7 +3185,6 @@ export default function Home() {
     };
   }, [openAppointmentMenuId]);
   const [seedingSampleData, setSeedingSampleData] = useState(false);
-  const [decliningSampleData, setDecliningSampleData] = useState(false);
   const [removingSampleData, setRemovingSampleData] = useState(false);
   const [adminSampleEmail, setAdminSampleEmail] = useState("");
   const [adminSampleStatus, setAdminSampleStatus] =
@@ -3108,6 +3223,11 @@ export default function Home() {
     string | null
   >(null);
   const [message, setMessage] = useState("");
+  const [autoCarePrepStatus, setAutoCarePrepStatus] = useState<{
+    appointmentId: string;
+    id: number;
+    message: string;
+  } | null>(null);
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [requiresEmailUpdate, setRequiresEmailUpdate] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -3182,14 +3302,34 @@ export default function Home() {
   const adminAttentionFor = (
     scopeType: AdminViewScopeType,
     scopeKey: string
-  ) =>
-    adminAttentionSummaries[adminViewStateKey(scopeType, scopeKey)] ?? null;
+  ) => {
+    if (scopeType === "admin_tab" && scopeKey === "ai") {
+      return (
+        adminAttentionSummaries[
+          adminViewStateKey("ai_admin_tab", "proposals")
+        ] ?? null
+      );
+    }
+
+    if (!isActionableAdminAttentionScope(scopeType, scopeKey)) {
+      return null;
+    }
+
+    return adminAttentionSummaries[adminViewStateKey(scopeType, scopeKey)] ?? null;
+  };
   const adminLastViewedAt = (
     scopeType: AdminViewScopeType,
     scopeKey: string
   ) =>
     adminViewStates[adminViewStateKey(scopeType, scopeKey)]?.last_viewed_at ??
     null;
+  const actionableAdminAttentionSummaries = Object.values(
+    adminAttentionSummaries
+  ).filter(
+    (summary) =>
+      isActionableAdminAttentionScope(summary.scope_type, summary.scope_key) &&
+      !(summary.scope_type === "admin_tab" && summary.scope_key === "ai")
+  );
   const selectedProductMgmtSectionConfig =
     productMgmtAreas.find(
       (section) => section.area_key === selectedProductMgmtSection
@@ -3311,6 +3451,36 @@ export default function Home() {
       totalUsers: adminUserActivity.length,
     };
   }, [adminUserActivity]);
+  const earlyAccessIntakeStats = useMemo(() => {
+    const activeRows = earlyAccessIntakeRows.filter(
+      (row) => !["closed", "converted", "not_a_fit"].includes(row.status)
+    );
+
+    return {
+      active: activeRows.length,
+      contacted: earlyAccessIntakeRows.filter((row) => row.status === "contacted")
+        .length,
+      interested: earlyAccessIntakeRows.filter(
+        (row) => row.status === "interested"
+      ).length,
+      total: earlyAccessIntakeRows.length,
+    };
+  }, [earlyAccessIntakeRows]);
+  const filteredEarlyAccessIntakeRows = useMemo(() => {
+    if (earlyAccessIntakeFilter === "all") {
+      return earlyAccessIntakeRows;
+    }
+
+    if (earlyAccessIntakeFilter === "active") {
+      return earlyAccessIntakeRows.filter(
+        (row) => !["closed", "converted", "not_a_fit"].includes(row.status)
+      );
+    }
+
+    return earlyAccessIntakeRows.filter(
+      (row) => row.status === earlyAccessIntakeFilter
+    );
+  }, [earlyAccessIntakeFilter, earlyAccessIntakeRows]);
   const filteredAdminUserActivity = useMemo(() => {
     const inactiveSince = Date.now() - 1000 * 60 * 60 * 24 * 14;
 
@@ -3417,6 +3587,13 @@ export default function Home() {
     return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
   }
 
+  function autoCarePrepSuccessText(appointment: Appointment) {
+    return appContentText("careprep_auto_success_message").replaceAll(
+      "{appointmentTitle}",
+      appointment.title?.trim() || "the next appointment"
+    );
+  }
+
   const notesByAppointment = useMemo(() => {
     return new Map(notes.map((note) => [note.appointment_id, note]));
   }, [notes]);
@@ -3473,12 +3650,6 @@ export default function Home() {
     !needsOnboarding &&
     mainTab === "home" &&
     !welcomeGuideDismissed;
-  const shouldOfferSampleData =
-    Boolean(signedInEmail) &&
-    !needsBetaAgreement &&
-    !needsOnboarding &&
-    !sampleDataSeededAt &&
-    !sampleDataDeclinedAt;
   const homeCarePrepHighlights = useMemo(() => {
     if (!homeNextGuidance) {
       return [];
@@ -3610,6 +3781,8 @@ export default function Home() {
               await loadAdminSupportTickets();
             } else if (initialUiState.adminTab === "users") {
               await loadAdminUserActivity();
+            } else if (initialUiState.adminTab === "intake") {
+              await loadEarlyAccessIntake();
             } else if (initialUiState.adminTab === "errors") {
               await loadAdminIntegrationErrors();
             } else if (initialUiState.adminTab === "content") {
@@ -3702,6 +3875,20 @@ export default function Home() {
 
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
+
+  useEffect(() => {
+    if (!autoCarePrepStatus) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setAutoCarePrepStatus((currentStatus) =>
+        currentStatus?.id === autoCarePrepStatus.id ? null : currentStatus
+      );
+    }, 9000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [autoCarePrepStatus]);
 
   useEffect(() => {
     if (!adminReadonlySnapshot) {
@@ -3906,6 +4093,19 @@ export default function Home() {
       type: "info",
       ...options,
     });
+  }
+
+  function focusAppointmentCarePrep(appointmentId: string) {
+    setAppointmentView("upcoming");
+    setExpandedCarePrepIds((currentIds) => ({
+      ...currentIds,
+      [appointmentId]: true,
+    }));
+    window.setTimeout(() => {
+      document
+        .getElementById(`appointment-${appointmentId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
   }
 
   async function markWelcomeGuideRead() {
@@ -4125,7 +4325,7 @@ export default function Home() {
       setGuidance([]);
       setCarePrepHistory([]);
       setHistoryAppointmentId("");
-      setMessage("Review the beta testing notice to continue.");
+      setMessage("Review the Early Access notice to continue.");
       return;
     }
 
@@ -5811,6 +6011,151 @@ export default function Home() {
     }
   }
 
+  async function loadEarlyAccessIntake() {
+    setLoadingEarlyAccessIntake(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase
+        .from("early_access_intake")
+        .select(
+          "id,first_name,last_name,email,phone,care_role,interest_context,communication_preference,communication_consent,status,source,admin_notes,last_contacted_at,invited_at,converted_user_id,created_at,updated_at"
+        )
+        .order("updated_at", { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      const rows = (data ?? []) as EarlyAccessIntakeRow[];
+      setEarlyAccessIntakeRows(rows);
+      setEarlyAccessIntakeAdminNotes(
+        Object.fromEntries(rows.map((row) => [row.id, row.admin_notes ?? ""]))
+      );
+      setMessage(`Loaded ${rows.length} Early Access intake row(s).`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingEarlyAccessIntake(false);
+    }
+  }
+
+  function updateEarlyAccessIntakeDraft(
+    field: keyof EarlyAccessIntakeDraft,
+    value: string | boolean
+  ) {
+    setEarlyAccessIntakeDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }));
+  }
+
+  async function handleCreateEarlyAccessIntake(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+    setSavingEarlyAccessIntake(true);
+    setMessage("");
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError) {
+        throw userError;
+      }
+
+      const emailValue = earlyAccessIntakeDraft.email.trim();
+
+      if (!isLikelyEmail(emailValue)) {
+        throw new Error("Enter a valid email address for this intake record.");
+      }
+
+      const firstName = earlyAccessIntakeDraft.firstName.trim();
+      const lastName = earlyAccessIntakeDraft.lastName.trim();
+
+      if (!firstName || !lastName) {
+        throw new Error("First and last name are required.");
+      }
+
+      const { error } = await supabase.from("early_access_intake").insert({
+        admin_notes: earlyAccessIntakeDraft.adminNotes.trim(),
+        care_role: earlyAccessIntakeDraft.careRole,
+        communication_consent: false,
+        communication_preference:
+          earlyAccessIntakeDraft.communicationPreference,
+        created_by_user_id: userData.user?.id ?? null,
+        email: emailValue,
+        first_name: firstName,
+        interest_context: earlyAccessIntakeDraft.interestContext.trim(),
+        last_name: lastName,
+        phone: earlyAccessIntakeDraft.phone.trim() || null,
+        source: earlyAccessIntakeDraft.source.trim() || "admin",
+        status: "new",
+        updated_by_user_id: userData.user?.id ?? null,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setEarlyAccessIntakeDraft({
+        adminNotes: "",
+        careRole: "unspecified",
+        communicationPreference: "email",
+        email: "",
+        firstName: "",
+        interestContext: "",
+        lastName: "",
+        phone: "",
+        source: "admin",
+      });
+      await loadEarlyAccessIntake();
+      showToast("Early Access intake saved.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingEarlyAccessIntake(false);
+    }
+  }
+
+  async function handleUpdateEarlyAccessIntake(
+    row: EarlyAccessIntakeRow,
+    updates: Partial<Pick<
+      EarlyAccessIntakeRow,
+      "admin_notes" | "last_contacted_at" | "status"
+    >>
+  ) {
+    setUpdatingEarlyAccessIntakeId(row.id);
+    setMessage("");
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError) {
+        throw userError;
+      }
+
+      const { error } = await supabase
+        .from("early_access_intake")
+        .update({
+          ...updates,
+          updated_by_user_id: userData.user?.id ?? null,
+        })
+        .eq("id", row.id);
+
+      if (error) {
+        throw error;
+      }
+
+      await loadEarlyAccessIntake();
+      showToast("Intake updated.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setUpdatingEarlyAccessIntakeId(null);
+    }
+  }
+
   async function openAdminReadonlyUserView(userId: string) {
     setLoadingAdminReadonlyUserId(userId);
     setMessage("");
@@ -6229,6 +6574,16 @@ export default function Home() {
         .limit(25);
 
       if (runError) {
+        const runErrorCode =
+          runError && typeof runError === "object" && "code" in runError
+            ? String(runError.code)
+            : "";
+
+        if (runErrorCode === "PGRST205") {
+          setAssistantAnalysisRuns([]);
+          return;
+        }
+
         throw runError;
       }
 
@@ -6796,6 +7151,10 @@ export default function Home() {
       await loadAdminUserActivity();
     }
 
+    if (tab === "intake") {
+      await loadEarlyAccessIntake();
+    }
+
     if (tab === "errors") {
       await loadAdminIntegrationErrors();
     }
@@ -7155,7 +7514,7 @@ export default function Home() {
       }
 
       if (!acceptBetaDisclaimer || !acceptBetaPrivacy || !acceptBetaTerms) {
-        throw new Error("Please acknowledge each beta testing item to continue.");
+        throw new Error("Please acknowledge each Early Access item to continue.");
       }
 
       const acknowledgedAt = new Date().toISOString();
@@ -7182,7 +7541,7 @@ export default function Home() {
       setAcceptBetaPrivacy(false);
       setAcceptBetaTerms(false);
       await loadAppointments();
-      showToast("Beta acknowledgement saved.", {
+      showToast("Early Access acknowledgement saved.", {
         durationMs: 5000,
         type: "success",
       });
@@ -7391,29 +7750,6 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setSeedingSampleData(false);
-    }
-  }
-
-  async function handleDeclineSampleData() {
-    setDecliningSampleData(true);
-    setMessage("");
-
-    try {
-      const { data, error } = await supabase.rpc(
-        "decline_sample_data_for_current_user"
-      );
-
-      if (error) {
-        throw error;
-      }
-
-      const status = sampleDataStatusFromValue(data);
-      setSampleDataDeclinedAt(status.declined_at ?? new Date().toISOString());
-      showToast("Demo data skipped.", { type: "success" });
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setDecliningSampleData(false);
     }
   }
 
@@ -9343,7 +9679,12 @@ export default function Home() {
       throw new Error(result.error ?? "CarePrep generation failed.");
     }
 
-    return result as { message?: string };
+    return result as {
+      appointmentId?: string;
+      generationMode?: CarePrepGenerationMode;
+      guidanceId?: string;
+      message?: string;
+    };
   }
 
   async function triggerAutoCarePrepAfterNotes({
@@ -9485,9 +9826,15 @@ export default function Home() {
         contextualAppointment ?? datedFutureAppointments.sort(byDate)[0];
 
       if (!nextAppointment) {
+        setMessage("Notes saved. No upcoming appointment was available for automatic CarePrep.");
         return;
       }
 
+      setMessage(
+        `Notes saved. Preparing CarePrep for ${
+          nextAppointment.title || "the next appointment"
+        }...`
+      );
       setGeneratingCarePrepForId(nextAppointment.id);
       setCarePrepGenerationErrors((currentErrors) => {
         const nextErrors = { ...currentErrors };
@@ -9495,23 +9842,52 @@ export default function Home() {
         return nextErrors;
       });
 
-      const result = await requestCarePrepGeneration(
+      await requestCarePrepGeneration(
         nextAppointment.id,
         "auto_after_notes"
       );
 
-      await loadAppointments();
+      const { data: generatedGuidanceRows, error: generatedGuidanceError } =
+        await supabase
+          .from("careprep_guidance")
+          .select("id,review_status,is_current")
+          .eq("appointment_id", nextAppointment.id)
+          .or("is_current.eq.true,review_status.eq.draft")
+          .order("generated_at", { ascending: false })
+          .limit(1);
+
+      if (generatedGuidanceError) {
+        throw generatedGuidanceError;
+      }
+
+      if (!generatedGuidanceRows || generatedGuidanceRows.length === 0) {
+        throw new Error(
+          `CarePrep finished, but no draft was found for ${
+            nextAppointment.title || "the target appointment"
+          }.`
+        );
+      }
+
+      setAppointmentView("upcoming");
+      await loadAppointments("upcoming");
+      setExpandedCarePrepIds((currentIds) => ({
+        ...currentIds,
+        [nextAppointment.id]: true,
+      }));
       setCarePrepGenerationErrors((currentErrors) => {
         const nextErrors = { ...currentErrors };
         delete nextErrors[nextAppointment.id];
         return nextErrors;
       });
-      showToast(
-        result.message ?? "CarePrep was prepared for the next appointment.",
-        { type: "success" }
-      );
+      setMessage("");
+      setAutoCarePrepStatus({
+        appointmentId: nextAppointment.id,
+        id: Date.now(),
+        message: autoCarePrepSuccessText(nextAppointment),
+      });
     } catch (error) {
       const message = getErrorMessage(error);
+      setMessage(`Auto-CarePrep did not run: ${message}`);
       showToast(message, { type: "error" });
     } finally {
       setGeneratingCarePrepForId(null);
@@ -10059,22 +10435,55 @@ export default function Home() {
     const homeCarePrepGenerationError = homeNextAppointment
       ? carePrepGenerationErrors[homeNextAppointment.id]
       : null;
+    const welcomePanels = [
+      {
+        alt: "Appointment notes feeding CarePrep and context",
+        body: "Important context is often lost over time.",
+        emphasis: "We all live in this gap.",
+        src: "/welcome/panel1.png",
+      },
+      {
+        alt: "CarePrep questions and missed appointment context",
+        body: "Context is what connects one visit to the next.",
+        src: "/welcome/panel2.png",
+      },
+      {
+        alt: "CarePrep created from appointment notes",
+        body:
+          "Visit Notes help CarePland create CarePrep and carry forward context into future visits.",
+        src: "/welcome/panel3.jpg",
+      },
+    ];
+    const activeWelcomePanel =
+      welcomePanels[welcomePanelIndex] ?? welcomePanels[0];
+    const isFirstWelcomePanel = welcomePanelIndex === 0;
+    const isLastWelcomePanel = welcomePanelIndex === welcomePanels.length - 1;
+    const showPreviousWelcomePanel = () =>
+      setWelcomePanelIndex((currentIndex) =>
+        currentIndex === 0 ? currentIndex : currentIndex - 1
+      );
+    const showNextWelcomePanel = () =>
+      setWelcomePanelIndex((currentIndex) =>
+        currentIndex === welcomePanels.length - 1
+          ? currentIndex
+          : currentIndex + 1
+      );
 
     return (
       <div className="mt-6 space-y-5">
         {showWelcomeGuide ? (
-          <section className="rounded-lg bg-blue-50 px-5 py-6 ring-1 ring-blue-100">
+          <section className="px-2 py-6 sm:px-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="max-w-3xl">
-                <h1 className="text-3xl font-semibold text-slate-950">
+                <h1 className="text-3xl font-semibold text-[#2B6198]">
                   Welcome to CarePland
                 </h1>
-                <p className="mt-2 text-xl font-medium text-blue-800">
+                <p className="mt-2 text-xl font-medium text-[#2B6198]">
                   Appointment context, simply.
                 </p>
               </div>
               <button
-                className="rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700"
+                className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-[#2B6198]"
                 onClick={markWelcomeGuideRead}
                 type="button"
               >
@@ -10082,7 +10491,7 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="mx-auto mt-5 w-full max-w-[495px] overflow-hidden rounded-lg border-4 border-black bg-black shadow-sm">
+            <div className="mx-auto mt-5 w-full max-w-[720px] overflow-hidden rounded-lg border-4 border-black bg-black shadow-sm">
               <iframe
                 allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
                 allowFullScreen
@@ -10092,71 +10501,70 @@ export default function Home() {
               />
             </div>
 
-            <p className="mx-auto mt-5 max-w-2xl text-center text-base leading-7 text-slate-700">
+            <p className="mx-auto mt-5 max-w-2xl text-center text-lg leading-8 text-slate-700">
               CarePland helps carry forward important context between
               appointments, helping you remember what changed, what mattered,
               and what comes next.
             </p>
 
-            <div className="mt-8 grid gap-8 lg:grid-cols-3">
-              <article className="mx-auto max-w-sm text-center">
-                <div className="overflow-hidden rounded-md bg-white shadow-sm ring-1 ring-blue-100">
+            <div className="mx-auto mt-8 max-w-4xl">
+              <h2 className="mb-4 text-center text-xl font-semibold text-[#2B6198]">
+                Continuity, shown through just three slides
+              </h2>
+              <article className="text-center">
+                <div className="relative aspect-[3/2] w-full overflow-hidden rounded-xl">
                   <Image
-                    alt="A care loop with the words we all do in the gap"
-                    className="h-auto w-full"
-                    height={768}
-                    src="/welcome/gap-we-all-do.png"
-                    width={1366}
+                    alt={activeWelcomePanel.alt}
+                    className="object-contain"
+                    fill
+                    sizes="(min-width: 768px) 672px, 100vw"
+                    src={activeWelcomePanel.src}
                   />
+                  <button
+                    aria-label="Previous welcome panel"
+                    className={`absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/25 text-4xl font-light leading-none text-[#2B6198]/60 hover:bg-white/40 hover:text-[#2B6198]/80 ${
+                      isFirstWelcomePanel ? "opacity-25" : ""
+                    }`}
+                    disabled={isFirstWelcomePanel}
+                    onClick={showPreviousWelcomePanel}
+                    type="button"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    aria-label="Next welcome panel"
+                    className={`absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/25 text-4xl font-light leading-none text-[#2B6198]/60 hover:bg-white/40 hover:text-[#2B6198]/80 ${
+                      isLastWelcomePanel ? "opacity-25" : ""
+                    }`}
+                    disabled={isLastWelcomePanel}
+                    onClick={showNextWelcomePanel}
+                    type="button"
+                  >
+                    ›
+                  </button>
                 </div>
-                <p className="mt-4 text-sm leading-6 text-slate-600">
-                  Important context is often lost over time.
-                </p>
-                <p className="mt-1 text-lg font-semibold text-slate-950">
-                  We all live in this gap.
-                </p>
-              </article>
-              <article className="mx-auto max-w-sm text-center">
-                <div className="overflow-hidden rounded-md bg-white shadow-sm ring-1 ring-blue-100">
-                  <Image
-                    alt="A continuity loop with context in the center"
-                    className="h-auto w-full"
-                    height={768}
-                    src="/welcome/context-connection.png"
-                    width={1366}
-                  />
+                <div className="mx-auto mt-4 flex min-h-28 max-w-4xl flex-col items-center justify-start sm:min-h-24">
+                  <p className="text-lg leading-8 text-slate-700">
+                    {activeWelcomePanel.body}
+                  </p>
+                  {activeWelcomePanel.emphasis ? (
+                    <p className="mt-1 text-xl font-semibold text-[#2B6198]">
+                      {activeWelcomePanel.emphasis}
+                    </p>
+                  ) : null}
                 </div>
-                <p className="mt-4 text-sm leading-6 text-slate-700">
-                  Context is what connects one visit to the next.
-                </p>
-              </article>
-              <article className="mx-auto max-w-sm text-center">
-                <div className="overflow-hidden rounded-md bg-white shadow-sm ring-1 ring-blue-100">
-                  <Image
-                    alt="The CarePland mark inside a continuity loop"
-                    className="h-auto w-full"
-                    height={768}
-                    src="/welcome/carepland-loop.png"
-                    width={1366}
-                  />
-                </div>
-                <p className="mt-4 text-sm leading-6 text-slate-700">
-                  Visit Notes help CarePland create CarePrep and carry forward
-                  context into future visits.
-                </p>
               </article>
             </div>
 
-            <div className="mt-8 text-center">
-              <h2 className="text-xl font-semibold text-slate-950">
+            <div className="text-center">
+              <h2 className="text-xl font-semibold text-[#2B6198]">
                 Get started
               </h2>
-              <p className="mt-2 text-sm text-slate-600">You can:</p>
             </div>
 
             <div className="mt-4 flex flex-wrap justify-center gap-3">
               <button
-                className="rounded-full bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:bg-slate-400"
+                className="rounded-full bg-[#2B6198] px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:bg-slate-400"
                 onClick={async () => {
                   await markWelcomeGuideRead();
                   startAppointmentPanel("add");
@@ -10166,48 +10574,34 @@ export default function Home() {
                 Add your first appointment
               </button>
               <button
-                className="rounded-full border border-blue-200 bg-white px-5 py-2.5 text-sm font-semibold text-blue-800"
+                className="rounded-full border border-blue-100 bg-white px-5 py-2.5 text-sm font-semibold text-[#2B6198]"
                 onClick={async () => {
                   await markWelcomeGuideRead();
                   startAppointmentPanel("quickAdd");
                 }}
                 type="button"
               >
-                Import appointments or Visit Notes
+                Import appointments
               </button>
-              {shouldOfferSampleData ? (
-                <button
-                  className="rounded-full border border-blue-200 bg-white px-5 py-2.5 text-sm font-semibold text-blue-800 disabled:text-slate-400"
-                  disabled={seedingSampleData || decliningSampleData}
-                  onClick={async () => {
-                    await markWelcomeGuideRead();
-                    await handleSeedSampleDataForCurrentUser();
-                  }}
-                  type="button"
-                >
-                  {seedingSampleData ? "Adding..." : "Provide some examples"}
-                </button>
-              ) : null}
-              {shouldOfferSampleData ? (
-                <button
-                  className="rounded-full px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-white disabled:text-slate-400"
-                  disabled={seedingSampleData || decliningSampleData}
-                  onClick={async () => {
-                    await markWelcomeGuideRead();
-                    await handleDeclineSampleData();
-                  }}
-                  type="button"
-                >
-                  {decliningSampleData ? "Starting..." : "Start clean"}
-                </button>
-              ) : null}
             </div>
 
-            {shouldOfferSampleData ? (
-              <p className="mt-3 text-center text-sm text-slate-600">
-                Or have us add a few clearly labeled examples to help you get
-                started.
-              </p>
+            {!sampleDataSeededAt ? (
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-sm text-slate-600">
+                <span>Not sure?</span>
+                <button
+                  className="rounded-full border border-slate-300 bg-transparent px-3.5 py-1.5 text-sm font-normal text-slate-500 transition hover:border-blue-100 hover:text-[#2B6198] disabled:text-slate-400"
+                  disabled={seedingSampleData}
+                  onClick={async () => {
+                    await markWelcomeGuideRead();
+                    await handleSeedSampleDataForCurrentUser(true);
+                  }}
+                  type="button"
+                >
+                  {seedingSampleData
+                    ? "Adding..."
+                    : "We'll add examples for you to explore"}
+                </button>
+              </div>
             ) : null}
             <p className="mt-5 text-center text-sm text-slate-600">
               Need help? Support is always nearby in the top-right corner of
@@ -10567,6 +10961,14 @@ export default function Home() {
     );
   }
 
+  if (
+    !signedInEmail &&
+    authMode !== "updatePassword" &&
+    !showAuthGateway
+  ) {
+    return <PublicWebsite onOpenApp={() => setShowAuthGateway(true)} />;
+  }
+
   return (
     <main
       className={`min-h-screen overflow-x-clip bg-slate-50 px-3 text-slate-900 sm:px-4 lg:px-6 lg:py-8 ${
@@ -10876,7 +11278,7 @@ export default function Home() {
           <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-semibold">Beta testing notice</h2>
+                <h2 className="text-2xl font-semibold">Early Access notice</h2>
                 <p className="mt-1 max-w-3xl text-slate-600">
                   {appContentText("beta_notice_intro")}
                 </p>
@@ -11215,6 +11617,14 @@ export default function Home() {
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-2 font-semibold text-slate-950">
                       <span>{currentPricingTier.name}</span>
+                      {isAdmin ? (
+                        <span
+                          className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[0.68rem] font-bold uppercase tracking-wide text-amber-800"
+                          title="Admin access is managed separately from plan billing."
+                        >
+                          Admin
+                        </span>
+                      ) : null}
                       <button
                         aria-expanded={planHelpExpanded}
                         aria-label="Explain CarePland plan tiers"
@@ -12255,6 +12665,31 @@ export default function Home() {
               </div>
             ) : null}
 
+            {signedInEmail && autoCarePrepStatus ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950 shadow-sm">
+                <span>{autoCarePrepStatus.message}</span>
+                <span className="flex flex-wrap items-center gap-2">
+                  <button
+                    className="rounded-md bg-white px-3 py-1 font-semibold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
+                    onClick={() =>
+                      focusAppointmentCarePrep(autoCarePrepStatus.appointmentId)
+                    }
+                    type="button"
+                  >
+                    View appointment
+                  </button>
+                  <button
+                    aria-label="Dismiss automatic CarePrep status"
+                    className="rounded-md bg-white px-3 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100"
+                    onClick={() => setAutoCarePrepStatus(null)}
+                    type="button"
+                  >
+                    Dismiss
+                  </button>
+                </span>
+              </div>
+            ) : null}
+
             {signedInEmail && message ? (
               <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-700">
                 {message}
@@ -13201,6 +13636,7 @@ export default function Home() {
                     ["dashboard", "Dashboard"],
                     ["tools", "Tools"],
                     ["users", "Users"],
+                    ["intake", "Intake"],
                     ["errors", "Errors"],
                     ["content", "Dynamic Text"],
                     ["ai", "AI Prompts"],
@@ -13217,6 +13653,16 @@ export default function Home() {
                     if (tabKey === "tickets") {
                       fallbackNewCount = adminNewTickets.length;
                       fallbackFollowupCount = adminTicketsNeedingFollowup.length;
+                    } else if (tabKey === "intake") {
+                      fallbackNewCount = earlyAccessIntakeRows.filter(
+                        (row) => row.status === "new"
+                      ).length;
+                      fallbackFollowupCount = earlyAccessIntakeRows.filter(
+                        (row) =>
+                          ["new", "reviewing", "contacted", "interested"].includes(
+                            row.status
+                          )
+                      ).length;
                     } else if (tabKey === "errors") {
                       fallbackNewCount = adminIntegrationErrors.filter((row) =>
                         isNewForAdmin(
@@ -13238,21 +13684,6 @@ export default function Home() {
                           !assistantReviewAdminReviews.some(
                             (review) => review.interaction_id === interaction.id
                           )
-                      ).length;
-                    } else if (tabKey === "product") {
-                      fallbackNewCount = productMgmtItems.filter((item) => {
-                        const area = productMgmtAreas.find(
-                          (productArea) => productArea.id === item.area_id
-                        );
-                        return isNewForAdmin(
-                          item.updated_at,
-                          area
-                            ? adminLastViewedAt("product_area", area.area_key)
-                            : null
-                        );
-                      }).length;
-                      fallbackFollowupCount = productMgmtItems.filter((item) =>
-                        ["open", "in_progress"].includes(item.status)
                       ).length;
                     }
                     const newCount = Math.max(
@@ -13305,7 +13736,7 @@ export default function Home() {
                       New / unseen
                     </p>
                     <p className="mt-2 text-3xl font-semibold text-red-700">
-                      {Object.values(adminAttentionSummaries).reduce(
+                      {actionableAdminAttentionSummaries.reduce(
                         (total, item) => total + (item.new_count ?? 0),
                         0
                       )}
@@ -13316,7 +13747,7 @@ export default function Home() {
                       Follow-up
                     </p>
                     <p className="mt-2 text-3xl font-semibold text-amber-800">
-                      {Object.values(adminAttentionSummaries).reduce(
+                      {actionableAdminAttentionSummaries.reduce(
                         (total, item) => total + (item.followup_count ?? 0),
                         0
                       )}
@@ -13354,7 +13785,7 @@ export default function Home() {
                     <div>
                       <h2 className="text-2xl font-semibold">Admin tools</h2>
                       <p className="mt-1 text-slate-600">
-                        Add sample data for beta testers, update account emails,
+                        Add sample data for Early Access users, update account emails,
                         and review account setup state.
                       </p>
                     </div>
@@ -13411,7 +13842,7 @@ export default function Home() {
                     Sample data
                   </h3>
                   <p className="mt-1 text-sm text-slate-600">
-                    Check whether a beta tester can receive demo examples.
+                    Check whether an Early Access user can receive demo examples.
                   </p>
 
                   <form
@@ -13555,7 +13986,7 @@ export default function Home() {
                           </div>
                           <div>
                             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              Beta acknowledgements
+                              Early Access acknowledgements
                             </dt>
                             <dd className="text-slate-800">
                               {adminReadonlySnapshot.profile.beta_terms_acknowledged_at &&
@@ -14300,6 +14731,394 @@ export default function Home() {
                         })}
                       </tbody>
                     </table>
+                  </div>
+                )}
+              </section>
+              ) : null}
+
+              {adminTab === "intake" ? (
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-semibold">
+                      Early Access intake
+                    </h2>
+                    <p className="mt-1 max-w-3xl text-slate-600">
+                      Capture interested people before creating accounts. This
+                      keeps prospect follow-up separate from auth users and gives
+                      us a clean place for individual or group communication later.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
+                    disabled={loadingEarlyAccessIntake}
+                    onClick={() => loadEarlyAccessIntake()}
+                    type="button"
+                  >
+                    {loadingEarlyAccessIntake ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    ["Total", earlyAccessIntakeStats.total],
+                    ["Active", earlyAccessIntakeStats.active],
+                    ["Interested", earlyAccessIntakeStats.interested],
+                    ["Contacted", earlyAccessIntakeStats.contacted],
+                  ].map(([label, value]) => (
+                    <div
+                      className="rounded-md border border-slate-200 bg-slate-50 p-3"
+                      key={label}
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {label}
+                      </p>
+                      <p className="mt-1 text-2xl font-semibold text-slate-900">
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <form
+                  className="mt-5 rounded-lg border border-blue-100 bg-blue-50 p-4"
+                  onSubmit={handleCreateEarlyAccessIntake}
+                >
+                  <h3 className="text-lg font-semibold text-blue-950">
+                    Add interested person
+                  </h3>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <label className="block text-sm font-medium text-slate-700">
+                      First name
+                      <input
+                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={savingEarlyAccessIntake}
+                        onChange={(event) =>
+                          updateEarlyAccessIntakeDraft(
+                            "firstName",
+                            event.target.value
+                          )
+                        }
+                        required
+                        value={earlyAccessIntakeDraft.firstName}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Last name
+                      <input
+                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={savingEarlyAccessIntake}
+                        onChange={(event) =>
+                          updateEarlyAccessIntakeDraft(
+                            "lastName",
+                            event.target.value
+                          )
+                        }
+                        required
+                        value={earlyAccessIntakeDraft.lastName}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Email
+                      <input
+                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={savingEarlyAccessIntake}
+                        onChange={(event) =>
+                          updateEarlyAccessIntakeDraft("email", event.target.value)
+                        }
+                        required
+                        type="email"
+                        value={earlyAccessIntakeDraft.email}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Phone
+                      <input
+                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={savingEarlyAccessIntake}
+                        onChange={(event) =>
+                          updateEarlyAccessIntakeDraft("phone", event.target.value)
+                        }
+                        placeholder="Optional"
+                        value={earlyAccessIntakeDraft.phone}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Relationship to care
+                      <select
+                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={savingEarlyAccessIntake}
+                        onChange={(event) =>
+                          updateEarlyAccessIntakeDraft(
+                            "careRole",
+                            event.target.value
+                          )
+                        }
+                        value={earlyAccessIntakeDraft.careRole}
+                      >
+                        <option value="unspecified">Not specified</option>
+                        <option value="patient">Patient/self</option>
+                        <option value="caregiver">Caregiver/family</option>
+                        <option value="clinician_partner">Clinician/partner</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Communication preference
+                      <select
+                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={savingEarlyAccessIntake}
+                        onChange={(event) =>
+                          updateEarlyAccessIntakeDraft(
+                            "communicationPreference",
+                            event.target.value
+                          )
+                        }
+                        value={earlyAccessIntakeDraft.communicationPreference}
+                      >
+                        <option value="email">Email</option>
+                        <option value="phone">Phone</option>
+                        <option value="either">Either</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+                      What interests you about CarePland?
+                      <textarea
+                        className="mt-1 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={savingEarlyAccessIntake}
+                        onChange={(event) =>
+                          updateEarlyAccessIntakeDraft(
+                            "interestContext",
+                            event.target.value
+                          )
+                        }
+                        placeholder="What did they say they wanted help with?"
+                        value={earlyAccessIntakeDraft.interestContext}
+                      />
+                    </label>
+                    <label className="block text-sm font-medium text-slate-700">
+                      Source
+                      <input
+                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={savingEarlyAccessIntake}
+                        onChange={(event) =>
+                          updateEarlyAccessIntakeDraft("source", event.target.value)
+                        }
+                        placeholder="admin, website, referral"
+                        value={earlyAccessIntakeDraft.source}
+                      />
+                    </label>
+                    <div className="self-end rounded-md border border-blue-100 bg-white p-3 text-sm text-slate-700">
+                      <p className="font-semibold text-slate-900">
+                        Consent is read-only
+                      </p>
+                      <p className="mt-1">
+                        Admin intake does not set communication consent. Signup
+                        forms or explicit future communication flows should
+                        capture that directly from the person.
+                      </p>
+                    </div>
+                    <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+                      Admin notes
+                      <textarea
+                        className="mt-1 min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                        disabled={savingEarlyAccessIntake}
+                        onChange={(event) =>
+                          updateEarlyAccessIntakeDraft(
+                            "adminNotes",
+                            event.target.value
+                          )
+                        }
+                        placeholder="Internal follow-up notes"
+                        value={earlyAccessIntakeDraft.adminNotes}
+                      />
+                    </label>
+                  </div>
+                  <button
+                    className="mt-3 rounded-md bg-slate-950 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                    disabled={savingEarlyAccessIntake}
+                    type="submit"
+                  >
+                    {savingEarlyAccessIntake ? "Saving..." : "Save intake"}
+                  </button>
+                </form>
+
+                <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
+                  <label className="block text-sm font-medium text-slate-700">
+                    View
+                    <select
+                      className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                      onChange={(event) =>
+                        setEarlyAccessIntakeFilter(
+                          event.target.value as
+                            | "active"
+                            | "all"
+                            | EarlyAccessIntakeStatus
+                        )
+                      }
+                      value={earlyAccessIntakeFilter}
+                    >
+                      <option value="active">Active follow-up</option>
+                      <option value="all">All intake</option>
+                      <option value="new">New</option>
+                      <option value="reviewing">Reviewing</option>
+                      <option value="contacted">Contacted</option>
+                      <option value="interested">Interested</option>
+                      <option value="invited">Invited</option>
+                      <option value="converted">Converted</option>
+                      <option value="not_a_fit">Not a fit</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                  </label>
+                  <p className="text-sm text-slate-500">
+                    Showing {filteredEarlyAccessIntakeRows.length} of{" "}
+                    {earlyAccessIntakeRows.length}
+                  </p>
+                </div>
+
+                {earlyAccessIntakeRows.length === 0 ? (
+                  <div className="mt-5 rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
+                    No intake records loaded yet.
+                  </div>
+                ) : (
+                  <div className="mt-5 space-y-3">
+                    {filteredEarlyAccessIntakeRows.map((row) => (
+                      <article
+                        className="rounded-md border border-slate-200 bg-white p-4"
+                        key={row.id}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-semibold text-slate-950">
+                              {row.first_name} {row.last_name}
+                            </h3>
+                            <p className="break-all text-sm text-slate-600">
+                              {row.email}
+                              {row.phone ? ` · ${row.phone}` : ""}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                              <span className="rounded-full bg-blue-50 px-2 py-1 font-semibold text-blue-700">
+                                {row.status.replaceAll("_", " ")}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+                                {row.communication_preference}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
+                                {row.care_role.replaceAll("_", " ")}
+                              </span>
+                              {row.communication_consent ? (
+                                <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
+                                  follow-up ok
+                                </span>
+                              ) : (
+                                <span className="rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-700">
+                                  confirm follow-up
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-sm text-slate-500">
+                            <p>Source: {row.source || "unknown"}</p>
+                            <p>Added: {formatAdminDate(row.created_at)}</p>
+                            <p>Updated: {formatAdminDate(row.updated_at)}</p>
+                            <p>
+                              Last contacted:{" "}
+                              {formatAdminDate(row.last_contacted_at)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {row.interest_context ? (
+                          <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              What interests them
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap">
+                              {row.interest_context}
+                            </p>
+                          </div>
+                        ) : null}
+
+                        <div className="mt-3 grid gap-3 lg:grid-cols-[12rem_minmax(0,1fr)_auto]">
+                          <label className="block text-sm font-medium text-slate-700">
+                            Status
+                            <select
+                              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
+                              disabled={updatingEarlyAccessIntakeId === row.id}
+                              onChange={(event) =>
+                                handleUpdateEarlyAccessIntake(row, {
+                                  status: event.target
+                                    .value as EarlyAccessIntakeStatus,
+                                })
+                              }
+                              value={row.status}
+                            >
+                              <option value="new">New</option>
+                              <option value="reviewing">Reviewing</option>
+                              <option value="contacted">Contacted</option>
+                              <option value="interested">Interested</option>
+                              <option value="invited">Invited</option>
+                              <option value="converted">Converted</option>
+                              <option value="not_a_fit">Not a fit</option>
+                              <option value="closed">Closed</option>
+                            </select>
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Admin notes
+                            <textarea
+                              className="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2"
+                              disabled={updatingEarlyAccessIntakeId === row.id}
+                              onChange={(event) =>
+                                setEarlyAccessIntakeAdminNotes(
+                                  (currentNotes) => ({
+                                    ...currentNotes,
+                                    [row.id]: event.target.value,
+                                  })
+                                )
+                              }
+                              value={
+                                earlyAccessIntakeAdminNotes[row.id] ??
+                                row.admin_notes ??
+                                ""
+                              }
+                            />
+                          </label>
+                          <div className="flex flex-col justify-end gap-2">
+                            <button
+                              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                              disabled={updatingEarlyAccessIntakeId === row.id}
+                              onClick={() =>
+                                handleUpdateEarlyAccessIntake(row, {
+                                  admin_notes:
+                                    earlyAccessIntakeAdminNotes[row.id] ?? "",
+                                })
+                              }
+                              type="button"
+                            >
+                              {updatingEarlyAccessIntakeId === row.id
+                                ? "Saving..."
+                                : "Save notes"}
+                            </button>
+                            <button
+                              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
+                              disabled={updatingEarlyAccessIntakeId === row.id}
+                              onClick={() =>
+                                handleUpdateEarlyAccessIntake(row, {
+                                  last_contacted_at: new Date().toISOString(),
+                                  status:
+                                    row.status === "new"
+                                      ? "contacted"
+                                      : row.status,
+                                })
+                              }
+                              type="button"
+                            >
+                              Mark contacted
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
                   </div>
                 )}
               </section>
@@ -16225,7 +17044,7 @@ export default function Home() {
                   <div>
                     <h2 className="text-2xl font-semibold">Product management</h2>
                     <p className="mt-1 max-w-3xl text-slate-600">
-                      Track bugs, beta readiness, release notes, wishlist items,
+                      Track bugs, Early Access readiness, release notes, wishlist items,
                       and admin follow-ups without leaving the app. Each add or
                       status change is versioned.
                     </p>
@@ -16246,36 +17065,13 @@ export default function Home() {
                           const itemCount = productMgmtItems.filter(
                             (item) => item.area_id === area?.id
                           ).length;
-                          const attention = adminAttentionFor(
-                            "product_area",
-                            section.key
-                          );
-                          const laneItems = productMgmtItems.filter(
-                            (item) => item.area_id === area?.id
-                          );
-                          const laneNewCount = laneItems.filter((item) =>
-                            isNewForAdmin(
-                              item.updated_at,
-                              adminLastViewedAt("product_area", section.key)
-                            )
-                          ).length;
-                          const laneFollowupCount = laneItems.filter((item) =>
-                            ["open", "in_progress"].includes(item.status)
-                          ).length;
-
                           return (
                             <AdminNavButton
                               className="w-full px-3 py-3 text-left"
-                              followupCount={Math.max(
-                                attention?.followup_count ?? 0,
-                                laneFollowupCount
-                              )}
+                              followupCount={0}
                               isSelected={isSelected}
                               key={section.key}
-                              newCount={Math.max(
-                                attention?.new_count ?? 0,
-                                laneNewCount
-                              )}
+                              newCount={0}
                               onClick={() =>
                                 handleChangeProductMgmtSection(
                                   section.key as ProductMgmtSection
@@ -16523,16 +17319,6 @@ export default function Home() {
                                 productMgmtItemDraft !== null;
                               const isSavingEdit =
                                 savingProductMgmtEditItemId === item.id;
-                              const isNewToAdmin = isNewForAdmin(
-                                item.updated_at,
-                                adminLastViewedAt(
-                                  "product_area",
-                                  selectedProductMgmtSection
-                                )
-                              );
-                              const needsFollowup = ["open", "in_progress"].includes(
-                                item.status
-                              );
                               const statusLabel = item.status
                                 .replace("_", " ")
                                 .replace(/^./, (letter) => letter.toUpperCase());
@@ -16540,11 +17326,7 @@ export default function Home() {
                               return (
                                 <article
                                   className={`rounded-md border p-3 ${
-                                    isNewToAdmin
-                                      ? "border-red-200 bg-red-50/70"
-                                      : needsFollowup
-                                        ? "border-amber-200 bg-amber-50/70"
-                                        : isResolved
+                                    isResolved
                                       ? "border-slate-200 bg-slate-50"
                                       : "border-slate-200 bg-white"
                                   }`}
@@ -16572,16 +17354,6 @@ export default function Home() {
                                     >
                                       {statusLabel}
                                     </span>
-                                    {isNewToAdmin ? (
-                                      <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
-                                        New to me
-                                      </span>
-                                    ) : null}
-                                    {!isNewToAdmin && needsFollowup ? (
-                                      <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                                        Follow up
-                                      </span>
-                                    ) : null}
                                   </div>
                                   {item.body ? (
                                     <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
@@ -16826,6 +17598,9 @@ export default function Home() {
                 const carePrepDraft = draftGuidanceByAppointment.get(
                   appointment.id
                 );
+                const hasCarePrepAvailable = Boolean(
+                  prep?.summary || carePrepDraft?.summary
+                );
                 const carePrepGenerationError =
                   carePrepGenerationErrors[appointment.id];
                 const appointmentDraft =
@@ -16887,6 +17662,7 @@ export default function Home() {
                   "";
                 return (
                   <article
+                    id={`appointment-${appointment.id}`}
                     className="relative flex flex-col px-5 py-7 before:absolute before:left-5 before:right-5 before:top-0 before:h-0.5 before:rounded-full before:bg-slate-300 first:before:hidden"
                     key={appointment.id}
                   >
@@ -17906,7 +18682,7 @@ export default function Home() {
                     ) : null}
 
                     {shouldShowCarePrep &&
-                    (prep?.summary ||
+                    (hasCarePrepAvailable ||
                       canGenerateCarePrep ||
                       generatingCarePrepForId === appointment.id ||
                       carePrepGenerationError) ? (
@@ -17917,7 +18693,7 @@ export default function Home() {
                               className="inline-flex w-36 items-center justify-center gap-1.5 rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:text-slate-400"
                               disabled={generatingCarePrepForId === appointment.id}
                               onClick={() => {
-                                if (prep?.summary) {
+                                if (hasCarePrepAvailable) {
                                   setExpandedCarePrepIds((currentIds) => ({
                                     ...currentIds,
                                     [appointment.id]: true,
@@ -17931,7 +18707,7 @@ export default function Home() {
                               type="button"
                             >
                               CarePrep
-                              {prep?.summary ? (
+                              {hasCarePrepAvailable ? (
                                 <span
                                   aria-hidden="true"
                                   className="text-sm leading-none text-blue-950"

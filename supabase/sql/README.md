@@ -6,7 +6,7 @@ Supabase SQL editor history.
 ## Current Committed SQL
 
 - `2026-05-19_beta_agreement_profile_fields.sql`  
-  Migration: beta acknowledgement fields on `profiles`.
+  Migration: Early Access acknowledgement fields on `profiles` (legacy column names retain `beta_*`).
 
 - `2026-05-19_sample_data_seed.sql`  
   Migration/admin utility: sample-data flags plus seed/status functions.
@@ -18,7 +18,7 @@ Supabase SQL editor history.
   Migration/admin utility: lets a signed-in user remove their own demo data.
 
 - `2026-05-19_app_content_versions.sql`
-  Migration/admin utility: versioned dynamic app text for beta/legal/support copy.
+  Migration/admin utility: versioned dynamic app text for Early Access/legal/support copy.
 
 - `2026-05-20_product_management.sql`
   Migration/admin utility: versioned product-management lanes, bugs, wishlist, and release notes.
@@ -51,10 +51,13 @@ Supabase SQL editor history.
   Migration/admin utility: stores Agent Knowledge proposal-generation settings and queued check runs for manual, software-update, scheduled, and feedback-cluster cycles.
 
 - `2026-05-22_pricing_tiers.sql`
-  Admin utility: aligns beta plan ids and public names for Free, Active Use, Premium Individual, and Group.
+  Admin utility: aligns internal beta plan ids and public names for Free, Active Use, Premium Individual, Group, and Early Access.
 
 - `2026-05-22_plan_feature_metering.sql`
   Migration/admin utility: adds plan feature definitions, Care Circle usage counters, and feature usage check/consume/refund functions.
+
+- `2026-05-22_admin_view_states.sql`
+  Migration/admin utility: stores per-admin Admin view timestamps and summarizes red/yellow Admin attention breadcrumbs for operational response queues, excluding admin-authored backlog/content surfaces such as Product Mgmt.
 
 - `2026-05-22_profile_plan_tier_help_content.sql`
   Admin utility: seeds editable Profile plan-tier helper text.
@@ -65,17 +68,44 @@ Supabase SQL editor history.
 - `2026-05-23_careprep_refresh_not_ready_content.sql`
   Admin utility: seeds the editable message shown when CarePrep refresh has no additional appointment history to consider.
 
+- `2026-05-23_careprep_auto_success_message_content.sql`
+  Admin utility: seeds the editable expiring success status shown after automatic CarePrep prepares an appointment.
+
 - `2026-05-23_careprep_generation_outlier_tracking.sql`
   Admin utility: adds an admin RPC for finding short-window CarePrep generation and refresh-like outliers by Care Circle/user.
 
+- `2026-05-23_early_access_language_content.sql`
+  Admin utility: shifts user-facing Dynamic Text and metered CarePrep limit copy from beta/testing language to Early Access language.
+
+- `2026-05-23_early_access_intake.sql`
+  Migration/admin utility: stores Early Access prospect/intake records, follow-up preferences, statuses, and admin notes separately from auth users.
+
+- `2026-05-24_public_early_access_intake.sql`
+  Migration: lets the public website create consented Early Access intake records as anonymous visitors while preserving Admin-only read/update access.
+
+- `2026-05-23_early_access_plan_tier.sql`
+  Admin utility: adds the Early Access plan tier with current Group-level/full-access feature settings and updates editable plan/agent text.
+
+- `2026-05-23_reset_andrew_dental_cleaning_notes_careprep.sql`
+  One-off test utility: clears Visit Notes and CarePrep from Andrew's Dental Cleaning appointments while preserving the appointments.
+
+- `2026-05-23_reset_andrew_sample_data.sql`
+  One-off test utility: removes Andrew's sample/demo appointments and clears sample-data prompt flags.
+
+- `2026-05-23_debug_andrew_dental_cleaning_auto_careprep.sql`
+  One-off read-only debug utility: shows Andrew's Dental Cleaning note/CarePrep state and auto-target eligibility.
+
 - `2026-05-22_seed_plan_metering_agent_knowledge.sql`
-  Admin utility: seeds Agent Knowledge updates for pricing tiers, metering, and beta plan-change limitations.
+  Admin utility: seeds Agent Knowledge updates for pricing tiers, metering, and Early Access plan-change limitations.
 
 - `2026-05-23_welcome_guide_dismissal.sql`
   Migration/reset utility: stores welcome-guide dismissal state on `profiles` and resets the current rollout for all users.
 
 - `2026-05-23_seed_admin_attention_demo.sql`
   Admin utility: seeds clearly labeled demo records across Admin tabs so red/yellow attention breadcrumbs can be reviewed, including nested Product Mgmt lanes.
+
+- `2026-05-23_remove_admin_attention_demo.sql`
+  Admin utility: removes the Admin attention demo records and refreshes the demo-related Admin view states so test breadcrumb lights turn off.
 
 - `2026-05-23_seed_admin_hq_prioritization_instruction.sql`
   Admin utility: seeds the editable Admin HQ prioritization prompt/instruction set for existing care circles.
@@ -127,11 +157,15 @@ as named utility scripts if they are still useful.
 - Reset Beta Acknowledgements for Profile
 - Assign personal_plus entitlement plan
 - Align beta pricing tiers
+- Add Early Access plan tier
 - Add plan feature metering
 - Seed Profile plan tier help content
 - Seed CarePrep limit message content
 - Seed CarePrep refresh not-ready message
+- Seed automatic CarePrep success message
 - Add CarePrep generation outlier tracking
+- Reset Andrew Dental Cleaning notes/CarePrep
+- Debug Andrew Dental Cleaning auto-CarePrep
 - Seed plan metering Agent Knowledge
 - Activate Care Circle Entitlement
 - Add Member and Upgrade Care Circle Plan

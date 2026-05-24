@@ -205,32 +205,32 @@ from (
   values
     (
       'beta_notice_intro',
-      'Beta testing notice intro',
-      'Introductory text shown before beta acknowledgement checkboxes.',
-      'CarePland Personal is currently in testing. Formal Terms of Service and Privacy Policy pages are not enabled yet.'
+      'Early Access notice intro',
+      'Introductory text shown before Early Access acknowledgement checkboxes.',
+      'CarePland Personal is currently available through Early Access. Formal Terms of Service and Privacy Policy pages are not enabled yet.'
     ),
     (
       'beta_terms_ack',
-      'Beta terms acknowledgement',
-      'Checkbox text confirming Terms of Service status during beta.',
-      'I understand formal Terms of Service are not currently enabled for this testing version.'
+      'Early Access terms acknowledgement',
+      'Checkbox text confirming Terms of Service status during Early Access.',
+      'I understand formal Terms of Service are not currently enabled for this Early Access version.'
     ),
     (
       'beta_privacy_ack',
-      'Beta privacy acknowledgement',
-      'Checkbox text confirming Privacy Policy status during beta.',
-      'I understand formal Privacy Policy review is not currently enabled for this testing version.'
+      'Early Access privacy acknowledgement',
+      'Checkbox text confirming Privacy Policy status during Early Access.',
+      'I understand formal Privacy Policy review is not currently enabled for this Early Access version.'
     ),
     (
       'beta_disclaimer_ack',
-      'Beta safety acknowledgement',
-      'Checkbox text confirming beta safety limitations.',
-      'I understand this beta is not for emergencies or critical medical decisions.'
+      'Early Access safety acknowledgement',
+      'Checkbox text confirming Early Access safety limitations.',
+      'I understand this Early Access version is not for emergencies or critical medical decisions.'
     ),
     (
       'support_contact_note',
       'Support contact note',
-      'General support context for beta users.',
+      'General support context for Early Access users.',
       'Need help or want to report an issue? Contact support from the app and include what you were trying to do.'
     )
 ) as seeded(content_key, label, description, body)

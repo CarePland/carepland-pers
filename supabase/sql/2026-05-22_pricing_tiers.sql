@@ -6,7 +6,8 @@ values
   ('personal', 'Free', 1),
   ('active_use', 'Active Use', 1),
   ('premium_individual', 'Premium Individual', 1),
-  ('personal_plus', 'Group', 4)
+  ('personal_plus', 'Group', 4),
+  ('early_access', 'Early Access', 4)
 on conflict (id) do update
 set
   name = excluded.name,

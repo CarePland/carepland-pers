@@ -27,7 +27,7 @@ Core philosophy:
 - Maintain audit trails for meaningful data changes, AI outputs, admin edits, support interactions, and prompt evolution.
 - Prefer calm patient-facing surfaces over admin-style control panels.
 
-CarePland Personal is currently a beta product. The old Adalo/Make/Twilio implementation is treated as product-discovery history, not as a code architecture to clone.
+CarePland Personal is internally managed as a beta product, but user-facing product language should call this phase `Early Access`, not `Beta Testing` or `beta`, unless referring to internal operations. Early Access means the same rollout/testing phase as internal beta testing while presenting a more confident user-facing posture. The old Adalo/Make/Twilio implementation is treated as product-discovery history, not as a code architecture to clone.
 
 ## Legacy Adalo
 
@@ -82,7 +82,10 @@ Current implemented assumptions:
 - Tier 2: Active Use supports active healthcare management with larger manual CarePrep and import allowances, CarePland assistant/chat support access, and increased historical/context depth. It remains primarily manually triggered.
 - Tier 3: Premium Individual supports one Care VIP with automatic CarePrep for medical appointments, smart reminders, proactive preparation workflows, generous import allowances, enhanced support responsiveness, and reduced manual effort.
 - Tier 4: Group supports multiple Care VIPs, automatic CarePrep across multiple people, shared continuity workflows, group-oriented coordination, highest import allowances, and most generous support access.
-- Existing database plan ids are currently preserved for compatibility: `personal` maps to Free and `personal_plus` maps to Group.
+- Early Access is a distinct plan tier for early adopters. Functionally, it currently matches Group/full-access behavior, supports multiple Care VIPs, includes automatic CarePrep, and should help distinguish early adopters from later paid subscribers.
+- Existing database plan ids are currently preserved for compatibility: `personal` maps to Free and `personal_plus` maps to Group. `early_access` maps to Early Access.
+- During the pre-billing phase, do not automatically assign new users to `early_access`; keep assigning the current full-access plan where appropriate so users can be moved to Early Access intentionally later.
+- Admin is not a pricing tier. Admin access remains controlled by admin flags/permissions, but the Profile plan display may show an Admin badge next to the actual plan for admin users.
 - Billing-grade enforcement is not complete; plan enforcement is currently lightweight and beta-oriented.
 - Backend plan-feature metering foundation exists as SQL patches: `plan_features`, `care_circle_feature_usage`, `check_feature_access`, `consume_feature_usage`, and `refund_feature_usage`.
 - Manual CarePrep generation is the first metered workflow and uses feature key `careprep_manual`; automatic CarePrep entitlement uses feature key `careprep_auto` for future automation work.
@@ -90,11 +93,13 @@ Current implemented assumptions:
 - Manual CarePrep plan-limit copy is editable in Admin > Dynamic Text via `careprep_manual_limit_message`; `plan_features.limit_message` remains a backend fallback.
 - When a user reaches a metered CarePrep limit, keep the CarePrep action visible and show the plan-limit message in place. Do not hide the feature or remove the path, because that creates confusion.
 - Automatic CarePrep after saved Visit Notes uses `careprep_auto`: after notes are saved on a completed/logged appointment, CarePland should try to prepare the next upcoming contextually related appointment for the same Care VIP, such as dental notes flowing to the next dental appointment before an unrelated earlier eye exam. If no contextual match is found, fall back to the next upcoming appointment for that Care VIP. The notes save must remain successful even if automatic CarePrep is unavailable or fails.
-- CarePrep refresh should be gated before metering/model work when the latest saved/draft CarePrep already considered the same total count of relevant prior appointments. The editable Dynamic Text key `careprep_refresh_not_ready_message` explains this case; current default: `CarePrep can't be run yet because you have no additional appointments to consider.`
+- Successful automatic CarePrep should show a green expiring appointment-page status bar with an anchor action to the prepared appointment. The editable Dynamic Text key `careprep_auto_success_message` controls the message and supports `{appointmentTitle}`.
+- CarePrep refresh should be gated before metering/model work when the latest saved/draft CarePrep already considered the same total count of relevant prior appointments and there are no newer saved Visit Notes among those prior appointments. Updated notes on an already-considered appointment are a material context change and should allow refresh. The editable Dynamic Text key `careprep_refresh_not_ready_message` explains the blocked case; current default: `CarePrep can't be run yet because you have no additional appointments to consider.`
 - Outlier monitoring for CarePrep generation should track short-window generation volume and repeat/refresh-like generation volume by Care Circle/user. Start with Admin-visible tracking and soft review before adding hard throttles, unless abuse or runaway cost appears in real usage.
 - Multi-user/group permissioning is future expansion, not a fully implemented role system.
 - CP Family is a separate future app direction for deeper caregiving support and should not be used as the Tier 4 label for CarePland Personal.
-- Plan changes during beta may be mediated through support/admin rather than self-service billing.
+- Plan changes during Early Access may be mediated through support/admin rather than self-service billing.
+- Reassigning a user from Group/`personal_plus` to Early Access/`early_access` should be a simple entitlement `plan_id` change on the active Care Circle entitlement; appointment, Care VIP, notes, and CarePrep data should not move.
 - Metering should use user-facing workflow language such as CarePrep generations, automatic appointment preparation, document imports, and Care VIPs.
 - Do not expose technical concepts such as tokens, credits, context units, or model usage in patient-facing pricing surfaces.
 
@@ -182,11 +187,11 @@ Home is the signed-in first surface for CarePland Personal. It should welcome ne
 Current Home direction:
 
 - First-run welcome guidance belongs on Home, not on the Appointments list.
-- The first-run welcome page should stay short and philosophical rather than readme-like: `Welcome to CarePland`, `Appointment context, simply.`, a small orientation video, one concise explanation, three visual panels, and a compact get-started section.
+- The first-run welcome page should stay short and philosophical rather than readme-like: `Welcome to CarePland`, `Appointment context, simply.`, a small orientation video, one concise explanation, a compact slideshow of three visual panels, and a compact get-started section.
 - Welcome-page visuals can use a few stills from the orientation video as placeholders, but should not become a full storyboard or heavy tutorial.
 - The three welcome panels should explain the gap between appointments, context as the missing connection, and the CarePland loop from Visit Notes to CarePrep to future context.
-- Desktop/tablet welcome panels should sit in three calm columns with generous whitespace and equal visual weight; mobile should stack the panels with relaxed spacing.
-- Primary first-run actions should help users add their first real appointment or import details they already have.
+- Welcome panels should appear one at a time in a calm slideshow so the images can be large enough to read without making the page feel dense.
+- Primary first-run actions should help users add their first real appointment or import appointment details they already have.
 - Demo data should be offered as clearly labeled examples to explore, not as a required setup step.
 - Demo-data copy should reassure users that examples are fictional/clearly labeled and removable without affecting real appointments.
 - Regular user-facing Home, Appointments, and Profile pages should include a tiny soft-gray footer with centered `© 2026 CarePland` and a subtle `Why CarePland` pill on the right that opens the welcome explanation. Keep it off the welcome page itself.
@@ -309,7 +314,7 @@ Agent knowledge:
 - Agent Knowledge also includes voice/tone guidance so the support assistant stays warm, steady, practical, empathetic without pretending intimacy, supportive without being syrupy, and clear about limits without sounding cold.
 - The support assistant injects current Agent Knowledge into its context.
 - Agent Knowledge should be updated when product capabilities change to prevent context drift.
-- Agent Knowledge includes beta plan tier facts, CarePrep metering context, and the limitation that self-service billing/plan changes are not wired up yet.
+- Agent Knowledge includes Early Access plan tier facts, CarePrep metering context, and the limitation that self-service billing/plan changes are not wired up yet.
 - Agent Knowledge should evolve toward a proposal-based lifecycle: automated or manual checks can propose changes with justifications, source evidence, confidence, and risk category; Admin should approve, edit, reject, defer, or publish those changes.
 - Agent Knowledge proposals should preserve the original current text, AI-proposed text, and Admin-final text when edited. Admin edits are first-class QA signal and should not overwrite the original proposal trail.
 - Rollbacks should be granular where possible by Agent Knowledge block/entry and should create new current versions rather than deleting history.
@@ -338,9 +343,12 @@ Support:
 
 Admin:
 
-- Admin tabs include tools, users/activity, integration errors, Dynamic Text, AI, assistant review, product management, and tickets. Do not add a separate top-level Messages tab; short messages belong in Dynamic Text.
+- Admin tabs include tools, users/activity, Early Access intake, integration errors, Dynamic Text, AI, assistant review, product management, and tickets. Do not add a separate top-level Messages tab; short messages belong in Dynamic Text.
+- Admin Early Access Intake stores interested people/prospects separately from Supabase auth users. Intake records should capture name, email, optional phone, relationship to care, communication preference, read-only consent status, `What interests you about CarePland?`, source, status, last contacted timestamp, and admin notes.
+- Early Access intake is the staging area for follow-up before account creation. Do not create placeholder auth accounts merely to track interest.
+- Future individual/group communication workflows should build from Early Access intake records and communication preferences rather than ad hoc email threads.
 - Admin header/ticket indicators should show actionable counts with words, e.g. `New` and `Followup`, not mystery fractions.
-- Admin navigation uses durable per-admin freshness state for breadcrumb-style attention indicators. Red means new/unseen by that admin and takes priority over yellow. Yellow means known but still needs follow-up/action. The same red/yellow logic should carry from top Admin tabs into contextual menus and item rows where practical so admins can follow the trail to the relevant work.
+- Admin navigation uses durable per-admin freshness state for breadcrumb-style attention indicators only for operational/admin-response queues. Red means new/unseen by that admin and takes priority over yellow. Yellow means known but still needs follow-up/action. These indicators should apply to things that require an admin response, such as system/integration errors, user-reported support tickets, Early Access intake follow-up, assistant-review items, and reviewable AI proposals. They should not light up for admin-authored backlog/content surfaces such as Product Mgmt lanes/items, Dynamic Text edits, prompt/version history, wishlist entries, bugs entered by the admin, or other internal notes that are better summarized later by Admin HQ/dashboard tooling.
 - Voluntary development halt: Admin HQ/dashboard prioritization and further Admin attention/polish work should pause until real operational data accumulates from actual use. Future chats should remind Andrew of this pause if he starts expanding Admin dashboards, prioritization agents, extra alert layers, or related polish without a concrete real-world signal. Existing scaffold can remain, but avoid deeper implementation based only on imagined needs.
 - Admin tools may be denser than patient-facing pages.
 - Admin pages may use wider layouts than user-facing pages.
@@ -362,7 +370,7 @@ Email notifications:
 
 Dynamic content admin exists for app text that may change, including:
 
-- Beta/legal acknowledgement text.
+- Early Access/legal acknowledgement text.
 - Support assistant copy.
 - Support email content.
 - Onboarding/welcome text.
@@ -372,7 +380,7 @@ Dynamic content admin exists for app text that may change, including:
 
 Rules:
 
-- Prefer dynamic content for wording likely to evolve during beta.
+- Prefer dynamic content for wording likely to evolve during Early Access.
 - Preserve version history.
 - Reverting content should create a new current version.
 - Keep user-facing messages calm and practical.
@@ -380,39 +388,43 @@ Rules:
 
 ## Public Website And Domain Positioning
 
-CarePland should have a public website/front door separate from the signed-in app experience.
+CarePland has a public website/front door separate from the signed-in app experience, hosted inside the same Next.js/Vercel project as the app.
 
 Current website direction:
 
-- `carepland.com` / `www.carepland.com` should present the public marketing/beta site.
-- `app.carepland.com` remains the production signed-in app.
-- Vercel can host both the app and public website, either as separate projects or coordinated deployments.
-- The public website should route primary top-level calls to action toward beta signup rather than directly into the app while CarePland Personal is in beta.
-- Beta signup should collect interested tester emails and route operationally to `info@carepland.com`.
+- `carepland.com` / `www.carepland.com` should present the public marketing/Early Access site.
+- The signed-in app remains in the same Vercel project and is reachable from the public homepage through the Sign in/Open app path; signed-in users should continue into the app shell.
+- Use one coordinated deployment so public website assets, Early Access intake, and app/admin surfaces stay aligned.
+- The public website should route primary top-level calls to action toward Early Access signup rather than directly into the app during Early Access.
+- Early Access signup should write consented prospect records into `early_access_intake` with `source = public_website`; Admin remains the review/follow-up surface.
 - The public website should be calm, patient-centered, and concrete rather than startup-generic.
 
 Core public positioning:
 
-- CarePland completes the appointment loop.
-- CarePland helps patients and caregivers bring forward the context that matters.
+- `Complete the appointment loop.`
+- CarePland helps people and loved ones bring the context that matters to the next visit.
 - CarePland turns past visits, notes, and care history into actionable preparation for the next appointment.
 - Healthcare asks patients to be active participants, but most tools are built around providers and systems. CarePland is purpose-built for patients and caregivers in the space between appointments.
 - CarePland helps people arrive prepared to collaborate with their clinician; avoid framing the product as replacing or competing with the doctor.
 
 Website content assumptions:
 
-- CP Pers can be introduced publicly as different perspectives for different care moments, but the core public language should remain understandable without internal feature jargon.
+- Narrative order: identify the problem, show the cause, offer the answer.
+- Public section sequence should be: hero/appointment-loop preview, gap-between-appointments video section, continuity-breakdown panels, patient-tools asymmetry, care-history-to-appointment-readiness, Early Access signup.
+- Keep CP Pers out of the initial public website narrative unless it becomes necessary later; the current homepage should avoid internal feature jargon.
 - Public pricing/tier explanation can live on the website; draft website copy is preserved in `docs/CAREPLAND_PRICING_TIERS_WEBSITE_COPY.md`.
-- The existing public website/front-door surface can expose pricing as a top navigation tab for review.
+- Pricing can be added to the public website later, but the initial homepage should stay focused on the appointment-loop narrative and Early Access intake.
 - A future demo video should be embedded from a video platform or CDN rather than stored as a large file in the website repo/deployment.
 - The circular hands/heart mark can be used as the public logo direction because it better implies the appointment loop than the rounded-square variant.
+- Public website accessibility requirements include descriptive alt text for the three continuity panels, iframe title text for the orientation video, visible keyboard focus, form labels beyond placeholder text, and WCAG AA contrast for text.
 
 ## Technical Stack And Architecture
 
 Current stack:
 
 - Next.js App Router.
-- React client-heavy app in `app/page.tsx`.
+- React client-heavy signed-in app in `app/page.tsx`.
+- Public website component in `app/components/PublicWebsite.tsx`, rendered for signed-out visitors from the root route.
 - Supabase for auth, database, RLS, RPCs, storage of prompt/content/support/admin data.
 - Vercel for deployment.
 - OpenAI APIs for AI workflows.
@@ -422,6 +434,8 @@ Current stack:
 Important files:
 
 - Main app: `app/page.tsx`
+- Public website/front door: `app/components/PublicWebsite.tsx`
+- Public Early Access API: `app/api/early-access/route.ts`
 - Components: `app/components/`
 - API routes: `app/api/`
 - Places helpers: `app/lib/places`
@@ -453,6 +467,8 @@ Supabase is used for:
 - Support assistant interaction storage and admin reviews.
 - Integration error summaries.
 - Plan feature definitions and Care Circle feature usage counters.
+- Early Access intake/prospect records.
+- Public website Early Access submissions use anonymous insert-only access into `early_access_intake`; Admin read/update remains authenticated/admin-only.
 
 SQL rules:
 
@@ -574,6 +590,14 @@ Support notifications:
 - Time-suppression logic should exist on email side for future rollout even if current value is effectively zero/no suppression.
 - Global email sending toggle should exist.
 
+Early Access intake:
+
+- Intake records are not user accounts.
+- Store communication preference and consent/readiness before follow-up.
+- Communication consent is not an Admin-editable field. It should be captured directly from the person through signup/intake or a future explicit communication flow.
+- Use the prompt `What interests you about CarePland?` rather than asking for private care details in first-contact intake.
+- Status should support a simple funnel such as new, reviewing, contacted, interested, invited, converted, not a fit, and closed.
+
 Google Places errors:
 
 - Show gentle user message when unavailable.
@@ -601,6 +625,7 @@ Demo/test users:
 - Appointment toolbar extracted to `app/components/AppointmentViewToolbar.tsx` because it has a clean low-coupling boundary.
 - Do not extract the full appointment card yet; it is too coupled to page-local state and would create a large prop bundle.
 - Appointment records use one white workspace with divider-separated records rather than individual card borders/shadows.
-- Public website CTA should point to beta signup during beta rather than repeatedly sending users to the app.
+- Public website CTA should point to Early Access signup during the internal beta phase rather than repeatedly sending users to the app.
 - Public website video should be embedded from a hosted video service/CDN rather than committed as a large deployment asset.
 - Admin `View as user` is implemented as read-only admin snapshot/reveal RPCs with audit logging rather than true session impersonation. Sensitive data should be fetched only after an explicit reveal action.
+- Admin Early Access Intake stores prospects separately from app users so interest and communication follow-up can be managed before account creation.

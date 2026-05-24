@@ -23,7 +23,7 @@ from (
       'welcome_guide_title',
       'Welcome guide title',
       'Headline for the first-run welcome card on the appointments screen.',
-      'Welcome to the CarePland beta'
+      'Welcome to CarePland'
     ),
     (
       'welcome_guide_body',

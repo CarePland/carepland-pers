@@ -81,6 +81,25 @@ Behavior:
 - Intended for people coordinating care across more than one Care VIP.
 - Supports longitudinal continuity across multiple individuals.
 
+## Early Access
+
+Purpose: Distinguish early adopters from later paid subscribers.
+
+Best for: Early adopters who should retain broad CarePland Personal access while billing is still being shaped.
+
+Includes:
+
+- Current Group-level functionality.
+- Multiple Care VIP profiles.
+- Automatic CarePrep across multiple people.
+- Highest upload and import allowances.
+- Most generous support access.
+
+Behavior:
+
+- Functionally mirrors the current full-access multi-person tier.
+- Should be assigned intentionally so early adopters can later be differentiated from paid subscribers.
+
 ## Trial And Upgrade Notes
 
 Free users may temporarily experience selected higher-tier automation features to demonstrate the value of automatic continuity, proactive preparation, and reduced cognitive effort.

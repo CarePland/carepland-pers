@@ -26,7 +26,8 @@ from (
       $$- <b>Free</b> is for light use.
 - <b>Active Use</b> adds larger manual CarePrep and import allowances.
 - <b>Premium Individual</b> adds automatic appointment preparation for one Care VIP.
-- <b>Group</b> supports multiple Care VIPs.$$
+- <b>Group</b> supports multiple Care VIPs.
+- <b>Early Access</b> currently includes Group-level access for early adopters.$$
     )
 ) as seeded(content_key, label, description, body)
 where not exists (

@@ -258,29 +258,6 @@ begin
     $sql$;
   end if;
 
-  if to_regclass('public.product_mgmt_areas') is not null
-     and to_regclass('public.product_mgmt_items') is not null then
-    execute $sql$
-      insert into pg_temp.admin_attention_rows
-      select
-        'product_area',
-        pma.area_key,
-        max(pmi.updated_at),
-        count(*) filter (
-          where pmi.updated_at > coalesce(avs.last_viewed_at, '-infinity'::timestamptz)
-        ),
-        count(*) filter (where pmi.status in ('open', 'in_progress'))
-      from public.product_mgmt_areas pma
-      left join public.product_mgmt_items pmi on pmi.area_id = pma.id
-      left join public.admin_view_states avs
-        on avs.admin_user_id = auth.uid()
-       and avs.scope_type = 'product_area'
-       and avs.scope_key = pma.area_key
-      where pma.is_active = true
-      group by pma.area_key, avs.last_viewed_at
-    $sql$;
-  end if;
-
   if to_regclass('public.support_tickets') is not null then
     execute $sql$
       insert into pg_temp.admin_attention_rows
@@ -392,14 +369,7 @@ begin
   end if;
 
   insert into pg_temp.admin_attention_rows
-  select
-    'admin_tab',
-    'product',
-    max(latest_activity_at),
-    coalesce(sum(new_count), 0)::bigint,
-    coalesce(sum(followup_count), 0)::bigint
-  from pg_temp.admin_attention_rows
-  where scope_type = 'product_area';
+  values ('admin_tab', 'product', null, 0, 0);
 
   insert into pg_temp.admin_attention_rows
   select

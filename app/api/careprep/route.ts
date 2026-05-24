@@ -45,6 +45,26 @@ function jsonString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
 
+function appointmentLabel(appointment: { starts_at?: string | null; title?: string | null }) {
+  const title = appointment.title?.trim() || "this appointment";
+
+  if (!appointment.starts_at) {
+    return title;
+  }
+
+  const date = new Date(appointment.starts_at);
+
+  if (Number.isNaN(date.getTime())) {
+    return title;
+  }
+
+  return `${title} on ${date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })}`;
+}
+
 async function currentAppContentText(
   supabase: AppContentReader,
   contentKey: string
@@ -154,6 +174,44 @@ function snapshotPastAppointmentCount(snapshot: unknown): number | null {
   }
 
   return Array.isArray(pastAppointments) ? pastAppointments.length : null;
+}
+
+function latestSnapshotPriorNoteTime(snapshot: unknown): number | null {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    return null;
+  }
+
+  const pastAppointments = (snapshot as JsonObject).past_appointments;
+
+  if (!Array.isArray(pastAppointments)) {
+    return null;
+  }
+
+  return pastAppointments.reduce<number | null>((latestTime, item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return latestTime;
+    }
+
+    const note = (item as JsonObject).note;
+
+    if (!note || typeof note !== "object" || Array.isArray(note)) {
+      return latestTime;
+    }
+
+    const createdAt = (note as JsonObject).created_at;
+
+    if (typeof createdAt !== "string") {
+      return latestTime;
+    }
+
+    const time = new Date(createdAt).getTime();
+
+    if (!Number.isFinite(time)) {
+      return latestTime;
+    }
+
+    return latestTime === null || time > latestTime ? time : latestTime;
+  }, null);
 }
 
 export async function POST(request: NextRequest) {
@@ -629,7 +687,7 @@ export async function POST(request: NextRequest) {
       priorAppointmentIds.length > 0
         ? await supabase
             .from("appointment_notes")
-            .select("appointment_id,summary_short,takeaways,followups")
+            .select("appointment_id,created_at,summary_short,takeaways,followups")
             .in("appointment_id", priorAppointmentIds)
             .eq("is_current", true)
         : { data: [], error: null };
@@ -664,7 +722,7 @@ export async function POST(request: NextRequest) {
     const { data: latestGuidanceRows, error: latestGuidanceError } =
       await supabase
         .from("careprep_guidance")
-        .select("id,input_context_snapshot")
+        .select("id,generated_at,input_context_snapshot")
         .eq("appointment_id", appointment.id)
         .in("review_status", ["accepted", "draft"])
         .order("generated_at", { ascending: false })
@@ -674,24 +732,67 @@ export async function POST(request: NextRequest) {
       throw latestGuidanceError;
     }
 
+    const latestGuidance = latestGuidanceRows?.[0] ?? null;
+
     const previousPastAppointmentCount = snapshotPastAppointmentCount(
-      latestGuidanceRows?.[0]?.input_context_snapshot
+      latestGuidance?.input_context_snapshot
+    );
+    const previousLatestPriorNoteTime = latestSnapshotPriorNoteTime(
+      latestGuidance?.input_context_snapshot
+    );
+    const currentLatestPriorNoteTime = priorNoteRows.reduce<number | null>(
+      (latestTime, note) => {
+        const createdAt =
+          note && typeof note === "object" && "created_at" in note
+            ? String(note.created_at ?? "")
+            : "";
+        const time = new Date(createdAt).getTime();
+
+        if (!Number.isFinite(time)) {
+          return latestTime;
+        }
+
+        return latestTime === null || time > latestTime ? time : latestTime;
+      },
+      null
     );
     const currentPastAppointmentCount =
       priorAppointmentTotalCount ?? pastAppointments.length;
+    const hasNewerPriorNotes =
+      currentLatestPriorNoteTime !== null &&
+      (previousLatestPriorNoteTime === null ||
+        currentLatestPriorNoteTime > previousLatestPriorNoteTime);
 
     if (
       previousPastAppointmentCount !== null &&
-      currentPastAppointmentCount <= previousPastAppointmentCount
+      currentPastAppointmentCount <= previousPastAppointmentCount &&
+      !hasNewerPriorNotes
     ) {
       const refreshNotReadyMessage = await currentAppContentText(
         supabase as unknown as AppContentReader,
         "careprep_refresh_not_ready_message"
       );
+      const latestGuidanceDate = latestGuidance?.generated_at
+        ? new Date(String(latestGuidance.generated_at))
+        : null;
+      const latestGuidanceDateText =
+        latestGuidanceDate && !Number.isNaN(latestGuidanceDate.getTime())
+          ? latestGuidanceDate.toLocaleString("en-US", {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })
+          : "an earlier run";
+      const detailMessage = `Target: ${appointmentLabel(
+        appointment
+      )}. Last CarePrep from ${latestGuidanceDateText} considered ${
+        previousPastAppointmentCount ?? 0
+      } prior appointment(s); current context has ${currentPastAppointmentCount}. No newer saved Visit Notes were found among the prior appointments CarePrep uses.`;
 
       throw new Error(
-        refreshNotReadyMessage ||
+        `${
+          refreshNotReadyMessage ||
           "CarePrep can't be run yet because you have no additional appointments to consider."
+        } ${detailMessage}`
       );
     }
 
@@ -829,7 +930,7 @@ export async function POST(request: NextRequest) {
     const existingDrafts = existingDraftRows ?? [];
     const promptVersion = `careprep_generation:v${instructionVersion.version_number}`;
 
-    const { error: guidanceError } = await supabase
+    const { data: guidanceRow, error: guidanceError } = await supabase
       .from("careprep_guidance")
       .insert({
         appointment_id: appointment.id,
@@ -855,6 +956,8 @@ export async function POST(request: NextRequest) {
         version_number: 0,
         watchouts: guidance.watchouts,
       })
+      .select("id")
+      .single();
 
     if (guidanceError) {
       throw guidanceError;
@@ -881,6 +984,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
+      appointmentId: appointment.id,
+      guidanceId: guidanceRow.id,
+      generationMode,
       message: existingDrafts.length > 0
         ? generationMode === "auto_after_notes"
           ? "CarePrep was refreshed for the next appointment."

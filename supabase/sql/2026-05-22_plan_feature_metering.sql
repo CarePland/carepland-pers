@@ -402,7 +402,7 @@ values
     3,
     'month',
     'Manual CarePrep generations',
-    'You have used this month''s manual CarePrep generations. Plan changes are not wired up yet, but support can help during beta.'
+    'You have used this month''s manual CarePrep generations. Plan changes are not wired up yet, but support can help while account changes are still handled manually.'
   ),
   (
     'active_use',
@@ -411,7 +411,7 @@ values
     25,
     'month',
     'Manual CarePrep generations',
-    'You have used this month''s manual CarePrep generations. Plan changes are not wired up yet, but support can help during beta.'
+    'You have used this month''s manual CarePrep generations. Plan changes are not wired up yet, but support can help while account changes are still handled manually.'
   ),
   (
     'premium_individual',
@@ -429,7 +429,16 @@ values
     1,
     'month',
     'Manual CarePrep generations',
-    'You have used this month''s manual CarePrep generations. Plan changes are not wired up yet, but support can help during beta.'
+    'You have used this month''s manual CarePrep generations. Plan changes are not wired up yet, but support can help while account changes are still handled manually.'
+  ),
+  (
+    'early_access',
+    'careprep_manual',
+    true,
+    null,
+    'month',
+    'Manual CarePrep generations',
+    null
   ),
   (
     'personal',
@@ -460,6 +469,15 @@ values
   ),
   (
     'personal_plus',
+    'careprep_auto',
+    true,
+    null,
+    'month',
+    'Automatic appointment preparation',
+    null
+  ),
+  (
+    'early_access',
     'careprep_auto',
     true,
     null,

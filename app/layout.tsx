@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CarePland Personal",
-  description: "Appointment memory and CarePrep, rebuilt cleanly.",
+  title: "CarePland | Complete the appointment loop",
+  description:
+    "CarePland helps patients and caregivers bring forward the context that matters for the next medical appointment.",
 };
 
 export default function RootLayout({
