@@ -2242,7 +2242,8 @@ function authRedirectUrl(): string | undefined {
       if (
         hostname === "carepland.com" ||
         hostname === "www.carepland.com" ||
-        hostname === "app.carepland.com"
+        hostname === "app.carepland.com" ||
+        hostname === "carepland-pers.vercel.app"
       ) {
         return productionAppUrl;
       }
