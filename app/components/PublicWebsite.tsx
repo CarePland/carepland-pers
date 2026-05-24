@@ -135,7 +135,7 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
             className="inline-flex min-h-11 items-center justify-center rounded-md bg-[#256d85] px-4 font-bold text-white"
             href="#early-access"
           >
-            Join Early Access
+            Find out more
           </a>
         </div>
       </header>
@@ -342,19 +342,20 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
           <h2 className="max-w-[980px] text-[clamp(2rem,4vw,4.2rem)] font-black leading-[1.02]">
             Give your next appointment the context you&apos;ve always needed.
           </h2>
+          <p className="mt-5 max-w-[760px] text-xl font-semibold leading-relaxed text-[#39735a]">
+            <button
+              className="font-extrabold text-[#256d85] underline decoration-[#256d85]/35 underline-offset-4 hover:text-[#182421]"
+              onClick={onOpenApp}
+              type="button"
+            >
+              Try CarePland today
+            </button>
+            , or use this form to stay connected.
+          </p>
           <form
-            className="mt-8 grid max-w-[760px] gap-4 rounded-lg border border-[#d8e0dc] bg-white p-6"
+            className="mt-6 grid max-w-[760px] gap-4 rounded-lg border border-[#d8e0dc] bg-white p-6"
             onSubmit={handleEarlyAccessSubmit}
           >
-            <div>
-              <p className="mb-1 text-xl font-extrabold text-[#182421]">
-                Interested in Early Access?
-              </p>
-              <p className="text-[#596864]">
-                Leave your email and a short note. We are looking for people who
-                want better tools for preparing between appointments.
-              </p>
-            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="sr-only" htmlFor="marketing-first-name">
                 First name
@@ -400,7 +401,7 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
                 disabled={signupStatus === "saving"}
                 type="submit"
               >
-                {signupStatus === "saving" ? "Joining..." : "Join Early Access"}
+                {signupStatus === "saving" ? "Saving..." : "Stay in the Loop"}
               </button>
             </div>
             <label className="sr-only" htmlFor="marketing-interest-context">
