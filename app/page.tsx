@@ -1053,7 +1053,7 @@ const appContentDefaults = {
   support_agent_known_limitations:
     "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests. Self-service billing and plan changes are not wired up yet; plan questions or account-specific tier issues should be escalated to support.",
   support_agent_product_facts:
-    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Early Access plan tiers are Free, Active Use, Premium Individual, Group, and Early Access. The Early Access plan is intended for early adopters and currently includes Group-level functionality; it is not the default assignment while account changes are still handled manually. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual, Group, and Early Access tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Early Access currently gives early adopters full access, including multiple Care VIPs and automatic appointment preparation where available. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual, Group, and Early Access tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
   support_agent_voice_guidance:
     "Use a warm, steady, and practical tone. Be empathetic without pretending intimacy, supportive without being syrupy, and clear about limits without sounding cold. Be confident on app guidance, humble on care-related questions, and never corporate-deflective or fake-cheerful when a user is frustrated.",
   welcome_guide_body:
@@ -11513,8 +11513,8 @@ export default function Home() {
                 <h2 className="text-2xl font-semibold">Set up your profile</h2>
                 <p className="mt-1 text-slate-600">
                   {requiresEmailUpdate
-                    ? "Start by adding an email you can access, then confirm the basics CP Pers needs for dates and contact."
-                    : "Confirm the basics CP Pers needs for dates, contact, and later billing setup."}
+                    ? "Start by adding an email you can access, then confirm the basics CarePland needs for dates and contact."
+                    : "Confirm the basics CarePland needs for dates, contact, and support follow-up."}
                 </p>
               </div>
               <button
@@ -11795,13 +11795,9 @@ export default function Home() {
                         ?
                       </button>
                     </span>
-                    <button
-                      className="whitespace-nowrap text-sm font-semibold text-slate-400"
-                      disabled
-                      type="button"
-                    >
-                      Upgrade plan
-                    </button>
+                    <span className="whitespace-nowrap text-sm font-semibold text-slate-500">
+                      Early Access
+                    </span>
                   </div>
                   <div
                     aria-hidden={!planHelpExpanded}
