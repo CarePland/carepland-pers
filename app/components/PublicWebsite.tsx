@@ -417,7 +417,7 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
             <label className="flex gap-3 text-sm text-[#596864]">
               <input
                 checked={communicationConsent}
-                className="mt-1 h-4 w-4"
+                className="mt-1 h-4 w-4 accent-[#256d85]"
                 onChange={(event) =>
                   setCommunicationConsent(event.target.checked)
                 }
