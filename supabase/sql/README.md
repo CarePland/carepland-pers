@@ -83,6 +83,21 @@ Supabase SQL editor history.
 - `2026-05-24_public_early_access_intake.sql`
   Migration: lets the public website create consented Early Access intake records as anonymous visitors while preserving Admin-only read/update access.
 
+- `2026-05-24_assign_early_access_onboarding.sql`
+  Migration/admin utility: adds a signed-in helper for assigning the current user's primary Care Circle entitlement to Early Access after account setup.
+
+- `2026-05-24_assign_early_access_by_email.sql`
+  Admin utility: assigns a user's primary active Care Circle entitlement to Early Access by email.
+
+- `2026-05-24_list_non_early_access_users.sql`
+  Admin utility: lists users whose primary active Care Circle entitlement is not Early Access or is missing.
+
+- `2026-05-24_sql_editor_assign_early_access_by_email.sql`
+  SQL Editor utility: directly assigns Early Access by email when running from Supabase SQL Editor without an app auth session.
+
+- `2026-05-24_sql_editor_list_non_early_access_users.sql`
+  SQL Editor utility: directly lists users not on Early Access when running from Supabase SQL Editor without an app auth session.
+
 - `2026-05-23_early_access_plan_tier.sql`
   Admin utility: adds the Early Access plan tier with current Group-level/full-access feature settings and updates editable plan/agent text.
 

@@ -613,6 +613,20 @@ async function ensureAuthAndProfile({ account, anonKey, adminClient, password, r
     throw setupError;
   }
 
+  const { data: planAssignment, error: planAssignmentError } =
+    await userClient.rpc("assign_current_user_primary_plan", {
+      p_plan_id: "early_access",
+    });
+  if (planAssignmentError) {
+    throw planAssignmentError;
+  }
+
+  if (planAssignment?.status && planAssignment.status !== "updated") {
+    throw new Error(
+      `Early Access plan assignment was not completed for ${account.email}: ${planAssignment.status}`
+    );
+  }
+
   await userClient.auth.signOut();
   return { password: passwordForLogin, user, warning: null };
 }

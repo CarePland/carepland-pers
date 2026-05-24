@@ -12184,20 +12184,6 @@ export default function Home() {
               </form>
             )}
 
-            <div className="mt-6 rounded-md bg-slate-100 p-4 text-sm text-slate-700">
-              <p className="font-semibold">Current slice</p>
-              <p className="mt-1">
-                Create appointments and view note synthesis plus CarePrep
-                guidance.
-              </p>
-              {signedInEmail ? (
-                <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Plan: {entitlement.plan_name} · Care VIPs{" "}
-                  {careSubjects.length}/{careVipLimit}
-                </p>
-              ) : null}
-            </div>
-
             {signedInEmail && canUseMultipleCareVips ? (
               <div className="mt-6 border-t border-slate-200 pt-6">
                 <div className="flex items-center justify-between gap-3">
