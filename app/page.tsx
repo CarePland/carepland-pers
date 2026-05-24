@@ -1620,6 +1620,7 @@ const aiWorkflows: Record<
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+const productionAppUrl = "https://app.carepland.com";
 const careplandBuildNumber =
   process.env.NEXT_PUBLIC_CAREPLAND_BUILD_NUMBER ??
   process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ??
@@ -2233,19 +2234,38 @@ function sampleDataStatusText(status: SampleDataStatus | null): string {
 }
 
 function authRedirectUrl(): string | undefined {
+  const normalizeCarePlandAuthUrl = (value: string) => {
+    try {
+      const parsedUrl = new URL(value);
+      const hostname = parsedUrl.hostname.toLowerCase();
+
+      if (
+        hostname === "carepland.com" ||
+        hostname === "www.carepland.com" ||
+        hostname === "app.carepland.com"
+      ) {
+        return productionAppUrl;
+      }
+
+      return parsedUrl.origin;
+    } catch {
+      return value;
+    }
+  };
+
   if (appUrl) {
-    return appUrl;
+    return normalizeCarePlandAuthUrl(appUrl);
   }
 
   if (typeof window === "undefined") {
-    return undefined;
+    return productionAppUrl;
   }
 
   if (window.location.hostname === "localhost") {
     return undefined;
   }
 
-  return window.location.origin;
+  return normalizeCarePlandAuthUrl(window.location.origin);
 }
 
 function passwordResetRedirectUrl(): string | undefined {
@@ -2281,13 +2301,42 @@ function isPasswordRecoveryRedirect(): boolean {
   );
 }
 
-function clearPasswordRecoveryUrl() {
+function isEmailConfirmationRedirect(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const authType =
+    searchParams.get("type") ??
+    hashParams.get("type") ??
+    searchParams.get("auth_action") ??
+    hashParams.get("auth_action");
+  const hasConfirmationCode =
+    Boolean(searchParams.get("code")) && !isPasswordRecoveryRedirect();
+
+  return (
+    hasConfirmationCode ||
+    ["email", "email_confirmation", "signup"].includes(
+      authType?.toLowerCase() ?? ""
+    )
+  );
+}
+
+function clearAuthRedirectUrl() {
   if (typeof window === "undefined") {
     return;
   }
 
   const cleanedUrl = new URL(window.location.href);
+  cleanedUrl.searchParams.delete("code");
+  cleanedUrl.searchParams.delete("email");
+  cleanedUrl.searchParams.delete("error");
+  cleanedUrl.searchParams.delete("error_code");
+  cleanedUrl.searchParams.delete("error_description");
   cleanedUrl.searchParams.delete("auth_action");
+  cleanedUrl.searchParams.delete("token_hash");
   cleanedUrl.searchParams.delete("type");
   cleanedUrl.hash = "";
 
@@ -3733,6 +3782,7 @@ export default function Home() {
 
     async function restoreSession() {
       const isRecoveryRedirect = isPasswordRecoveryRedirect();
+      const isConfirmationRedirect = isEmailConfirmationRedirect();
 
       if (isRecoveryRedirect) {
         setLoading(true);
@@ -3810,6 +3860,12 @@ export default function Home() {
           setSessionRestored(true);
         }
       } else {
+        if (isConfirmationRedirect) {
+          setAuthMode("signIn");
+          setMessage("Account verified. Sign in to continue.");
+          clearAuthRedirectUrl();
+        }
+
         setSessionRestored(true);
       }
     }
@@ -4937,7 +4993,7 @@ export default function Home() {
       setAuthMode("signIn");
       setPassword("");
       setConfirmPassword("");
-      clearPasswordRecoveryUrl();
+      clearAuthRedirectUrl();
       showToast("Password updated.", { type: "success" });
       setMessage("Password updated. You can continue using CarePland.");
 
@@ -11247,7 +11303,7 @@ export default function Home() {
                   setAuthMode("signIn");
                   setPassword("");
                   setConfirmPassword("");
-                  clearPasswordRecoveryUrl();
+                  clearAuthRedirectUrl();
                   setMessage("");
                 }}
                 type="button"
@@ -12054,6 +12110,12 @@ export default function Home() {
               signedInEmail ? "hidden" : "mx-auto max-w-xl"
             }`}
           >
+            {!signedInEmail && message ? (
+              <p className="mb-5 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
+                {message}
+              </p>
+            ) : null}
+
             {signedInEmail ? (
               <div>
                 <h2 className="text-xl font-semibold">Signed in</h2>
@@ -12641,7 +12703,7 @@ export default function Home() {
               </form>
             ) : null}
 
-            {message ? (
+            {signedInEmail && message ? (
               <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
                 {message}
               </p>

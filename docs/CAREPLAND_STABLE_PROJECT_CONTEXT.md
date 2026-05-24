@@ -487,6 +487,7 @@ Current auth:
 - Password reset/update password flow.
 - Profile setup after signup.
 - Required profile basics include name, phone, ZIP, and time zone.
+- Supabase signup confirmation and password-reset links must resolve to `https://app.carepland.com`, not `carepland.com` / `www.carepland.com`. The public domains are the website/front door; auth handoff belongs in the app.
 
 MFA:
 
