@@ -2766,6 +2766,7 @@ export default function Home() {
   const adminReadonlyPanelRef = useRef<HTMLElement | null>(null);
   const [stickySecondaryOffset, setStickySecondaryOffset] = useState(0);
   const [runtimeEnvironmentLabel, setRuntimeEnvironmentLabel] = useState("");
+  const [showVersionInfo, setShowVersionInfo] = useState(false);
   const entryHostMode = useSyncExternalStore(
     subscribeEntryHostMode,
     getEntryHostMode,
@@ -3948,6 +3949,29 @@ export default function Home() {
     savedProfileLabel,
     signedInEmail,
   ]);
+
+  useEffect(() => {
+    const handleVersionShortcut = (event: KeyboardEvent) => {
+      const isVersionShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        event.altKey &&
+        event.key.toLowerCase() === "v";
+
+      if (isVersionShortcut) {
+        event.preventDefault();
+        setShowVersionInfo((isVisible) => !isVisible);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setShowVersionInfo(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleVersionShortcut);
+
+    return () => window.removeEventListener("keydown", handleVersionShortcut);
+  }, []);
 
   useEffect(() => {
     if (!toast?.durationMs) {
@@ -19122,11 +19146,81 @@ export default function Home() {
         ) : null}
         {isAdmin && isSignedInAppShell && mainTab === "admin" ? (
           <footer className="mt-8 pb-2 text-center text-xs text-slate-400">
-            Build Number {careplandBuildNumber} * Build dttm:{" "}
-            {careplandBuildDttm}
+            <button
+              className="rounded px-2 py-1 hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
+              onClick={() => setShowVersionInfo(true)}
+              type="button"
+            >
+              Build Number {careplandBuildNumber} * Build dttm:{" "}
+              {careplandBuildDttm}
+            </button>
           </footer>
         ) : null}
       </section>
+      <button
+        className="fixed bottom-2 left-2 z-[60] rounded px-2 py-1 text-[11px] font-semibold text-slate-300 hover:bg-white hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
+        onClick={() => setShowVersionInfo(true)}
+        title="Show version info"
+        type="button"
+      >
+        Version
+      </button>
+      {showVersionInfo ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/20 px-4 py-6">
+          <button
+            aria-label="Close version information"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setShowVersionInfo(false)}
+            type="button"
+          />
+          <section className="relative w-full max-w-sm rounded-lg border border-slate-200 bg-white p-5 text-slate-900 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
+                  CarePland
+                </p>
+                <h2 className="mt-1 text-xl font-semibold">Version info</h2>
+              </div>
+              <button
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700"
+                onClick={() => setShowVersionInfo(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+            <dl className="mt-5 space-y-3 text-sm">
+              <div>
+                <dt className="font-semibold text-slate-500">Build number</dt>
+                <dd className="mt-1 break-all font-mono text-slate-950">
+                  {careplandBuildNumber}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-slate-500">Build time</dt>
+                <dd className="mt-1 text-slate-950">{careplandBuildDttm}</dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-slate-500">Environment</dt>
+                <dd className="mt-1 text-slate-950">
+                  {runtimeEnvironmentLabel || "Production"}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-slate-500">Host</dt>
+                <dd className="mt-1 break-all text-slate-950">
+                  {typeof window === "undefined"
+                    ? "Unknown"
+                    : window.location.hostname}
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-5 text-xs text-slate-500">
+              Shortcut: Ctrl+Alt+V or Cmd+Option+V. Escape closes this panel.
+            </p>
+          </section>
+        </div>
+      ) : null}
       {locationSheetAppointment ? (
         <div className="fixed inset-0 z-[70] flex items-end bg-slate-950/20 px-3 pb-3">
           <button
