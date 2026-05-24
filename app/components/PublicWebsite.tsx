@@ -40,7 +40,7 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
   const [lastName, setLastName] = useState("");
   const [earlyAccessEmail, setEarlyAccessEmail] = useState("");
   const [interestContext, setInterestContext] = useState("");
-  const [communicationConsent, setCommunicationConsent] = useState(false);
+  const [communicationConsent, setCommunicationConsent] = useState(true);
   const [signupStatus, setSignupStatus] = useState<
     "error" | "idle" | "saving" | "success"
   >("idle");
@@ -77,7 +77,7 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
       setLastName("");
       setEarlyAccessEmail("");
       setInterestContext("");
-      setCommunicationConsent(false);
+      setCommunicationConsent(true);
     } catch (error) {
       setSignupStatus("error");
       setSignupMessage(errorMessage(error));
@@ -425,8 +425,7 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
                 type="checkbox"
               />
               <span>
-                CarePland may contact me about Early Access using the email I
-                provided.
+                CarePland may contact me using the email I provided.
               </span>
             </label>
             {signupMessage ? (
