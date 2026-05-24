@@ -2285,6 +2285,23 @@ function passwordResetRedirectUrl(): string | undefined {
   }
 }
 
+function emailConfirmationRedirectUrl(): string | undefined {
+  const baseUrl = authRedirectUrl();
+
+  if (!baseUrl) {
+    return undefined;
+  }
+
+  try {
+    const confirmationUrl = new URL(baseUrl);
+    confirmationUrl.searchParams.set("auth_action", "email_confirmation");
+    return confirmationUrl.toString();
+  } catch {
+    const separator = baseUrl.includes("?") ? "&" : "?";
+    return `${baseUrl}${separator}auth_action=email_confirmation`;
+  }
+}
+
 function isPasswordRecoveryRedirect(): boolean {
   if (typeof window === "undefined") {
     return false;
@@ -4875,7 +4892,7 @@ export default function Home() {
         email: trimmedEmail,
         password,
         options: {
-          emailRedirectTo: authRedirectUrl(),
+          emailRedirectTo: emailConfirmationRedirectUrl(),
         },
       });
 
