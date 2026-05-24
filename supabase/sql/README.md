@@ -60,7 +60,7 @@ Supabase SQL editor history.
   Migration/admin utility: stores per-admin Admin view timestamps and summarizes red/yellow Admin attention breadcrumbs for operational response queues, excluding admin-authored backlog/content surfaces such as Product Mgmt.
 
 - `2026-05-22_profile_plan_tier_help_content.sql`
-  Admin utility: seeds editable Profile plan-tier helper text.
+  Historical admin utility: seeds the former editable Profile plan-tier helper text. The current Profile plan helper uses structured plan metadata instead.
 
 - `2026-05-22_careprep_limit_message_content.sql`
   Admin utility: seeds the editable manual CarePrep plan-limit message for Admin > Dynamic Text.
@@ -97,6 +97,21 @@ Supabase SQL editor history.
 
 - `2026-05-24_sql_editor_list_non_early_access_users.sql`
   SQL Editor utility: directly lists users not on Early Access when running from Supabase SQL Editor without an app auth session.
+
+- `2026-05-24_plan_feature_dynamic_text.sql`
+  Admin utility: seeds editable plan feature wording for the Profile current-plan helper under Admin > Dynamic Text > Plans.
+
+- `2026-05-24_plan_profile_panel_dynamic_text.sql`
+  Admin utility: seeds one whole editable Dynamic Text block per plan for the Profile current-plan helper.
+
+- `2026-05-24_admin_contact_details_audit.sql`
+  Migration/admin utility: adds contact-update permission scope and requires a reason before Admin contact-detail reveals.
+
+- `2026-05-24_admin_user_activity_vips_sorting.sql`
+  Migration/admin utility: extends the Admin Users / Activity summary with Care Circle/account-owner group labels and Care VIP name pills for row expansion.
+
+- `2026-05-24_reset_welcome_screen_for_all_users.sql`
+  One-off utility: clears welcome-guide dismissal fields so every user sees the Welcome screen again.
 
 - `2026-05-23_early_access_plan_tier.sql`
   Admin utility: adds the Early Access plan tier with current Group-level/full-access feature settings and updates editable plan/agent text.

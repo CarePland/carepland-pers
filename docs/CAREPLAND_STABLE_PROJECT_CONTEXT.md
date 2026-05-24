@@ -1,6 +1,6 @@
 # CarePland Stable Project Context
 
-Last updated: 2026-05-22
+Last updated: 2026-05-24
 
 This document is the stable architectural and operational memory for CarePland Personal. It should be updated as assumptions change. Do not preserve obsolete decisions for historical completeness here; keep this document current, clear, and useful for future implementation chats.
 
@@ -25,6 +25,7 @@ Core philosophy:
 - Accept information in the form users already have: manual entry, pasted text, uploaded images, and `.ics` calendar files.
 - Use AI as a quiet assistant. Avoid making "AI" the user-facing product identity.
 - Maintain audit trails for meaningful data changes, AI outputs, admin edits, support interactions, and prompt evolution.
+- Data dignity is a core trust principle. User data should be treated as borrowed context for helping the user, not as casually available operational raw material.
 - Prefer calm patient-facing surfaces over admin-style control panels.
 
 CarePland Personal is internally managed as a beta product, but user-facing product language should call this phase `Early Access`, not `Beta Testing` or `beta`, unless referring to internal operations. Early Access means the same rollout/testing phase as internal beta testing while presenting a more confident user-facing posture. The old Adalo/Make/Twilio implementation is treated as product-discovery history, not as a code architecture to clone.
@@ -354,10 +355,31 @@ Admin:
 - Admin pages may use wider layouts than user-facing pages.
 - Admin-only Auth maintenance that touches `auth.users`, such as updating a tester's login email, must run through protected server routes using `SUPABASE_SERVICE_ROLE_KEY`; never expose service-role keys or Auth admin operations to browser/client code.
 - Admin Users / Activity supports a read-only `View as user` workflow for test-account pre-flight and troubleshooting. It is not auth impersonation and should not create a Supabase session as the target user.
+- Admin Users / Activity rows can include lightweight operational helpers such as sortable column headers, a `User Group` column, and an expandable `View VIPs` row detail with Care VIP name pills. `User Group` should identify the Care Circle/account owner so users can be visually grouped by household/family-style account context; it should not mean pricing tier. These are admin metadata/navigation aids and should not reveal sensitive appointment, Notes, or CarePrep content.
+- Admin table sorting should become a reusable UI pattern. The default implementation should be client-side sorting for already-loaded Admin datasets: each sortable header is a button, clicking the same header toggles ascending/descending, clicking a different header applies that column's sensible default direction, and the active sort indicator is visible in the header. Prefer a small shared helper/component once at least two Admin tables need this behavior, e.g. `SortableHeader`, sort-state type, and value-accessor sort utility. Use server-side sorting only when result sets become too large, paginated, or expensive to fully load.
+- Candidate places for the reusable sorting pattern include Users / Activity, Early Access Intake, support tickets, assistant review queues, integration error summaries, and future Admin audit/access-history views. Sorting should remain an Admin/workbench affordance unless a patient-facing table clearly needs it.
+- Recent modularization direction: extract components when they have a clean boundary and reduce the size of `app/page.tsx` without forcing a huge prop bundle. Good examples are Admin contact reveal/edit panels, toolbar-like controls, sortable table headers, and small repeated admin cards. Avoid extracting deeply coupled appointment/body workflows until their state and actions can move cleanly with them.
+- Admin access to user data should be intentional and justified, including owner/admin access by Andrew. Sensitive access should require a short purpose/justification before reveal whenever practical.
 - Read-only admin user views should default to metadata and account/workflow shape. Sensitive profile/contact details, full appointment titles, appointment times, full provider/practice/location details, appointment details, Notes, CarePrep bodies, support message bodies, imported text, and extracted content should stay hidden until deliberately revealed. Appointment previews may show dates plus short prefixes of title/provider/practice/location so the view remains operationally useful without exposing full details.
 - Non-sensitive appointment metadata such as created/updated timestamps, short record IDs, Care VIP assignment, note/CarePrep presence, and draft/current state can be shown in Admin read-only views to support import QA and troubleshooting.
 - Sensitive reveals should be backed by admin-scoped RPCs and audit events, not by simply hiding already-loaded sensitive content in the browser.
+- Admin access requests/events should be designed so they can later power a user-visible access history. User-facing history should be calm and understandable, e.g. who accessed which broad category, when, and why, without exposing internal implementation details.
 - Admin access is beginning to move from a single `is_admin` flag toward extensible permission scopes for future staff roles. `is_admin` remains the current owner/admin compatibility flag.
+
+## Privacy And Trust Posture
+
+CarePland should treat privacy as part of the product experience, not only as a legal page. The trust angle is grounded in Andrew's PeopleSoft, Student Records, FERPA, and compliance background: operational access can be necessary, but it should be purposeful, limited, documented, and reviewable. That philosophy should carry into user-facing explanations later: CarePland asks people to store sensitive appointment context, so the app should show that access is handled with care.
+
+Current implementation principles:
+
+- User data is borrowed context for helping the user, not casually available operational raw material.
+- Admin views should start with redacted or summarized information whenever that is enough for troubleshooting.
+- Contact details are hidden by default in Admin `View as user`. Revealing full contact details requires a written justification before the data is returned.
+- Updating contact details requires a separate written justification before saving. Viewing and saving are separate audit events; taking a peek is not invisible.
+- Contact detail updates run through a protected server route using the Supabase service role key. Service-role operations must never run in browser/client code.
+- Contact audit metadata should record broad fields viewed or changed, actor, target user, timestamp, reason, and redacted before/after summaries. Avoid casually displaying full old/new sensitive values in audit surfaces.
+- Sensitive appointment, Notes, and CarePrep content should follow the same general reveal-and-audit pattern as contact details, even when the exact UI differs.
+- Future public trust copy can say, in plain language, that CarePland limits admin visibility by default, requires a reason to reveal sensitive account details, and keeps an access trail for accountability.
 
 Email notifications:
 
@@ -374,8 +396,8 @@ Dynamic content admin exists for app text that may change, including:
 - Support assistant copy.
 - Support email content.
 - Onboarding/welcome text.
-- Profile helper text, including the expandable plan-tier explanation.
 - Short workflow messages, including the manual CarePrep plan-limit message.
+- Plan feature wording shown in the Profile current-plan helper and future billing surfaces.
 - AI Agent knowledge.
 
 Rules:
@@ -384,7 +406,9 @@ Rules:
 - Preserve version history.
 - Reverting content should create a new current version.
 - Keep user-facing messages calm and practical.
-- Profile plan-tier helper content supports line breaks and a tiny safe inline formatting subset for bold text: `<b>` and `<strong>`.
+- The Profile plan `?` helper should describe the current plan's actual included features in very brief phrases, not compare all tiers or act as marketing copy. Each plan has one whole editable Dynamic Text block under the Plans category so Admin can review and edit the panel visually without hunting individual lines. The first line is the summary; following lines may use `Label: value`. It may reserve a quiet placeholder for a future plan-change link.
+- In Admin sessions, the Profile plan panel's Change Plan control may act as a local preview selector for validating plan Dynamic Text. This must not update entitlements, billing state, metering state, or user data.
+- In Admin sessions, the Profile Care VIPs panel may include a small local allowance preview selector beside the counter. This is only for visual validation of Care VIP limit states and must not update the real entitlement or create additional permissions.
 
 ## Public Website And Domain Positioning
 
@@ -414,6 +438,12 @@ Website content assumptions:
 - Public section sequence should be: hero/appointment-loop preview, gap-between-appointments video section, continuity-breakdown panels, patient-tools asymmetry, care-history-to-appointment-readiness, Early Access signup.
 - Keep CP Pers out of the initial public website narrative unless it becomes necessary later; the current homepage should avoid internal feature jargon.
 - Public pricing/tier explanation can live on the website; draft website copy is preserved in `docs/CAREPLAND_PRICING_TIERS_WEBSITE_COPY.md`.
+
+Future website editing options to consider only if manual edits start consuming too much implementation time or credits:
+
+- First preference: move public website copy, slide captions, CTA text, and alt text into a small repo-owned content file so edits remain lightweight while Vercel/GitHub stay the source of truth.
+- Second preference: evaluate a Git-backed CMS such as TinaCMS or Decap CMS if Andrew needs a browser-based editing surface that still commits content changes back to the repo.
+- Later/only if clearly needed: evaluate a visual builder such as Builder.io or Plasmic for layout-level editing. Avoid reintroducing a separate Weebly-style website stack unless there is a strong reason.
 - Pricing can be added to the public website later, but the initial homepage should stay focused on the appointment-loop narrative and Early Access intake.
 - A future demo video should be embedded from a video platform or CDN rather than stored as a large file in the website repo/deployment.
 - The circular hands/heart mark can be used as the public logo direction because it better implies the appointment loop than the rounded-square variant.

@@ -21,6 +21,10 @@ function isLikelyEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function redactEmail(value: string) {
+  return value.trim().replace(/(^.).*(@.*$)/, "$1***$2");
+}
+
 async function findAuthUserByEmail(
   adminClient: SupabaseClient,
   email: string
@@ -74,9 +78,14 @@ export async function POST(request: NextRequest) {
       typeof body.currentEmail === "string" ? body.currentEmail.trim() : "";
     const newEmail =
       typeof body.newEmail === "string" ? body.newEmail.trim() : "";
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
 
     if (!isLikelyEmail(currentEmail) || !isLikelyEmail(newEmail)) {
       throw new Error("Enter a valid current email and replacement email.");
+    }
+
+    if (reason.length < 8) {
+      throw new Error("Enter a brief reason before updating user email.");
     }
 
     if (currentEmail.toLowerCase() === newEmail.toLowerCase()) {
@@ -158,6 +167,27 @@ export async function POST(request: NextRequest) {
 
     if (profileError) {
       throw profileError;
+    }
+
+    const { error: auditError } = await adminClient
+      .from("admin_access_events")
+      .insert({
+        actor_user_id: adminUserId,
+        event_type: "admin_contact_details_updated",
+        metadata: {
+          after_preview: { email: redactEmail(newEmail) },
+          before_preview: { email: redactEmail(currentEmail) },
+          changed_fields: ["email"],
+          source: "admin_email_update_tool",
+        },
+        permission_scope: "update_user_contact",
+        reason,
+        resource_type: "profile_contact",
+        target_user_id: targetUser.id,
+      });
+
+    if (auditError) {
+      throw auditError;
     }
 
     return NextResponse.json({

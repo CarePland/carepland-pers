@@ -4,7 +4,6 @@ import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
 import {
   FormEvent,
-  ReactNode,
   useEffect,
   useMemo,
   useRef,
@@ -20,6 +19,7 @@ import {
   AgentKnowledgeProposalsPanel,
 } from "./components/AgentKnowledgeProposalsPanel";
 import { AdminNavButton } from "./components/admin/AdminAttention";
+import { AdminContactDetailsPanel } from "./components/admin/AdminContactDetailsPanel";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import { PublicWebsite } from "./components/PublicWebsite";
@@ -31,6 +31,16 @@ import {
   PlaceDetailsResult,
   placesUnavailableMessage,
 } from "./lib/places";
+import {
+  AdminContactDetails,
+  adminContactDetailsFromValue,
+} from "./lib/adminContactDetails";
+import {
+  planFeatureContentDefaults,
+  planProfilePanelContentKey,
+  pricingTierForEntitlement,
+  pricingTiers,
+} from "./lib/pricingTiers";
 
 type Appointment = {
   id: string;
@@ -69,21 +79,6 @@ type CareCircleEntitlement = {
   max_active_subjects: number;
   plan_id: string;
   plan_name: string;
-};
-
-type PricingTier = {
-  id: string;
-  aliases?: string[];
-  name: string;
-  label: string;
-  purpose: string;
-  bestFor: string;
-  careVips: string;
-  carePrep: string;
-  imports: string;
-  support: string;
-  automation: string;
-  highlights: string[];
 };
 
 type AppointmentNote = {
@@ -191,6 +186,8 @@ type AdminUserActivityRow = {
   user_id: string;
   email: string | null;
   display_name: string | null;
+  care_subjects?: CareSubject[];
+  user_group?: string | null;
   account_created_at: string | null;
   last_seen_at: string | null;
   appointment_count: number;
@@ -638,6 +635,17 @@ type AdminUserActivityFilter =
   | "needs_followup"
   | "real"
   | "test";
+type AdminUserActivitySortKey =
+  | "appointments"
+  | "careprep"
+  | "created"
+  | "flags"
+  | "group"
+  | "last_activity"
+  | "last_seen"
+  | "notes"
+  | "tickets"
+  | "user";
 type SupportTicketStatus =
   | "closed"
   | "in_progress"
@@ -847,176 +855,6 @@ const defaultAgentKnowledgeAutomationSettings: AgentKnowledgeAutomationSettings 
   updated_at: "",
 };
 
-const pricingTiers: PricingTier[] = [
-  {
-    id: "personal",
-    aliases: ["free"],
-    name: "Free",
-    label: "Tier 1",
-    purpose: "A gentle way to try appointment memory and CarePrep.",
-    bestFor: "Light or occasional appointment tracking",
-    careVips: "1 Care VIP",
-    carePrep: "Limited manual CarePrep generations",
-    imports: "Limited document uploads, OCR, and calendar imports",
-    support: "Self-service help",
-    automation: "Manual preparation only",
-    highlights: [
-      "Basic appointment tracking",
-      "Manual CarePrep generation",
-      "Limited import allowances",
-    ],
-  },
-  {
-    id: "active_use",
-    name: "Active Use",
-    label: "Tier 2",
-    purpose: "More room for active healthcare management.",
-    bestFor: "Chronic care, frequent specialists, or fuller history",
-    careVips: "1 Care VIP",
-    carePrep: "Expanded manual CarePrep allowance",
-    imports: "Expanded document uploads, OCR, and calendar imports",
-    support: "CarePland assistant and chat support access",
-    automation: "Mostly manual preparation",
-    highlights: [
-      "Larger CarePrep generation bag",
-      "Deeper saved appointment context",
-      "More import capacity",
-    ],
-  },
-  {
-    id: "premium_individual",
-    name: "Premium Individual",
-    label: "Tier 3",
-    purpose: "Proactive continuity support for one person.",
-    bestFor: "People who want CarePland to quietly do more work",
-    careVips: "1 Care VIP",
-    carePrep: "Automatic CarePrep for medical appointments",
-    imports: "Generous document upload and import allowances",
-    support: "Enhanced support responsiveness",
-    automation: "Automatic preparation after appointment creation or import",
-    highlights: [
-      "Automatic appointment preparation",
-      "Smart reminders and preparation workflows",
-      "Reduced manual effort",
-    ],
-  },
-  {
-    id: "personal_plus",
-    aliases: ["group", "caregiver"],
-    name: "Group",
-    label: "Tier 4",
-    purpose: "Coordination across multiple Care VIPs.",
-    bestFor: "Families, caregivers, or groups managing care for others",
-    careVips: "Multiple Care VIPs",
-    carePrep: "Automatic CarePrep across multiple people",
-    imports: "Highest upload, OCR, and calendar import allowances",
-    support: "Most generous support access",
-    automation: "Multi-person automatic preparation and continuity support",
-    highlights: [
-      "Multiple Care VIP profiles",
-      "Shared continuity workflows",
-      "Group-oriented coordination support",
-    ],
-  },
-  {
-    id: "early_access",
-    aliases: ["early_adopter"],
-    name: "Early Access",
-    label: "Early Access",
-    purpose: "Full-access continuity support for early adopters.",
-    bestFor: "Early adopters who should retain broad Personal access",
-    careVips: "Multiple Care VIPs",
-    carePrep: "Automatic CarePrep across multiple people",
-    imports: "Highest upload, OCR, and calendar import allowances",
-    support: "Most generous support access",
-    automation: "Multi-person automatic preparation and continuity support",
-    highlights: [
-      "Group-level functionality",
-      "Early adopter differentiation",
-      "Ready for later subscription transition",
-    ],
-  },
-];
-
-function pricingTierForEntitlement(entitlement: CareCircleEntitlement) {
-  return (
-    pricingTiers.find(
-      (tier) =>
-        tier.id === entitlement.plan_id ||
-        tier.aliases?.includes(entitlement.plan_id)
-    ) ??
-    pricingTiers.find((tier) => tier.name === entitlement.plan_name) ??
-    pricingTiers[0]
-  );
-}
-
-function formattedHelpLines(body: string) {
-  const trimmedBody = body.trim();
-
-  if (!trimmedBody) {
-    return [];
-  }
-
-  if (trimmedBody.includes("\n")) {
-    return trimmedBody
-      .split("\n")
-      .map((line) => line.trim().replace(/^[-*]\s+/, ""))
-      .filter(Boolean);
-  }
-
-  return trimmedBody
-    .split(". ")
-    .map((line, index, lines) => {
-      const trimmedLine = line.trim();
-      const isLastLine = index === lines.length - 1;
-
-      if (!trimmedLine) {
-        return "";
-      }
-
-      return isLastLine || trimmedLine.endsWith(".")
-        ? trimmedLine
-        : `${trimmedLine}.`;
-    })
-    .filter(Boolean);
-}
-
-function renderBasicInlineMarkup(text: string): ReactNode[] {
-  const parts = text.split(/(<\/?(?:b|strong)>)/gi);
-  const renderedParts: ReactNode[] = [];
-  let isBold = false;
-
-  parts.forEach((part, index) => {
-    const normalizedPart = part.toLowerCase();
-
-    if (normalizedPart === "<b>" || normalizedPart === "<strong>") {
-      isBold = true;
-      return;
-    }
-
-    if (normalizedPart === "</b>" || normalizedPart === "</strong>") {
-      isBold = false;
-      return;
-    }
-
-    if (!part) {
-      return;
-    }
-
-    renderedParts.push(
-      isBold ? (
-        <strong className="font-semibold text-slate-900" key={`${part}-${index}`}>
-          {part}
-        </strong>
-      ) : (
-        part
-      )
-    );
-  });
-
-  return renderedParts;
-}
-
 const appContentDefaults = {
   beta_disclaimer_ack:
     "I understand this Early Access version is not for emergencies or critical medical decisions.",
@@ -1033,8 +871,7 @@ const appContentDefaults = {
   demo_prompt_body:
     "CarePland can add a few fictional appointments, notes, and CarePrep examples so you can explore before entering your own information.",
   demo_prompt_title: "Want examples to explore?",
-  profile_plan_tier_help_body:
-    "- <b>Free</b> is for light use.\n- <b>Active Use</b> adds larger manual CarePrep and import allowances.\n- <b>Premium Individual</b> adds automatic appointment preparation for one Care VIP.\n- <b>Group</b> supports multiple Care VIPs.\n- <b>Early Access</b> currently includes Group-level access for early adopters.",
+  ...planFeatureContentDefaults,
   careprep_manual_limit_message:
     "You have used this month's manual CarePrep generations. Plan changes are not wired up yet, but support can help while account changes are still handled manually.",
   careprep_refresh_not_ready_message:
@@ -1177,13 +1014,13 @@ const appContentOptions = [
     description: "Profile page explanation shown before adding demo data.",
     label: "Demo data add note",
   },
-  {
-    category: "profile",
-    contentKey: "profile_plan_tier_help_body",
+  ...pricingTiers.map((tier) => ({
+    category: "plans",
+    contentKey: planProfilePanelContentKey(tier.id),
     description:
-      "Expandable Profile page note that briefly explains plan tier differences. Supports line breaks and basic bold tags: <b> or <strong>.",
-    label: "Plan tier help note",
-  },
+      "Whole editable block shown in the Profile plan helper. First line is the brief summary; following lines may use Label: value.",
+    label: `${tier.name}: Profile plan panel`,
+  })),
   {
     category: "messages",
     contentKey: "careprep_manual_limit_message",
@@ -1235,9 +1072,9 @@ const appContentCategories = [
     label: "Onboarding",
   },
   {
-    description: "Editable Profile page helper text and account-setting notes.",
-    key: "profile",
-    label: "Profile",
+    description: "Plan feature wording shown in Profile and future billing surfaces.",
+    key: "plans",
+    label: "Plans",
   },
   {
     description: "Short status, success, warning, and validation messages.",
@@ -1801,6 +1638,16 @@ function adminAppointmentPrivacyLabel(appointment: AdminReadonlyAppointment) {
   return hiddenItems.length > 0
     ? `Hidden: ${hiddenItems.join(", ")}`
     : "No hidden appointment details";
+}
+
+function adminUserActivityLastActivity(row: AdminUserActivityRow) {
+  return (
+    row.last_support_ticket_at ??
+    row.last_careprep_generated_at ??
+    row.last_note_created_at ??
+    row.last_appointment_created_at ??
+    row.last_seen_at
+  );
 }
 
 function shortId(value: string | null): string {
@@ -2796,6 +2643,7 @@ export default function Home() {
   const [authMode, setAuthMode] = useState<AuthMode>("signIn");
   const [showAuthGateway, setShowAuthGateway] = useState(false);
   const [planHelpExpanded, setPlanHelpExpanded] = useState(false);
+  const [adminPlanPreviewId, setAdminPlanPreviewId] = useState("");
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
     useState<AppointmentPanel | null>(
       initialUiState?.activeAppointmentPanel ?? null
@@ -3021,6 +2869,13 @@ export default function Home() {
     useState(false);
   const [adminUserActivityFilter, setAdminUserActivityFilter] =
     useState<AdminUserActivityFilter>("all");
+  const [adminUserActivitySort, setAdminUserActivitySort] = useState<{
+    direction: "asc" | "desc";
+    key: AdminUserActivitySortKey;
+  }>({
+    direction: "desc",
+    key: "last_activity",
+  });
   const [earlyAccessIntakeRows, setEarlyAccessIntakeRows] = useState<
     EarlyAccessIntakeRow[]
   >([]);
@@ -3051,9 +2906,13 @@ export default function Home() {
     useState<string | null>(null);
   const [revealingAdminSensitiveKey, setRevealingAdminSensitiveKey] =
     useState<string | null>(null);
+  const [savingAdminContactDetails, setSavingAdminContactDetails] =
+    useState(false);
   const [adminRevealedSensitiveData, setAdminRevealedSensitiveData] = useState<
     Record<string, AdminRevealedSensitiveData>
   >({});
+  const [expandedAdminUserCareVipRows, setExpandedAdminUserCareVipRows] =
+    useState<Record<string, boolean>>({});
   const [adminIntegrationErrors, setAdminIntegrationErrors] = useState<
     AdminIntegrationErrorSummaryRow[]
   >([]);
@@ -3279,6 +3138,7 @@ export default function Home() {
   const [adminEmailUpdateCurrentEmail, setAdminEmailUpdateCurrentEmail] =
     useState("");
   const [adminEmailUpdateNewEmail, setAdminEmailUpdateNewEmail] = useState("");
+  const [adminEmailUpdateReason, setAdminEmailUpdateReason] = useState("");
   const [adminEmailUpdateResult, setAdminEmailUpdateResult] = useState("");
   const [updatingAdminUserEmail, setUpdatingAdminUserEmail] = useState(false);
   const [acceptBetaDisclaimer, setAcceptBetaDisclaimer] = useState(false);
@@ -3566,7 +3426,7 @@ export default function Home() {
   const filteredAdminUserActivity = useMemo(() => {
     const inactiveSince = Date.now() - 1000 * 60 * 60 * 24 * 14;
 
-    return adminUserActivity.filter((row) => {
+    const filteredRows = adminUserActivity.filter((row) => {
       if (adminUserActivityFilter === "real") {
         return !row.is_test_user;
       }
@@ -3602,7 +3462,47 @@ export default function Home() {
 
       return true;
     });
-  }, [adminUserActivity, adminUserActivityFilter]);
+
+    return [...filteredRows].sort((firstRow, secondRow) => {
+      const direction = adminUserActivitySort.direction === "asc" ? 1 : -1;
+      const valueForSort = (row: AdminUserActivityRow) => {
+        switch (adminUserActivitySort.key) {
+          case "appointments":
+            return row.appointment_count;
+          case "careprep":
+            return row.careprep_count;
+          case "created":
+            return row.account_created_at ?? "";
+          case "flags":
+            return [row.is_admin ? "Admin" : "", row.is_test_user ? "Test" : ""]
+              .filter(Boolean)
+              .join(" ");
+          case "group":
+            return row.user_group ?? "";
+          case "last_activity":
+            return adminUserActivityLastActivity(row) ?? "";
+          case "last_seen":
+            return row.last_seen_at ?? "";
+          case "notes":
+            return row.note_count;
+          case "tickets":
+            return row.open_support_ticket_count;
+          case "user":
+            return row.display_name || row.email || row.user_id;
+          default:
+            return "";
+        }
+      };
+      const firstValue = valueForSort(firstRow);
+      const secondValue = valueForSort(secondRow);
+
+      if (typeof firstValue === "number" && typeof secondValue === "number") {
+        return (firstValue - secondValue) * direction;
+      }
+
+      return String(firstValue).localeCompare(String(secondValue)) * direction;
+    });
+  }, [adminUserActivity, adminUserActivityFilter, adminUserActivitySort]);
   const selectedBulkAppointmentCount = bulkAppointmentDrafts.filter(
     (draft) => draft.isSelected
   ).length;
@@ -3665,8 +3565,12 @@ export default function Home() {
     };
   }, [adminIntegrationErrors]);
 
-  function appContentText(key: keyof typeof appContentDefaults) {
-    return currentAppContentByKey.get(key)?.body ?? appContentDefaults[key];
+  function appContentText(key: string) {
+    return (
+      currentAppContentByKey.get(key)?.body ??
+      (appContentDefaults as Record<string, string>)[key] ??
+      ""
+    );
   }
 
   function autoCarePrepSuccessText(appointment: Appointment) {
@@ -3701,7 +3605,33 @@ export default function Home() {
   }, [careSubjects]);
 
   const careVipLimit = Math.max(entitlement.max_active_subjects || 1, 1);
-  const currentPricingTier = pricingTierForEntitlement(entitlement);
+  const actualPricingTier = pricingTierForEntitlement(entitlement);
+  const previewPricingTier =
+    isAdmin && adminPlanPreviewId
+      ? pricingTiers.find((tier) => tier.id === adminPlanPreviewId)
+      : null;
+  const currentPricingTier = previewPricingTier ?? actualPricingTier;
+  const isPreviewingPlan = Boolean(
+    previewPricingTier && previewPricingTier.id !== actualPricingTier.id
+  );
+  const currentPlanPanelLines = appContentText(
+    planProfilePanelContentKey(currentPricingTier.id)
+  )
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const currentPlanSummary =
+    currentPlanPanelLines[0] || currentPricingTier.profileSummary;
+  const currentPlanFeatureRows = currentPlanPanelLines
+    .slice(1)
+    .map((line) => {
+      const [label, ...valueParts] = line.split(":");
+      const value = valueParts.join(":").trim();
+
+      return value
+        ? [label.trim(), value]
+        : ["", line];
+    });
   const canUseMultipleCareVips = careVipLimit > 1;
   const canFilterCareVips = careSubjects.length > 1;
   const canAddCareVip = careSubjects.length < careVipLimit;
@@ -6166,6 +6096,20 @@ export default function Home() {
     }
   }
 
+  function toggleAdminUserActivitySort(key: AdminUserActivitySortKey) {
+    setAdminUserActivitySort((currentSort) =>
+      currentSort.key === key
+        ? {
+            direction: currentSort.direction === "asc" ? "desc" : "asc",
+            key,
+          }
+        : {
+            direction: key === "user" || key === "group" ? "asc" : "desc",
+            key,
+          }
+    );
+  }
+
   async function loadEarlyAccessIntake() {
     setLoadingEarlyAccessIntake(true);
     setMessage("");
@@ -6346,10 +6290,12 @@ export default function Home() {
   }
 
   async function revealAdminSensitiveData({
+    reason,
     resourceId = null,
     resourceType,
     targetUserId,
   }: {
+    reason?: string;
     resourceId?: string | null;
     resourceType: AdminSensitiveResourceType;
     targetUserId: string;
@@ -6359,6 +6305,46 @@ export default function Home() {
     setMessage("");
 
     try {
+      if (resourceType === "profile_contact") {
+        const { data: sessionData, error: sessionError } =
+          await supabase.auth.getSession();
+
+        if (sessionError) {
+          throw sessionError;
+        }
+
+        const accessToken = sessionData.session?.access_token;
+
+        if (!accessToken) {
+          throw new Error("Please sign in before viewing contact details.");
+        }
+
+        const response = await fetch("/api/admin/contact-details", {
+          body: JSON.stringify({
+            action: "reveal",
+            reason,
+            targetUserId,
+          }),
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error ?? "Contact reveal failed.");
+        }
+
+        setAdminRevealedSensitiveData((currentData) => ({
+          ...currentData,
+          [revealKey]: adminContactDetailsFromValue(result.contactDetails),
+        }));
+        setMessage("Contact details revealed and logged.");
+        return;
+      }
+
       const { data, error } = await supabase.rpc(
         "reveal_admin_user_sensitive_data",
         {
@@ -6382,6 +6368,81 @@ export default function Home() {
       setMessage(getErrorMessage(error));
     } finally {
       setRevealingAdminSensitiveKey(null);
+    }
+  }
+
+  async function saveAdminContactDetails(
+    contactDetails: AdminContactDetails,
+    reason: string
+  ) {
+    if (!adminReadonlySnapshot) {
+      return;
+    }
+
+    setSavingAdminContactDetails(true);
+    setMessage("");
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before saving contact details.");
+      }
+
+      const response = await fetch("/api/admin/contact-details", {
+        body: JSON.stringify({
+          action: "update",
+          contactDetails,
+          reason,
+          targetUserId: adminReadonlySnapshot.profile.id,
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Contact update failed.");
+      }
+
+      const contactKey = adminSensitiveKey("profile_contact");
+      const updatedContactDetails = adminContactDetailsFromValue(
+        result.contactDetails
+      );
+      setAdminRevealedSensitiveData((currentData) => ({
+        ...currentData,
+        [contactKey]: updatedContactDetails,
+      }));
+      setAdminReadonlySnapshot((currentSnapshot) =>
+        currentSnapshot
+          ? {
+              ...currentSnapshot,
+              profile: {
+                ...currentSnapshot.profile,
+                masked_email:
+                  updatedContactDetails.email.replace(
+                    /(^.).*(@.*$)/,
+                    "$1***$2"
+                  ) || currentSnapshot.profile.masked_email,
+              },
+            }
+          : currentSnapshot
+      );
+      showToast("Contact details updated and logged.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAdminContactDetails(false);
     }
   }
 
@@ -8042,9 +8103,14 @@ export default function Home() {
     try {
       const currentEmail = adminEmailUpdateCurrentEmail.trim();
       const newEmail = adminEmailUpdateNewEmail.trim();
+      const reason = adminEmailUpdateReason.trim();
 
       if (!isLikelyEmail(currentEmail) || !isLikelyEmail(newEmail)) {
         throw new Error("Enter a valid current email and replacement email.");
+      }
+
+      if (reason.length < 8) {
+        throw new Error("Enter a brief reason before updating user email.");
       }
 
       if (currentEmail.toLowerCase() === newEmail.toLowerCase()) {
@@ -8065,7 +8131,7 @@ export default function Home() {
       }
 
       const response = await fetch("/api/admin/update-user-email", {
-        body: JSON.stringify({ currentEmail, newEmail }),
+        body: JSON.stringify({ currentEmail, newEmail, reason }),
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
@@ -8081,6 +8147,7 @@ export default function Home() {
       const successMessage = `Updated ${currentEmail} to ${result.email ?? newEmail}.`;
       setAdminEmailUpdateCurrentEmail("");
       setAdminEmailUpdateNewEmail("");
+      setAdminEmailUpdateReason("");
       setAdminEmailUpdateResult(successMessage);
       showToast(successMessage, { type: "success" });
     } catch (error) {
@@ -11769,10 +11836,51 @@ export default function Home() {
 
               <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
                 <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-1">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Plan
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Plan
+                    </div>
+                    {isAdmin ? (
+                      <label className="w-[7.5rem]">
+                        <span className="sr-only">Preview plan</span>
+                        <select
+                          aria-label="Preview plan"
+                          className="h-7 w-full rounded-md border border-blue-100 bg-white px-2 text-xs font-semibold leading-none text-slate-500"
+                          onChange={(event) => {
+                            const selectedTierId = event.target.value;
+                            setAdminPlanPreviewId(
+                              selectedTierId === actualPricingTier.id
+                                ? ""
+                                : selectedTierId
+                            );
+                            setPlanHelpExpanded(true);
+                          }}
+                          title="Admin-only local plan preview. Does not change the real account plan."
+                          value={currentPricingTier.id}
+                        >
+                          {pricingTiers.map((tier) => (
+                            <option key={tier.id} value={tier.id}>
+                              {tier.id === "premium_individual"
+                                ? "Premium"
+                                : tier.id === "early_access"
+                                  ? "Early"
+                                  : tier.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <button
+                        className="h-7 whitespace-nowrap text-xs font-semibold text-slate-400"
+                        disabled
+                        title="Plan changes are not wired up yet."
+                        type="button"
+                      >
+                        Change Plan
+                      </button>
+                    )}
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center gap-2 font-semibold text-slate-950">
                       <span>{currentPricingTier.name}</span>
                       {isAdmin ? (
@@ -11781,6 +11889,14 @@ export default function Home() {
                           title="Admin access is managed separately from plan billing."
                         >
                           Admin
+                        </span>
+                      ) : null}
+                      {isPreviewingPlan ? (
+                        <span
+                          className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[0.68rem] font-bold uppercase tracking-wide text-blue-700"
+                          title={`Previewing ${currentPricingTier.name}; actual plan is ${actualPricingTier.name}.`}
+                        >
+                          Preview
                         </span>
                       ) : null}
                       <button
@@ -11795,26 +11911,38 @@ export default function Home() {
                         ?
                       </button>
                     </span>
-                    <span className="whitespace-nowrap text-sm font-semibold text-slate-500">
-                      Early Access
-                    </span>
                   </div>
                   <div
                     aria-hidden={!planHelpExpanded}
-                    className={`mt-3 rounded-md border border-blue-100 bg-white p-3 text-sm leading-6 text-slate-700 ${
-                      planHelpExpanded ? "" : "hidden sm:block sm:invisible"
+                    className={`mt-3 rounded-md border border-blue-100 bg-white p-3 text-sm text-slate-700 ${
+                      planHelpExpanded ? "" : "hidden"
                     }`}
                   >
-                    <ul className="space-y-2">
-                      {formattedHelpLines(
-                        appContentText("profile_plan_tier_help_body")
-                      ).map((line) => (
-                        <li className="flex gap-2" key={line}>
-                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-300" />
-                          <span>{renderBasicInlineMarkup(line)}</span>
-                        </li>
+                    <p className="mb-3 leading-5 text-slate-800">
+                      {currentPlanSummary}
+                    </p>
+                    <dl className="space-y-3">
+                      {currentPlanFeatureRows.map(([label, value]) => (
+                        <div className="grid gap-1 sm:grid-cols-[6rem_minmax(0,1fr)]" key={label}>
+                          {label ? (
+                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              {label}
+                            </dt>
+                          ) : null}
+                          <dd className="leading-5 text-slate-800">{value}</dd>
+                        </div>
                       ))}
-                    </ul>
+                    </dl>
+                    <div className="mt-4 border-t border-blue-100 pt-3">
+                      <button
+                        className="text-sm font-semibold text-slate-400"
+                        disabled
+                        title="Plan changes are not wired up yet."
+                        type="button"
+                      >
+                        Plan change options coming later
+                      </button>
+                    </div>
                   </div>
                 </section>
 
@@ -11848,8 +11976,8 @@ export default function Home() {
                     <form className="mt-4" onSubmit={handleCreateCareVip}>
                       <label className="block text-sm font-medium text-slate-700">
                         Add Care VIP
-                        <input
-                          className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                          <input
+                            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
                           disabled={!canAddCareVip}
                           onChange={(event) =>
                             setNewCareVipName(event.target.value)
@@ -13974,6 +14102,18 @@ export default function Home() {
                     >
                       {updatingAdminUserEmail ? "Updating..." : "Update email"}
                     </button>
+                    <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                      Update justification
+                      <textarea
+                        className="mt-2 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                        onChange={(event) => {
+                          setAdminEmailUpdateReason(event.target.value);
+                          setAdminEmailUpdateResult("");
+                        }}
+                        placeholder="Required before changing a login email."
+                        value={adminEmailUpdateReason}
+                      />
+                    </label>
                   </form>
 
                   {adminEmailUpdateResult ? (
@@ -14167,65 +14307,44 @@ export default function Home() {
                         </dl>
 
                         {adminReadonlySnapshot.profile.has_contact_details ? (
-                          <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-                            {adminRevealedSensitiveData[
-                              adminSensitiveKey("profile_contact")
-                            ] ? (
-                              <div className="space-y-1 text-sm text-slate-700">
-                                {[
-                                  ["Email", "email"],
-                                  ["Phone", "phone"],
-                                  ["Time zone", "timezone"],
-                                  ["Address", "address_line1"],
-                                  ["Address 2", "address_line2"],
-                                  ["City", "city"],
-                                  ["State", "region"],
-                                  ["ZIP", "postal_code"],
-                                  ["Country", "country"],
-                                ].map(([label, key]) => {
-                                  const value = textValue(
+                          <AdminContactDetailsPanel
+                            contactDetails={
+                              adminRevealedSensitiveData[
+                                adminSensitiveKey("profile_contact")
+                              ]
+                                ? adminContactDetailsFromValue(
                                     adminRevealedSensitiveData[
                                       adminSensitiveKey("profile_contact")
-                                    ]?.[key]
-                                  );
-
-                                  return value ? (
-                                    <p key={key}>
-                                      <span className="font-semibold">{label}:</span>{" "}
-                                      {value}
-                                    </p>
-                                  ) : null;
-                                })}
-                              </div>
-                            ) : (
-                              <>
-                                <p className="text-sm text-slate-600">
-                                  Contact and address details are hidden.
-                                </p>
-                                <button
-                                  className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
-                                  disabled={
-                                    revealingAdminSensitiveKey ===
-                                    adminSensitiveKey("profile_contact")
-                                  }
-                                  onClick={() =>
-                                    revealAdminSensitiveData({
-                                      resourceType: "profile_contact",
-                                      targetUserId:
-                                        adminReadonlySnapshot.profile.id,
-                                    })
-                                  }
-                                  type="button"
-                                >
-                                  {revealingAdminSensitiveKey ===
-                                  adminSensitiveKey("profile_contact")
-                                    ? "Revealing..."
-                                    : "Reveal contact details"}
-                                </button>
-                              </>
-	                            )}
-	                          </div>
-	                        ) : null}
+                                    ]
+                                  )
+                                : null
+                            }
+                            hasContactDetails={
+                              adminReadonlySnapshot.profile.has_contact_details
+                            }
+                            key={JSON.stringify(
+                              adminRevealedSensitiveData[
+                                adminSensitiveKey("profile_contact")
+                              ] ?? "hidden"
+                            )}
+                            maskedEmail={
+                              adminReadonlySnapshot.profile.masked_email
+                            }
+                            onReveal={(reason) =>
+                              revealAdminSensitiveData({
+                                reason,
+                                resourceType: "profile_contact",
+                                targetUserId: adminReadonlySnapshot.profile.id,
+                              })
+                            }
+                            onSave={saveAdminContactDetails}
+                            revealing={
+                              revealingAdminSensitiveKey ===
+                              adminSensitiveKey("profile_contact")
+                            }
+                            saving={savingAdminContactDetails}
+                          />
+                        ) : null}
 	                      </div>
 
                       <div className="rounded-md border border-blue-100 bg-white p-3">
@@ -14733,35 +14852,156 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="mt-5 overflow-x-auto">
-                    <table className="min-w-[980px] w-full border-separate border-spacing-0 text-left text-sm">
+                    <table className="min-w-[1120px] w-full border-separate border-spacing-0 text-left text-sm">
                       <thead>
                         <tr className="text-xs uppercase tracking-wide text-slate-500">
                           <th className="border-b border-slate-200 px-3 py-2">
-                            User
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() => toggleAdminUserActivitySort("user")}
+                              type="button"
+                            >
+                              User
+                              {adminUserActivitySort.key === "user"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
                           </th>
                           <th className="border-b border-slate-200 px-3 py-2">
-                            Last seen
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() => toggleAdminUserActivitySort("group")}
+                              type="button"
+                            >
+                              User Group
+                              {adminUserActivitySort.key === "group"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
                           </th>
                           <th className="border-b border-slate-200 px-3 py-2">
-                            Created
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            Appts
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            Notes
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            CarePrep
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            Tix
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            Last activity
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() =>
+                                toggleAdminUserActivitySort("last_seen")
+                              }
+                              type="button"
+                            >
+                              Last seen
+                              {adminUserActivitySort.key === "last_seen"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
                           </th>
                           <th className="border-b border-slate-200 px-3 py-2">
-                            Flags
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() => toggleAdminUserActivitySort("created")}
+                              type="button"
+                            >
+                              Created
+                              {adminUserActivitySort.key === "created"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() =>
+                                toggleAdminUserActivitySort("appointments")
+                              }
+                              type="button"
+                            >
+                              Appts
+                              {adminUserActivitySort.key === "appointments"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() => toggleAdminUserActivitySort("notes")}
+                              type="button"
+                            >
+                              Notes
+                              {adminUserActivitySort.key === "notes"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() =>
+                                toggleAdminUserActivitySort("careprep")
+                              }
+                              type="button"
+                            >
+                              CarePrep
+                              {adminUserActivitySort.key === "careprep"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2 text-right">
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() => toggleAdminUserActivitySort("tickets")}
+                              type="button"
+                            >
+                              Tix
+                              {adminUserActivitySort.key === "tickets"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() =>
+                                toggleAdminUserActivitySort("last_activity")
+                              }
+                              type="button"
+                            >
+                              Last activity
+                              {adminUserActivitySort.key === "last_activity"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
+                          </th>
+                          <th className="border-b border-slate-200 px-3 py-2">
+                            <button
+                              className="font-semibold uppercase tracking-wide"
+                              onClick={() => toggleAdminUserActivitySort("flags")}
+                              type="button"
+                            >
+                              Flags
+                              {adminUserActivitySort.key === "flags"
+                                ? adminUserActivitySort.direction === "asc"
+                                  ? " ↑"
+                                  : " ↓"
+                                : ""}
+                            </button>
                           </th>
                           <th className="border-b border-slate-200 px-3 py-2">
                             Actions
@@ -14771,14 +15011,13 @@ export default function Home() {
                       <tbody>
                         {filteredAdminUserActivity.map((row) => {
                           const lastActivity =
-                            row.last_support_ticket_at ??
-                            row.last_careprep_generated_at ??
-                            row.last_note_created_at ??
-                            row.last_appointment_created_at ??
-                            row.last_seen_at;
+                            adminUserActivityLastActivity(row);
 
                           const isReadonlyViewTarget =
                             adminReadonlySnapshot?.profile.id === row.user_id;
+                          const rowCareSubjects = row.care_subjects ?? [];
+                          const areCareVipsExpanded =
+                            expandedAdminUserCareVipRows[row.user_id] ?? false;
 
                           return (
                             <tr
@@ -14794,6 +15033,41 @@ export default function Home() {
                                 <p className="break-all text-xs text-slate-500">
                                   {row.email || row.user_id}
                                 </p>
+                                <button
+                                  className="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                                  onClick={() =>
+                                    setExpandedAdminUserCareVipRows(
+                                      (currentRows) => ({
+                                        ...currentRows,
+                                        [row.user_id]: !areCareVipsExpanded,
+                                      })
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  {areCareVipsExpanded ? "Hide VIPs" : "View VIPs"}
+                                </button>
+                                {areCareVipsExpanded ? (
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {rowCareSubjects.length > 0 ? (
+                                      rowCareSubjects.map((subject) => (
+                                        <span
+                                          className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700"
+                                          key={subject.id}
+                                        >
+                                          {subject.display_name}
+                                        </span>
+                                      ))
+                                    ) : (
+                                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">
+                                        No Care VIPs
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
+                                {row.user_group || "Unassigned"}
                               </td>
                               <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
                                 {formatAdminDate(row.last_seen_at)}
@@ -16471,7 +16745,7 @@ export default function Home() {
                   <label className="block text-sm font-medium text-slate-700">
                     Text shown in the app
                     <textarea
-                      className="mt-2 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                      className="mt-2 min-h-64 w-full rounded-md border border-slate-300 px-3 py-2 text-base leading-7"
                       onChange={(event) => setAppContentBody(event.target.value)}
                       value={appContentBody}
                     />
