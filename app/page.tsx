@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   AgentKnowledgeAutomationSettings,
@@ -124,6 +125,14 @@ type AiInstructionSet = {
   name: string;
   description: string | null;
 };
+
+const getEntryHostMode = () =>
+  typeof window !== "undefined" &&
+  window.location.hostname.toLowerCase() === "app.carepland.com"
+    ? "app"
+    : "public";
+
+const subscribeEntryHostMode = () => () => {};
 
 type AiInstructionVersion = {
   id: string;
@@ -2691,6 +2700,11 @@ export default function Home() {
   const adminReadonlyPanelRef = useRef<HTMLElement | null>(null);
   const [stickySecondaryOffset, setStickySecondaryOffset] = useState(0);
   const [runtimeEnvironmentLabel, setRuntimeEnvironmentLabel] = useState("");
+  const entryHostMode = useSyncExternalStore(
+    subscribeEntryHostMode,
+    getEntryHostMode,
+    getEntryHostMode
+  );
   const [initialUiState] = useState<StoredUiState | null>(() => {
     if (typeof window === "undefined") {
       return null;
@@ -4190,6 +4204,26 @@ export default function Home() {
       careSubjectId,
       userId,
     };
+  }
+
+  async function assignCurrentUserEarlyAccessPlan() {
+    const { data, error } = await supabase.rpc(
+      "assign_current_user_primary_plan",
+      { p_plan_id: "early_access" }
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    const status =
+      data && typeof data === "object" && "status" in data
+        ? String(data.status)
+        : "";
+
+    if (status && status !== "updated") {
+      throw new Error("Early Access plan assignment was not completed.");
+    }
   }
 
   function profileDraftFromRow(
@@ -7684,6 +7718,8 @@ export default function Home() {
         throw setupError;
       }
 
+      await assignCurrentUserEarlyAccessPlan();
+
       const { careCircleId } = await getPrimaryCareContext();
       const { error: subjectSyncError } = await supabase
         .from("care_subjects")
@@ -10964,7 +11000,8 @@ export default function Home() {
   if (
     !signedInEmail &&
     authMode !== "updatePassword" &&
-    !showAuthGateway
+    !showAuthGateway &&
+    entryHostMode === "public"
   ) {
     return <PublicWebsite onOpenApp={() => setShowAuthGateway(true)} />;
   }

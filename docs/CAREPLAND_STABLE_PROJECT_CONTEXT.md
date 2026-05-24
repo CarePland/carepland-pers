@@ -84,7 +84,7 @@ Current implemented assumptions:
 - Tier 4: Group supports multiple Care VIPs, automatic CarePrep across multiple people, shared continuity workflows, group-oriented coordination, highest import allowances, and most generous support access.
 - Early Access is a distinct plan tier for early adopters. Functionally, it currently matches Group/full-access behavior, supports multiple Care VIPs, includes automatic CarePrep, and should help distinguish early adopters from later paid subscribers.
 - Existing database plan ids are currently preserved for compatibility: `personal` maps to Free and `personal_plus` maps to Group. `early_access` maps to Early Access.
-- During the pre-billing phase, do not automatically assign new users to `early_access`; keep assigning the current full-access plan where appropriate so users can be moved to Early Access intentionally later.
+- During the pre-billing phase, real new onboarded users and imported early adopters should be assigned to `early_access` by default so they are distinguishable from later paid subscribers and can later choose a standard plan.
 - Admin is not a pricing tier. Admin access remains controlled by admin flags/permissions, but the Profile plan display may show an Admin badge next to the actual plan for admin users.
 - Billing-grade enforcement is not complete; plan enforcement is currently lightweight and beta-oriented.
 - Backend plan-feature metering foundation exists as SQL patches: `plan_features`, `care_circle_feature_usage`, `check_feature_access`, `consume_feature_usage`, and `refund_feature_usage`.
@@ -393,6 +393,7 @@ CarePland has a public website/front door separate from the signed-in app experi
 Current website direction:
 
 - `carepland.com` / `www.carepland.com` should present the public marketing/Early Access site.
+- `app.carepland.com` should bypass the public website for signed-out visitors and open the app sign-in/auth gateway directly.
 - The signed-in app remains in the same Vercel project and is reachable from the public homepage through the Sign in/Open app path; signed-in users should continue into the app shell.
 - Use one coordinated deployment so public website assets, Early Access intake, and app/admin surfaces stay aligned.
 - The public website should route primary top-level calls to action toward Early Access signup rather than directly into the app during Early Access.
@@ -498,8 +499,8 @@ MFA:
 Deployment:
 
 - Vercel hosts the app.
-- `app.carepland.com` is production/live.
-- `carepland.com` / `www.carepland.com` may host the public website/front door.
+- `app.carepland.com` is production/live for the app login and signed-in app experience.
+- `carepland.com` / `www.carepland.com` host the public website/front door.
 - Vercel preview deployments are useful for beta testing.
 - Environment indicators such as `DEV`/`Preview` are useful outside production.
 - Production custom domain should not show preview/dev status.
