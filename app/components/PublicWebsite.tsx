@@ -26,6 +26,21 @@ const publicWebsiteSlides = [
   },
 ];
 
+const trustPrinciples = [
+  {
+    body: "CarePland treats appointment details, personal information, and other aspects of your data as worthy of dignity and respect.",
+    title: "Your context is not raw material",
+  },
+  {
+    body: "Sensitive details, including personal information and appointment details, stay hidden from us whenever possible.",
+    title: "We don't want to see your data",
+  },
+  {
+    body: "When your appointment and account details need to be viewed or changed, we've built CarePland so we must justify and record any time we review or update your data.",
+    title: "To see your data, we have to say why",
+  },
+];
+
 function errorMessage(error: unknown) {
   return error instanceof Error
     ? error.message
@@ -121,6 +136,9 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
           </a>
           <a className="hover:text-[#256d85]" href="#how-it-works">
             Complete the Loop
+          </a>
+          <a className="hover:text-[#256d85]" href="#trust">
+            Trust
           </a>
         </nav>
         <div className="flex items-center justify-end gap-2">
@@ -336,6 +354,62 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
         </section>
 
         <section
+          className="border-y border-[#d8e0dc] bg-[#182421] px-5 py-16 text-white md:px-[5vw] md:py-24"
+          id="trust"
+        >
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(360px,1.1fr)] lg:gap-16">
+            <div className="max-w-[760px]">
+              <h2 className="text-[clamp(2rem,4vw,4.2rem)] font-black leading-[1.02]">
+                Privacy is part of the care experience.
+              </h2>
+              <p className="mt-6 text-xl font-semibold leading-relaxed text-[#d8e0dc]">
+                CarePland asks you to store appointment context because that
+                context can help you show up prepared. That means the product
+                and those who administer it must treat your information with
+                respect before, during, and after support work.
+              </p>
+            </div>
+
+            <div className="grid content-start gap-6">
+              <div className="border-l-4 border-[#9fc8b4] bg-white/8 p-6">
+                <p className="text-lg leading-relaxed text-[#edf3f0]">
+                  My background includes higher education systems, student
+                  records, FERPA-centered responsibilities, auditing, and data
+                  security work. One lesson from that world carries directly
+                  into CarePland: high-stakes personal records deserve accuracy,
+                  respect, and accountability.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+                {trustPrinciples.map((principle) => (
+                  <article
+                    className="rounded-lg border border-white/14 bg-white/[0.06] p-5"
+                    key={principle.title}
+                  >
+                    <h3 className="mb-3 text-lg font-extrabold text-white">
+                      {principle.title}
+                    </h3>
+                    <p className="text-sm leading-relaxed text-[#d8e0dc]">
+                      {principle.body}
+                    </p>
+                  </article>
+                ))}
+              </div>
+
+              <p className="text-sm leading-relaxed text-[#b8c7c2]">
+                Formal Privacy Policy and Terms pages are still being finalized
+                for Early Access. This is a plain-language statement of the
+                product posture CarePland is being built to honor.
+              </p>
+            </div>
+            <p className="text-center text-2xl font-extrabold leading-tight text-[#edf3f0] md:col-span-2 md:text-3xl">
+              Your data is yours. Period.
+            </p>
+          </div>
+        </section>
+
+        <section
           className="border-t border-[#d8e0dc] bg-[#edf3f0] px-5 py-16 md:px-[5vw] md:py-24"
           id="early-access"
         >
@@ -453,6 +527,9 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
         >
           <a className="hover:text-[#256d85]" href="#early-access">
             Early Access
+          </a>
+          <a className="hover:text-[#256d85]" href="#trust">
+            Trust
           </a>
           <button
             className="font-semibold hover:text-[#256d85]"

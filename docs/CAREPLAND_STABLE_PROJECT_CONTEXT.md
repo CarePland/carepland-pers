@@ -436,8 +436,10 @@ Core public positioning:
 Website content assumptions:
 
 - Narrative order: identify the problem, show the cause, offer the answer.
-- Public section sequence should be: hero/appointment-loop preview, gap-between-appointments video section, continuity-breakdown panels, patient-tools asymmetry, care-history-to-appointment-readiness, Early Access signup.
+- Public section sequence should be: hero/appointment-loop preview, gap-between-appointments video section, continuity-breakdown panels, patient-tools asymmetry, care-history-to-appointment-readiness, trust/data-dignity explanation, Early Access signup.
 - Keep CP Pers out of the initial public website narrative unless it becomes necessary later; the current homepage should avoid internal feature jargon.
+- Public trust copy should be plain-language and reviewable before publication. It can connect CarePland's privacy posture to Andrew's higher-ed systems, FERPA, auditing, data-security background, National Student Clearinghouse enrollment reporting, NSLDS data-integrity verification, and Title IV financial-aid enrollment data stewardship, but it should avoid legal/compliance overclaims and should not imply formal HIPAA certification or complete legal-policy coverage.
+- Public trust copy should emphasize data dignity, limited admin visibility by default, purposeful sensitive access, written reasons where practical, and reviewable audit trails.
 - Public pricing/tier explanation can live on the website; draft website copy is preserved in `docs/CAREPLAND_PRICING_TIERS_WEBSITE_COPY.md`.
 
 Future website editing options to consider only if manual edits start consuming too much implementation time or credits:
