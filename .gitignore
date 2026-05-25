@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+CP Family summry.docx
 
 # debug
 npm-debug.log*

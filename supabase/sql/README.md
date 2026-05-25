@@ -116,6 +116,33 @@ Supabase SQL editor history.
 - `2026-05-24_reset_welcome_screen_for_all_users.sql`
   One-off utility: clears welcome-guide dismissal fields so every user sees the Welcome screen again.
 
+- `2026-05-25_ask_foundation.sql`
+  Migration/admin utility: adds the Ask thread/message/submission/link foundation, routing settings, Product Mgmt/support cross-reference fields, and initial modular Ask AI instruction seeds.
+
+- `2026-05-25_ai_operation_cost_logs.sql`
+  Migration/admin utility: adds reusable AI operation usage/cost logs and an Admin summary RPC for future operational-cost dashboard tiles.
+
+- `2026-05-25_ask_recommendation_decisions.sql`
+  Migration/admin utility: tracks Admin accept/reject/override decisions for Ask AI recommendations, creates linked Product Mgmt items from Ask submissions, and summarizes agreement data for model-quality review.
+
+- `2026-05-25_ask_support_resolution.sql`
+  Migration/admin utility: lets Admin accept answered Ask support questions as closed or create linked support tickets from Ask review while recording the recommendation decision trail.
+
+- `2026-05-25_ask_interpreter_schemas.sql`
+  Migration/admin utility: adds current structured output schemas/prompts for the Ask feature/workflow and bug/friction interpreter modules.
+
+- `2026-05-25_ask_clarifier_schema.sql`
+  Migration/admin utility: adds the current structured output schema/prompt for The Clarifier Ask module.
+
+- `2026-05-25_ask_off_topic_handler_schema.sql`
+  Migration/admin utility: adds the current structured output schema/prompt for the bounded Ask off-topic handler.
+
+- `2026-05-25_ask_routing_settings_admin.sql`
+  Migration/admin utility: adds a protected Admin RPC for updating Ask routing thresholds and clarification limits.
+
+- `2026-05-25_ask_user_response_rubric_instruction.sql`
+  Migration/admin utility: adds an Admin-visible global Ask user-facing response rubric in AI Prompts and appends it to current Ask module prompts.
+
 - `2026-05-23_early_access_plan_tier.sql`
   Admin utility: adds the Early Access plan tier with current Group-level/full-access feature settings and updates editable plan/agent text.
 

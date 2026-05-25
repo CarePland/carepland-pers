@@ -27,7 +27,22 @@ import {
   AdminAuditTrailPanel,
   type AdminAccessEventRow,
 } from "./components/admin/AdminAuditTrailPanel";
-import { AdminDashboardPanel } from "./components/admin/AdminDashboardPanel";
+import {
+  AdminAskIntakePanel,
+  type AskModuleLabKey,
+  type AskModuleLabResult,
+  type AdminAskSubmission,
+  type AskRecommendationDecision,
+  type AskRecommendationDecisionSummaryRow,
+  type AskReviewProductTarget,
+  type AskRoutingSettings,
+  type AskRoutingState,
+  type AskSubmissionLink,
+} from "./components/admin/AdminAskIntakePanel";
+import {
+  AdminDashboardPanel,
+  type AiOperationCostSummaryRow,
+} from "./components/admin/AdminDashboardPanel";
 import {
   AdminEarlyAccessIntakePanel,
   type EarlyAccessIntakeDraft,
@@ -209,6 +224,7 @@ type ProductMgmtArea = {
 };
 
 type ProductMgmtItem = {
+  ask_submission_id: string | null;
   id: string;
   area_id: string;
   title: string;
@@ -307,6 +323,18 @@ type SupportAssistantResult = {
   interactionId: string;
   priority: SupportTicketPriority;
   suggestedNextStep: string;
+};
+
+type AskConversationMessage = {
+  body: string;
+  role: "assistant" | "user";
+};
+
+const defaultAskRoutingSettings: AskRoutingSettings = {
+  auto_create_min_confidence: 0.9,
+  auto_route_enabled: false,
+  clarify_absolute_max_turns: 5,
+  clarify_default_max_turns: 3,
 };
 
 type SupportAssistantInteraction = {
@@ -533,6 +561,7 @@ type AdminAttentionSummary = {
 };
 type AiWorkflowKey =
   | "admin_hq_prioritization"
+  | "ask_user_response_rubric"
   | "bulk_appointment_intake"
   | "careprep_generation"
   | "note_intake_interpretation"
@@ -787,6 +816,12 @@ const appContentDefaults = {
     "CarePrep can't be run yet because you have no additional appointments to consider.",
   careprep_auto_success_message:
     "CarePrep generated for {appointmentTitle}.",
+  ask_guidance_message:
+    "Questions, ideas, workflow feedback, or things that felt confusing — tell us what’s on your mind.",
+  ask_acknowledgement_message:
+    "Thank you for taking the time to ask us. We do review every request!",
+  ask_duplicate_message:
+    "Thanks — we got your question!",
   support_contact_note:
     "Need help or want to report an issue? Contact support from the app and include what you were trying to do.",
   support_reply_email_body:
@@ -930,6 +965,27 @@ const appContentOptions = [
       "Whole editable block shown in the Profile plan helper. First line is the brief summary; following lines may use Label: value.",
     label: `${tier.name}: Profile plan panel`,
   })),
+  {
+    category: "messages",
+    contentKey: "ask_guidance_message",
+    description:
+      "Guidance text shown at the top of the Ask panel before a user sends a message.",
+    label: "Ask guidance message",
+  },
+  {
+    category: "messages",
+    contentKey: "ask_acknowledgement_message",
+    description:
+      "Message shown after an Ask conversation has been accepted for review.",
+    label: "Ask acknowledgement message",
+  },
+  {
+    category: "messages",
+    contentKey: "ask_duplicate_message",
+    description:
+      "Message shown when a user tries to submit the same Ask message more than once.",
+    label: "Ask duplicate message",
+  },
   {
     category: "messages",
     contentKey: "careprep_manual_limit_message",
@@ -1329,6 +1385,18 @@ const aiWorkflows: Record<
       "Instructions used to summarize and prioritize Admin operational signals.",
     historyLabel: "Admin HQ History",
     label: "Admin HQ prioritization",
+  },
+  ask_user_response_rubric: {
+    defaultChangeNote: "Initial Ask user-facing response rubric",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "Ask should sound like a CarePland routing surface, not a human agent. Avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical. Prefer neutral constructions such as \"This will be raised for review,\" \"This may need a closer look,\" \"A little more detail would help route this correctly,\" or \"Thanks for adding this.\" Do not deny that Ask is AI or pretend to be human. If AI identity is directly relevant, explain it plainly without overemphasizing it. Keep responses brief, calm, respectful, and non-corporate.",
+    defaultUserPrompt:
+      "Apply this rubric to user-facing Ask module responses unless a more specific approved instruction overrides it.",
+    description:
+      "Global response philosophy used by Ask modules when writing user-facing text.",
+    historyLabel: "Ask Rubric History",
+    label: "Ask user response rubric",
   },
   careprep_generation: {
     defaultChangeNote: "Initial CarePrep instruction set",
@@ -2617,6 +2685,11 @@ export default function Home() {
   const [adminAttentionSummaries, setAdminAttentionSummaries] = useState<
     Record<string, AdminAttentionSummary>
   >({});
+  const [aiOperationCostSummary, setAiOperationCostSummary] = useState<
+    AiOperationCostSummaryRow[]
+  >([]);
+  const [aiOperationCostError, setAiOperationCostError] = useState("");
+  const [loadingAiOperationCosts, setLoadingAiOperationCosts] = useState(false);
   const [loadingInstructions, setLoadingInstructions] = useState(false);
   const [loadingCarePrepHistory, setLoadingCarePrepHistory] = useState(false);
   const [savingInstructions, setSavingInstructions] = useState(false);
@@ -2808,6 +2881,19 @@ export default function Home() {
   const [askingSupportQuestion, setAskingSupportQuestion] = useState(false);
   const [savingSupportQuestion, setSavingSupportQuestion] = useState(false);
   const [savingSupportReply, setSavingSupportReply] = useState(false);
+  const [askPanelOpen, setAskPanelOpen] = useState(false);
+  const [askThreadId, setAskThreadId] = useState<string | null>(null);
+  const [askInput, setAskInput] = useState("");
+  const [askMessages, setAskMessages] = useState<AskConversationMessage[]>([]);
+  const [askConversationComplete, setAskConversationComplete] = useState(false);
+  const [askCompletionMessageKey, setAskCompletionMessageKey] = useState(
+    "ask_acknowledgement_message"
+  );
+  const [askPanelError, setAskPanelError] = useState("");
+  const [askSubmittedFingerprints, setAskSubmittedFingerprints] = useState<
+    string[]
+  >([]);
+  const [sendingAskMessage, setSendingAskMessage] = useState(false);
   const [supportQuestionSubject, setSupportQuestionSubject] = useState("");
   const [supportQuestionBody, setSupportQuestionBody] = useState("");
   const [supportReplyBody, setSupportReplyBody] = useState("");
@@ -2840,6 +2926,39 @@ export default function Home() {
     useState<SupportAssistantInteraction[]>([]);
   const [assistantReviewAdminReviews, setAssistantReviewAdminReviews] =
     useState<SupportAssistantAdminReview[]>([]);
+  const [askReviewSubmissions, setAskReviewSubmissions] = useState<
+    AdminAskSubmission[]
+  >([]);
+  const [askRecommendationDecisions, setAskRecommendationDecisions] = useState<
+    AskRecommendationDecision[]
+  >([]);
+  const [askSubmissionLinks, setAskSubmissionLinks] = useState<
+    AskSubmissionLink[]
+  >([]);
+  const [
+    askRecommendationDecisionSummary,
+    setAskRecommendationDecisionSummary,
+  ] = useState<AskRecommendationDecisionSummaryRow[]>([]);
+  const [loadingAskReviews, setLoadingAskReviews] = useState(false);
+  const [loadingAskRoutingSettings, setLoadingAskRoutingSettings] =
+    useState(false);
+  const [selectedAskReviewId, setSelectedAskReviewId] = useState("");
+  const [askReviewRoutingState, setAskReviewRoutingState] =
+    useState<AskRoutingState>("needs_review");
+  const [askReviewNote, setAskReviewNote] = useState("");
+  const [askRoutingSettingsDraft, setAskRoutingSettingsDraft] =
+    useState<AskRoutingSettings>(defaultAskRoutingSettings);
+  const [askModuleLabInput, setAskModuleLabInput] = useState("");
+  const [askModuleLabKey, setAskModuleLabKey] =
+    useState<AskModuleLabKey>("ask_router");
+  const [askModuleLabResults, setAskModuleLabResults] = useState<
+    AskModuleLabResult[]
+  >([]);
+  const [runningAskModuleLab, setRunningAskModuleLab] = useState(false);
+  const [savingAskReviewAction, setSavingAskReviewAction] = useState(false);
+  const [savingAskRoutingSettings, setSavingAskRoutingSettings] =
+    useState(false);
+  const [savingAskReview, setSavingAskReview] = useState(false);
   const [loadingAssistantReviews, setLoadingAssistantReviews] = useState(false);
   const [selectedAssistantReviewId, setSelectedAssistantReviewId] = useState("");
   const [assistantReviewOutcomeFilter, setAssistantReviewOutcomeFilter] =
@@ -3306,6 +3425,13 @@ export default function Home() {
         (review) => review.interaction_id === selectedAssistantReviewInteraction.id
       )
     : [];
+  const selectedAskReviewSubmission =
+    askReviewSubmissions.find(
+      (submission) => submission.id === selectedAskReviewId
+    ) ??
+    askReviewSubmissions.find((submission) => submission.routing_state !== "closed") ??
+    askReviewSubmissions[0] ??
+    null;
   const selectedAssistantAnalysisRun =
     assistantAnalysisRuns.find((run) => run.id === selectedAssistantAnalysisRunId) ??
     assistantAnalysisRuns[0] ??
@@ -3372,7 +3498,7 @@ export default function Home() {
     {
       ...adminAttentionCountsForTab("assistantReview"),
       key: "assistantReview",
-      label: "Asst Review",
+      label: "Ask - Review",
     },
     { ...adminAttentionCountsForTab("tickets"), key: "tickets", label: "Tickets" },
   ];
@@ -3924,6 +4050,11 @@ export default function Home() {
               await loadProductMgmt();
             } else if (initialUiState.adminTab === "tickets") {
               await loadAdminSupportTickets();
+            } else if (initialUiState.adminTab === "assistantReview") {
+              await Promise.all([
+                loadAskReviewSubmissions(),
+                loadAssistantReviewInteractions(),
+              ]);
             } else if (initialUiState.adminTab === "users") {
               await loadAdminUserActivity();
             } else if (initialUiState.adminTab === "intake") {
@@ -3934,6 +4065,8 @@ export default function Home() {
               await loadAdminIntegrationErrors();
             } else if (initialUiState.adminTab === "content") {
               await loadAppContent(initialUiState.selectedAppContentKey);
+            } else if (initialUiState.adminTab === "dashboard") {
+              await loadAdminAttentionOverview();
             }
           }
         } catch (error) {
@@ -5009,6 +5142,32 @@ export default function Home() {
     }
   }
 
+  async function loadAiOperationCostSummary() {
+    setLoadingAiOperationCosts(true);
+    setAiOperationCostError("");
+
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase.rpc("ai_operation_cost_summary", {
+        p_since: since,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setAiOperationCostSummary((data ?? []) as AiOperationCostSummaryRow[]);
+    } catch (error) {
+      console.warn("Unable to load AI operation cost summary", error);
+      setAiOperationCostSummary([]);
+      setAiOperationCostError(
+        "AI operation cost tracking is ready in the app, but the database migration has not been applied yet."
+      );
+    } finally {
+      setLoadingAiOperationCosts(false);
+    }
+  }
+
   async function loadAdminAttentionOverview() {
     await Promise.allSettled([
       loadAdminViewStates(),
@@ -5018,6 +5177,8 @@ export default function Home() {
       loadProductMgmt(),
       loadAgentKnowledgeProposals(),
       loadAssistantReviewInteractions(),
+      loadAskReviewSubmissions(),
+      loadAiOperationCostSummary(),
     ]);
   }
 
@@ -5877,7 +6038,7 @@ export default function Home() {
       const { data: items, error: itemError } = await supabase
         .from("product_mgmt_items")
         .select(
-          "id,area_id,title,body,status,priority,current_version_number,created_at,updated_at,resolved_at"
+          "id,area_id,title,body,status,priority,current_version_number,created_at,updated_at,resolved_at,ask_submission_id"
         )
         .order("status", { ascending: true })
         .order("updated_at", { ascending: false });
@@ -6241,7 +6402,7 @@ export default function Home() {
       const { data: ticketRows, error: ticketError } = await supabase
         .from("support_tickets")
         .select(
-          "id,user_id,subject,status,priority,category,current_page,needs_admin_followup,user_has_unread_update,created_at,updated_at"
+          "id,user_id,subject,status,priority,category,current_page,needs_admin_followup,user_has_unread_update,created_at,updated_at,ask_submission_id"
         )
         .eq("user_id", userData.user.id)
         .order("updated_at", { ascending: false })
@@ -6923,6 +7084,695 @@ export default function Home() {
     return displayName || fullName || profile?.email || interaction.user_id;
   }
 
+  function profileLabel(profile: {
+    display_name: string | null;
+    email: string | null;
+    family_name: string | null;
+    given_name: string | null;
+  } | null | undefined) {
+    const displayName = profile?.display_name?.trim();
+    const fullName = [profile?.given_name, profile?.family_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    return displayName || fullName || profile?.email || "";
+  }
+
+  function askActionText(value: unknown) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function askRecommendationTitle(
+    submission: AdminAskSubmission,
+    action: Record<string, unknown>,
+    target: AskReviewProductTarget
+  ) {
+    const actionTitle =
+      askActionText(action.title) ||
+      askActionText(action.action) ||
+      submission.ai_summary ||
+      submission.original_user_wording;
+    const prefix =
+      target === "bug"
+        ? "Ask bug"
+        : target === "wishlist"
+          ? "Ask wishlist"
+          : "Ask workflow";
+
+    return `${prefix}: ${actionTitle}`.slice(0, 180);
+  }
+
+  function askRecommendationBody(
+    submission: AdminAskSubmission,
+    action: Record<string, unknown>
+  ) {
+    return [
+      askActionText(action.rationale)
+        ? `AI recommendation rationale: ${askActionText(action.rationale)}`
+        : "",
+      askActionText(action.app_area)
+        ? `Affected app area: ${askActionText(action.app_area)}`
+        : "",
+      askActionText(action.category)
+        ? `Recommended category: ${askActionText(action.category)}`
+        : "",
+      askActionText(action.priority)
+        ? `Priority clue: ${askActionText(action.priority)}`
+        : "",
+      askActionText(action.suggested_feature)
+        ? `Suggested feature/workflow: ${askActionText(action.suggested_feature)}`
+        : "",
+      submission.router_rationale
+        ? `Router rationale: ${submission.router_rationale}`
+        : "",
+      askActionText(action.tried_to_do)
+        ? `Tried to do: ${askActionText(action.tried_to_do)}`
+        : "",
+      askActionText(action.expected_behavior)
+        ? `Expected behavior: ${askActionText(action.expected_behavior)}`
+        : "",
+      askActionText(action.actual_behavior)
+        ? `Actual behavior: ${askActionText(action.actual_behavior)}`
+        : "",
+      askActionText(action.reproducibility_clues)
+        ? `Reproducibility clues: ${askActionText(action.reproducibility_clues)}`
+        : "",
+      submission.original_user_wording
+        ? `Original user wording: ${submission.original_user_wording}`
+        : "",
+      submission.transcript ? `Ask transcript:\n${submission.transcript}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  function askSupportTicketSubject(
+    submission: AdminAskSubmission,
+    action: Record<string, unknown>
+  ) {
+    return (
+      askActionText(action.title) ||
+      submission.ai_summary ||
+      submission.original_user_wording ||
+      "Ask support follow-up"
+    ).slice(0, 180);
+  }
+
+  function askSupportTicketMessage(
+    submission: AdminAskSubmission,
+    action: Record<string, unknown>
+  ) {
+    return [
+      submission.original_user_wording
+        ? `Original user wording: ${submission.original_user_wording}`
+        : "",
+      submission.ai_summary ? `Ask summary: ${submission.ai_summary}` : "",
+      askActionText(action.rationale)
+        ? `AI recommendation rationale: ${askActionText(action.rationale)}`
+        : "",
+      submission.router_rationale
+        ? `Router rationale: ${submission.router_rationale}`
+        : "",
+      submission.transcript ? `Ask transcript:\n${submission.transcript}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  function normalizeAskRoutingSettings(
+    value: Partial<AskRoutingSettings> | null | undefined
+  ): AskRoutingSettings {
+    const defaultTurns = Math.max(
+      0,
+      Number(
+        value?.clarify_default_max_turns ??
+          defaultAskRoutingSettings.clarify_default_max_turns
+      )
+    );
+    const absoluteTurns = Math.max(
+      defaultTurns,
+      Number(
+        value?.clarify_absolute_max_turns ??
+          defaultAskRoutingSettings.clarify_absolute_max_turns
+      )
+    );
+    const confidence = Math.max(
+      0,
+      Math.min(
+        1,
+        Number(
+          value?.auto_create_min_confidence ??
+            defaultAskRoutingSettings.auto_create_min_confidence
+        )
+      )
+    );
+
+    return {
+      auto_create_min_confidence: Number.isNaN(confidence) ? 0.9 : confidence,
+      auto_route_enabled: Boolean(value?.auto_route_enabled),
+      clarify_absolute_max_turns: Number.isNaN(absoluteTurns)
+        ? 5
+        : absoluteTurns,
+      clarify_default_max_turns: Number.isNaN(defaultTurns) ? 3 : defaultTurns,
+      updated_at: value?.updated_at ?? null,
+    };
+  }
+
+  async function loadAskRoutingSettings() {
+    setLoadingAskRoutingSettings(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("ask_routing_settings")
+        .select(
+          "auto_route_enabled,auto_create_min_confidence,clarify_default_max_turns,clarify_absolute_max_turns,updated_at"
+        )
+        .eq("settings_key", "default")
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      setAskRoutingSettingsDraft(normalizeAskRoutingSettings(data));
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAskRoutingSettings(false);
+    }
+  }
+
+  async function loadAskReviewSubmissions() {
+    setLoadingAskReviews(true);
+
+    try {
+      void loadAskRoutingSettings();
+
+      const { data: submissionRows, error: submissionError } = await supabase
+        .from("ask_submissions")
+        .select(
+          "id,thread_id,user_id,source,current_page,context,transcript,original_user_wording,ai_summary,router_category,router_confidence,router_rationale,recommended_actions,safety_flags,routing_state,reviewed_at,review_note,prompt_version,model,created_at,updated_at"
+        )
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (submissionError) {
+        throw submissionError;
+      }
+
+      const loadedSubmissions = (submissionRows ?? []) as Array<
+        Omit<AdminAskSubmission, "user_label">
+      >;
+      const userIds = Array.from(
+        new Set(
+          loadedSubmissions
+            .map((submission) => submission.user_id)
+            .filter(Boolean)
+        )
+      );
+      const profileById = new Map<
+        string,
+        {
+          display_name: string | null;
+          email: string | null;
+          family_name: string | null;
+          given_name: string | null;
+        }
+      >();
+
+      if (userIds.length > 0) {
+        const { data: profileRows, error: profileError } = await supabase
+          .from("profiles")
+          .select("id,email,display_name,given_name,family_name")
+          .in("id", userIds);
+
+        if (!profileError) {
+          (profileRows ?? []).forEach((profile) => {
+            profileById.set(profile.id, {
+              display_name: profile.display_name,
+              email: profile.email,
+              family_name: profile.family_name,
+              given_name: profile.given_name,
+            });
+          });
+        }
+      }
+
+      const hydratedSubmissions = loadedSubmissions.map((submission) => ({
+        ...submission,
+        user_label:
+          profileLabel(profileById.get(submission.user_id)) ||
+          submission.user_id,
+      }));
+
+      setAskReviewSubmissions(hydratedSubmissions);
+
+      if (hydratedSubmissions.length > 0) {
+        const submissionIds = hydratedSubmissions.map(
+          (submission) => submission.id
+        );
+        const [
+          { data: decisionRows, error: decisionError },
+          { data: linkRows, error: linkError },
+        ] = await Promise.all([
+          supabase
+            .from("ask_recommendation_decisions")
+            .select(
+              "id,ask_submission_id,recommended_action_index,recommended_action,decision,created_target_table,created_target_id,override_action,decision_note,created_at"
+            )
+            .in("ask_submission_id", submissionIds)
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("ask_submission_links")
+            .select(
+              "id,ask_submission_id,target_table,target_id,relationship_type,label,is_active,created_at"
+            )
+            .in("ask_submission_id", submissionIds)
+            .eq("is_active", true)
+            .order("created_at", { ascending: false }),
+        ]);
+
+        if (decisionError) {
+          throw decisionError;
+        }
+
+        if (linkError) {
+          throw linkError;
+        }
+
+        setAskRecommendationDecisions(
+          (decisionRows ?? []) as AskRecommendationDecision[]
+        );
+        setAskSubmissionLinks((linkRows ?? []) as AskSubmissionLink[]);
+      } else {
+        setAskRecommendationDecisions([]);
+        setAskSubmissionLinks([]);
+      }
+
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: decisionSummaryRows, error: decisionSummaryError } =
+        await supabase.rpc("ask_recommendation_decision_summary", {
+          p_since: since,
+        });
+
+      if (decisionSummaryError) {
+        throw decisionSummaryError;
+      }
+
+      setAskRecommendationDecisionSummary(
+        (decisionSummaryRows ?? []) as AskRecommendationDecisionSummaryRow[]
+      );
+
+      const currentSelectionStillExists = hydratedSubmissions.some(
+        (submission) => submission.id === selectedAskReviewId
+      );
+      const nextSelection = currentSelectionStillExists
+        ? hydratedSubmissions.find(
+            (submission) => submission.id === selectedAskReviewId
+          ) ?? null
+        : hydratedSubmissions.find(
+            (submission) => submission.routing_state !== "closed"
+          ) ??
+          hydratedSubmissions[0] ??
+          null;
+
+      if (nextSelection) {
+        setSelectedAskReviewId(nextSelection.id);
+        setAskReviewRoutingState(nextSelection.routing_state);
+        setAskReviewNote(nextSelection.review_note ?? "");
+      } else {
+        setSelectedAskReviewId("");
+        setAskReviewRoutingState("needs_review");
+        setAskReviewNote("");
+      }
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAskReviews(false);
+    }
+  }
+
+  function selectAskReviewSubmission(submission: AdminAskSubmission) {
+    setSelectedAskReviewId(submission.id);
+    setAskReviewRoutingState(submission.routing_state);
+    setAskReviewNote(submission.review_note ?? "");
+  }
+
+  async function openAskSubmissionReview(askSubmissionId: string) {
+    if (!askSubmissionId) {
+      return;
+    }
+
+    setSelectedAskReviewId(askSubmissionId);
+    await handleChangeAdminTab("assistantReview");
+    setSelectedAskReviewId(askSubmissionId);
+    showToast("Opened Ask review item.", { type: "success" });
+  }
+
+  async function openAskRelatedItem(link: AskSubmissionLink) {
+    if (!link.target_id) {
+      return;
+    }
+
+    try {
+      if (link.target_table === "support_tickets") {
+        await handleChangeAdminTab("tickets");
+        setSelectedAdminTicketId(link.target_id);
+        showToast("Opened linked support ticket.", { type: "success" });
+        return;
+      }
+
+      if (link.target_table === "product_mgmt_items") {
+        const { data: linkedItem, error: linkedItemError } = await supabase
+          .from("product_mgmt_items")
+          .select("area_id")
+          .eq("id", link.target_id)
+          .maybeSingle();
+
+        if (linkedItemError) {
+          throw linkedItemError;
+        }
+
+        const { data: linkedArea, error: linkedAreaError } = linkedItem?.area_id
+          ? await supabase
+              .from("product_mgmt_areas")
+              .select("area_key")
+              .eq("id", linkedItem.area_id)
+              .maybeSingle()
+          : { data: null, error: null };
+
+        if (linkedAreaError) {
+          throw linkedAreaError;
+        }
+
+        if (linkedArea) {
+          setSelectedProductMgmtSection(linkedArea.area_key);
+        }
+
+        await handleChangeAdminTab("product");
+        showToast("Opened Product Management.", { type: "success" });
+        return;
+      }
+
+      showToast("Related item link saved.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
+  }
+
+  async function handleUpdateAskRoutingSettings(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+    setSavingAskRoutingSettings(true);
+    setMessage("");
+
+    try {
+      const normalizedSettings = normalizeAskRoutingSettings(
+        askRoutingSettingsDraft
+      );
+      const { data, error } = await supabase.rpc(
+        "update_ask_routing_settings",
+        {
+          p_auto_create_min_confidence:
+            normalizedSettings.auto_create_min_confidence,
+          p_auto_route_enabled: normalizedSettings.auto_route_enabled,
+          p_clarify_absolute_max_turns:
+            normalizedSettings.clarify_absolute_max_turns,
+          p_clarify_default_max_turns:
+            normalizedSettings.clarify_default_max_turns,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      setAskRoutingSettingsDraft(normalizeAskRoutingSettings(data));
+      showToast("Ask routing settings saved.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAskRoutingSettings(false);
+    }
+  }
+
+  async function handleRunAskModuleLab(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!askModuleLabInput.trim()) {
+      setMessage("Paste at least one question to test.");
+      return;
+    }
+
+    setRunningAskModuleLab(true);
+    setAskModuleLabResults([]);
+    setMessage("");
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before testing Ask modules.");
+      }
+
+      const response = await fetch("/api/ask-module-test", {
+        body: JSON.stringify({
+          moduleKey: askModuleLabKey,
+          questions: askModuleLabInput,
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Ask module test failed.");
+      }
+
+      setAskModuleLabResults((result.results ?? []) as AskModuleLabResult[]);
+      showToast("Ask module test complete.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setRunningAskModuleLab(false);
+    }
+  }
+
+  async function recordAskRecommendationDecision(
+    decision: "overridden" | "rejected",
+    actionIndex: number | null,
+    action: Record<string, unknown>,
+    overrideAction?: string
+  ) {
+    if (!selectedAskReviewSubmission) {
+      return;
+    }
+
+    setSavingAskReviewAction(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc(
+        "record_ask_recommendation_decision",
+        {
+          p_ask_submission_id: selectedAskReviewSubmission.id,
+          p_created_target_id: null,
+          p_created_target_table: null,
+          p_decision: decision,
+          p_decision_note: askReviewNote.trim() || null,
+          p_override_action: overrideAction ?? null,
+          p_recommended_action: action,
+          p_recommended_action_index: actionIndex,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      await loadAskReviewSubmissions();
+      showToast("Ask recommendation decision saved.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAskReviewAction(false);
+    }
+  }
+
+  async function createProductItemFromAskRecommendation(
+    target: AskReviewProductTarget,
+    actionIndex: number | null,
+    action: Record<string, unknown>
+  ) {
+    if (!selectedAskReviewSubmission) {
+      return;
+    }
+
+    setSavingAskReviewAction(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc(
+        "create_product_mgmt_item_from_ask",
+        {
+          p_area_key: target,
+          p_ask_submission_id: selectedAskReviewSubmission.id,
+          p_body: askRecommendationBody(selectedAskReviewSubmission, action),
+          p_decision_note: askReviewNote.trim() || null,
+          p_priority:
+            askActionText(action.priority) === "high" ||
+            askActionText(action.priority) === "low" ||
+            askActionText(action.priority) === "medium"
+              ? askActionText(action.priority)
+              : "medium",
+          p_recommended_action: action,
+          p_recommended_action_index: actionIndex,
+          p_status: "open",
+          p_title: askRecommendationTitle(
+            selectedAskReviewSubmission,
+            action,
+            target
+          ),
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      await Promise.all([loadAskReviewSubmissions(), loadProductMgmt()]);
+      showToast("Linked Product Mgmt item created from Ask.", {
+        type: "success",
+      });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAskReviewAction(false);
+    }
+  }
+
+  async function resolveAskAnswerRecommendation(
+    actionIndex: number | null,
+    action: Record<string, unknown>
+  ) {
+    if (!selectedAskReviewSubmission) {
+      return;
+    }
+
+    setSavingAskReviewAction(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("resolve_ask_answer_from_review", {
+        p_ask_submission_id: selectedAskReviewSubmission.id,
+        p_decision_note: askReviewNote.trim() || null,
+        p_recommended_action: action,
+        p_recommended_action_index: actionIndex,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      await loadAskReviewSubmissions();
+      showToast("Ask answer accepted and closed.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAskReviewAction(false);
+    }
+  }
+
+  async function createSupportTicketFromAskRecommendation(
+    actionIndex: number | null,
+    action: Record<string, unknown>
+  ) {
+    if (!selectedAskReviewSubmission) {
+      return;
+    }
+
+    setSavingAskReviewAction(true);
+    setMessage("");
+
+    try {
+      const priority = askActionText(action.priority);
+      const { error } = await supabase.rpc("create_support_ticket_from_ask", {
+        p_ask_submission_id: selectedAskReviewSubmission.id,
+        p_category: selectedAskReviewSubmission.router_category,
+        p_decision_note: askReviewNote.trim() || null,
+        p_message: askSupportTicketMessage(selectedAskReviewSubmission, action),
+        p_priority:
+          priority === "high" ||
+          priority === "low" ||
+          priority === "medium" ||
+          priority === "urgent"
+            ? priority
+            : "medium",
+        p_recommended_action: action,
+        p_recommended_action_index: actionIndex,
+        p_subject: askSupportTicketSubject(selectedAskReviewSubmission, action),
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      await Promise.all([loadAskReviewSubmissions(), loadAdminSupportTickets()]);
+      showToast("Linked support ticket created from Ask.", {
+        type: "success",
+      });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAskReviewAction(false);
+    }
+  }
+
+  async function handleUpdateAskReview(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedAskReviewSubmission) {
+      return;
+    }
+
+    setSavingAskReview(true);
+
+    try {
+      const { error } = await supabase
+        .from("ask_submissions")
+        .update({
+          review_note: askReviewNote.trim() || null,
+          reviewed_at: new Date().toISOString(),
+          routing_state: askReviewRoutingState,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", selectedAskReviewSubmission.id);
+
+      if (error) {
+        throw error;
+      }
+
+      await loadAskReviewSubmissions();
+      setMessage("Ask review saved.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAskReview(false);
+    }
+  }
+
   async function loadAssistantReviewInteractions() {
     setLoadingAssistantReviews(true);
 
@@ -7265,6 +8115,129 @@ export default function Home() {
     } finally {
       setAskingSupportAssistant(false);
     }
+  }
+
+  async function handleSendAskMessage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const outgoingMessage = askInput.trim();
+
+    if (!outgoingMessage) {
+      return;
+    }
+
+    const outgoingFingerprint = outgoingMessage
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+    if (askSubmittedFingerprints.includes(outgoingFingerprint)) {
+      setAskCompletionMessageKey("ask_duplicate_message");
+      setAskConversationComplete(true);
+      setAskInput("");
+      setAskPanelError("");
+      return;
+    }
+
+    setSendingAskMessage(true);
+    setAskInput("");
+    setAskPanelError("");
+    setAskMessages((currentMessages) => [
+      ...currentMessages,
+      { body: outgoingMessage, role: "user" },
+    ]);
+    setMessage("");
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before using Ask.");
+      }
+
+      const response = await fetch("/api/ask", {
+        body: JSON.stringify({
+          context: {
+            email: signedInEmail,
+            has_open_support_ticket: Boolean(currentSupportTicket),
+            profile_label: savedProfileLabel,
+          },
+          currentPage: mainTab,
+          message: outgoingMessage,
+          threadId: askThreadId,
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Ask is temporarily unavailable.");
+      }
+
+      if (typeof result.threadId === "string") {
+        setAskThreadId(result.threadId);
+      }
+
+      const isTerminalAskAction = result.action !== "ask_clarifying_question";
+
+      if (isTerminalAskAction) {
+        setAskCompletionMessageKey(
+          result.duplicate
+            ? "ask_duplicate_message"
+            : "ask_acknowledgement_message"
+        );
+        setAskSubmittedFingerprints((currentFingerprints) =>
+          currentFingerprints.includes(outgoingFingerprint)
+            ? currentFingerprints
+            : [...currentFingerprints, outgoingFingerprint]
+        );
+        setAskConversationComplete(true);
+      }
+
+      const assistantMessage =
+        typeof result.assistantMessage === "string"
+          ? result.assistantMessage.trim()
+          : "";
+      const shouldShowAssistantMessage =
+        Boolean(assistantMessage) &&
+        (!isTerminalAskAction ||
+          (!result.duplicate &&
+            assistantMessage !== "Thanks. I saved this for review."));
+
+      if (shouldShowAssistantMessage) {
+        setAskMessages((currentMessages) => [
+          ...currentMessages,
+          { body: assistantMessage, role: "assistant" },
+        ]);
+      }
+    } catch (error) {
+      setAskInput(outgoingMessage);
+      setAskMessages((currentMessages) => currentMessages.slice(0, -1));
+      setAskPanelError(getErrorMessage(error));
+    } finally {
+      setSendingAskMessage(false);
+    }
+  }
+
+  function resetAskPanelState() {
+    setAskPanelOpen(false);
+    setAskThreadId(null);
+    setAskInput("");
+    setAskMessages([]);
+    setAskConversationComplete(false);
+    setAskCompletionMessageKey("ask_acknowledgement_message");
+    setAskPanelError("");
+    setSendingAskMessage(false);
   }
 
   async function handleSupportAssistantFeedback(
@@ -7625,7 +8598,10 @@ export default function Home() {
     }
 
     if (tab === "assistantReview") {
-      await loadAssistantReviewInteractions();
+      await Promise.all([
+        loadAskReviewSubmissions(),
+        loadAssistantReviewInteractions(),
+      ]);
     }
 
     await markAdminScopeViewed("admin_tab", tab);
@@ -11389,6 +12365,8 @@ export default function Home() {
     authMode !== "updatePassword" &&
     !needsBetaAgreement &&
     !needsOnboarding;
+  const canShowAskEntry =
+    Boolean(signedInEmail) && authMode !== "updatePassword";
   const signedInDisplayName = savedProfileLabel || signedInEmail;
   const locationSheetAppointment =
     locationSheetAppointmentId
@@ -11613,50 +12591,35 @@ export default function Home() {
                 <UserIcon className="h-5 w-5" />
               </button>
             ) : null}
-            {isSignedInAppShell ? (
-              isAdmin ? (
-                <button
-                  className="hidden items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm min-[410px]:inline-flex"
-                  onClick={async () => {
-                    setMainTab("admin");
-                    await handleChangeAdminTab("tickets");
-                  }}
-                  type="button"
+            {isSignedInAppShell && isAdmin ? (
+              <button
+                className="hidden items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm min-[410px]:inline-flex"
+                onClick={async () => {
+                  setMainTab("admin");
+                  await handleChangeAdminTab("tickets");
+                }}
+                type="button"
+              >
+                <span
+                  className={`px-2.5 py-1 ${
+                    adminNewTickets.length > 0
+                      ? "bg-red-50 text-red-700"
+                      : "bg-slate-50 text-slate-500"
+                  }`}
                 >
-                  <span
-                    className={`px-2.5 py-1 ${
-                      adminNewTickets.length > 0
-                        ? "bg-red-50 text-red-700"
-                        : "bg-slate-50 text-slate-500"
-                    }`}
-                  >
-                    {adminNewTickets.length} New
-                  </span>
-                  <span
-                    className={`border-l border-slate-200 px-2.5 py-1 ${
-                      adminTicketsNeedingFollowup.length > 0
-                        ? "bg-amber-50 text-amber-800"
-                        : "bg-slate-50 text-slate-500"
-                    }`}
-                  >
-                    {adminTicketsNeedingFollowup.length} Followup
-                  </span>
-                </button>
-              ) : (
-                <button
-                  aria-label="Ask support"
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-white text-xl font-semibold leading-none text-blue-700 hover:border-blue-300 hover:bg-blue-50 sm:h-11 sm:w-11 sm:text-2xl"
-                  onClick={() => {
-                    setAskingSupportQuestion(true);
-                    setSupportQuestionExpanded(true);
-                  }}
-                  title="Ask support"
-                  type="button"
+                  {adminNewTickets.length} New
+                </span>
+                <span
+                  className={`border-l border-slate-200 px-2.5 py-1 ${
+                    adminTicketsNeedingFollowup.length > 0
+                      ? "bg-amber-50 text-amber-800"
+                      : "bg-slate-50 text-slate-500"
+                  }`}
                 >
-                  ?
-                </button>
-              )
-	            ) : null}
+                  {adminTicketsNeedingFollowup.length} Followup
+                </span>
+              </button>
+            ) : null}
 	            </div>
 	          </div>
 	          {adminReadonlySnapshot ? (
@@ -14201,7 +15164,10 @@ export default function Home() {
 
               {adminTab === "dashboard" ? (
                 <AdminDashboardPanel
+                  aiOperationCostError={aiOperationCostError}
+                  aiOperationCostRows={aiOperationCostSummary}
                   followupCount={adminDashboardFollowupCount}
+                  loadingAiOperationCosts={loadingAiOperationCosts}
                   newCount={adminDashboardNewCount}
                   onOpenPrioritizationPrompt={() => {
                     setSelectedAiWorkflow("admin_hq_prioritization");
@@ -14501,6 +15467,7 @@ export default function Home() {
                   messages={selectedAdminTicketMessages}
                   onAddInternalNote={handleAddAdminInternalNote}
                   onAddReply={handleAddAdminTicketReply}
+                  onOpenAskSubmission={openAskSubmissionReview}
                   onRefresh={loadAdminSupportTickets}
                   onSelectTicket={selectAdminTicket}
                   onSetCategory={setAdminTicketCategory}
@@ -14519,12 +15486,48 @@ export default function Home() {
               ) : null}
 
               {adminTab === "assistantReview" ? (
+              <div className="space-y-4">
+              <AdminAskIntakePanel
+                decisions={askRecommendationDecisions}
+                decisionSummaryRows={askRecommendationDecisionSummary}
+                formatDate={formatDate}
+                links={askSubmissionLinks}
+                loadingSettings={loadingAskRoutingSettings}
+                loading={loadingAskReviews}
+                moduleLabInput={askModuleLabInput}
+                moduleLabKey={askModuleLabKey}
+                moduleLabResults={askModuleLabResults}
+                moduleLabRunning={runningAskModuleLab}
+                onCreateProductItem={createProductItemFromAskRecommendation}
+                onCreateSupportTicket={createSupportTicketFromAskRecommendation}
+                onOpenRelatedItem={openAskRelatedItem}
+                onRecordDecision={recordAskRecommendationDecision}
+                onRefresh={loadAskReviewSubmissions}
+                onResolveAnswer={resolveAskAnswerRecommendation}
+                onRunModuleLab={handleRunAskModuleLab}
+                onSelectSubmission={selectAskReviewSubmission}
+                onSetModuleLabInput={setAskModuleLabInput}
+                onSetModuleLabKey={setAskModuleLabKey}
+                onSetReviewNote={setAskReviewNote}
+                onSetSettingsDraft={setAskRoutingSettingsDraft}
+                onSetRoutingState={setAskReviewRoutingState}
+                onUpdateSettings={handleUpdateAskRoutingSettings}
+                onUpdateReview={handleUpdateAskReview}
+                reviewNote={askReviewNote}
+                routingState={askReviewRoutingState}
+                savingAction={savingAskReviewAction}
+                savingSettings={savingAskRoutingSettings}
+                savingReview={savingAskReview}
+                selectedSubmission={selectedAskReviewSubmission}
+                settingsDraft={askRoutingSettingsDraft}
+                submissions={askReviewSubmissions}
+              />
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-2xl font-semibold">Assistant answer review</h2>
+                    <h2 className="text-2xl font-semibold">Support assistant answer review</h2>
                     <p className="mt-1 text-slate-600">
-                      Review every support assistant answer, including helpful and untouched responses.
+                      Older support-assistant answers remain here while Ask becomes the primary review stream.
                     </p>
                   </div>
                   <button
@@ -15113,6 +16116,7 @@ export default function Home() {
                   ) : null}
                 </div>
               </section>
+              </div>
               ) : null}
 
               {adminTab === "content" ? (
@@ -16274,6 +17278,27 @@ export default function Home() {
                                     <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
                                       {item.body}
                                     </p>
+                                  ) : null}
+
+                                  {item.ask_submission_id ? (
+                                    <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3">
+                                      <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <p className="text-sm font-medium text-slate-700">
+                                          Created from Ask intake.
+                                        </p>
+                                        <button
+                                          className="rounded-md border border-sky-300 bg-white px-3 py-2 text-sm font-semibold text-sky-700"
+                                          onClick={() =>
+                                            openAskSubmissionReview(
+                                              item.ask_submission_id ?? ""
+                                            )
+                                          }
+                                          type="button"
+                                        >
+                                          Open Ask review
+                                        </button>
+                                      </div>
+                                    </div>
                                   ) : null}
 
                                   {isEditing ? (
@@ -17946,6 +18971,106 @@ export default function Home() {
           </footer>
         ) : null}
       </section>
+      {canShowAskEntry ? (
+        <button
+          aria-label="Ask"
+          aria-expanded={askPanelOpen}
+          className="fixed right-3 top-3 z-[60] inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 sm:right-5 sm:top-5 sm:h-11 sm:px-4 sm:text-base"
+          data-testid="ask-entry"
+          onClick={() => {
+            if (askPanelOpen) {
+              resetAskPanelState();
+              return;
+            }
+
+            setAskPanelOpen(true);
+          }}
+          title="Ask"
+          type="button"
+        >
+          Ask
+        </button>
+      ) : null}
+      {canShowAskEntry && askPanelOpen ? (
+        <>
+          <button
+            aria-label="Close Ask panel"
+            className="fixed inset-0 z-[65] cursor-default bg-transparent"
+            onClick={resetAskPanelState}
+            type="button"
+          />
+          <section
+            aria-label="Ask panel"
+            className="fixed inset-x-3 top-16 z-[70] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-[#d8e0dc] bg-[#fffcf5] p-5 shadow-xl sm:left-auto sm:right-5 sm:top-20 sm:w-[min(32rem,calc(100vw-2.5rem))]"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-950">Ask</h2>
+                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
+                  {askConversationComplete
+                    ? appContentText(askCompletionMessageKey)
+                    : appContentText("ask_guidance_message")}
+                </p>
+              </div>
+              <button
+                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600"
+                onClick={resetAskPanelState}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            {askMessages.length > 0 ? (
+              <div className="mt-6 space-y-2">
+                {askMessages.map((askMessage, index) => (
+                  <div
+                    className={`max-w-[min(100%,42rem)] rounded-xl px-4 py-3 text-sm leading-relaxed ${
+                      askMessage.role === "user"
+                        ? "ml-auto bg-blue-700 text-white"
+                        : "border border-[#d8e0dc] bg-white text-slate-700"
+                    }`}
+                    key={`${askMessage.role}-${index}`}
+                  >
+                    <p className="whitespace-pre-wrap">{askMessage.body}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {askPanelError ? (
+              <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+                {askPanelError}
+              </p>
+            ) : null}
+
+            {!askConversationComplete ? (
+              <form className="mt-8" onSubmit={handleSendAskMessage}>
+                <label className="sr-only" htmlFor="ask-message">
+                  Ask a question, share an idea, or describe a problem
+                </label>
+                <textarea
+                  className="min-h-36 w-full rounded-xl border border-[#d8e0dc] bg-white px-4 py-4 text-base leading-relaxed text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  disabled={sendingAskMessage}
+                  id="ask-message"
+                  onChange={(event) => setAskInput(event.target.value)}
+                  placeholder="Ask a question, share an idea, or describe a problem"
+                  value={askInput}
+                />
+                <div className="mt-3 flex items-center justify-end">
+                  <button
+                    className="rounded-md bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white disabled:bg-slate-400"
+                    disabled={sendingAskMessage || !askInput.trim()}
+                    type="submit"
+                  >
+                    {sendingAskMessage ? "Sending..." : "Send"}
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </section>
+        </>
+      ) : null}
       <button
         className="fixed bottom-2 left-2 z-[60] rounded px-2 py-1 text-[11px] font-semibold text-slate-300 hover:bg-white hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
         onClick={() => setShowVersionInfo(true)}

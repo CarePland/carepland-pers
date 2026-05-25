@@ -12,6 +12,7 @@ export type SupportTicketStatus =
 export type SupportTicketPriority = "high" | "low" | "medium" | "urgent";
 
 export type SupportTicket = {
+  ask_submission_id: string | null;
   id: string;
   category: string;
   created_at: string;
@@ -54,6 +55,7 @@ type AdminSupportTicketsPanelProps = {
   messages: SupportTicketMessage[];
   onAddInternalNote: (event: FormEvent<HTMLFormElement>) => void;
   onAddReply: (event: FormEvent<HTMLFormElement>) => void;
+  onOpenAskSubmission: (askSubmissionId: string) => void;
   onRefresh: () => void;
   onSelectTicket: (ticket: SupportTicket) => void;
   onSetCategory: (value: string) => void;
@@ -110,6 +112,7 @@ export function AdminSupportTicketsPanel({
   messages,
   onAddInternalNote,
   onAddReply,
+  onOpenAskSubmission,
   onRefresh,
   onSelectTicket,
   onSetCategory,
@@ -238,6 +241,28 @@ export function AdminSupportTicketsPanel({
                 )}
               </div>
             </div>
+
+            {selectedTicket.ask_submission_id ? (
+              <div className="mt-4 rounded-md border border-sky-200 bg-sky-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+                  Ask intake source
+                </p>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-slate-700">
+                    This ticket was created from an Ask conversation.
+                  </p>
+                  <button
+                    className="rounded-md border border-sky-300 bg-white px-3 py-2 text-sm font-semibold text-sky-700"
+                    onClick={() =>
+                      onOpenAskSubmission(selectedTicket.ask_submission_id ?? "")
+                    }
+                    type="button"
+                  >
+                    Open Ask review
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-4 max-h-[28rem] space-y-3 overflow-auto rounded-md bg-slate-50 p-3">
               {messages.length === 0 ? (

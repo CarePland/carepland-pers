@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CarePland Ask System Running Notes</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #fbfaf6;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #526071;
+      --line: #dfe5e8;
+      --soft: #f3f7f4;
+      --accent: #315f7d;
+      --accent-soft: #e8f2f5;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.6;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 24px 72px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.2;
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      letter-spacing: 0;
+    }
+
+    h2 {
+      border-top: 1px solid var(--line);
+      font-size: 1.7rem;
+      margin-top: 40px;
+      padding-top: 32px;
+    }
+
+    h3 {
+      color: var(--accent);
+      font-size: 1.15rem;
+      margin-top: 26px;
+    }
+
+    p {
+      margin: 14px 0 0;
+    }
+
+    ul {
+      margin: 12px 0 0;
+      padding-left: 1.35rem;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      background: var(--accent-soft);
+      border-radius: 4px;
+      color: #17435a;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      padding: 0.1rem 0.25rem;
+    }
+
+    .lede {
+      color: var(--muted);
+      font-size: 1.1rem;
+      max-width: 760px;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-top: 12px;
+    }
+
+    .note {
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-top: 22px;
+      padding: 16px 18px;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-top: 18px;
+      padding: 20px;
+    }
+
+    .toc {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      margin-top: 20px;
+    }
+
+    .toc a {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--accent);
+      font-weight: 700;
+      padding: 12px 14px;
+      text-decoration: none;
+    }
+
+    .toc a:hover {
+      background: var(--accent-soft);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>CarePland Ask System Running Notes</h1>
+      <p class="meta">Last updated: May 25, 2026</p>
+      <p class="lede">
+        A living companion to <code>CAREPLAND_STABLE_PROJECT_CONTEXT.md</code>.
+        The stable context remains authoritative for long-term architecture and philosophy.
+        This document explains the Ask system in plain language and collects validation ideas
+        to revisit once real user data starts arriving.
+      </p>
+      <nav class="toc" aria-label="Page sections">
+        <a href="#how-it-works">How It Works</a>
+        <a href="#validation">Test And Validation Items</a>
+        <a href="#early-review">Early Review Questions</a>
+      </nav>
+    </header>
+
+    <section id="how-it-works">
+      <h2>Part 1: Natural-Language Explanation</h2>
+
+      <p>
+        Ask is CarePland's unified place for users to say what is on their mind
+        without first deciding what kind of request they are making.
+      </p>
+
+      <p>
+        A user might ask a how-to question, report something confusing, describe
+        a bug, suggest a feature, mention a workflow problem, or raise an
+        account/access concern. The user-facing experience should not make them
+        choose a category before typing. They should simply see <code>Ask</code>,
+        write naturally, and feel that the system is listening respectfully.
+      </p>
+
+      <p>
+        The Ask workflow starts with conversation, not ticketing. The panel is
+        meant to feel lightweight, warm, and safe: more open dialogue than
+        support queue. The assistant may ask a brief clarifying question when
+        that would materially improve the answer or the routing decision. If the
+        conversation reaches a useful stopping point, the panel acknowledges the
+        submission and closes the input area.
+      </p>
+
+      <p>
+        Behind the scenes, Ask is an intake system. It stores the conversation
+        as a thread with messages. When the conversation is ready to route,
+        CarePland creates an Ask submission snapshot containing the original
+        wording, transcript, AI summary, router category, confidence, rationale,
+        safety flags, and recommended next actions.
+      </p>
+
+      <p>
+        The router is intentionally modular. It should classify and route rather
+        than try to be every assistant at once. As the system matures, separate
+        interpreters can handle support answers, wishlist/feature interpretation,
+        bug/friction interpretation, workflow feedback, account/access issues,
+        and limited off-topic handling. Each path should have its own
+        prompt/instructions and its own output shape so it can be improved
+        independently.
+      </p>
+
+      <p>
+        The first downstream interpreter passes are wired for feature/workflow
+        and bug/friction routes. The router still decides the broad path, then
+        the relevant interpreter enriches the intake with cleaner structured
+        recommended actions for Admin review. For feature/workflow items, that
+        includes the suggested feature or workflow, pain point, desired outcome,
+        affected app area, and urgency clues. For bug/friction items, that
+        includes what the user tried, what they expected, what happened instead,
+        reproducibility clues, affected area, and whether the issue may be
+        usability confusion rather than a product defect.
+      </p>
+
+      <p>
+        The Clarifier is now a separate runtime module. When the router thinks
+        clarification may help, The Clarifier decides whether one more question
+        is actually useful. It can return a warm follow-up question, or it can
+        stop the questioning and provide a short understanding summary for
+        review. Clarification limits still set the ceiling, but the module helps
+        avoid asking questions simply because the system can.
+      </p>
+
+      <p>
+        The off-topic handler is also a bounded runtime module. If something is
+        harmlessly outside CarePland's purpose, it can close the loop with a
+        short redirect. If an off-topic message carries possible medical,
+        emergency, privacy, security, account-access, abuse, or data-loss risk,
+        it should send the item to review instead of closing it casually.
+      </p>
+
+      <p>
+        Admin review happens in <code>Support &gt; Ask - Review</code>. The
+        review surface is decision-first. It shows a concise recommended action
+        before raw data, with the longer transcript, router rationale, JSON
+        recommendation details, safety flags, and manual review note available
+        in collapsible sections. This keeps the page useful without forcing
+        every review to feel like reading a case file.
+      </p>
+
+      <p>
+        Ask outputs are cross-referenceable. A single Ask conversation can lead
+        to a support ticket, Product Management item, wishlist item, bug item,
+        workflow item, or later related records. The intake item remains the
+        source record, and downstream items should link back to it. This
+        preserves the original user language and avoids losing context when the
+        same conversation touches more than one area.
+      </p>
+
+      <p>
+        Support-question outcomes are now part of the review workflow. If the
+        assistant answered well, Admin can accept the answer and close the Ask
+        item. If human follow-up is needed, Admin can create a linked support
+        ticket from the Ask item. If the recommendation was wrong, Admin can
+        reject or override it. These decisions are not just workflow bookkeeping;
+        they are model-quality feedback.
+      </p>
+
+      <p>
+        Recommendation decisions should become a learning loop. Over time,
+        CarePland should be able to see where Admin agrees with the AI, where
+        Admin disagrees, which categories are weak, which prompts need
+        refinement, and when confidence thresholds are trustworthy enough to
+        allow more automation. Rejected or overridden items should remain
+        available for analysis rather than being erased.
+      </p>
+
+      <p>
+        Ask also logs estimated AI operation costs through a reusable
+        cost-tracking pattern. This is admin-only operational information. It
+        should help answer practical questions such as which AI workflows are
+        expensive, how cost changes as usage grows, and whether future
+        automation decisions are financially reasonable.
+      </p>
+
+      <p>
+        Ask Review includes a non-destructive module lab for prompt and routing
+        evaluation. Admin can paste a batch of test questions, choose one Ask
+        module, and review compact summaries, confidence, quality notes, and raw
+        structured output. These lab runs do not create Ask submissions or
+        downstream work items, but they do log estimated AI cost by module.
+      </p>
+
+      <p>
+        The assistant should not pretend to be human or deny that it is AI. At
+        the same time, the user-facing product should not foreground AI
+        unnecessarily. User-facing Ask module responses should also avoid
+        first-person assistant phrasing such as <code>I</code>,
+        <code>me</code>, <code>my</code>, <code>we</code>,
+        <code>we're</code>, <code>we've</code>, and <code>we'll</code> whenever
+        practical. The goal is to make Ask sound like a CarePland routing
+        surface rather than a human agent. This global rubric is Admin-visible
+        in AI Prompts as <code>Ask user response rubric</code>.
+      </p>
+    </section>
+
+    <section id="validation">
+      <h2>Part 2: Test And Validation Items</h2>
+      <p class="note">
+        These items are meant to be revisited after real Ask data exists. They
+        are not all launch blockers.
+      </p>
+
+      <div class="section">
+        <h3>Basic User Experience</h3>
+        <ul>
+          <li>Confirm the <code>Ask</code> button appears app-wide for signed-in users where expected.</li>
+          <li>Confirm the panel opens and closes consistently, including outside-click close.</li>
+          <li>Confirm closing the panel resets the conversation state.</li>
+          <li>Confirm the guidance text comes from Dynamic Text.</li>
+          <li>Confirm the acknowledgement text comes from Dynamic Text.</li>
+          <li>Confirm the duplicate-submission acknowledgement comes from Dynamic Text.</li>
+          <li>Confirm the panel does not feel like a ticket form: no ticket number, no forced category, no overly robotic labels.</li>
+          <li>Confirm the input disappears after the conversation is concluded.</li>
+          <li>Confirm messages have comfortable spacing and readable contrast on mobile and desktop.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Conversation Behavior</h3>
+        <ul>
+          <li>Test a straightforward how-to question that can be answered immediately.</li>
+          <li>Test a question with a typo where a warm clarification is appropriate.</li>
+          <li>Test a vague question that needs one or two follow-up questions before routing.</li>
+          <li>Confirm The Clarifier asks one useful question when the router recommends clarification.</li>
+          <li>Confirm The Clarifier can stop questioning and summarize when another question would be low value.</li>
+          <li>Test a conversation that reaches the clarification limit and is sent for review with a brief summary.</li>
+          <li>Test whether the assistant asks useful questions rather than unnecessary ones.</li>
+          <li>Test whether the assistant stays in the background as AI unless asked directly.</li>
+          <li>Test direct questions such as <code>Are you AI?</code> and confirm the answer is transparent but not overexplained.</li>
+          <li>Test harmless off-topic input and confirm it receives a brief redirect.</li>
+          <li>Test risky off-topic input and confirm it is routed for review rather than closed.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Duplicate Handling</h3>
+        <ul>
+          <li>Submit the same message twice in one panel session.</li>
+          <li>Submit the same message again after closing and reopening the panel.</li>
+          <li>Submit the same message from another page.</li>
+          <li>Confirm duplicates are acknowledged warmly and do not create unnecessary duplicate review work.</li>
+          <li>Review whether the duplicate window is too strict or too loose after real usage.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Routing Quality</h3>
+        <ul>
+          <li>Collect examples of <code>support_question</code>, <code>bug_report</code>, <code>feature_request</code>, <code>workflow_feedback</code>, <code>account_or_access_issue</code>, <code>unclear_or_needs_human_review</code>, and <code>off_topic</code>.</li>
+          <li>Compare router category to Admin judgment.</li>
+          <li>For feature/workflow routes, check whether the interpreter preserves the user's idea without over-formalizing it.</li>
+          <li>For bug/friction routes, check whether the interpreter clearly separates tried, expected, and actual behavior.</li>
+          <li>Track confidence levels for correct and incorrect routes.</li>
+          <li>Look for categories that are frequently confused with each other.</li>
+          <li>Look for confidence scores that are too high on weak recommendations.</li>
+          <li>Review whether <code>unclear_or_needs_human_review</code> is used appropriately or becomes a dumping ground.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Ask Module Lab</h3>
+        <ul>
+          <li>Paste a batch of test questions and confirm the chosen module returns one compact result per line.</li>
+          <li>Confirm module-lab runs do not create Ask submissions, support tickets, bugs, workflow items, or wishlist items.</li>
+          <li>Compare the router output against expected categories before changing production prompts.</li>
+          <li>Use The Clarifier lab to test whether follow-up questions feel useful, brief, and conversational.</li>
+          <li>Use interpreter labs to check whether structured outputs preserve the user's original intent without over-formalizing it.</li>
+          <li>Confirm raw structured output is available for deeper inspection without dominating the first result view.</li>
+          <li>Confirm module-lab AI cost appears under module-specific operation keys in Admin cost tracking.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Admin Review Workflow</h3>
+        <ul>
+          <li>Confirm new Ask submissions appear in <code>Support &gt; Ask - Review</code>.</li>
+          <li>Confirm Ask routing settings load and save from <code>Support &gt; Ask - Review</code>.</li>
+          <li>Confirm default clarification turns cannot exceed the absolute maximum after saving.</li>
+          <li>Confirm active/closed/category filters behave as expected.</li>
+          <li>Confirm the recommended action is readable without expanding raw details.</li>
+          <li>Confirm each section expands independently.</li>
+          <li>Confirm <code>Expand all</code> and <code>Collapse all</code> work for the selected submission.</li>
+          <li>Confirm long transcripts remain readable and do not dominate the first view.</li>
+          <li>Confirm review notes and routing-state changes save correctly.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Decision Actions</h3>
+        <ul>
+          <li>Accept an answered support question and confirm the Ask item closes.</li>
+          <li>Create a support ticket from an Ask item and confirm the ticket appears in <code>Support &gt; Tickets</code>.</li>
+          <li>Confirm the created ticket links back to the Ask submission.</li>
+          <li>Confirm the Ask submission links to the created support ticket.</li>
+          <li>Confirm related support tickets and Product Management items appear on the Ask review item.</li>
+          <li>Confirm related-item buttons move Admin to the expected downstream review area.</li>
+          <li>Confirm support tickets created from Ask show a link back to the source Ask review item.</li>
+          <li>Confirm Product Management items created from Ask show a link back to the source Ask review item.</li>
+          <li>Create Product Management items from bug, wishlist, and workflow recommendations.</li>
+          <li>Reject a recommendation and confirm it appears in recommendation-decision stats.</li>
+          <li>Mark an override and confirm it appears separately from accepted/rejected decisions.</li>
+          <li>Confirm accepted decisions cannot accidentally create duplicate downstream records from the same recommendation.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Model-Quality Feedback</h3>
+        <ul>
+          <li>Review agreement rate after the first meaningful batch of Ask decisions.</li>
+          <li>Compare agreement rate by router category.</li>
+          <li>Compare agreement rate by recommended action type.</li>
+          <li>Identify examples where the AI was directionally right but too confident.</li>
+          <li>Identify examples where the AI asked too many or too few clarifying questions.</li>
+          <li>Identify examples where the AI preserved the user's original intent well.</li>
+          <li>Identify examples where the AI summary distorted or over-formalized the user's language.</li>
+          <li>Use rejected/overridden recommendations as prompt-improvement material.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Support Quality</h3>
+        <ul>
+          <li>Review accepted support answers for accuracy, tone, and completeness.</li>
+          <li>Watch for answers that are technically correct but emotionally mismatched.</li>
+          <li>Watch for answers that overpromise features not yet built.</li>
+          <li>Watch for answers that should have escalated sooner.</li>
+          <li>Track users who repeatedly ask low-quality, abusive, or incoherent questions as a support/admin concern, not as an automatic punishment.</li>
+          <li>Consider whether repeated low-quality input should influence support triage or trigger admin review.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Data Integrity And Privacy</h3>
+        <ul>
+          <li>Confirm user-submitted Ask text is treated as private account/support context.</li>
+          <li>Confirm Admin review surfaces expose only what is necessary for review.</li>
+          <li>Confirm support-ticket creation preserves the original user wording.</li>
+          <li>Confirm internal handoff notes are marked internal and not exposed to the user.</li>
+          <li>Confirm downstream records keep links to Ask without copying unnecessary sensitive detail.</li>
+          <li>Confirm rejected/overridden items remain available for analysis without becoming public roadmap commitments.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Cost Tracking</h3>
+        <ul>
+          <li>Confirm successful Ask AI calls create AI operation log rows.</li>
+          <li>Confirm operation type, model, token usage, source table, source id, and estimated cost are captured where available.</li>
+          <li>Confirm the Admin dashboard cost tile loads after the SQL migration is applied.</li>
+          <li>Compare estimated cost by workflow as usage grows.</li>
+          <li>Revisit pricing snapshots when OpenAI/provider pricing changes.</li>
+          <li>Watch for unusually expensive interactions that may indicate prompt/context bloat.</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Future Interpreter Work</h3>
+        <ul>
+          <li>Add or refine a dedicated Support Assistant module for how-to answers.</li>
+          <li>Add a Wishlist/Feature Interpreter that preserves original wording and extracts desired outcome, pain point, app area, urgency, and source.</li>
+          <li>Add a Bug/Friction Interpreter that captures tried/expected/actual behavior.</li>
+          <li>Add a Workflow Feedback Interpreter for repeated confusion or process suggestions.</li>
+          <li>Add a limited Off-Topic handler that safely closes or routes unusual input.</li>
+          <li>Make prompts and thresholds dynamically editable from Admin.</li>
+          <li>Consider auto-creation only after real agreement data supports it.</li>
+          <li>Keep auto-routing rollback as status/link retraction rather than physical deletion.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="early-review">
+      <h2>Early Review Questions</h2>
+      <div class="section">
+        <ul>
+          <li>Are users finding Ask naturally, or does it need gentler placement or copy?</li>
+          <li>Are users treating Ask as intended: open dialogue rather than a formal support form?</li>
+          <li>Are Admin review decisions fast enough, or is there still too much data in the way?</li>
+          <li>Are accepted answers genuinely good, or merely plausible?</li>
+          <li>Are recommendations producing useful downstream records without creating clutter?</li>
+          <li>Which category or interpreter should be improved first based on real disagreement data?</li>
+          <li>Does the system preserve the user's original language and dignity?</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
