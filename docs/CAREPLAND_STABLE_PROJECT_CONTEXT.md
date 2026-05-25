@@ -583,6 +583,7 @@ Patient-facing UX:
 - Keep secondary actions available but less dominant.
 - Hide controls that are not currently useful.
 - Patient-facing UI should feel gentle, kind, and human-scale. Avoid "operator cockpit" density unless the user is in an admin or power-review context. Prefer calm grouping, plain language, and a small number of meaningful actions over dense controls, status panels, and configuration-heavy surfaces.
+- Treat small UI choices as subconscious directors toward context, calmness, clarity, and continuity. Button shape, color weight, spacing, copy, confirmation behavior, and visual hierarchy should quietly help users understand what matters, feel safe continuing, and avoid accidental loss. These details do not need to announce themselves; they should make the product feel nice to use.
 - Avoid confirmation prompts for harmless, reversible actions such as signing out. Use confirmation or warning prompts when an action would discard unsaved user-entered changes, remove user data, or otherwise create meaningful loss.
 - Treat copy fit and line breaks as part of the design system, not incidental cleanup. Patient-facing UI should avoid awkward orphaned words, stranded helping verbs, cramped labels, and accidental wraps when a small wording change, deliberate line break, or modest layout adjustment can make the surface feel calmer and more polished. Single words should generally not wrap alone to a new line, and intentional multi-line word groups should look visually balanced.
 
