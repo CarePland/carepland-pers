@@ -20,6 +20,7 @@ create index if not exists admin_access_events_target_created_idx
 alter table public.admin_access_events enable row level security;
 
 grant select on public.admin_access_events to authenticated;
+grant insert on public.admin_access_events to service_role;
 
 drop policy if exists "Admins can read admin access events" on public.admin_access_events;
 create policy "Admins can read admin access events"

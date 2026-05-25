@@ -17,6 +17,20 @@ type AdminNavButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   newCount?: number;
 };
 
+export type AdminNavItem<Key extends string> = {
+  followupCount?: number;
+  key: Key;
+  label: string;
+  newCount?: number;
+};
+
+type AdminNavGroupProps<Key extends string> = {
+  activeKey: Key;
+  className?: string;
+  items: AdminNavItem<Key>[];
+  onSelect: (key: Key) => void;
+};
+
 export function AdminAttentionBadge({
   count,
   label = "New",
@@ -111,5 +125,30 @@ export function AdminNavButton({
         </span>
       ) : null}
     </button>
+  );
+}
+
+export function AdminNavGroup<Key extends string>({
+  activeKey,
+  className = "",
+  items,
+  onSelect,
+}: AdminNavGroupProps<Key>) {
+  return (
+    <div
+      className={`mb-5 flex flex-wrap gap-2 border-b border-slate-200 pb-4 ${className}`}
+    >
+      {items.map((item) => (
+        <AdminNavButton
+          followupCount={item.followupCount ?? 0}
+          isSelected={activeKey === item.key}
+          key={item.key}
+          newCount={item.newCount ?? 0}
+          onClick={() => onSelect(item.key)}
+        >
+          {item.label}
+        </AdminNavButton>
+      ))}
+    </div>
   );
 }

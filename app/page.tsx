@@ -18,9 +18,41 @@ import {
   AgentKnowledgeProposalItemReviewStatus,
   AgentKnowledgeProposalsPanel,
 } from "./components/AgentKnowledgeProposalsPanel";
-import { AdminNavButton } from "./components/admin/AdminAttention";
-import { AdminContactDetailsPanel } from "./components/admin/AdminContactDetailsPanel";
+import {
+  AdminNavButton,
+  AdminNavGroup,
+  AdminNavItem,
+} from "./components/admin/AdminAttention";
+import {
+  AdminAuditTrailPanel,
+  type AdminAccessEventRow,
+} from "./components/admin/AdminAuditTrailPanel";
+import { AdminDashboardPanel } from "./components/admin/AdminDashboardPanel";
+import {
+  AdminEarlyAccessIntakePanel,
+  type EarlyAccessIntakeDraft,
+  type EarlyAccessIntakeRow,
+  type EarlyAccessIntakeStatus,
+} from "./components/admin/AdminEarlyAccessIntakePanel";
+import {
+  AdminIntegrationErrorsPanel,
+  type AdminIntegrationErrorSummaryRow,
+} from "./components/admin/AdminIntegrationErrorsPanel";
+import { AdminReadonlyUserPanel } from "./components/admin/AdminReadonlyUserPanel";
 import { AdminSessionSettingsPanel } from "./components/admin/AdminSessionSettingsPanel";
+import {
+  AdminSupportTicketsPanel,
+  type SupportTicket,
+  type SupportTicketMessage,
+  type SupportTicketPriority,
+  type SupportTicketStatus,
+} from "./components/admin/AdminSupportTicketsPanel";
+import {
+  AdminUserActivityPanel,
+  type AdminUserActivityFilter,
+  type AdminUserActivityRow,
+  type AdminUserActivitySortKey,
+} from "./components/admin/AdminUserActivityPanel";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import { PublicWebsite } from "./components/PublicWebsite";
@@ -189,72 +221,6 @@ type ProductMgmtItem = {
   resolved_at: string | null;
 };
 
-type AdminUserActivityRow = {
-  user_id: string;
-  email: string | null;
-  display_name: string | null;
-  care_subjects?: CareSubject[];
-  user_group?: string | null;
-  account_created_at: string | null;
-  last_seen_at: string | null;
-  appointment_count: number;
-  upcoming_appointment_count: number;
-  logged_appointment_count: number;
-  note_count: number;
-  careprep_count: number;
-  support_ticket_count: number;
-  open_support_ticket_count: number;
-  last_appointment_created_at: string | null;
-  last_appointment_starts_at: string | null;
-  last_note_created_at: string | null;
-  last_careprep_generated_at: string | null;
-  last_support_ticket_at: string | null;
-  is_admin: boolean;
-  is_test_user: boolean;
-};
-
-type EarlyAccessIntakeStatus =
-  | "closed"
-  | "contacted"
-  | "converted"
-  | "interested"
-  | "invited"
-  | "new"
-  | "not_a_fit"
-  | "reviewing";
-
-type EarlyAccessIntakeRow = {
-  id: string;
-  admin_notes: string;
-  care_role: string;
-  communication_consent: boolean;
-  communication_preference: "either" | "email" | "phone";
-  converted_user_id: string | null;
-  created_at: string;
-  email: string;
-  first_name: string;
-  interest_context: string;
-  invited_at: string | null;
-  last_contacted_at: string | null;
-  last_name: string;
-  phone: string | null;
-  source: string;
-  status: EarlyAccessIntakeStatus;
-  updated_at: string;
-};
-
-type EarlyAccessIntakeDraft = {
-  adminNotes: string;
-  careRole: string;
-  communicationPreference: "either" | "email" | "phone";
-  email: string;
-  firstName: string;
-  interestContext: string;
-  lastName: string;
-  phone: string;
-  source: string;
-};
-
 type AdminReadonlyProfile = {
   id: string;
   display_name: string | null;
@@ -330,47 +296,6 @@ type AdminSensitiveResourceType =
 
 type AdminRevealedSensitiveData = Record<string, unknown> & {
   resource_type?: AdminSensitiveResourceType;
-};
-
-type AdminIntegrationErrorSummaryRow = {
-  window_grain: "day" | "minute";
-  window_start: string;
-  integration_key: string;
-  error_key: string;
-  occurrence_count: number;
-  affected_user_count: number;
-  latest_occurred_at: string;
-  max_attempted_call_count: number | null;
-  latest_error_message: string | null;
-};
-
-type SupportTicket = {
-  id: string;
-  category: string;
-  created_at: string;
-  current_page: string | null;
-  needs_admin_followup: boolean;
-  priority: SupportTicketPriority;
-  profiles?: {
-    display_name: string | null;
-    email: string | null;
-    family_name: string | null;
-    given_name: string | null;
-  } | null;
-  status: SupportTicketStatus;
-  subject: string;
-  updated_at: string;
-  user_has_unread_update: boolean;
-  user_id: string;
-};
-
-type SupportTicketMessage = {
-  id: string;
-  author_role: "admin" | "system" | "user";
-  created_at: string;
-  is_internal: boolean;
-  message_body: string;
-  ticket_id: string;
 };
 
 type SupportAssistantResult = {
@@ -587,7 +512,9 @@ type AdminTab =
   | "product"
   | "tickets"
   | "tools"
+  | "userAudit"
   | "users";
+type AdminTopTab = "dashboard" | "support" | "system" | "tools" | "users";
 type StoredAdminTab = AdminTab | "messages";
 type AdminViewScopeType = "admin_tab" | "ai_admin_tab" | "product_area";
 type AdminViewState = {
@@ -635,32 +562,6 @@ type SupportAssistantAnalysisStatus =
   | "new"
   | "rejected"
   | "reviewed";
-type AdminUserActivityFilter =
-  | "active"
-  | "all"
-  | "inactive"
-  | "needs_followup"
-  | "real"
-  | "test";
-type AdminUserActivitySortKey =
-  | "appointments"
-  | "careprep"
-  | "created"
-  | "flags"
-  | "group"
-  | "last_activity"
-  | "last_seen"
-  | "notes"
-  | "tickets"
-  | "user";
-type SupportTicketStatus =
-  | "closed"
-  | "in_progress"
-  | "open"
-  | "resolved"
-  | "waiting_on_user";
-type SupportTicketPriority = "high" | "low" | "medium" | "urgent";
-
 type ProductMgmtItemDraft = {
   areaId: string;
   body: string;
@@ -1620,10 +1521,6 @@ function asTextList(value: unknown): string[] {
     .filter(Boolean);
 }
 
-function textValue(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
 function adminSensitiveKey(
   resourceType: AdminSensitiveResourceType,
   resourceId: string | null = null
@@ -1631,46 +1528,8 @@ function adminSensitiveKey(
   return `${resourceType}:${resourceId ?? "profile"}`;
 }
 
-function adminAppointmentPrivacyLabel(appointment: AdminReadonlyAppointment) {
-  const hiddenItems = [
-    "full title",
-    appointment.has_starts_at ? "date/time" : "",
-    appointment.has_provider_name ? "provider" : "",
-    appointment.has_provider_organization ? "practice" : "",
-    appointment.has_location_name ? "location" : "",
-    appointment.has_reason ? "reason" : "",
-    appointment.has_location_address ? "address" : "",
-    appointment.has_location_phone ? "phone" : "",
-  ].filter(Boolean);
-
-  return hiddenItems.length > 0
-    ? `Hidden: ${hiddenItems.join(", ")}`
-    : "No hidden appointment details";
-}
-
-function adminUserActivityLastActivity(row: AdminUserActivityRow) {
-  return (
-    row.last_support_ticket_at ??
-    row.last_careprep_generated_at ??
-    row.last_note_created_at ??
-    row.last_appointment_created_at ??
-    row.last_seen_at
-  );
-}
-
 function shortId(value: string | null): string {
   return value ? value.slice(0, 8) : "—";
-}
-
-function careSubjectNameForId(subjects: CareSubject[], subjectId: string | null) {
-  if (!subjectId) {
-    return "No Care VIP";
-  }
-
-  return (
-    subjects.find((subject) => subject.id === subjectId)?.display_name ??
-    `Care VIP ${shortId(subjectId)}`
-  );
 }
 
 function linesToList(value: string): string[] {
@@ -2884,6 +2743,11 @@ export default function Home() {
     direction: "desc",
     key: "last_activity",
   });
+  const [adminAccessEvents, setAdminAccessEvents] = useState<
+    AdminAccessEventRow[]
+  >([]);
+  const [loadingAdminAccessEvents, setLoadingAdminAccessEvents] =
+    useState(false);
   const [earlyAccessIntakeRows, setEarlyAccessIntakeRows] = useState<
     EarlyAccessIntakeRow[]
   >([]);
@@ -3290,6 +3154,62 @@ export default function Home() {
       isActionableAdminAttentionScope(summary.scope_type, summary.scope_key) &&
       !(summary.scope_type === "admin_tab" && summary.scope_key === "ai")
   );
+  const systemAdminTabs: AdminTab[] = ["errors", "content", "ai", "product"];
+  const supportAdminTabs: AdminTab[] = ["assistantReview", "tickets"];
+  const usersAdminTabs: AdminTab[] = ["users", "intake", "userAudit"];
+  const adminAttentionCountsForTab = (tabKey: AdminTab) => {
+    const attention = adminAttentionFor("admin_tab", tabKey);
+    let fallbackNewCount = 0;
+    let fallbackFollowupCount = 0;
+
+    if (tabKey === "tickets") {
+      fallbackNewCount = adminNewTickets.length;
+      fallbackFollowupCount = adminTicketsNeedingFollowup.length;
+    } else if (tabKey === "users" || tabKey === "intake") {
+      fallbackNewCount = earlyAccessIntakeNewCount;
+      fallbackFollowupCount = earlyAccessIntakeFollowupCount;
+    } else if (tabKey === "errors") {
+      fallbackNewCount = adminIntegrationErrors.filter((row) =>
+        isNewForAdmin(
+          row.latest_occurred_at,
+          adminLastViewedAt("admin_tab", "errors")
+        )
+      ).length;
+      fallbackFollowupCount = adminIntegrationErrors.length;
+    } else if (tabKey === "assistantReview") {
+      fallbackNewCount = assistantReviewInteractions.filter((interaction) =>
+        isNewForAdmin(
+          interaction.updated_at || interaction.created_at,
+          adminLastViewedAt("admin_tab", "assistantReview")
+        )
+      ).length;
+      fallbackFollowupCount = assistantReviewInteractions.filter(
+        (interaction) =>
+          !assistantReviewAdminReviews.some(
+            (review) => review.interaction_id === interaction.id
+          )
+      ).length;
+    }
+
+    return {
+      followupCount: Math.max(
+        attention?.followup_count ?? 0,
+        fallbackFollowupCount
+      ),
+      newCount: Math.max(attention?.new_count ?? 0, fallbackNewCount),
+    };
+  };
+  const adminAttentionCountsForTabs = (tabKeys: AdminTab[]) =>
+    tabKeys.reduce(
+      (totals, tabKey) => {
+        const counts = adminAttentionCountsForTab(tabKey);
+        return {
+          followupCount: totals.followupCount + counts.followupCount,
+          newCount: totals.newCount + counts.newCount,
+        };
+      },
+      { followupCount: 0, newCount: 0 }
+    );
   const selectedProductMgmtSectionConfig =
     productMgmtAreas.find(
       (section) => section.area_key === selectedProductMgmtSection
@@ -3426,6 +3346,79 @@ export default function Home() {
       total: earlyAccessIntakeRows.length,
     };
   }, [earlyAccessIntakeRows]);
+  const earlyAccessIntakeNewCount = earlyAccessIntakeRows.filter(
+    (row) => row.status === "new"
+  ).length;
+  const earlyAccessIntakeFollowupCount = earlyAccessIntakeRows.filter((row) =>
+    ["new", "reviewing", "contacted", "interested"].includes(row.status)
+  ).length;
+  const usersAdminNavItems: AdminNavItem<AdminTab>[] = [
+    { key: "users", label: "User Activity" },
+    {
+      followupCount: earlyAccessIntakeFollowupCount,
+      key: "intake",
+      label: "Early Access Intake",
+      newCount: earlyAccessIntakeNewCount,
+    },
+    { key: "userAudit", label: "Audit Trail" },
+  ];
+  const systemAdminNavItems: AdminNavItem<AdminTab>[] = [
+    { ...adminAttentionCountsForTab("errors"), key: "errors", label: "Errors" },
+    { key: "content", label: "Dynamic Text" },
+    { ...adminAttentionCountsForTab("ai"), key: "ai", label: "AI Prompts" },
+    { key: "product", label: "Prod Mgmt" },
+  ];
+  const supportAdminNavItems: AdminNavItem<AdminTab>[] = [
+    {
+      ...adminAttentionCountsForTab("assistantReview"),
+      key: "assistantReview",
+      label: "Asst Review",
+    },
+    { ...adminAttentionCountsForTab("tickets"), key: "tickets", label: "Tickets" },
+  ];
+  const systemAdminAttentionCounts = adminAttentionCountsForTabs(systemAdminTabs);
+  const supportAdminAttentionCounts =
+    adminAttentionCountsForTabs(supportAdminTabs);
+  const usersAdminAttentionCounts = adminAttentionCountsForTabs(usersAdminTabs);
+  const adminDashboardNewCount = actionableAdminAttentionSummaries.reduce(
+    (total, item) => total + (item.new_count ?? 0),
+    0
+  );
+  const adminDashboardFollowupCount = actionableAdminAttentionSummaries.reduce(
+    (total, item) => total + (item.followup_count ?? 0),
+    0
+  );
+  const topAdminNavItems: AdminNavItem<AdminTopTab>[] = [
+    { key: "dashboard", label: "Dashboard" },
+    { key: "tools", label: "Tools" },
+    { ...usersAdminAttentionCounts, key: "users", label: "Users" },
+    { ...systemAdminAttentionCounts, key: "system", label: "System" },
+    { ...supportAdminAttentionCounts, key: "support", label: "Support" },
+  ];
+  const activeAdminTopTab: AdminTopTab = usersAdminTabs.includes(adminTab)
+    ? "users"
+    : systemAdminTabs.includes(adminTab)
+      ? "system"
+      : supportAdminTabs.includes(adminTab)
+        ? "support"
+        : adminTab === "dashboard"
+          ? "dashboard"
+          : "tools";
+  const adminTabForTopTab = (topTab: AdminTopTab): AdminTab => {
+    if (topTab === "users") {
+      return usersAdminTabs.includes(adminTab) ? adminTab : "users";
+    }
+
+    if (topTab === "system") {
+      return systemAdminTabs.includes(adminTab) ? adminTab : "errors";
+    }
+
+    if (topTab === "support") {
+      return supportAdminTabs.includes(adminTab) ? adminTab : "assistantReview";
+    }
+
+    return topTab;
+  };
   const filteredEarlyAccessIntakeRows = useMemo(() => {
     if (earlyAccessIntakeFilter === "all") {
       return earlyAccessIntakeRows;
@@ -3442,6 +3435,12 @@ export default function Home() {
     );
   }, [earlyAccessIntakeFilter, earlyAccessIntakeRows]);
   const filteredAdminUserActivity = useMemo(() => {
+    const lastActivityForRow = (row: AdminUserActivityRow) =>
+      row.last_support_ticket_at ??
+      row.last_careprep_generated_at ??
+      row.last_note_created_at ??
+      row.last_appointment_created_at ??
+      row.last_seen_at;
     const inactiveSince = Date.now() - 1000 * 60 * 60 * 24 * 14;
 
     const filteredRows = adminUserActivity.filter((row) => {
@@ -3498,7 +3497,7 @@ export default function Home() {
           case "group":
             return row.user_group ?? "";
           case "last_activity":
-            return adminUserActivityLastActivity(row) ?? "";
+            return lastActivityForRow(row) ?? "";
           case "last_seen":
             return row.last_seen_at ?? "";
           case "notes":
@@ -3929,6 +3928,8 @@ export default function Home() {
               await loadAdminUserActivity();
             } else if (initialUiState.adminTab === "intake") {
               await loadEarlyAccessIntake();
+            } else if (initialUiState.adminTab === "userAudit") {
+              await loadAdminAccessEvents();
             } else if (initialUiState.adminTab === "errors") {
               await loadAdminIntegrationErrors();
             } else if (initialUiState.adminTab === "content") {
@@ -6313,8 +6314,48 @@ export default function Home() {
         : {
             direction: key === "user" || key === "group" ? "asc" : "desc",
             key,
-          }
+        }
     );
+  }
+
+  async function loadAdminAccessEvents() {
+    setLoadingAdminAccessEvents(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase
+        .from("admin_access_events")
+        .select(
+          "id,actor_user_id,target_user_id,event_type,resource_type,resource_id,permission_scope,reason,metadata,created_at"
+        )
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (error) {
+        throw error;
+      }
+
+      const rows = (data ?? []) as AdminAccessEventRow[];
+      setAdminAccessEvents(rows);
+
+      if (adminUserActivity.length === 0) {
+        const { data: userData, error: userError } = await supabase.rpc(
+          "get_admin_user_activity_summary"
+        );
+
+        if (userError) {
+          throw userError;
+        }
+
+        setAdminUserActivity((userData ?? []) as AdminUserActivityRow[]);
+      }
+
+      setMessage(`Loaded ${rows.length} audit event(s).`);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAdminAccessEvents(false);
+    }
   }
 
   async function loadEarlyAccessIntake() {
@@ -6549,7 +6590,7 @@ export default function Home() {
           [revealKey]: adminContactDetailsFromValue(result.contactDetails),
         }));
         setMessage("Contact details revealed and logged.");
-        return;
+        return true;
       }
 
       const { data, error } = await supabase.rpc(
@@ -6571,8 +6612,10 @@ export default function Home() {
         [revealKey]: (data ?? {}) as AdminRevealedSensitiveData,
       }));
       setMessage("Sensitive details revealed and logged.");
+      return true;
     } catch (error) {
       setMessage(getErrorMessage(error));
+      return false;
     } finally {
       setRevealingAdminSensitiveKey(null);
     }
@@ -6583,7 +6626,7 @@ export default function Home() {
     reason: string
   ) {
     if (!adminReadonlySnapshot) {
-      return;
+      return false;
     }
 
     setSavingAdminContactDetails(true);
@@ -6646,8 +6689,10 @@ export default function Home() {
           : currentSnapshot
       );
       showToast("Contact details updated and logged.", { type: "success" });
+      return true;
     } catch (error) {
       setMessage(getErrorMessage(error));
+      return false;
     } finally {
       setSavingAdminContactDetails(false);
     }
@@ -6865,17 +6910,6 @@ export default function Home() {
     setAdminTicketChangeNote("");
     setAdminTicketReplyBody("");
     setAdminTicketInternalNote("");
-  }
-
-  function supportTicketUserLabel(ticket: SupportTicket) {
-    const profile = ticket.profiles;
-    const displayName = profile?.display_name?.trim();
-    const fullName = [profile?.given_name, profile?.family_name]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-
-    return displayName || fullName || profile?.email || ticket.user_id;
   }
 
   function assistantInteractionUserLabel(interaction: SupportAssistantInteraction) {
@@ -7580,6 +7614,10 @@ export default function Home() {
 
     if (tab === "intake") {
       await loadEarlyAccessIntake();
+    }
+
+    if (tab === "userAudit") {
+      await loadAdminAccessEvents();
     }
 
     if (tab === "errors") {
@@ -14125,150 +14163,52 @@ export default function Home() {
                 style={{ top: stickySecondaryOffset }}
               >
                 <div className="flex flex-wrap gap-2">
-                  {[
-                    ["dashboard", "Dashboard"],
-                    ["tools", "Tools"],
-                    ["users", "Users"],
-                    ["intake", "Intake"],
-                    ["errors", "Errors"],
-                    ["content", "Dynamic Text"],
-                    ["ai", "AI Prompts"],
-                    ["assistantReview", "Asst Review"],
-                    ["product", "Prod Mgmt"],
-                    ["tickets", "Tickets"],
-                  ].map(([tab, label]) => {
-                    const tabKey = tab as AdminTab;
-                    const attention = adminAttentionFor("admin_tab", tabKey);
-                    const isSelected = adminTab === tabKey;
-                    let fallbackNewCount = 0;
-                    let fallbackFollowupCount = 0;
-
-                    if (tabKey === "tickets") {
-                      fallbackNewCount = adminNewTickets.length;
-                      fallbackFollowupCount = adminTicketsNeedingFollowup.length;
-                    } else if (tabKey === "intake") {
-                      fallbackNewCount = earlyAccessIntakeRows.filter(
-                        (row) => row.status === "new"
-                      ).length;
-                      fallbackFollowupCount = earlyAccessIntakeRows.filter(
-                        (row) =>
-                          ["new", "reviewing", "contacted", "interested"].includes(
-                            row.status
-                          )
-                      ).length;
-                    } else if (tabKey === "errors") {
-                      fallbackNewCount = adminIntegrationErrors.filter((row) =>
-                        isNewForAdmin(
-                          row.latest_occurred_at,
-                          adminLastViewedAt("admin_tab", "errors")
-                        )
-                      ).length;
-                      fallbackFollowupCount = adminIntegrationErrors.length;
-                    } else if (tabKey === "assistantReview") {
-                      fallbackNewCount = assistantReviewInteractions.filter(
-                        (interaction) =>
-                          isNewForAdmin(
-                            interaction.updated_at || interaction.created_at,
-                            adminLastViewedAt("admin_tab", "assistantReview")
-                          )
-                      ).length;
-                      fallbackFollowupCount = assistantReviewInteractions.filter(
-                        (interaction) =>
-                          !assistantReviewAdminReviews.some(
-                            (review) => review.interaction_id === interaction.id
-                          )
-                      ).length;
-                    }
-                    const newCount = Math.max(
-                      attention?.new_count ?? 0,
-                      fallbackNewCount
-                    );
-                    const followupCount = Math.max(
-                      attention?.followup_count ?? 0,
-                      fallbackFollowupCount
-                    );
-
-                    return (
-                      <AdminNavButton
-                        followupCount={followupCount}
-                        isSelected={isSelected}
-                        key={tab}
-                        newCount={newCount}
-                        onClick={() => handleChangeAdminTab(tabKey)}
-                      >
-                        {label}
-                      </AdminNavButton>
-                    );
-                  })}
+                  {topAdminNavItems.map((item) => (
+                    <AdminNavButton
+                      followupCount={item.followupCount ?? 0}
+                      isSelected={activeAdminTopTab === item.key}
+                      key={item.key}
+                      newCount={item.newCount ?? 0}
+                      onClick={() => handleChangeAdminTab(adminTabForTopTab(item.key))}
+                    >
+                      {item.label}
+                    </AdminNavButton>
+                  ))}
                 </div>
               </section>
+
+              {systemAdminTabs.includes(adminTab) ? (
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <AdminNavGroup
+                    activeKey={adminTab}
+                    className="mb-0 border-b-0 pb-0"
+                    items={systemAdminNavItems}
+                    onSelect={(tab) => handleChangeAdminTab(tab)}
+                  />
+                </section>
+              ) : null}
+
+              {supportAdminTabs.includes(adminTab) ? (
+                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <AdminNavGroup
+                    activeKey={adminTab}
+                    className="mb-0 border-b-0 pb-0"
+                    items={supportAdminNavItems}
+                    onSelect={(tab) => handleChangeAdminTab(tab)}
+                  />
+                </section>
+              ) : null}
 
               {adminTab === "dashboard" ? (
-              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-semibold">Admin dashboard</h2>
-                    <p className="mt-1 text-slate-600">
-                      Read-only home for prioritized Admin HQ signals. The first
-                      version will summarize what deserves attention first and
-                      link back into the existing Admin tabs.
-                    </p>
-                  </div>
-                  <button
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                    onClick={() => loadAdminAttentionOverview()}
-                    type="button"
-                  >
-                    Refresh signals
-                  </button>
-                </div>
-
-                <div className="mt-5 grid gap-3 md:grid-cols-3">
-                  <div className="rounded-md border border-red-200 bg-red-50 p-4">
-                    <p className="text-sm font-semibold text-red-950">
-                      New / unseen
-                    </p>
-                    <p className="mt-2 text-3xl font-semibold text-red-700">
-                      {actionableAdminAttentionSummaries.reduce(
-                        (total, item) => total + (item.new_count ?? 0),
-                        0
-                      )}
-                    </p>
-                  </div>
-                  <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-                    <p className="text-sm font-semibold text-amber-950">
-                      Follow-up
-                    </p>
-                    <p className="mt-2 text-3xl font-semibold text-amber-800">
-                      {actionableAdminAttentionSummaries.reduce(
-                        (total, item) => total + (item.followup_count ?? 0),
-                        0
-                      )}
-                    </p>
-                  </div>
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-sm font-semibold text-slate-900">
-                      Prompt workflow
-                    </p>
-                    <button
-                      className="mt-2 text-left text-sm font-semibold text-blue-700 hover:text-blue-900"
-                      onClick={() => {
-                        setSelectedAiWorkflow("admin_hq_prioritization");
-                        void handleChangeAdminTab("ai");
-                      }}
-                      type="button"
-                    >
-                      Open Admin HQ prioritization prompt
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-5 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
-                  Admin HQ is currently a read-only placeholder. Next step is to
-                  feed Admin-safe signals into the prioritization prompt and show
-                  a ranked brief here.
-                </div>
-              </section>
+                <AdminDashboardPanel
+                  followupCount={adminDashboardFollowupCount}
+                  newCount={adminDashboardNewCount}
+                  onOpenPrioritizationPrompt={() => {
+                    setSelectedAiWorkflow("admin_hq_prioritization");
+                    void handleChangeAdminTab("ai");
+                  }}
+                  onRefreshSignals={loadAdminAttentionOverview}
+                />
               ) : null}
 
               {adminTab === "tools" ? (
@@ -14426,6 +14366,11 @@ export default function Home() {
 
               {adminTab === "users" ? (
               <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <AdminNavGroup
+                  activeKey={adminTab}
+                  items={usersAdminNavItems}
+                  onSelect={(tab) => handleChangeAdminTab(tab)}
+                />
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-2xl font-semibold">Users / activity</h2>
@@ -14445,1808 +14390,132 @@ export default function Home() {
                 </div>
 
                 {adminReadonlySnapshot ? (
-                  <section
-                    className="mt-5 scroll-mt-24 rounded-md border border-blue-200 bg-blue-50 p-4"
-                    ref={adminReadonlyPanelRef}
-                    tabIndex={-1}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-                          Read-only admin view
-                        </p>
-                        <h3 className="mt-1 text-xl font-semibold text-slate-950">
-                          Viewing {adminReadonlySnapshot.profile.display_name || "User"}
-                        </h3>
-                        <p className="mt-1 max-w-3xl text-sm text-blue-950">
-                          Sensitive profile, appointment, Notes, and CarePrep details
-                          are hidden until revealed. Reveals are logged for audit.
-                        </p>
-                      </div>
-                      <button
-                        className="rounded-md border border-blue-300 bg-white px-4 py-2 font-semibold text-blue-800"
-                        onClick={closeAdminReadonlyUserView}
-                        type="button"
-                      >
-                        Exit view
-                      </button>
-                    </div>
-
-                    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-                      <div className="rounded-md border border-blue-100 bg-white p-3">
-                        <h4 className="font-semibold text-slate-900">Account</h4>
-                        <dl className="mt-3 space-y-2 text-sm">
-                          <div>
-                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              Email
-                            </dt>
-                            <dd className="text-slate-800">
-                              {adminReadonlySnapshot.profile.masked_email || "Not set"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              Onboarding
-                            </dt>
-                            <dd className="text-slate-800">
-                              {adminReadonlySnapshot.profile.onboarding_completed_at
-                                ? `Complete ${formatAdminDate(
-                                    adminReadonlySnapshot.profile.onboarding_completed_at
-                                  )}`
-                                : "Not complete"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              Early Access acknowledgements
-                            </dt>
-                            <dd className="text-slate-800">
-                              {adminReadonlySnapshot.profile.beta_terms_acknowledged_at &&
-                              adminReadonlySnapshot.profile.beta_privacy_acknowledged_at &&
-                              adminReadonlySnapshot.profile.beta_disclaimer_acknowledged_at
-                                ? "Complete"
-                                : "Incomplete"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              Flags
-                            </dt>
-                            <dd className="mt-1 flex flex-wrap gap-1">
-                              {adminReadonlySnapshot.profile.requires_email_update ? (
-                                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                                  Needs email update
-                                </span>
-                              ) : null}
-                              {adminReadonlySnapshot.profile.is_test_user ? (
-                                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                                  Test
-                                </span>
-                              ) : null}
-                              {adminReadonlySnapshot.profile.is_admin ? (
-                                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
-                                  Admin
-                                </span>
-                              ) : null}
-                            </dd>
-                          </div>
-                        </dl>
-
-                        {adminReadonlySnapshot.profile.has_contact_details ? (
-                          <AdminContactDetailsPanel
-                            contactDetails={
-                              adminRevealedSensitiveData[
-                                adminSensitiveKey("profile_contact")
-                              ]
-                                ? adminContactDetailsFromValue(
-                                    adminRevealedSensitiveData[
-                                      adminSensitiveKey("profile_contact")
-                                    ]
-                                  )
-                                : null
-                            }
-                            hasContactDetails={
-                              adminReadonlySnapshot.profile.has_contact_details
-                            }
-                            key={JSON.stringify(
-                              adminRevealedSensitiveData[
-                                adminSensitiveKey("profile_contact")
-                              ] ?? "hidden"
-                            )}
-                            maskedEmail={
-                              adminReadonlySnapshot.profile.masked_email
-                            }
-                            onReveal={(reason) =>
-                              revealAdminSensitiveData({
-                                reason,
-                                resourceType: "profile_contact",
-                                targetUserId: adminReadonlySnapshot.profile.id,
-                              })
-                            }
-                            onSave={saveAdminContactDetails}
-                            revealing={
-                              revealingAdminSensitiveKey ===
-                              adminSensitiveKey("profile_contact")
-                            }
-                            saving={savingAdminContactDetails}
-                          />
-                        ) : null}
-	                      </div>
-
-                      <div className="rounded-md border border-blue-100 bg-white p-3">
-                        <div className="grid gap-3 sm:grid-cols-3">
-                          {[
-                            [
-                              "Appointments",
-                              adminReadonlySnapshot.counts.appointment_count,
-                            ],
-                            ["Notes", adminReadonlySnapshot.counts.note_count],
-                            [
-                              "CarePrep",
-                              adminReadonlySnapshot.counts.careprep_count,
-                            ],
-                          ].map(([label, value]) => (
-                            <div className="rounded-md bg-slate-50 p-3" key={label}>
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                {label}
-                              </p>
-                              <p className="mt-1 text-2xl font-semibold text-slate-900">
-                                {value}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap gap-2 text-sm">
-                          {adminReadonlySnapshot.entitlements.length > 0 ? (
-                            adminReadonlySnapshot.entitlements.map((entitlement) => (
-                              <span
-                                className="rounded-full bg-blue-100 px-3 py-1 font-semibold text-blue-800"
-                                key={`${entitlement.care_circle_id}-${entitlement.plan_id}`}
-                              >
-                                {entitlement.plan_name ||
-                                  entitlement.plan_id ||
-                                  "Plan unknown"}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">
-                              No active plan found
-                            </span>
-                          )}
-                          {adminReadonlySnapshot.care_subjects.map((subject) => (
-                            <span
-                              className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700"
-                              key={subject.id}
-                            >
-                              Care VIP: {subject.display_name}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 space-y-3">
-                      <h4 className="font-semibold text-slate-900">
-                        Appointment preview
-                      </h4>
-                      {adminReadonlySnapshot.appointments.length === 0 ? (
-                        <p className="rounded-md border border-dashed border-blue-200 bg-white p-3 text-sm text-slate-600">
-                          No appointments found for this account.
-                        </p>
-                      ) : (
-                        adminReadonlySnapshot.appointments.map((appointment) => {
-                          const detailKey = adminSensitiveKey(
-                            "appointment_details",
-                            appointment.id
-                          );
-                          const noteKey = appointment.current_note_id
-                            ? adminSensitiveKey(
-                                "appointment_note",
-                                appointment.current_note_id
-                              )
-                            : "";
-                          const carePrepKey = appointment.current_guidance_id
-                            ? adminSensitiveKey(
-                                "careprep_guidance",
-                                appointment.current_guidance_id
-                              )
-                            : "";
-                          const appointmentDetails =
-                            adminRevealedSensitiveData[detailKey];
-                          const noteDetails = noteKey
-                            ? adminRevealedSensitiveData[noteKey]
-                            : null;
-                          const carePrepDetails = carePrepKey
-                            ? adminRevealedSensitiveData[carePrepKey]
-                            : null;
-
-                          return (
-                            <article
-                              className="rounded-md border border-blue-100 bg-white p-3"
-                              key={appointment.id}
-                            >
-                              <div className="flex flex-wrap items-start justify-between gap-3">
-                                <div>
-                                  <h5 className="font-semibold text-slate-950">
-                                    {appointmentDetails
-                                      ? textValue(appointmentDetails.title) ||
-                                        "Appointment"
-                                      : appointment.title_preview ||
-                                        "Appointment"}
-                                  </h5>
-                                  <p className="text-sm text-slate-600">
-                                    {appointmentDetails &&
-                                    textValue(appointmentDetails.starts_at)
-                                      ? formatDate(
-                                          textValue(appointmentDetails.starts_at)
-                                        )
-                                      : appointment.starts_on
-                                        ? `${formatDateOnly(
-                                            appointment.starts_on
-                                          )} · time hidden`
-                                        : "Date not set"}{" "}
-                                    · {appointment.status}
-                                  </p>
-                                  <p className="mt-1 text-sm text-slate-700">
-                                    {appointmentDetails
-                                      ? [
-                                          textValue(
-                                            appointmentDetails.provider_name
-                                          ),
-                                          textValue(
-                                            appointmentDetails.provider_organization
-                                          ),
-                                          textValue(
-                                            appointmentDetails.location_name
-                                          ),
-                                        ]
-                                          .filter(Boolean)
-                                          .join(" · ") ||
-                                        "Provider/location not set"
-                                      : [
-                                          appointment.has_provider_name ||
-                                          appointment.has_provider_organization
-                                            ? [
-                                                appointment.provider_name_preview,
-                                                appointment.provider_organization_preview,
-                                              ]
-                                                .filter(Boolean)
-                                                .join(" · ") || "Provider hidden"
-                                            : "",
-                                          appointment.has_location_name
-                                            ? appointment.location_name_preview ||
-                                              "Location hidden"
-                                            : "",
-                                        ]
-                                          .filter(Boolean)
-                                          .join(" · ") ||
-                                        "Provider/location not set"}
-                                  </p>
-                                </div>
-                                <div className="text-right text-xs text-slate-500">
-                                  {appointment.is_sample_data ? (
-                                    <span className="mb-1 inline-flex rounded-full bg-amber-100 px-2 py-1 font-semibold text-amber-800">
-                                      Sample
-                                    </span>
-                                  ) : null}
-                                  <p>
-                                    <span className="font-semibold">Created:</span>{" "}
-                                    {formatAdminDate(appointment.created_at)}
-                                  </p>
-                                  <p>
-                                    <span className="font-semibold">Updated:</span>{" "}
-                                    {formatAdminDate(appointment.updated_at)}
-                                  </p>
-                                  <p>
-                                    <span className="font-semibold">Appt ID:</span>{" "}
-                                    {shortId(appointment.id)}
-                                  </p>
-                                  <p>
-                                    <span className="font-semibold">Care VIP:</span>{" "}
-                                    {careSubjectNameForId(
-                                      adminReadonlySnapshot.care_subjects,
-                                      appointment.care_subject_id
-                                    )}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                                <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">
-                                  {appointment.has_note
-                                    ? "Has notes"
-                                    : "No current note"}
-                                </span>
-                                <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">
-                                  {appointment.has_careprep
-                                    ? appointment.current_guidance_review_status ===
-                                      "draft"
-                                      ? "CarePrep draft"
-                                      : "Has CarePrep"
-                                    : "No CarePrep"}
-                                </span>
-                                {appointment.current_note_id ? (
-                                  <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">
-                                    Note ID {shortId(appointment.current_note_id)}
-                                  </span>
-                                ) : null}
-                                {appointment.current_guidance_id ? (
-                                  <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-600">
-                                    CarePrep ID{" "}
-                                    {shortId(appointment.current_guidance_id)}
-                                  </span>
-                                ) : null}
-                              </div>
-
-                              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                                <div className="rounded-md bg-slate-50 p-3 text-sm">
-                                  <p className="font-semibold text-slate-800">
-                                    Details
-                                  </p>
-                                  {appointmentDetails ? (
-                                    <div className="mt-2 space-y-1 text-slate-700">
-                                      {textValue(appointmentDetails.reason) ? (
-                                        <p>
-                                          <span className="font-semibold">
-                                            Reason:
-                                          </span>{" "}
-                                          {textValue(appointmentDetails.reason)}
-                                        </p>
-                                      ) : null}
-                                      {textValue(
-                                        appointmentDetails.location_address
-                                      ) ? (
-                                        <p>
-                                          <span className="font-semibold">
-                                            Address:
-                                          </span>{" "}
-                                          {textValue(
-                                            appointmentDetails.location_address
-                                          )}
-                                        </p>
-                                      ) : null}
-                                      {textValue(appointmentDetails.starts_at) ? (
-                                        <p>
-                                          <span className="font-semibold">
-                                            Date/time:
-                                          </span>{" "}
-                                          {formatDate(
-                                            textValue(appointmentDetails.starts_at)
-                                          )}
-                                        </p>
-                                      ) : null}
-                                      {textValue(
-                                        appointmentDetails.provider_name
-                                      ) ? (
-                                        <p>
-                                          <span className="font-semibold">
-                                            Provider:
-                                          </span>{" "}
-                                          {textValue(
-                                            appointmentDetails.provider_name
-                                          )}
-                                        </p>
-                                      ) : null}
-                                      {textValue(
-                                        appointmentDetails.provider_organization
-                                      ) ? (
-                                        <p>
-                                          <span className="font-semibold">
-                                            Practice:
-                                          </span>{" "}
-                                          {textValue(
-                                            appointmentDetails.provider_organization
-                                          )}
-                                        </p>
-                                      ) : null}
-                                      {textValue(
-                                        appointmentDetails.location_name
-                                      ) ? (
-                                        <p>
-                                          <span className="font-semibold">
-                                            Location:
-                                          </span>{" "}
-                                          {textValue(
-                                            appointmentDetails.location_name
-                                          )}
-                                        </p>
-                                      ) : null}
-                                      {textValue(
-                                        appointmentDetails.location_phone
-                                      ) ? (
-                                        <p>
-                                          <span className="font-semibold">
-                                            Phone:
-                                          </span>{" "}
-                                          {textValue(
-                                            appointmentDetails.location_phone
-                                          )}
-                                        </p>
-                                      ) : null}
-                                    </div>
-                                  ) : (
-                                    <>
-                                      <p className="mt-1 text-slate-600">
-                                        {adminAppointmentPrivacyLabel(appointment)}
-                                      </p>
-                                      <button
-                                        className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:text-slate-400"
-                                        disabled={
-                                          revealingAdminSensitiveKey === detailKey
-                                        }
-                                        onClick={() =>
-                                          revealAdminSensitiveData({
-                                            resourceId: appointment.id,
-                                            resourceType:
-                                              "appointment_details",
-                                            targetUserId:
-                                              adminReadonlySnapshot.profile.id,
-                                          })
-                                        }
-                                        type="button"
-                                      >
-                                        {revealingAdminSensitiveKey === detailKey
-                                          ? "Revealing..."
-                                          : "Reveal full title/details"}
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-
-                                <div className="rounded-md bg-slate-50 p-3 text-sm">
-                                  <p className="font-semibold text-slate-800">
-                                    Notes
-                                  </p>
-                                  {noteDetails ? (
-                                    <div className="mt-2 space-y-2 text-slate-700">
-                                      {textValue(noteDetails.summary_short) ? (
-                                        <p>{textValue(noteDetails.summary_short)}</p>
-                                      ) : null}
-                                      <p className="font-semibold text-slate-800">
-                                        Takeaways
-                                      </p>
-                                      <DetailList
-                                        emptyLabel="No takeaways saved."
-                                        items={asTextList(noteDetails.takeaways)}
-                                      />
-                                      <p className="font-semibold text-slate-800">
-                                        Follow-ups
-                                      </p>
-                                      <DetailList
-                                        emptyLabel="No follow-ups saved."
-                                        items={asTextList(noteDetails.followups)}
-                                      />
-                                    </div>
-                                  ) : appointment.current_note_id ? (
-                                    <>
-                                      <p className="mt-1 text-slate-600">
-                                        Note content is hidden.
-                                      </p>
-                                      <button
-                                        className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:text-slate-400"
-                                        disabled={
-                                          revealingAdminSensitiveKey === noteKey
-                                        }
-                                        onClick={() =>
-                                          revealAdminSensitiveData({
-                                            resourceId:
-                                              appointment.current_note_id,
-                                            resourceType: "appointment_note",
-                                            targetUserId:
-                                              adminReadonlySnapshot.profile.id,
-                                          })
-                                        }
-                                        type="button"
-                                      >
-                                        {revealingAdminSensitiveKey === noteKey
-                                          ? "Revealing..."
-                                          : "Reveal notes"}
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <p className="mt-1 text-slate-600">
-                                      No current note.
-                                    </p>
-                                  )}
-                                </div>
-
-                                <div className="rounded-md bg-slate-50 p-3 text-sm">
-                                  <p className="font-semibold text-slate-800">
-                                    CarePrep
-                                  </p>
-                                  {carePrepDetails ? (
-                                    <div className="mt-2 space-y-2 text-slate-700">
-                                      {textValue(carePrepDetails.summary) ? (
-                                        <p>{textValue(carePrepDetails.summary)}</p>
-                                      ) : null}
-                                      <p className="font-semibold text-slate-800">
-                                        Questions
-                                      </p>
-                                      <DetailList
-                                        emptyLabel="No questions saved."
-                                        items={asTextList(
-                                          carePrepDetails.key_questions
-                                        )}
-                                      />
-                                      <p className="font-semibold text-slate-800">
-                                        Bring
-                                      </p>
-                                      <DetailList
-                                        emptyLabel="No bring list saved."
-                                        items={asTextList(carePrepDetails.bring_list)}
-                                      />
-                                      <p className="font-semibold text-slate-800">
-                                        Watchouts
-                                      </p>
-                                      <DetailList
-                                        emptyLabel="No watchouts saved."
-                                        items={asTextList(carePrepDetails.watchouts)}
-                                      />
-                                    </div>
-                                  ) : appointment.current_guidance_id ? (
-                                    <>
-                                      <p className="mt-1 text-slate-600">
-                                        CarePrep content is hidden.
-                                      </p>
-                                      <button
-                                        className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:text-slate-400"
-                                        disabled={
-                                          revealingAdminSensitiveKey === carePrepKey
-                                        }
-                                        onClick={() =>
-                                          revealAdminSensitiveData({
-                                            resourceId:
-                                              appointment.current_guidance_id,
-                                            resourceType: "careprep_guidance",
-                                            targetUserId:
-                                              adminReadonlySnapshot.profile.id,
-                                          })
-                                        }
-                                        type="button"
-                                      >
-                                        {revealingAdminSensitiveKey === carePrepKey
-                                          ? "Revealing..."
-                                          : "Reveal CarePrep"}
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <p className="mt-1 text-slate-600">
-                                      No current CarePrep.
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </article>
-                          );
-                        })
-                      )}
-                    </div>
-                  </section>
+                  <AdminReadonlyUserPanel
+                    formatAdminDate={formatAdminDate}
+                    formatDate={formatDate}
+                    formatDateOnly={formatDateOnly}
+                    onClose={closeAdminReadonlyUserView}
+                    onReveal={revealAdminSensitiveData}
+                    onSaveContactDetails={saveAdminContactDetails}
+                    panelRef={adminReadonlyPanelRef}
+                    revealedData={adminRevealedSensitiveData}
+                    revealingKey={revealingAdminSensitiveKey}
+                    savingContactDetails={savingAdminContactDetails}
+                    shortId={shortId}
+                    snapshot={adminReadonlySnapshot}
+                  />
                 ) : null}
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {[
-                    ["Total users", adminUserActivityStats.totalUsers],
-                    ["Real users", adminUserActivityStats.realUsers],
-                    ["Active 14d", adminUserActivityStats.activeRecently],
-                    ["Needs follow-up", adminUserActivityStats.needsFollowup],
-                  ].map(([label, value]) => (
-                    <div
-                      className="rounded-md border border-slate-200 bg-slate-50 p-3"
-                      key={label}
-                    >
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {label}
-                      </p>
-                      <p className="mt-1 text-2xl font-semibold text-slate-900">
-                        {value}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
-                  <label className="block text-sm font-medium text-slate-700">
-                    View
-                    <select
-                      className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                      onChange={(event) =>
-                        setAdminUserActivityFilter(
-                          event.target.value as AdminUserActivityFilter
-                        )
-                      }
-                      value={adminUserActivityFilter}
-                    >
-                      <option value="all">All users</option>
-                      <option value="real">Real users</option>
-                      <option value="test">Test/admin users</option>
-                      <option value="active">Active last 14 days</option>
-                      <option value="inactive">Inactive 14+ days</option>
-                      <option value="needs_followup">Needs follow-up</option>
-                    </select>
-                  </label>
-                  <p className="text-sm text-slate-500">
-                    Showing {filteredAdminUserActivity.length} of{" "}
-                    {adminUserActivity.length}
-                  </p>
-                </div>
-
-                {adminUserActivity.length === 0 ? (
-                  <div className="mt-5 rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
-                    No user activity loaded yet.
-                  </div>
-                ) : (
-                  <div className="mt-5 overflow-x-auto">
-                    <table className="min-w-[1120px] w-full border-separate border-spacing-0 text-left text-sm">
-                      <thead>
-                        <tr className="text-xs uppercase tracking-wide text-slate-500">
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() => toggleAdminUserActivitySort("user")}
-                              type="button"
-                            >
-                              User
-                              {adminUserActivitySort.key === "user"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() => toggleAdminUserActivitySort("group")}
-                              type="button"
-                            >
-                              User Group
-                              {adminUserActivitySort.key === "group"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() =>
-                                toggleAdminUserActivitySort("last_seen")
-                              }
-                              type="button"
-                            >
-                              Last seen
-                              {adminUserActivitySort.key === "last_seen"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() => toggleAdminUserActivitySort("created")}
-                              type="button"
-                            >
-                              Created
-                              {adminUserActivitySort.key === "created"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() =>
-                                toggleAdminUserActivitySort("appointments")
-                              }
-                              type="button"
-                            >
-                              Appts
-                              {adminUserActivitySort.key === "appointments"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() => toggleAdminUserActivitySort("notes")}
-                              type="button"
-                            >
-                              Notes
-                              {adminUserActivitySort.key === "notes"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() =>
-                                toggleAdminUserActivitySort("careprep")
-                              }
-                              type="button"
-                            >
-                              CarePrep
-                              {adminUserActivitySort.key === "careprep"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() => toggleAdminUserActivitySort("tickets")}
-                              type="button"
-                            >
-                              Tix
-                              {adminUserActivitySort.key === "tickets"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() =>
-                                toggleAdminUserActivitySort("last_activity")
-                              }
-                              type="button"
-                            >
-                              Last activity
-                              {adminUserActivitySort.key === "last_activity"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            <button
-                              className="font-semibold uppercase tracking-wide"
-                              onClick={() => toggleAdminUserActivitySort("flags")}
-                              type="button"
-                            >
-                              Flags
-                              {adminUserActivitySort.key === "flags"
-                                ? adminUserActivitySort.direction === "asc"
-                                  ? " ↑"
-                                  : " ↓"
-                                : ""}
-                            </button>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            Actions
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredAdminUserActivity.map((row) => {
-                          const lastActivity =
-                            adminUserActivityLastActivity(row);
-
-                          const isReadonlyViewTarget =
-                            adminReadonlySnapshot?.profile.id === row.user_id;
-                          const rowCareSubjects = row.care_subjects ?? [];
-                          const areCareVipsExpanded =
-                            expandedAdminUserCareVipRows[row.user_id] ?? false;
-
-                          return (
-                            <tr
-                              className={
-                                isReadonlyViewTarget ? "bg-blue-50" : undefined
-                              }
-                              key={row.user_id}
-                            >
-                              <td className="border-b border-slate-100 px-3 py-3 align-top">
-                                <p className="font-semibold text-slate-900">
-                                  {row.display_name || row.email || "Unknown user"}
-                                </p>
-                                <p className="break-all text-xs text-slate-500">
-                                  {row.email || row.user_id}
-                                </p>
-                                <button
-                                  className="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
-                                  onClick={() =>
-                                    setExpandedAdminUserCareVipRows(
-                                      (currentRows) => ({
-                                        ...currentRows,
-                                        [row.user_id]: !areCareVipsExpanded,
-                                      })
-                                    )
-                                  }
-                                  type="button"
-                                >
-                                  {areCareVipsExpanded ? "Hide VIPs" : "View VIPs"}
-                                </button>
-                                {areCareVipsExpanded ? (
-                                  <div className="mt-2 flex flex-wrap gap-1">
-                                    {rowCareSubjects.length > 0 ? (
-                                      rowCareSubjects.map((subject) => (
-                                        <span
-                                          className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700"
-                                          key={subject.id}
-                                        >
-                                          {subject.display_name}
-                                        </span>
-                                      ))
-                                    ) : (
-                                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">
-                                        No Care VIPs
-                                      </span>
-                                    )}
-                                  </div>
-                                ) : null}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                                {row.user_group || "Unassigned"}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                                {formatAdminDate(row.last_seen_at)}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                                {formatAdminDate(row.account_created_at)}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top">
-                                <span className="font-semibold text-slate-900">
-                                  {row.appointment_count}
-                                </span>
-                                <p className="text-xs text-slate-500">
-                                  {row.upcoming_appointment_count} upcoming /{" "}
-                                  {row.logged_appointment_count} logged
-                                </p>
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
-                                {row.note_count}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
-                                {row.careprep_count}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top">
-                                <span className="font-semibold text-slate-900">
-                                  {row.open_support_ticket_count}
-                                </span>
-                                <p className="text-xs text-slate-500">
-                                  {row.support_ticket_count} total
-                                </p>
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                                {formatAdminDate(lastActivity)}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top">
-                                <div className="flex flex-wrap gap-1">
-                                  {row.is_admin ? (
-                                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
-                                      Admin
-                                    </span>
-                                  ) : null}
-                                  {row.is_test_user ? (
-                                    <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                                      Test
-                                    </span>
-                                  ) : null}
-                                  {!row.is_test_user &&
-                                  row.appointment_count === 0 ? (
-                                    <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
-                                      No appts
-                                    </span>
-                                  ) : null}
-                                  {!row.is_test_user &&
-                                  row.appointment_count > 0 &&
-                                  row.note_count === 0 ? (
-                                    <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
-                                      No notes
-                                    </span>
-                                  ) : null}
-                                </div>
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top">
-                                <button
-                                  className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:text-slate-400 ${
-                                    isReadonlyViewTarget
-                                      ? "border-blue-300 bg-blue-100 text-blue-800"
-                                      : "border-slate-300 text-slate-700"
-                                  }`}
-                                  disabled={loadingAdminReadonlyUserId === row.user_id}
-                                  onClick={() => openAdminReadonlyUserView(row.user_id)}
-                                  type="button"
-                                >
-                                  {loadingAdminReadonlyUserId === row.user_id
-                                    ? "Loading..."
-                                    : isReadonlyViewTarget
-                                      ? "Viewing"
-                                      : "View as user"}
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                <AdminUserActivityPanel
+                  activeReadonlyUserId={adminReadonlySnapshot?.profile.id ?? null}
+                  expandedCareVipRows={expandedAdminUserCareVipRows}
+                  filter={adminUserActivityFilter}
+                  filteredRows={filteredAdminUserActivity}
+                  formatAdminDate={formatAdminDate}
+                  loadingReadonlyUserId={loadingAdminReadonlyUserId}
+                  onChangeFilter={setAdminUserActivityFilter}
+                  onOpenReadonlyUserView={openAdminReadonlyUserView}
+                  onToggleCareVips={(userId) =>
+                    setExpandedAdminUserCareVipRows((currentRows) => ({
+                      ...currentRows,
+                      [userId]: !currentRows[userId],
+                    }))
+                  }
+                  onToggleSort={toggleAdminUserActivitySort}
+                  rows={adminUserActivity}
+                  sort={adminUserActivitySort}
+                  stats={adminUserActivityStats}
+                />
               </section>
+              ) : null}
+
+              {adminTab === "userAudit" ? (
+                <AdminAuditTrailPanel
+                  activeKey={adminTab}
+                  formatAdminDate={formatAdminDate}
+                  loading={loadingAdminAccessEvents}
+                  navItems={usersAdminNavItems}
+                  onRefresh={loadAdminAccessEvents}
+                  onSelectTab={handleChangeAdminTab}
+                  rows={adminAccessEvents}
+                  shortId={shortId}
+                  userRows={adminUserActivity}
+                />
               ) : null}
 
               {adminTab === "intake" ? (
-              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-semibold">
-                      Early Access intake
-                    </h2>
-                    <p className="mt-1 max-w-3xl text-slate-600">
-                      Capture interested people before creating accounts. This
-                      keeps prospect follow-up separate from auth users and gives
-                      us a clean place for individual or group communication later.
-                    </p>
-                  </div>
-                  <button
-                    className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
-                    disabled={loadingEarlyAccessIntake}
-                    onClick={() => loadEarlyAccessIntake()}
-                    type="button"
-                  >
-                    {loadingEarlyAccessIntake ? "Refreshing..." : "Refresh"}
-                  </button>
-                </div>
-
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {[
-                    ["Total", earlyAccessIntakeStats.total],
-                    ["Active", earlyAccessIntakeStats.active],
-                    ["Interested", earlyAccessIntakeStats.interested],
-                    ["Contacted", earlyAccessIntakeStats.contacted],
-                  ].map(([label, value]) => (
-                    <div
-                      className="rounded-md border border-slate-200 bg-slate-50 p-3"
-                      key={label}
-                    >
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {label}
-                      </p>
-                      <p className="mt-1 text-2xl font-semibold text-slate-900">
-                        {value}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <form
-                  className="mt-5 rounded-lg border border-blue-100 bg-blue-50 p-4"
-                  onSubmit={handleCreateEarlyAccessIntake}
-                >
-                  <h3 className="text-lg font-semibold text-blue-950">
-                    Add interested person
-                  </h3>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    <label className="block text-sm font-medium text-slate-700">
-                      First name
-                      <input
-                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        disabled={savingEarlyAccessIntake}
-                        onChange={(event) =>
-                          updateEarlyAccessIntakeDraft(
-                            "firstName",
-                            event.target.value
-                          )
-                        }
-                        required
-                        value={earlyAccessIntakeDraft.firstName}
-                      />
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Last name
-                      <input
-                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        disabled={savingEarlyAccessIntake}
-                        onChange={(event) =>
-                          updateEarlyAccessIntakeDraft(
-                            "lastName",
-                            event.target.value
-                          )
-                        }
-                        required
-                        value={earlyAccessIntakeDraft.lastName}
-                      />
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Email
-                      <input
-                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        disabled={savingEarlyAccessIntake}
-                        onChange={(event) =>
-                          updateEarlyAccessIntakeDraft("email", event.target.value)
-                        }
-                        required
-                        type="email"
-                        value={earlyAccessIntakeDraft.email}
-                      />
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Phone
-                      <input
-                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        disabled={savingEarlyAccessIntake}
-                        onChange={(event) =>
-                          updateEarlyAccessIntakeDraft("phone", event.target.value)
-                        }
-                        placeholder="Optional"
-                        value={earlyAccessIntakeDraft.phone}
-                      />
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Relationship to care
-                      <select
-                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        disabled={savingEarlyAccessIntake}
-                        onChange={(event) =>
-                          updateEarlyAccessIntakeDraft(
-                            "careRole",
-                            event.target.value
-                          )
-                        }
-                        value={earlyAccessIntakeDraft.careRole}
-                      >
-                        <option value="unspecified">Not specified</option>
-                        <option value="patient">Patient/self</option>
-                        <option value="caregiver">Caregiver/family</option>
-                        <option value="clinician_partner">Clinician/partner</option>
-                        <option value="other">Other</option>
-                      </select>
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Communication preference
-                      <select
-                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        disabled={savingEarlyAccessIntake}
-                        onChange={(event) =>
-                          updateEarlyAccessIntakeDraft(
-                            "communicationPreference",
-                            event.target.value
-                          )
-                        }
-                        value={earlyAccessIntakeDraft.communicationPreference}
-                      >
-                        <option value="email">Email</option>
-                        <option value="phone">Phone</option>
-                        <option value="either">Either</option>
-                      </select>
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700 md:col-span-2">
-                      What interests you about CarePland?
-                      <textarea
-                        className="mt-1 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        disabled={savingEarlyAccessIntake}
-                        onChange={(event) =>
-                          updateEarlyAccessIntakeDraft(
-                            "interestContext",
-                            event.target.value
-                          )
-                        }
-                        placeholder="What did they say they wanted help with?"
-                        value={earlyAccessIntakeDraft.interestContext}
-                      />
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Source
-                      <input
-                        className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        disabled={savingEarlyAccessIntake}
-                        onChange={(event) =>
-                          updateEarlyAccessIntakeDraft("source", event.target.value)
-                        }
-                        placeholder="admin, website, referral"
-                        value={earlyAccessIntakeDraft.source}
-                      />
-                    </label>
-                    <div className="self-end rounded-md border border-blue-100 bg-white p-3 text-sm text-slate-700">
-                      <p className="font-semibold text-slate-900">
-                        Consent is read-only
-                      </p>
-                      <p className="mt-1">
-                        Admin intake does not set communication consent. Signup
-                        forms or explicit future communication flows should
-                        capture that directly from the person.
-                      </p>
-                    </div>
-                    <label className="block text-sm font-medium text-slate-700 md:col-span-2">
-                      Admin notes
-                      <textarea
-                        className="mt-1 min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        disabled={savingEarlyAccessIntake}
-                        onChange={(event) =>
-                          updateEarlyAccessIntakeDraft(
-                            "adminNotes",
-                            event.target.value
-                          )
-                        }
-                        placeholder="Internal follow-up notes"
-                        value={earlyAccessIntakeDraft.adminNotes}
-                      />
-                    </label>
-                  </div>
-                  <button
-                    className="mt-3 rounded-md bg-slate-950 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                    disabled={savingEarlyAccessIntake}
-                    type="submit"
-                  >
-                    {savingEarlyAccessIntake ? "Saving..." : "Save intake"}
-                  </button>
-                </form>
-
-                <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
-                  <label className="block text-sm font-medium text-slate-700">
-                    View
-                    <select
-                      className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                      onChange={(event) =>
-                        setEarlyAccessIntakeFilter(
-                          event.target.value as
-                            | "active"
-                            | "all"
-                            | EarlyAccessIntakeStatus
-                        )
-                      }
-                      value={earlyAccessIntakeFilter}
-                    >
-                      <option value="active">Active follow-up</option>
-                      <option value="all">All intake</option>
-                      <option value="new">New</option>
-                      <option value="reviewing">Reviewing</option>
-                      <option value="contacted">Contacted</option>
-                      <option value="interested">Interested</option>
-                      <option value="invited">Invited</option>
-                      <option value="converted">Converted</option>
-                      <option value="not_a_fit">Not a fit</option>
-                      <option value="closed">Closed</option>
-                    </select>
-                  </label>
-                  <p className="text-sm text-slate-500">
-                    Showing {filteredEarlyAccessIntakeRows.length} of{" "}
-                    {earlyAccessIntakeRows.length}
-                  </p>
-                </div>
-
-                {earlyAccessIntakeRows.length === 0 ? (
-                  <div className="mt-5 rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
-                    No intake records loaded yet.
-                  </div>
-                ) : (
-                  <div className="mt-5 space-y-3">
-                    {filteredEarlyAccessIntakeRows.map((row) => (
-                      <article
-                        className="rounded-md border border-slate-200 bg-white p-4"
-                        key={row.id}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <h3 className="text-lg font-semibold text-slate-950">
-                              {row.first_name} {row.last_name}
-                            </h3>
-                            <p className="break-all text-sm text-slate-600">
-                              {row.email}
-                              {row.phone ? ` · ${row.phone}` : ""}
-                            </p>
-                            <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                              <span className="rounded-full bg-blue-50 px-2 py-1 font-semibold text-blue-700">
-                                {row.status.replaceAll("_", " ")}
-                              </span>
-                              <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-                                {row.communication_preference}
-                              </span>
-                              <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">
-                                {row.care_role.replaceAll("_", " ")}
-                              </span>
-                              {row.communication_consent ? (
-                                <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
-                                  follow-up ok
-                                </span>
-                              ) : (
-                                <span className="rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-700">
-                                  confirm follow-up
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="text-sm text-slate-500">
-                            <p>Source: {row.source || "unknown"}</p>
-                            <p>Added: {formatAdminDate(row.created_at)}</p>
-                            <p>Updated: {formatAdminDate(row.updated_at)}</p>
-                            <p>
-                              Last contacted:{" "}
-                              {formatAdminDate(row.last_contacted_at)}
-                            </p>
-                          </div>
-                        </div>
-
-                        {row.interest_context ? (
-                          <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              What interests them
-                            </p>
-                            <p className="mt-1 whitespace-pre-wrap">
-                              {row.interest_context}
-                            </p>
-                          </div>
-                        ) : null}
-
-                        <div className="mt-3 grid gap-3 lg:grid-cols-[12rem_minmax(0,1fr)_auto]">
-                          <label className="block text-sm font-medium text-slate-700">
-                            Status
-                            <select
-                              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2"
-                              disabled={updatingEarlyAccessIntakeId === row.id}
-                              onChange={(event) =>
-                                handleUpdateEarlyAccessIntake(row, {
-                                  status: event.target
-                                    .value as EarlyAccessIntakeStatus,
-                                })
-                              }
-                              value={row.status}
-                            >
-                              <option value="new">New</option>
-                              <option value="reviewing">Reviewing</option>
-                              <option value="contacted">Contacted</option>
-                              <option value="interested">Interested</option>
-                              <option value="invited">Invited</option>
-                              <option value="converted">Converted</option>
-                              <option value="not_a_fit">Not a fit</option>
-                              <option value="closed">Closed</option>
-                            </select>
-                          </label>
-                          <label className="block text-sm font-medium text-slate-700">
-                            Admin notes
-                            <textarea
-                              className="mt-1 min-h-20 w-full rounded-md border border-slate-300 px-3 py-2"
-                              disabled={updatingEarlyAccessIntakeId === row.id}
-                              onChange={(event) =>
-                                setEarlyAccessIntakeAdminNotes(
-                                  (currentNotes) => ({
-                                    ...currentNotes,
-                                    [row.id]: event.target.value,
-                                  })
-                                )
-                              }
-                              value={
-                                earlyAccessIntakeAdminNotes[row.id] ??
-                                row.admin_notes ??
-                                ""
-                              }
-                            />
-                          </label>
-                          <div className="flex flex-col justify-end gap-2">
-                            <button
-                              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
-                              disabled={updatingEarlyAccessIntakeId === row.id}
-                              onClick={() =>
-                                handleUpdateEarlyAccessIntake(row, {
-                                  admin_notes:
-                                    earlyAccessIntakeAdminNotes[row.id] ?? "",
-                                })
-                              }
-                              type="button"
-                            >
-                              {updatingEarlyAccessIntakeId === row.id
-                                ? "Saving..."
-                                : "Save notes"}
-                            </button>
-                            <button
-                              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 disabled:text-slate-400"
-                              disabled={updatingEarlyAccessIntakeId === row.id}
-                              onClick={() =>
-                                handleUpdateEarlyAccessIntake(row, {
-                                  last_contacted_at: new Date().toISOString(),
-                                  status:
-                                    row.status === "new"
-                                      ? "contacted"
-                                      : row.status,
-                                })
-                              }
-                              type="button"
-                            >
-                              Mark contacted
-                            </button>
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </section>
+                <AdminEarlyAccessIntakePanel
+                  activeKey={adminTab}
+                  adminNotes={earlyAccessIntakeAdminNotes}
+                  draft={earlyAccessIntakeDraft}
+                  filter={earlyAccessIntakeFilter}
+                  filteredRows={filteredEarlyAccessIntakeRows}
+                  formatAdminDate={formatAdminDate}
+                  loading={loadingEarlyAccessIntake}
+                  navItems={usersAdminNavItems}
+                  onCreate={handleCreateEarlyAccessIntake}
+                  onRefresh={loadEarlyAccessIntake}
+                  onSelectTab={handleChangeAdminTab}
+                  onUpdateDraft={updateEarlyAccessIntakeDraft}
+                  onUpdateRow={handleUpdateEarlyAccessIntake}
+                  rows={earlyAccessIntakeRows}
+                  saving={savingEarlyAccessIntake}
+                  setAdminNotes={setEarlyAccessIntakeAdminNotes}
+                  setFilter={setEarlyAccessIntakeFilter}
+                  stats={earlyAccessIntakeStats}
+                  updatingId={updatingEarlyAccessIntakeId}
+                />
               ) : null}
 
               {adminTab === "errors" ? (
-              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-semibold">Integration errors</h2>
-                    <p className="mt-1 text-slate-600">
-                      Review rolled-up integration limit and availability events.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {selectedVisibleAdminIntegrationErrorKeys.length > 0 ? (
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
-                        {selectedVisibleAdminIntegrationErrorKeys.length} selected
-                      </span>
-                    ) : null}
-                    <button
-                      className="rounded-md border border-red-200 bg-white px-4 py-2 font-semibold text-red-700 disabled:text-slate-400"
-                      disabled={
-                        deletingAdminIntegrationErrors ||
-                        selectedVisibleAdminIntegrationErrorKeys.length === 0
-                      }
-                      onClick={() => deleteSelectedAdminIntegrationErrors()}
-                      type="button"
-                    >
-                      {deletingAdminIntegrationErrors
-                        ? "Deleting..."
-                        : "Delete selected"}
-                    </button>
-                    <button
-                      className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
-                      disabled={
-                        loadingAdminIntegrationErrors ||
-                        deletingAdminIntegrationErrors
-                      }
-                      onClick={() => loadAdminIntegrationErrors()}
-                      type="button"
-                    >
-                      {loadingAdminIntegrationErrors
-                        ? "Refreshing..."
-                        : "Refresh"}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {[
-                    ["Minute windows", adminIntegrationErrorStats.minuteWindows],
-                    ["Day windows", adminIntegrationErrorStats.dayWindows],
-                    ["Affected users", adminIntegrationErrorStats.affectedUsers],
-                    [
-                      "Latest",
-                      adminIntegrationErrorStats.latestErrorAt
-                        ? formatAdminDate(adminIntegrationErrorStats.latestErrorAt)
-                        : "None",
-                    ],
-                  ].map(([label, value]) => (
-                    <div
-                      className="rounded-md border border-slate-200 bg-slate-50 p-3"
-                      key={label}
-                    >
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {label}
-                      </p>
-                      <p className="mt-1 text-lg font-semibold text-slate-900">
-                        {value}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-5 rounded-md bg-blue-50 p-3 text-sm text-blue-900">
-                  Google Places over-quota messages should be gentle for users:
-                  Looks like autocomplete for addresses isn&apos;t available right
-                  now. We&apos;ll look into it.
-                </div>
-
-                {adminIntegrationErrors.length === 0 ? (
-                  <div className="mt-5 rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
-                    No integration errors have been recorded yet.
-                  </div>
-                ) : (
-                  <div className="mt-5 overflow-x-auto">
-                    <table className="min-w-[980px] w-full border-separate border-spacing-0 text-left text-sm">
-                      <thead>
-                        <tr className="text-xs uppercase tracking-wide text-slate-500">
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            <label className="flex items-center gap-2">
-                              <input
-                                checked={allAdminIntegrationErrorsSelected}
-                                disabled={deletingAdminIntegrationErrors}
-                                onChange={() => toggleAllAdminIntegrationErrors()}
-                                type="checkbox"
-                              />
-                              Select
-                            </label>
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            Window
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            Integration
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            Error
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            Hits
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            Users
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2 text-right">
-                            Calls before error
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            Latest
-                          </th>
-                          <th className="border-b border-slate-200 px-3 py-2">
-                            Message
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {adminIntegrationErrors.map((row) => {
-                          const rowKey = adminIntegrationErrorRowKey(row);
-                          const selected =
-                            selectedAdminIntegrationErrorKeys.includes(rowKey);
-                          const isNewToAdmin = isNewForAdmin(
-                            row.latest_occurred_at,
-                            adminLastViewedAt("admin_tab", "errors")
-                          );
-
-                          return (
-                            <tr key={rowKey}>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top">
-                                <input
-                                  aria-label={`Select ${row.integration_key} ${row.error_key} error row`}
-                                  checked={selected}
-                                  disabled={deletingAdminIntegrationErrors}
-                                  onChange={() =>
-                                    toggleAdminIntegrationErrorSelection(row)
-                                  }
-                                  type="checkbox"
-                                />
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top">
-                                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
-                                  {row.window_grain}
-                                </span>
-                                <p className="mt-2 text-slate-700">
-                                  {formatAdminDate(row.window_start)}
-                                </p>
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top font-semibold text-slate-900">
-                                <span>{row.integration_key.replaceAll("_", " ")}</span>
-                                {isNewToAdmin ? (
-                                  <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
-                                    New to me
-                                  </span>
-                                ) : (
-                                  <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                                    Follow up
-                                  </span>
-                                )}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                                {row.error_key.replaceAll("_", " ")}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
-                                {row.occurrence_count}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top font-semibold text-slate-900">
-                                {row.affected_user_count}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 text-right align-top text-slate-700">
-                                {row.max_attempted_call_count ?? "Unknown"}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                                {formatAdminDate(row.latest_occurred_at)}
-                              </td>
-                              <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
-                                {row.latest_error_message ||
-                                  "No detail recorded"}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
+                <AdminIntegrationErrorsPanel
+                  allSelected={allAdminIntegrationErrorsSelected}
+                  deleting={deletingAdminIntegrationErrors}
+                  formatAdminDate={formatAdminDate}
+                  lastViewedAt={adminLastViewedAt("admin_tab", "errors")}
+                  loading={loadingAdminIntegrationErrors}
+                  onDeleteSelected={deleteSelectedAdminIntegrationErrors}
+                  onRefresh={loadAdminIntegrationErrors}
+                  onToggleAll={toggleAllAdminIntegrationErrors}
+                  onToggleRow={toggleAdminIntegrationErrorSelection}
+                  rowKey={adminIntegrationErrorRowKey}
+                  rows={adminIntegrationErrors}
+                  selectedKeys={selectedAdminIntegrationErrorKeys}
+                  selectedVisibleCount={selectedVisibleAdminIntegrationErrorKeys.length}
+                  stats={adminIntegrationErrorStats}
+                />
               ) : null}
 
               {adminTab === "tickets" ? (
-              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-semibold">Support questions</h2>
-                    <p className="mt-1 text-slate-600">
-                      Review user questions, reply, and track follow-up state.
-                    </p>
-                  </div>
-                  <button
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-                    disabled={loadingAdminTickets}
-                    onClick={() => loadAdminSupportTickets()}
-                    type="button"
-                  >
-                    {loadingAdminTickets ? "Refreshing..." : "Refresh"}
-                  </button>
-                </div>
-
-                <div className="mt-5 grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
-                  <aside className="space-y-2">
-                    {adminSupportTickets.length === 0 ? (
-                      <div className="rounded-md border border-dashed border-slate-300 p-4 text-slate-600">
-                        No support questions yet.
-                      </div>
-                    ) : (
-                      adminSupportTickets.map((ticket) => {
-                        const selected = selectedAdminTicket?.id === ticket.id;
-                        const isNewToAdmin = isNewForAdmin(
-                          ticket.updated_at,
-                          adminLastViewedAt("admin_tab", "tickets")
-                        );
-
-                        return (
-                          <button
-                            className={`w-full rounded-md border p-3 text-left transition ${
-                              selected
-                                ? isNewToAdmin
-                                  ? "border-red-300 bg-red-50"
-                                  : ticket.needs_admin_followup
-                                    ? "border-amber-300 bg-amber-50"
-                                    : "border-sky-300 bg-sky-50"
-                                : isNewToAdmin
-                                  ? "border-red-200 bg-red-50/70"
-                                  : ticket.needs_admin_followup
-                                    ? "border-amber-200 bg-amber-50/70"
-                                  : "border-slate-200 bg-white hover:border-sky-200"
-                            }`}
-                            key={ticket.id}
-                            onClick={() => selectAdminTicket(ticket)}
-                            type="button"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <span className="font-semibold text-slate-900">
-                                {ticket.subject}
-                              </span>
-                              {ticket.needs_admin_followup ? (
-                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                                  Follow up
-                                </span>
-                              ) : null}
-                              {isNewToAdmin ? (
-                                <span className="shrink-0 rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
-                                  New to me
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="mt-1 text-sm text-slate-600">
-                              {supportTicketUserLabel(ticket)}
-                            </p>
-                            <p className="mt-2 text-xs uppercase tracking-wide text-slate-500">
-                              {ticket.status.replace("_", " ")} · {ticket.priority}
-                            </p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              Updated {formatDate(ticket.updated_at)}
-                            </p>
-                          </button>
-                        );
-                      })
-                    )}
-                  </aside>
-
-                  {selectedAdminTicket ? (
-                    <div className="rounded-md border border-slate-200 p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-xl font-semibold text-slate-900">
-                            {selectedAdminTicket.subject}
-                          </h3>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {supportTicketUserLabel(selectedAdminTicket)} · {selectedAdminTicket.category}
-                          </p>
-                          <p className="mt-1 text-sm text-slate-500">
-                            Opened {formatDate(selectedAdminTicket.created_at)} · updated {formatDate(selectedAdminTicket.updated_at)}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap justify-end gap-2">
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
-                            {selectedAdminTicket.status.replace("_", " ")}
-                          </span>
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
-                            {selectedAdminTicket.priority}
-                          </span>
-                          {selectedAdminTicket.needs_admin_followup ? (
-                            <span className="rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-700">
-                              Needs response
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700">
-                              No admin follow-up
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="mt-4 max-h-[28rem] space-y-3 overflow-auto rounded-md bg-slate-50 p-3">
-                        {selectedAdminTicketMessages.length === 0 ? (
-                          <p className="text-sm text-slate-600">
-                            No messages found for this question.
-                          </p>
-                        ) : (
-                          selectedAdminTicketMessages.map((messageRow) => (
-                            <div
-                              className={`rounded-md border p-3 ${
-                                messageRow.is_internal
-                                  ? "border-amber-200 bg-amber-50 text-amber-950"
-                                  : messageRow.author_role === "admin"
-                                    ? "border-sky-200 bg-sky-50 text-slate-800"
-                                    : "border-slate-200 bg-white text-slate-800"
-                              }`}
-                              key={messageRow.id}
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                <span>
-                                  {messageRow.is_internal
-                                    ? "Internal note"
-                                    : messageRow.author_role === "admin"
-                                      ? "Admin reply"
-                                      : "User"}
-                                </span>
-                                <span>{formatDate(messageRow.created_at)}</span>
-                              </div>
-                              <p className="mt-2 whitespace-pre-wrap text-sm">
-                                {messageRow.message_body}
-                              </p>
-                            </div>
-                          ))
-                        )}
-                      </div>
-
-                      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                        <form
-                          className="rounded-md border border-slate-200 p-3"
-                          onSubmit={handleAddAdminTicketReply}
-                        >
-                          <h4 className="font-semibold text-slate-900">
-                            Reply to user
-                          </h4>
-                          <textarea
-                            className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2"
-                            onChange={(event) =>
-                              setAdminTicketReplyBody(event.target.value)
-                            }
-                            placeholder="Write a user-visible reply."
-                            value={adminTicketReplyBody}
-                          />
-                          <button
-                            className="mt-3 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                            disabled={savingAdminTicketReply || !adminTicketReplyBody.trim()}
-                            type="submit"
-                          >
-                            {savingAdminTicketReply ? "Sending..." : "Send reply"}
-                          </button>
-                        </form>
-
-                        <form
-                          className="rounded-md border border-slate-200 p-3"
-                          onSubmit={handleAddAdminInternalNote}
-                        >
-                          <h4 className="font-semibold text-slate-900">
-                            Internal note
-                          </h4>
-                          <textarea
-                            className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2"
-                            onChange={(event) =>
-                              setAdminTicketInternalNote(event.target.value)
-                            }
-                            placeholder="Private admin note."
-                            value={adminTicketInternalNote}
-                          />
-                          <button
-                            className="mt-3 rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
-                            disabled={savingAdminTicketReply || !adminTicketInternalNote.trim()}
-                            type="submit"
-                          >
-                            {savingAdminTicketReply ? "Saving..." : "Add internal note"}
-                          </button>
-                        </form>
-                      </div>
-
-                      <form
-                        className="mt-4 rounded-md border border-slate-200 p-3"
-                        onSubmit={handleUpdateAdminTicketStatus}
-                      >
-                        <h4 className="font-semibold text-slate-900">
-                          Status and routing
-                        </h4>
-                        <div className="mt-3 grid gap-3 md:grid-cols-3">
-                          <label className="block text-sm font-medium text-slate-700">
-                            Status
-                            <select
-                              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
-                              onChange={(event) =>
-                                setAdminTicketStatus(event.target.value as SupportTicketStatus)
-                              }
-                              value={adminTicketStatus}
-                            >
-                              <option value="open">Open</option>
-                              <option value="in_progress">In progress</option>
-                              <option value="waiting_on_user">Waiting on user</option>
-                              <option value="resolved">Resolved</option>
-                              <option value="closed">Closed</option>
-                            </select>
-                          </label>
-                          <label className="block text-sm font-medium text-slate-700">
-                            Priority
-                            <select
-                              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
-                              onChange={(event) =>
-                                setAdminTicketPriority(event.target.value as SupportTicketPriority)
-                              }
-                              value={adminTicketPriority}
-                            >
-                              <option value="low">Low</option>
-                              <option value="medium">Medium</option>
-                              <option value="high">High</option>
-                              <option value="urgent">Urgent</option>
-                            </select>
-                          </label>
-                          <label className="block text-sm font-medium text-slate-700">
-                            Category
-                            <input
-                              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
-                              onChange={(event) =>
-                                setAdminTicketCategory(event.target.value)
-                              }
-                              value={adminTicketCategory}
-                            />
-                          </label>
-                        </div>
-                        <label className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-700">
-                          <input
-                            checked={adminTicketNeedsFollowup}
-                            onChange={(event) =>
-                              setAdminTicketNeedsFollowup(event.target.checked)
-                            }
-                            type="checkbox"
-                          />
-                          Needs admin follow-up
-                        </label>
-                        <label className="mt-3 block text-sm font-medium text-slate-700">
-                          Change note
-                          <input
-                            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
-                            onChange={(event) =>
-                              setAdminTicketChangeNote(event.target.value)
-                            }
-                            placeholder="What changed and why?"
-                            value={adminTicketChangeNote}
-                          />
-                        </label>
-                        <button
-                          className="mt-3 rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                          disabled={savingAdminTicketStatus}
-                          type="submit"
-                        >
-                          {savingAdminTicketStatus ? "Saving..." : "Save ticket status"}
-                        </button>
-                      </form>
-                    </div>
-                  ) : null}
-                </div>
-              </section>
+                <AdminSupportTicketsPanel
+                  adminTicketCategory={adminTicketCategory}
+                  adminTicketChangeNote={adminTicketChangeNote}
+                  adminTicketInternalNote={adminTicketInternalNote}
+                  adminTicketNeedsFollowup={adminTicketNeedsFollowup}
+                  adminTicketPriority={adminTicketPriority}
+                  adminTicketReplyBody={adminTicketReplyBody}
+                  adminTicketStatus={adminTicketStatus}
+                  formatDate={formatDate}
+                  lastViewedAt={adminLastViewedAt("admin_tab", "tickets")}
+                  loading={loadingAdminTickets}
+                  messages={selectedAdminTicketMessages}
+                  onAddInternalNote={handleAddAdminInternalNote}
+                  onAddReply={handleAddAdminTicketReply}
+                  onRefresh={loadAdminSupportTickets}
+                  onSelectTicket={selectAdminTicket}
+                  onSetCategory={setAdminTicketCategory}
+                  onSetChangeNote={setAdminTicketChangeNote}
+                  onSetInternalNote={setAdminTicketInternalNote}
+                  onSetNeedsFollowup={setAdminTicketNeedsFollowup}
+                  onSetPriority={setAdminTicketPriority}
+                  onSetReplyBody={setAdminTicketReplyBody}
+                  onSetStatus={setAdminTicketStatus}
+                  onUpdateStatus={handleUpdateAdminTicketStatus}
+                  savingReply={savingAdminTicketReply}
+                  savingStatus={savingAdminTicketStatus}
+                  selectedTicket={selectedAdminTicket}
+                  tickets={adminSupportTickets}
+                />
               ) : null}
 
               {adminTab === "assistantReview" ? (

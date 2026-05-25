@@ -107,6 +107,9 @@ Supabase SQL editor history.
 - `2026-05-24_admin_contact_details_audit.sql`
   Migration/admin utility: adds contact-update permission scope and requires a reason before Admin contact-detail reveals.
 
+- `2026-05-24_admin_access_events_insert_grant.sql`
+  Migration/admin utility: grants the protected server role permission to insert required Admin access audit events.
+
 - `2026-05-24_admin_user_activity_vips_sorting.sql`
   Migration/admin utility: extends the Admin Users / Activity summary with Care Circle/account-owner group labels and Care VIP name pills for row expansion.
 
