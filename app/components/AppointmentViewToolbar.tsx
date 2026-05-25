@@ -91,17 +91,17 @@ export function AppointmentViewToolbar({
     >
       <div className="relative px-3 pt-2">
         <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
-          <div className="order-2 flex flex-wrap items-end gap-1 md:order-1">
+          <div className="order-2 flex flex-wrap items-center gap-1.5 rounded-full border border-blue-100 bg-white/70 p-1 shadow-sm md:order-1">
             {viewOptions.map((option) => {
               const selected = view === option.value;
 
               return (
                 <button
                   aria-pressed={selected}
-                  className={`relative rounded-t-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                  className={`relative rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
                     selected
-                      ? "border-x border-t border-slate-200 bg-white text-blue-800 shadow-[0_-1px_0_rgba(148,163,184,0.18)]"
-                      : "mb-px border border-transparent text-slate-600 hover:bg-white/70 hover:text-slate-900"
+                      ? "bg-blue-50 text-blue-800 ring-1 ring-blue-100"
+                      : "text-slate-600 hover:bg-blue-50/70 hover:text-blue-800"
                   }`}
                   disabled={disabled}
                   key={option.value}
@@ -122,7 +122,7 @@ export function AppointmentViewToolbar({
               <button
                 aria-expanded={mobileMenuOpen}
                 aria-label="Appointment view options"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 hover:bg-white/80 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-blue-100 bg-white/80 text-slate-500 shadow-sm hover:bg-blue-50 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
                 disabled={disabled}
                 onClick={() => setMobileMenuOpen((isOpen) => !isOpen)}
                 type="button"

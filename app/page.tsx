@@ -2890,6 +2890,7 @@ export default function Home() {
     "ask_acknowledgement_message"
   );
   const [askPanelError, setAskPanelError] = useState("");
+  const [askCloseConfirmOpen, setAskCloseConfirmOpen] = useState(false);
   const [askSubmittedFingerprints, setAskSubmittedFingerprints] = useState<
     string[]
   >([]);
@@ -8141,6 +8142,7 @@ export default function Home() {
     setSendingAskMessage(true);
     setAskInput("");
     setAskPanelError("");
+    setAskCloseConfirmOpen(false);
     setAskMessages((currentMessages) => [
       ...currentMessages,
       { body: outgoingMessage, role: "user" },
@@ -8237,7 +8239,21 @@ export default function Home() {
     setAskConversationComplete(false);
     setAskCompletionMessageKey("ask_acknowledgement_message");
     setAskPanelError("");
+    setAskCloseConfirmOpen(false);
     setSendingAskMessage(false);
+  }
+
+  function requestCloseAskPanel() {
+    const hasTypedAskText = Boolean(askInput.trim());
+    const hasUnresolvedAskConversation =
+      (askMessages.length > 0 || sendingAskMessage) && !askConversationComplete;
+
+    if (hasTypedAskText || hasUnresolvedAskConversation) {
+      setAskCloseConfirmOpen(true);
+      return;
+    }
+
+    resetAskPanelState();
   }
 
   async function handleSupportAssistantFeedback(
@@ -11740,6 +11756,21 @@ export default function Home() {
     }
   }
 
+  const gentlePrimaryButtonClass =
+    "rounded-full bg-[#2B6198] px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-[#24547f] disabled:bg-slate-300 disabled:text-white";
+  const gentleSecondaryButtonClass =
+    "rounded-full border border-blue-100 bg-white/85 px-4 py-2 font-semibold text-[#2B6198] shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800 disabled:bg-slate-50 disabled:text-slate-400";
+  const gentleSoftBlueButtonClass =
+    "rounded-full border border-blue-100 bg-blue-50 px-4 py-2 font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100 disabled:bg-slate-50 disabled:text-slate-400";
+  const gentleSmallBlueButtonClass =
+    "rounded-full border border-blue-100 bg-white/80 px-3 py-1.5 text-sm font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300";
+  const gentleSmallSecondaryButtonClass =
+    "rounded-full border border-slate-200 bg-white/85 px-3 py-2 text-sm font-semibold text-[#2B6198] shadow-sm transition hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700 disabled:bg-slate-50 disabled:text-slate-400";
+  const gentleCautionButtonClass =
+    "rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:border-rose-200 hover:bg-rose-100 disabled:bg-slate-50 disabled:text-slate-400";
+  const gentleWarmButtonClass =
+    "rounded-full border border-amber-100 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 shadow-sm transition hover:border-amber-200 hover:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400";
+
   function renderPlaceLookup(className = "") {
     const canFavorite =
       Boolean(newAppointmentLocationName.trim()) ||
@@ -11940,7 +11971,7 @@ export default function Home() {
                 </p>
               </div>
               <button
-                className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-500 hover:text-[#2B6198]"
+                className={gentleSmallSecondaryButtonClass}
                 onClick={markWelcomeGuideRead}
                 type="button"
               >
@@ -12021,7 +12052,7 @@ export default function Home() {
 
             <div className="mt-4 flex flex-wrap justify-center gap-3">
               <button
-                className="rounded-full bg-[#2B6198] px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:bg-slate-400"
+                className={`${gentlePrimaryButtonClass} px-5 py-2.5 text-sm`}
                 onClick={async () => {
                   await markWelcomeGuideRead();
                   startAppointmentPanel("add");
@@ -12031,7 +12062,7 @@ export default function Home() {
                 Add your first appointment
               </button>
               <button
-                className="rounded-full border border-blue-100 bg-white px-5 py-2.5 text-sm font-semibold text-[#2B6198]"
+                className={`${gentleSecondaryButtonClass} px-5 py-2.5 text-sm text-[#2B6198]`}
                 onClick={async () => {
                   await markWelcomeGuideRead();
                   startAppointmentPanel("quickAdd");
@@ -12046,7 +12077,7 @@ export default function Home() {
               <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-sm text-slate-600">
                 <span>Not sure?</span>
                 <button
-                  className="rounded-full border border-slate-300 bg-transparent px-3.5 py-1.5 text-sm font-normal text-slate-500 transition hover:border-blue-100 hover:text-[#2B6198] disabled:text-slate-400"
+                  className="rounded-full border border-blue-100 bg-white/60 px-3.5 py-1.5 text-sm font-medium text-slate-500 shadow-sm transition hover:bg-blue-50 hover:text-[#2B6198] disabled:text-slate-400"
                   disabled={seedingSampleData}
                   onClick={async () => {
                     await markWelcomeGuideRead();
@@ -12093,7 +12124,7 @@ export default function Home() {
                     </p>
                   ) : null}
                   <button
-                    className="mt-3 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                    className={`mt-3 ${gentleSmallSecondaryButtonClass}`}
                     onClick={() => {
                       void handleChangeMainTab("appointments");
                       void handleChangeAppointmentView("upcoming");
@@ -12105,7 +12136,7 @@ export default function Home() {
                 </>
               ) : (
                 <button
-                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                  className={`${gentlePrimaryButtonClass} text-sm`}
                   onClick={() => startAppointmentPanel("add")}
                   type="button"
                 >
@@ -12155,7 +12186,7 @@ export default function Home() {
               </button>
               {homeNextAppointment ? (
                 <button
-                  className="rounded-md border border-blue-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:border-blue-300 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  className={gentleSmallBlueButtonClass}
                   disabled={generatingCarePrepForId === homeNextAppointment.id}
                   onClick={() => handleGenerateCarePrep(homeNextAppointment)}
                   type="button"
@@ -12261,7 +12292,7 @@ export default function Home() {
                     </p>
                   </div>
                   <button
-                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                    className={gentleSmallSecondaryButtonClass}
                     onClick={cancelTextIntake}
                     type="button"
                   >
@@ -12283,7 +12314,7 @@ export default function Home() {
                       />
                     </label>
                     <button
-                      className="mt-4 rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                      className={`mt-4 ${gentlePrimaryButtonClass}`}
                       disabled={processingTextIntake}
                       type="submit"
                     >
@@ -12342,7 +12373,7 @@ export default function Home() {
                       </label>
                       <div className="flex items-end">
                         <button
-                          className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                          className={gentlePrimaryButtonClass}
                           disabled={savingTextIntake}
                           type="submit"
                         >
@@ -12365,8 +12396,7 @@ export default function Home() {
     authMode !== "updatePassword" &&
     !needsBetaAgreement &&
     !needsOnboarding;
-  const canShowAskEntry =
-    Boolean(signedInEmail) && authMode !== "updatePassword";
+  const canShowAskEntry = isSignedInAppShell;
   const signedInDisplayName = savedProfileLabel || signedInEmail;
   const locationSheetAppointment =
     locationSheetAppointmentId
@@ -12504,10 +12534,10 @@ export default function Home() {
                 aria-label="Main navigation"
               >
               <button
-                className={`h-10 shrink-0 rounded-md px-2.5 text-sm font-semibold leading-none sm:h-11 sm:px-3 md:px-4 md:text-base ${
+                className={`h-10 shrink-0 rounded-full border px-3 text-sm font-semibold leading-none shadow-sm transition sm:h-11 sm:px-4 md:text-base ${
                   mainTab === "appointments"
-                    ? "bg-blue-700 text-white"
-                    : "border border-slate-300 bg-white text-slate-700"
+                    ? "border-blue-200 bg-blue-50 text-blue-800"
+                    : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
                 }`}
                 onClick={async () => {
                   if (showWelcomeGuide) {
@@ -12517,17 +12547,14 @@ export default function Home() {
                 }}
                 type="button"
               >
-                <span className="hidden min-[340px]:inline">
-                  Appointments
-                </span>
-                <span className="min-[340px]:hidden">Appts</span>
+                Appointments
               </button>
               <button
                 aria-label="Profile"
-                className={`hidden h-11 min-w-11 shrink-0 items-center justify-center rounded-md px-3 text-sm font-semibold md:flex md:px-4 md:text-base ${
+                className={`hidden h-11 min-w-11 shrink-0 items-center justify-center rounded-full border px-4 text-sm font-semibold shadow-sm transition md:flex md:text-base ${
                   mainTab === "profile"
-                    ? "bg-blue-700 text-white"
-                    : "border border-slate-300 bg-white text-slate-700"
+                    ? "border-blue-200 bg-blue-50 text-blue-800"
+                    : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
                 }`}
                 onClick={async () => {
                   if (showWelcomeGuide) {
@@ -12538,17 +12565,16 @@ export default function Home() {
                 type="button"
                 title="Profile"
               >
-                <UserIcon className="h-5 w-5 md:hidden" />
-                <span className="hidden md:inline">Profile</span>
+                Profile
               </button>
               {isAdmin ? (
                 <button
                   aria-label="Admin"
-                  className={`flex h-10 min-w-10 shrink-0 items-center justify-center rounded-md px-2.5 text-sm font-semibold sm:h-11 sm:min-w-11 sm:px-3 md:px-4 md:text-base ${
-                    mainTab === "admin"
-                      ? "bg-blue-700 text-white"
-                      : "border border-slate-300 bg-white text-slate-700"
-                  }`}
+	                  className={`flex h-10 min-w-10 shrink-0 items-center justify-center rounded-full border px-2.5 text-sm font-semibold shadow-sm transition sm:h-11 sm:min-w-11 sm:px-3 md:px-4 md:text-base ${
+	                    mainTab === "admin"
+	                      ? "border-blue-200 bg-blue-50 text-blue-800"
+	                      : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
+	                  }`}
                   onClick={async () => {
                     if (showWelcomeGuide) {
                       await markWelcomeGuideRead();
@@ -12565,63 +12591,88 @@ export default function Home() {
               </nav>
             ) : null}
 
-	            <div className="flex min-w-0 items-center justify-end gap-1 text-sm text-slate-600 sm:gap-2">
-	            {isSignedInAppShell ? (
-	              <span className="hidden min-w-0 truncate font-semibold text-slate-900 md:inline xl:max-w-60 2xl:max-w-none">
-	                {signedInDisplayName}
-              </span>
-            ) : null}
-            {isSignedInAppShell ? (
-              <button
-                aria-label="Profile"
-                className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-md border px-2.5 sm:h-11 sm:min-w-11 sm:px-3 md:hidden ${
-                  mainTab === "profile"
-                    ? "border-blue-700 bg-blue-700 text-white"
-                    : "border-slate-300 bg-white text-slate-700"
-                }`}
-                onClick={async () => {
-                  if (showWelcomeGuide) {
-                    await markWelcomeGuideRead();
-                  }
-                  await handleChangeMainTab("profile");
-                }}
-                title="Profile"
-                type="button"
-              >
-                <UserIcon className="h-5 w-5" />
-              </button>
-            ) : null}
-            {isSignedInAppShell && isAdmin ? (
-              <button
-                className="hidden items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm min-[410px]:inline-flex"
-                onClick={async () => {
-                  setMainTab("admin");
-                  await handleChangeAdminTab("tickets");
-                }}
-                type="button"
-              >
-                <span
-                  className={`px-2.5 py-1 ${
-                    adminNewTickets.length > 0
-                      ? "bg-red-50 text-red-700"
-                      : "bg-slate-50 text-slate-500"
-                  }`}
-                >
-                  {adminNewTickets.length} New
+            <div className="flex min-w-0 items-center justify-end gap-1 text-sm text-slate-600 sm:gap-2">
+              {isSignedInAppShell ? (
+                <span className="hidden min-w-0 truncate font-semibold text-slate-900 md:inline xl:max-w-60 2xl:max-w-none">
+                  {signedInDisplayName}
                 </span>
-                <span
-                  className={`border-l border-slate-200 px-2.5 py-1 ${
-                    adminTicketsNeedingFollowup.length > 0
-                      ? "bg-amber-50 text-amber-800"
-                      : "bg-slate-50 text-slate-500"
-                  }`}
+              ) : null}
+              {isSignedInAppShell ? (
+                <button
+                  aria-label="Profile"
+	                className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-full border px-2.5 shadow-sm transition sm:h-11 sm:min-w-11 sm:px-3 md:hidden ${
+	                  mainTab === "profile"
+	                    ? "border-blue-200 bg-blue-50 text-blue-800"
+	                    : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
+	                }`}
+                  onClick={async () => {
+                    if (showWelcomeGuide) {
+                      await markWelcomeGuideRead();
+                    }
+                    await handleChangeMainTab("profile");
+                  }}
+                  title="Profile"
+                  type="button"
                 >
-                  {adminTicketsNeedingFollowup.length} Followup
-                </span>
-              </button>
-            ) : null}
-	            </div>
-	          </div>
+                  <UserIcon className="h-5 w-5" />
+                </button>
+              ) : null}
+              {isSignedInAppShell && isAdmin ? (
+                <button
+                  className="hidden items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm min-[410px]:inline-flex"
+                  onClick={async () => {
+                    setMainTab("admin");
+                    await handleChangeAdminTab("tickets");
+                  }}
+                  type="button"
+                >
+                  <span
+                    className={`px-2.5 py-1 ${
+                      adminNewTickets.length > 0
+                        ? "bg-red-50 text-red-700"
+                        : "bg-slate-50 text-slate-500"
+                    }`}
+                  >
+                    {adminNewTickets.length} New
+                  </span>
+                  <span
+                    className={`border-l border-slate-200 px-2.5 py-1 ${
+                      adminTicketsNeedingFollowup.length > 0
+                        ? "bg-amber-50 text-amber-800"
+                        : "bg-slate-50 text-slate-500"
+                    }`}
+                  >
+                    {adminTicketsNeedingFollowup.length} Followup
+                  </span>
+                </button>
+              ) : null}
+              {canShowAskEntry ? (
+                <button
+                  aria-label="Ask CarePland"
+                  aria-expanded={askPanelOpen}
+	                  className={`inline-flex h-10 shrink-0 items-center justify-center rounded-full border px-3 text-sm font-semibold shadow-sm transition sm:h-11 sm:px-4 ${
+	                    askPanelOpen
+	                      ? "border-blue-200 bg-blue-100 text-[#2B6198]"
+	                      : "border-blue-100 bg-blue-50 text-[#2B6198] hover:border-blue-200 hover:bg-blue-100"
+	                  }`}
+                  data-testid="ask-entry"
+                  onClick={() => {
+                    if (askPanelOpen) {
+                      requestCloseAskPanel();
+                      return;
+                    }
+
+                    setAskPanelOpen(true);
+                    setAskCloseConfirmOpen(false);
+                  }}
+                  title="Ask CarePland"
+                  type="button"
+                >
+                  Ask
+                </button>
+              ) : null}
+            </div>
+          </div>
 	          {adminReadonlySnapshot ? (
 	            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-100 px-3 py-2 text-sm text-amber-950">
 	              <p className="font-semibold">
@@ -13046,7 +13097,7 @@ export default function Home() {
                   </h2>
                 </div>
                 <button
-                  className="rounded-md border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                  className={`${gentleSecondaryButtonClass} text-sm`}
                   onClick={() => void handleSignOut()}
                   type="button"
                 >
@@ -13208,7 +13259,7 @@ export default function Home() {
                         />
                       </label>
                       <button
-                        className="mt-3 w-full rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                        className={`mt-3 w-full ${gentleSoftBlueButtonClass}`}
                         disabled={creatingCareVip || !canAddCareVip}
                         type="submit"
                       >
@@ -13233,7 +13284,7 @@ export default function Home() {
                       Send reset link to your verified email.
                     </p>
                     <button
-                      className="mt-3 w-full rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                      className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
                       disabled={sendingPasswordReset}
                       onClick={handleSendProfilePasswordReset}
                       type="button"
@@ -13255,10 +13306,10 @@ export default function Home() {
                       </p>
                     )}
                     {sampleDataSeededAt ? (
-                      <button
-                        className="mt-3 w-full rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 disabled:text-slate-400"
-                        disabled={removingSampleData}
-                        onClick={handleRemoveSampleData}
+	                      <button
+	                        className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
+	                        disabled={removingSampleData}
+	                        onClick={handleRemoveSampleData}
                         type="button"
                       >
                         {removingSampleData
@@ -13267,7 +13318,7 @@ export default function Home() {
                       </button>
                     ) : (
                       <button
-                        className="mt-3 w-full rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                        className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
                         disabled={seedingSampleData}
                         onClick={() => handleSeedSampleDataForCurrentUser(true)}
                         type="button"
@@ -13496,7 +13547,7 @@ export default function Home() {
               </label>
               <div className="md:col-span-2">
                 <button
-                  className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                  className={gentlePrimaryButtonClass}
                   disabled={savingProfile}
                   type="submit"
                 >
@@ -13704,7 +13755,7 @@ export default function Home() {
                       />
                     </label>
                     <button
-                      className="mt-4 w-full rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                      className={`mt-4 w-full ${gentleSoftBlueButtonClass}`}
                       disabled={creatingCareVip || !canAddCareVip}
                       type="submit"
                     >
@@ -13986,14 +14037,14 @@ export default function Home() {
                     </label>
                     <div className="mt-4 flex flex-wrap gap-3">
                       <button
-                        className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                        className={gentlePrimaryButtonClass}
                         disabled={savingTextIntake}
                         type="submit"
                       >
                         {savingTextIntake ? "Saving..." : "Save intake"}
                       </button>
                       <button
-                        className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                        className={gentleSecondaryButtonClass}
                         onClick={() => {
                           cancelTextIntake();
                         }}
@@ -14103,7 +14154,7 @@ export default function Home() {
                   />
                 </label>
                 <button
-                  className="mt-4 w-full rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                  className={`mt-4 w-full ${gentlePrimaryButtonClass}`}
                   disabled={creatingAppointment}
                   type="submit"
                 >
@@ -14228,7 +14279,7 @@ export default function Home() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
-                      className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                      className={gentleSmallSecondaryButtonClass}
                       onClick={() => {
                         setSupportQuestionExpanded((isExpanded) => !isExpanded);
                         if (currentSupportTicket?.user_has_unread_update) {
@@ -14241,7 +14292,7 @@ export default function Home() {
                     </button>
                     {currentSupportTicket ? (
                       <button
-                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                        className={gentleSmallSecondaryButtonClass}
                         onClick={() => {
                           setAskingSupportQuestion(true);
                           setSupportQuestionExpanded(true);
@@ -14272,7 +14323,7 @@ export default function Home() {
                             </p>
                           </div>
                           <button
-                            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                            className={gentleSmallSecondaryButtonClass}
                             onClick={() => {
                               setAskingSupportQuestion(true);
                               setSupportAssistantResult(null);
@@ -14311,7 +14362,7 @@ export default function Home() {
                             />
                           </label>
                           <button
-                            className="mt-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                            className={`mt-2 ${gentlePrimaryButtonClass} text-sm`}
                             disabled={savingSupportReply || !supportReplyBody.trim()}
                             type="submit"
                           >
@@ -14428,7 +14479,7 @@ export default function Home() {
                               {!supportAssistantFeedbackMode && !supportAssistantResolution ? (
                                 <>
                                   <button
-                                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                                    className={gentleSmallSecondaryButtonClass}
                                     disabled={savingSupportAssistantFeedback}
                                     onClick={() => handleSupportAssistantFeedback("helpful")}
                                     type="button"
@@ -14436,7 +14487,7 @@ export default function Home() {
                                     Helpful
                                   </button>
                                   <button
-                                    className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:text-slate-400"
+                                    className={gentleSmallSecondaryButtonClass}
                                     disabled={savingSupportAssistantFeedback}
                                     onClick={() => {
                                       setSupportAssistantFeedbackMode("not_helpful");
@@ -14450,7 +14501,7 @@ export default function Home() {
                               ) : null}
                               {supportAssistantFeedbackMode === "not_helpful" ? (
                                 <button
-                                  className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                                  className={gentleSmallBlueButtonClass}
                                   disabled={savingSupportAssistantFeedback}
                                   onClick={() => handleSupportAssistantFeedback("not_helpful")}
                                   type="button"
@@ -14460,7 +14511,7 @@ export default function Home() {
                               ) : null}
                               {supportAssistantFeedbackMode === "not_helpful" ? (
                                 <button
-                                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                                  className={gentleSmallSecondaryButtonClass}
                                   disabled={savingSupportAssistantFeedback || savingSupportQuestion}
                                   onClick={() => {
                                     setSupportAssistantFeedbackMode(null);
@@ -14473,7 +14524,7 @@ export default function Home() {
                               ) : null}
                               {supportAssistantResolution === "not_helpful_saved" ? (
                                 <button
-                                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                                  className={gentleSmallSecondaryButtonClass}
                                   disabled={savingSupportQuestion}
                                   onClick={() => {
                                     setSupportQuestionSubject("");
@@ -14492,7 +14543,7 @@ export default function Home() {
                               ) : null}
                               {supportAssistantResolution !== "helpful" ? (
                                 <button
-                                className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                                className={gentleSmallBlueButtonClass}
                                 disabled={savingSupportQuestion}
                                 onClick={handleEscalateSupportAssistant}
                                 type="button"
@@ -14507,7 +14558,7 @@ export default function Home() {
                         {!supportAssistantResult ? (
                           <div className="mt-3 flex flex-wrap gap-2">
                           <button
-                            className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                            className={`${gentlePrimaryButtonClass} text-sm`}
                             disabled={
                               askingSupportAssistant ||
                               !supportQuestionSubject.trim() ||
@@ -14519,7 +14570,7 @@ export default function Home() {
                           </button>
                           {currentSupportTicket ? (
                             <button
-                              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                              className={`${gentleSecondaryButtonClass} text-sm`}
                               disabled={savingSupportQuestion}
                               onClick={() => setAskingSupportQuestion(false)}
                               type="button"
@@ -14642,14 +14693,14 @@ export default function Home() {
                     </label>
                     <div className="flex flex-wrap gap-3 md:col-span-2">
                       <button
-                        className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                        className={gentlePrimaryButtonClass}
                         disabled={creatingAppointment}
                         type="submit"
                       >
                         {creatingAppointment ? "Adding..." : "Add appointment"}
                       </button>
                       <button
-                        className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                        className={gentleSecondaryButtonClass}
                         onClick={() => {
                           resetPlaceLookup();
                           setActiveAppointmentPanel(null);
@@ -14696,7 +14747,7 @@ export default function Home() {
                         </label>
                         <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-700">
                           <label
-                            className={`rounded-md border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-700 ${
+                            className={`rounded-full border border-blue-100 bg-white/85 px-3 py-2 font-semibold text-slate-600 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800 ${
                               extractingImageText
                                 ? "cursor-not-allowed opacity-60"
                                 : "cursor-pointer"
@@ -14742,7 +14793,7 @@ export default function Home() {
                       </label>
                       <div className="mt-4 flex flex-wrap gap-3">
                         <button
-                          className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                          className={gentlePrimaryButtonClass}
                           disabled={processingTextIntake}
                           type="submit"
                         >
@@ -14751,7 +14802,7 @@ export default function Home() {
                             : "Review appointments"}
                         </button>
                         <button
-                          className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                          className={gentleSecondaryButtonClass}
                           onClick={() => {
                             cancelTextIntake();
                             setActiveAppointmentPanel(null);
@@ -14877,14 +14928,14 @@ export default function Home() {
                         </label>
                         <div className="flex flex-wrap gap-3 md:col-span-2">
                           <button
-                            className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                            className={gentlePrimaryButtonClass}
                             disabled={savingTextIntake}
                             type="submit"
                           >
                             {savingTextIntake ? "Saving..." : "Save intake"}
                           </button>
                           <button
-                            className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                            className={gentleSecondaryButtonClass}
                             onClick={cancelTextIntake}
                             type="button"
                           >
@@ -15096,7 +15147,7 @@ export default function Home() {
 
                         <div className="mt-4 flex flex-wrap gap-3">
                           <button
-                            className="rounded-md bg-slate-900 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                            className={gentlePrimaryButtonClass}
                             disabled={savingTextIntake}
                             type="submit"
                           >
@@ -15105,7 +15156,7 @@ export default function Home() {
                               : "Save selected appointments"}
                           </button>
                           <button
-                            className="rounded-md border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700"
+                            className={gentleSecondaryButtonClass}
                             onClick={cancelTextIntake}
                             type="button"
                           >
@@ -17762,7 +17813,7 @@ export default function Home() {
                           </p>
                           <div className="flex flex-wrap gap-2">
                             <button
-                              className="rounded-md bg-amber-900 px-3 py-2 text-sm font-semibold text-white"
+                              className={gentleWarmButtonClass}
                               onClick={() =>
                                 discardAndSwitchAppointmentModifier(appointment)
                               }
@@ -17773,7 +17824,7 @@ export default function Home() {
                                 : "Discard and close"}
                             </button>
                             <button
-                              className="rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-950"
+                              className="rounded-full border border-amber-100 bg-white/85 px-3 py-2 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-50"
                               onClick={() => setPendingModifierSwitch(null)}
                               type="button"
                             >
@@ -17793,7 +17844,7 @@ export default function Home() {
                           </p>
                           <div className="flex flex-wrap gap-2">
                             <button
-                              className="rounded-md bg-rose-700 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                              className={gentleCautionButtonClass}
                               disabled={
                                 deletingAppointmentForId === appointment.id
                               }
@@ -17805,7 +17856,7 @@ export default function Home() {
                                 : "Delete appointment"}
                             </button>
                             <button
-                              className="rounded-md border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-950"
+                              className="rounded-full border border-rose-100 bg-white/85 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50"
                               onClick={() => setPendingDeleteAppointmentId(null)}
                               type="button"
                             >
@@ -17874,7 +17925,7 @@ export default function Home() {
                                   </span>
                                 ) : null}
                               </button>
-                              <label className="inline-flex cursor-pointer items-center rounded-md border border-blue-200 bg-white/80 px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50">
+                              <label className="inline-flex cursor-pointer items-center rounded-full border border-blue-100 bg-white/85 px-3 py-1.5 text-sm font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50">
                                 Add screenshots (max 10)
                                 <input
                                   accept="image/gif,image/jpeg,image/png,image/webp"
@@ -17907,7 +17958,7 @@ export default function Home() {
                             ) : null}
                             <div className="mt-4 flex flex-wrap items-center gap-4">
                               <button
-                                className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                                className={gentlePrimaryButtonClass}
                                 disabled={processingTextIntake}
                                 type="submit"
                               >
@@ -17916,7 +17967,7 @@ export default function Home() {
                                   : "Create summary"}
                               </button>
                               <button
-                                className="text-sm font-semibold text-slate-500 hover:text-slate-800"
+                                className="text-sm font-semibold text-slate-500 transition hover:text-blue-700"
                                 onClick={cancelTextIntake}
                                 type="button"
                               >
@@ -17986,7 +18037,7 @@ export default function Home() {
                               </label>
                               <div className="flex items-end gap-3">
                                 <button
-                                  className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                                  className={gentlePrimaryButtonClass}
                                   disabled={savingTextIntake}
                                   type="submit"
                                 >
@@ -18019,7 +18070,7 @@ export default function Home() {
                             ) : null}
                           </div>
                           <button
-                            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                            className={gentleSmallSecondaryButtonClass}
                             onClick={() => cancelEditingNote(appointment.id)}
                             type="button"
                           >
@@ -18076,7 +18127,7 @@ export default function Home() {
                           </label>
                           <div className="flex items-end">
                             <button
-                              className="w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                              className={`w-full ${gentlePrimaryButtonClass}`}
                               disabled={savingNoteForId === appointment.id}
                               type="submit"
                             >
@@ -18108,7 +18159,7 @@ export default function Home() {
                             </p>
                           </div>
                           <button
-                            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                            className={gentleSmallSecondaryButtonClass}
                             onClick={() => cancelEditingAppointment(appointment.id)}
                             type="button"
                           >
@@ -18259,7 +18310,7 @@ export default function Home() {
 
                         <div className="mt-4 flex flex-wrap gap-3">
                           <button
-                            className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                            className={gentlePrimaryButtonClass}
                             disabled={savingAppointmentForId === appointment.id}
                             type="submit"
                           >
@@ -18295,7 +18346,7 @@ export default function Home() {
                             </p>
                           </div>
                           <button
-                            className="rounded-md border border-blue-200 bg-white/80 px-3 py-2 text-sm font-semibold text-blue-800 hover:border-blue-300 disabled:text-slate-400"
+                            className={gentleSmallBlueButtonClass}
                             disabled={generatingCarePrepForId === appointment.id}
                             onClick={() => handleGenerateCarePrep(appointment)}
                             type="button"
@@ -18424,7 +18475,7 @@ export default function Home() {
 
                         <div className="mt-4 flex flex-wrap gap-3">
                           <button
-                            className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                            className={`${gentlePrimaryButtonClass} text-sm`}
                             disabled={
                               savingCarePrepForId === appointment.id ||
                               hasReviewCarePrepEdits
@@ -18448,7 +18499,7 @@ export default function Home() {
                               : "Accept CarePrep"}
                           </button>
                           <button
-                            className="rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                            className={`${gentleSoftBlueButtonClass} text-sm`}
                             disabled={
                               savingCarePrepForId === appointment.id ||
                               !hasReviewCarePrepEdits
@@ -18516,7 +18567,7 @@ export default function Home() {
                             </button>
                             {!isEditingNote && !isArchived ? (
                               <button
-                                className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                className={`${gentleSmallBlueButtonClass} inline-flex items-center gap-2`}
                                 onClick={() =>
                                   startEditingNote(appointment.id, note)
                                 }
@@ -18580,7 +18631,7 @@ export default function Home() {
                         </div>
                         {!isEditingNote && !isArchived ? (
                           <button
-                            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                            className={gentleSmallSecondaryButtonClass}
                             onClick={() => startEditingNote(appointment.id, note)}
                             type="button"
                           >
@@ -18693,7 +18744,7 @@ export default function Home() {
                                 </button>
                                 {!isArchived && !isEditingCarePrep ? (
                                   <button
-                                    className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                    className={`${gentleSmallBlueButtonClass} inline-flex items-center gap-2`}
                                     onClick={() =>
                                       startEditingCarePrep(appointment.id, prep)
                                     }
@@ -18706,7 +18757,7 @@ export default function Home() {
                               </div>
                               {!isArchived && !isEditingCarePrep ? (
                                 <button
-                                  className="rounded-md border border-blue-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-blue-800 hover:border-blue-300 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                  className={gentleSmallBlueButtonClass}
                                   disabled={
                                     generatingCarePrepForId === appointment.id
                                   }
@@ -18844,7 +18895,7 @@ export default function Home() {
 
                             <div className="flex flex-wrap gap-3">
                               <button
-                                className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                                className={`${gentlePrimaryButtonClass} text-sm`}
                                 disabled={savingCarePrepForId === appointment.id}
                                 onClick={() =>
                                   saveCurrentCarePrepEdit(appointment.id, prep)
@@ -18856,7 +18907,7 @@ export default function Home() {
                                   : "Save CarePrep edit"}
                               </button>
                               <button
-                                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+                                className={`${gentleSecondaryButtonClass} text-sm`}
                                 onClick={() =>
                                   cancelEditingCarePrep(appointment.id)
                                 }
@@ -18971,38 +19022,18 @@ export default function Home() {
           </footer>
         ) : null}
       </section>
-      {canShowAskEntry ? (
-        <button
-          aria-label="Ask"
-          aria-expanded={askPanelOpen}
-          className="fixed right-3 top-3 z-[60] inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 sm:right-5 sm:top-5 sm:h-11 sm:px-4 sm:text-base"
-          data-testid="ask-entry"
-          onClick={() => {
-            if (askPanelOpen) {
-              resetAskPanelState();
-              return;
-            }
-
-            setAskPanelOpen(true);
-          }}
-          title="Ask"
-          type="button"
-        >
-          Ask
-        </button>
-      ) : null}
       {canShowAskEntry && askPanelOpen ? (
         <>
-          <button
-            aria-label="Close Ask panel"
-            className="fixed inset-0 z-[65] cursor-default bg-transparent"
-            onClick={resetAskPanelState}
-            type="button"
-          />
-          <section
-            aria-label="Ask panel"
-            className="fixed inset-x-3 top-16 z-[70] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-[#d8e0dc] bg-[#fffcf5] p-5 shadow-xl sm:left-auto sm:right-5 sm:top-20 sm:w-[min(32rem,calc(100vw-2.5rem))]"
-          >
+	          <button
+	            aria-label="Close Ask panel"
+	            className="fixed inset-0 z-[65] cursor-default bg-transparent"
+	            onClick={requestCloseAskPanel}
+	            type="button"
+	          />
+	          <section
+	            aria-label="Ask panel"
+	            className="fixed inset-x-3 top-16 z-[70] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-2xl border border-blue-100 bg-blue-50 p-5 shadow-xl sm:left-auto sm:right-5 sm:top-20 sm:w-[min(32rem,calc(100vw-2.5rem))]"
+	          >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold text-slate-950">Ask</h2>
@@ -19011,25 +19042,50 @@ export default function Home() {
                     ? appContentText(askCompletionMessageKey)
                     : appContentText("ask_guidance_message")}
                 </p>
-              </div>
-              <button
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-600"
-                onClick={resetAskPanelState}
-                type="button"
-              >
-                Close
-              </button>
-            </div>
+	              </div>
+		              <button
+		                className={gentleSmallSecondaryButtonClass}
+		                onClick={requestCloseAskPanel}
+		                type="button"
+		              >
+	                Close
+	              </button>
+	            </div>
 
-            {askMessages.length > 0 ? (
+            {askCloseConfirmOpen ? (
+              <section className="mt-4 rounded-xl border border-amber-100 bg-white/85 p-3 shadow-sm">
+                <p className="text-sm font-medium text-slate-700">
+                  This Ask has unsent text or an active conversation. Close it
+                  and discard what is here?
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    className={gentlePrimaryButtonClass}
+                    onClick={resetAskPanelState}
+                    type="button"
+                  >
+                    Discard and close
+                  </button>
+                  <button
+                    className={gentleSmallSecondaryButtonClass}
+                    onClick={() => setAskCloseConfirmOpen(false)}
+                    type="button"
+                  >
+                    Keep writing
+                  </button>
+                </div>
+              </section>
+            ) : null}
+
+	            {askMessages.length > 0 ? (
               <div className="mt-6 space-y-2">
                 {askMessages.map((askMessage, index) => (
                   <div
-                    className={`max-w-[min(100%,42rem)] rounded-xl px-4 py-3 text-sm leading-relaxed ${
-                      askMessage.role === "user"
-                        ? "ml-auto bg-blue-700 text-white"
-                        : "border border-[#d8e0dc] bg-white text-slate-700"
-                    }`}
+	                    className={`max-w-[min(100%,42rem)] rounded-xl px-4 py-3 text-sm leading-relaxed ${
+	                      askMessage.role === "user"
+	                        ? "ml-auto border border-blue-100 bg-blue-50 text-slate-950"
+	                        : "border border-blue-100 bg-white/85 text-slate-700"
+	                    }`}
                     key={`${askMessage.role}-${index}`}
                   >
                     <p className="whitespace-pre-wrap">{askMessage.body}</p>
@@ -19049,20 +19105,23 @@ export default function Home() {
                 <label className="sr-only" htmlFor="ask-message">
                   Ask a question, share an idea, or describe a problem
                 </label>
-                <textarea
-                  className="min-h-36 w-full rounded-xl border border-[#d8e0dc] bg-white px-4 py-4 text-base leading-relaxed text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                  disabled={sendingAskMessage}
-                  id="ask-message"
-                  onChange={(event) => setAskInput(event.target.value)}
-                  placeholder="Ask a question, share an idea, or describe a problem"
-                  value={askInput}
-                />
-                <div className="mt-3 flex items-center justify-end">
-                  <button
-                    className="rounded-md bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white disabled:bg-slate-400"
-                    disabled={sendingAskMessage || !askInput.trim()}
-                    type="submit"
-                  >
+	                <textarea
+	                  className="min-h-36 w-full rounded-xl border border-[#d8e0dc] bg-white px-4 py-4 text-base leading-relaxed text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+	                  disabled={sendingAskMessage}
+	                  id="ask-message"
+	                  onChange={(event) => {
+	                    setAskInput(event.target.value);
+	                    setAskCloseConfirmOpen(false);
+	                  }}
+	                  placeholder="Ask a question, share an idea, or describe a problem"
+	                  value={askInput}
+	                />
+	                <div className="mt-3 flex items-center justify-end">
+	                  <button
+	                    className={`${gentlePrimaryButtonClass} px-5 py-2.5 text-sm`}
+	                    disabled={sendingAskMessage || !askInput.trim()}
+	                    type="submit"
+	                  >
                     {sendingAskMessage ? "Sending..." : "Send"}
                   </button>
                 </div>
