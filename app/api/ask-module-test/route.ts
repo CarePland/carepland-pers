@@ -20,6 +20,7 @@ type AskModuleKey =
   | "ask_bug_interpreter"
   | "ask_clarifier"
   | "ask_feature_interpreter"
+  | "ask_onboarding_helper"
   | "ask_off_topic_handler"
   | "ask_router";
 
@@ -253,6 +254,41 @@ const askOffTopicHandlerSchema = {
   type: "object",
 };
 
+const askOnboardingHelperSchema = {
+  additionalProperties: false,
+  properties: {
+    answer: { type: "string" },
+    confidence: { type: "number" },
+    escalation_reason: { type: "string" },
+    escalation_recommended: { type: "boolean" },
+    recommended_actions: {
+      items: {
+        additionalProperties: true,
+        properties: {
+          action: { type: "string" },
+          confidence: { type: "number" },
+          priority: { type: "string" },
+          rationale: { type: "string" },
+          title: { type: "string" },
+        },
+        required: ["action", "confidence", "rationale", "title"],
+        type: "object",
+      },
+      type: "array",
+    },
+    summary: { type: "string" },
+  },
+  required: [
+    "answer",
+    "confidence",
+    "escalation_reason",
+    "escalation_recommended",
+    "recommended_actions",
+    "summary",
+  ],
+  type: "object",
+};
+
 const moduleConfigs: Record<AskModuleKey, AskModuleConfig> = {
   ask_bug_interpreter: {
     fallbackPrompt:
@@ -274,6 +310,13 @@ const moduleConfigs: Record<AskModuleKey, AskModuleConfig> = {
     fallbackSchema: askFeatureInterpreterSchema,
     formatName: "ask_feature_interpreter_result",
     label: "Feature / Workflow Interpreter",
+  },
+  ask_onboarding_helper: {
+    fallbackPrompt:
+      "You are the CarePland Personal Ask onboarding helper. Answer low-risk getting-started questions about profile setup, Early Access acknowledgements, Care Circle setup, the first-run Home welcome guide, adding a first appointment, importing appointment details, and demo examples. For profile setup, explain that CarePland asks for basic account/contact details so dates, reminders, time zones, and support follow-up work correctly: first and last name, phone, time zone, and ZIP are required; display name and street address details are optional unless the app marks them otherwise. Keep this from sounding like a medical intake form. If the user says they are confused, lost, unsure what the welcome screen means, or asks what to do next, respond with gentle orientation: reassure them briefly, explain that CarePland helps carry important appointment context forward from one visit to the next, name a few examples such as what changed, what mattered, and what to ask next, then suggest the easiest next step: adding or importing a first appointment. Keep answers brief, calm, and practical. User-facing responses should avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical, because Ask should sound like a CarePland routing surface, not a human agent. Do not give medical, legal, privacy, account-security, billing, or emergency advice. Do not claim to change data. Escalate if the user appears blocked by account state, email update, authentication, profile saving, missing Care Circle setup, data loss, or frustration. Return valid JSON exactly matching the schema.",
+    fallbackSchema: askOnboardingHelperSchema,
+    formatName: "ask_onboarding_helper_result",
+    label: "Onboarding Helper",
   },
   ask_off_topic_handler: {
     fallbackPrompt:
@@ -381,6 +424,12 @@ function resultClassification(moduleKey: AskModuleKey, raw: JsonObject) {
     return raw.should_close === true ? "close as off-topic" : "send to review";
   }
 
+  if (moduleKey === "ask_onboarding_helper") {
+    return raw.escalation_recommended === true
+      ? "onboarding / send to review"
+      : "onboarding / answer";
+  }
+
   return [
     textValue(firstAction(raw).category),
     textValue(firstAction(raw).action),
@@ -398,6 +447,10 @@ function resultSummary(moduleKey: AskModuleKey, raw: JsonObject) {
 
   if (moduleKey === "ask_off_topic_handler") {
     return textValue(raw.user_response) || textValue(raw.review_reason);
+  }
+
+  if (moduleKey === "ask_onboarding_helper") {
+    return textValue(raw.answer) || textValue(raw.summary);
   }
 
   return (

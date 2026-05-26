@@ -299,6 +299,41 @@ const askOffTopicHandlerSchema = {
   type: "object",
 };
 
+const askOnboardingHelperSchema = {
+  additionalProperties: false,
+  properties: {
+    answer: { type: "string" },
+    confidence: { type: "number" },
+    escalation_reason: { type: "string" },
+    escalation_recommended: { type: "boolean" },
+    recommended_actions: {
+      items: {
+        additionalProperties: true,
+        properties: {
+          action: { type: "string" },
+          confidence: { type: "number" },
+          priority: { type: "string" },
+          rationale: { type: "string" },
+          title: { type: "string" },
+        },
+        required: ["action", "confidence", "rationale", "title"],
+        type: "object",
+      },
+      type: "array",
+    },
+    summary: { type: "string" },
+  },
+  required: [
+    "answer",
+    "confidence",
+    "escalation_reason",
+    "escalation_recommended",
+    "recommended_actions",
+    "summary",
+  ],
+  type: "object",
+};
+
 const askUserFacingResponseRubric =
   "Global user-facing response rubric: Ask should sound like a CarePland routing surface, not a human agent. Avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical. Prefer neutral constructions such as \"This will be raised for review,\" \"This may need a closer look,\" \"A little more detail would help route this correctly,\" or \"Thanks for adding this.\" Do not deny that Ask is AI or pretend to be human. If AI identity is directly relevant, explain it plainly without overemphasizing it. Keep responses brief, calm, respectful, and non-corporate.";
 
@@ -316,6 +351,9 @@ const fallbackAskBugInterpreterPrompt =
 
 const fallbackAskOffTopicHandlerPrompt =
   `You are the CarePland Personal Ask off-topic handler. Your job is narrow: briefly and kindly redirect clearly out-of-scope messages back to CarePland questions, appointment organization, bugs, ideas, workflow feedback, or support review. ${askUserFacingResponseRubric} If the message includes possible medical, emergency, legal, privacy, security, account-access, abuse, or data-loss risk, do not close it as harmless off-topic; mark it for human review. Do not shame the user. Do not continue the conversation unnecessarily. Return valid JSON exactly matching the schema.`;
+
+const fallbackAskOnboardingHelperPrompt =
+  `You are the CarePland Personal Ask onboarding helper. Answer low-risk getting-started questions about profile setup, Early Access acknowledgements, Care Circle setup, the first-run Home welcome guide, adding a first appointment, importing appointment details, and demo examples. For profile setup, explain that CarePland asks for basic account/contact details so dates, reminders, time zones, and support follow-up work correctly: first and last name, phone, time zone, and ZIP are required; display name and street address details are optional unless the app marks them otherwise. Keep this from sounding like a medical intake form. If the user says they are confused, lost, unsure what the welcome screen means, or asks what to do next, respond with gentle orientation: reassure them briefly, explain that CarePland helps carry important appointment context forward from one visit to the next, name a few examples such as what changed, what mattered, and what to ask next, then suggest the easiest next step: adding or importing a first appointment. Keep answers brief, calm, and practical. ${askUserFacingResponseRubric} Do not give medical, legal, privacy, account-security, billing, or emergency advice. Do not claim to change data. Escalate if the user appears blocked by account state, email update, authentication, profile saving, missing Care Circle setup, data loss, or frustration. Return valid JSON exactly matching the schema.`;
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -404,6 +442,52 @@ function safeActionObjects(value: unknown): JsonObject[] {
 
 function normalizeAskMessage(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function isLikelyOnboardingAsk({
+  context,
+  currentPage,
+  message,
+  transcript,
+}: {
+  context: JsonObject;
+  currentPage: string;
+  message: string;
+  transcript: string;
+}) {
+  const haystack = normalizeAskMessage(
+    [currentPage, message, transcript, JSON.stringify(context)].join(" ")
+  );
+
+  return [
+    "welcome",
+    "onboarding",
+    "getting started",
+    "get started",
+    "first appointment",
+    "first-run",
+    "first run",
+    "demo data",
+    "examples",
+    "early access acknowledgement",
+    "early access acknowledgements",
+    "profile setup",
+    "phone",
+    "zip",
+    "zip code",
+    "address",
+    "time zone",
+    "timezone",
+    "care circle setup",
+    "add appointment",
+    "import appointment",
+    "confused",
+    "lost",
+    "what do i do",
+    "what is this",
+    "what is this screen",
+    "what should i do",
+  ].some((keyword) => haystack.includes(keyword));
 }
 
 function transcriptFromMessages(
@@ -833,7 +917,7 @@ export async function POST(request: NextRequest) {
         2
       )}`,
       `App context:\n${JSON.stringify(context, null, 2)}`,
-      "Product context:\nCarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Ask is intended for questions, ideas, workflow feedback, bugs, confusing moments, and things that may need review. Do not deny being AI or pretend to be human, but keep AI framing in the background unless the user asks or it matters for trust/review. If a user asks what you are, it is okay to say you are an AI assistant designed to help route questions, feedback, and ideas throughout CarePland, and that you are not a replacement for real people.",
+      "Product context:\nCarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Ask has a separate onboarding helper module for low-risk getting-started questions. Ask is intended for questions, ideas, workflow feedback, bugs, confusing moments, and things that may need review. Do not deny being AI or pretend to be human, but keep AI framing in the background unless the user asks or it matters for trust/review. If a user asks what you are, it is okay to say you are an AI assistant designed to help route questions, feedback, and ideas throughout CarePland, and that you are not a replacement for real people.",
       `Response rubric:\n${responseRubric}`,
       `Ask transcript:\n${transcript}`,
     ]
@@ -868,6 +952,7 @@ export async function POST(request: NextRequest) {
       askThread.clarifying_turn_count >= clarifyingLimit;
     let clarifierRun: AskModuleRunResult | null = null;
     let offTopicRun: AskModuleRunResult | null = null;
+    let onboardingRun: AskModuleRunResult | null = null;
     let interpreterRun: AskModuleRunResult | null = null;
 
     if (action === "ask_clarifying_question" && clarifyingLimitReached) {
@@ -913,7 +998,7 @@ export async function POST(request: NextRequest) {
               2
             )}`,
             `App context:\n${JSON.stringify(context, null, 2)}`,
-            "Product context:\nCarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Ask should feel like open dialogue, not a ticketing system.",
+            "Product context:\nCarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and then see a first-run welcome guide on Home. Ask should feel like open dialogue, not a ticketing system.",
             `Response rubric:\n${responseRubric}`,
             `Ask transcript:\n${transcript}`,
           ].join("\n\n"),
@@ -1088,6 +1173,89 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const shouldRunOnboardingHelper =
+      action !== "off_topic" &&
+      (category === "support_question" ||
+        category === "unclear_or_needs_human_review") &&
+      isLikelyOnboardingAsk({ context, currentPage, message, transcript });
+
+    if (shouldRunOnboardingHelper) {
+      try {
+        onboardingRun = await runAskJsonModule({
+          careCircleId,
+          fallbackPrompt: fallbackAskOnboardingHelperPrompt,
+          fallbackSchema: askOnboardingHelperSchema,
+          formatName: "carepland_ask_onboarding_helper",
+          instructionKey: "ask_onboarding_helper",
+          openAiApiKey,
+          supabase,
+          userPrompt: [
+            `Current page: ${currentPage || "unknown"}`,
+            `Router decision:\n${JSON.stringify(
+              {
+                action,
+                ai_summary: aiSummary,
+                category,
+                confidence,
+                rationale,
+                risk_flags: riskFlags,
+              },
+              null,
+              2
+            )}`,
+            `App context:\n${JSON.stringify(context, null, 2)}`,
+            "Onboarding facts:\nNew users complete profile basics, Early Access acknowledgements, Care Circle setup, and then land on Home with the first-run welcome guide. Profile setup asks for basic account/contact details so dates, reminders, time zones, and support follow-up work correctly. First and last name, phone, time zone, and ZIP are required; display name and street address details are optional unless the app marks them otherwise. The welcome guide explains the appointment loop, keeps first actions focused, and may hide normal header navigation while still offering a Need help link that opens Ask. First useful actions are adding a real appointment, importing appointment details the user already has, or adding clearly labeled fictional demo examples. Demo examples can be removed later from Profile. Account-specific onboarding blockers should be reviewed by support/admin.",
+            `Response rubric:\n${responseRubric}`,
+            `Ask transcript:\n${transcript}`,
+          ].join("\n\n"),
+        });
+
+        const onboardingAnswer = String(
+          onboardingRun.parsed.answer ?? ""
+        ).trim();
+        const onboardingEscalates = Boolean(
+          onboardingRun.parsed.escalation_recommended
+        );
+        const onboardingActions = safeActionObjects(
+          onboardingRun.parsed.recommended_actions
+        );
+
+        if (onboardingAnswer) {
+          assistantResponse = onboardingAnswer;
+        }
+
+        if (onboardingEscalates) {
+          action = "needs_human_review";
+          recommendedActions =
+            onboardingActions.length > 0
+              ? onboardingActions
+              : [
+                  {
+                    action: "create_support_ticket",
+                    category: "support_question",
+                    confidence: cleanConfidence(
+                      onboardingRun.parsed.confidence
+                    ),
+                    priority: "medium",
+                    rationale:
+                      String(
+                        onboardingRun.parsed.escalation_reason ?? ""
+                      ).trim() || "Onboarding helper recommended review.",
+                    title: "Review onboarding help request",
+                  },
+                ];
+        } else {
+          action = "answer_now";
+          recommendedActions = [];
+        }
+      } catch (error) {
+        console.error(
+          "Ask onboarding helper failed; falling back to router output",
+          error
+        );
+      }
+    }
+
     let interpreterError = "";
     const shouldInterpretForReview =
       action === "route_now" || action === "needs_human_review";
@@ -1199,6 +1367,7 @@ export async function POST(request: NextRequest) {
           clarifier: clarifierRun?.parsed ?? null,
           interpreter: interpreterRun?.parsed ?? null,
           interpreter_error: interpreterError || null,
+          onboarding_helper: onboardingRun?.parsed ?? null,
           off_topic_handler: offTopicRun?.parsed ?? null,
           router: parsed,
         },
@@ -1280,6 +1449,21 @@ export async function POST(request: NextRequest) {
         operationKey: "ask_off_topic_handler",
         operationLabel: "Ask off-topic handler",
         run: offTopicRun,
+        sourceId: submission.id,
+        sourceTable: "ask_submissions",
+        supabase,
+        userId,
+      });
+    }
+
+    if (onboardingRun) {
+      await logAskOperationCost({
+        action,
+        careCircleId,
+        category,
+        operationKey: "ask_onboarding_helper",
+        operationLabel: "Ask onboarding helper",
+        run: onboardingRun,
         sourceId: submission.id,
         sourceTable: "ask_submissions",
         supabase,

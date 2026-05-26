@@ -561,6 +561,7 @@ type AdminAttentionSummary = {
 };
 type AiWorkflowKey =
   | "admin_hq_prioritization"
+  | "ask_onboarding_helper"
   | "ask_user_response_rubric"
   | "bulk_appointment_intake"
   | "careprep_generation"
@@ -834,7 +835,7 @@ const appContentDefaults = {
   support_agent_known_limitations:
     "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests. Self-service billing and plan changes are not wired up yet; plan questions or account-specific tier issues should be escalated to support.",
   support_agent_product_facts:
-    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Early Access currently gives early adopters full access, including multiple Care VIPs and automatic appointment preparation where available. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual, Group, and Early Access tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask questions in the app. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Early Access currently gives early adopters full access, including multiple Care VIPs and automatic appointment preparation where available. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual, Group, and Early Access tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
   support_agent_voice_guidance:
     "Use a warm, steady, and practical tone. Be empathetic without pretending intimacy, supportive without being syrupy, and clear about limits without sounding cold. Be confident on app guidance, humble on care-related questions, and never corporate-deflective or fake-cheerful when a user is frustrated.",
   welcome_guide_body:
@@ -1397,6 +1398,51 @@ const aiWorkflows: Record<
       "Global response philosophy used by Ask modules when writing user-facing text.",
     historyLabel: "Ask Rubric History",
     label: "Ask user response rubric",
+  },
+  ask_onboarding_helper: {
+    defaultChangeNote: "Initial Ask onboarding helper instruction set",
+    defaultSchema: {
+      additionalProperties: false,
+      properties: {
+        answer: { type: "string" },
+        confidence: { type: "number" },
+        escalation_reason: { type: "string" },
+        escalation_recommended: { type: "boolean" },
+        recommended_actions: {
+          items: {
+            additionalProperties: true,
+            properties: {
+              action: { type: "string" },
+              confidence: { type: "number" },
+              priority: { type: "string" },
+              rationale: { type: "string" },
+              title: { type: "string" },
+            },
+            required: ["action", "confidence", "rationale", "title"],
+            type: "object",
+          },
+          type: "array",
+        },
+        summary: { type: "string" },
+      },
+      required: [
+        "answer",
+        "confidence",
+        "escalation_reason",
+        "escalation_recommended",
+        "recommended_actions",
+        "summary",
+      ],
+      type: "object",
+    },
+    defaultSystemPrompt:
+      "You are the CarePland Personal Ask onboarding helper. Answer low-risk getting-started questions about profile setup, Early Access acknowledgements, Care Circle setup, the first-run Home welcome guide, adding a first appointment, importing appointment details, and demo examples. For profile setup, explain that CarePland asks for basic account/contact details so dates, reminders, time zones, and support follow-up work correctly: first and last name, phone, time zone, and ZIP are required; display name and street address details are optional unless the app marks them otherwise. Keep this from sounding like a medical intake form. If the user says they are confused, lost, unsure what the welcome screen means, or asks what to do next, respond with gentle orientation: reassure them briefly, explain that CarePland helps carry important appointment context forward from one visit to the next, name a few examples such as what changed, what mattered, and what to ask next, then suggest the easiest next step: adding or importing a first appointment. Keep answers brief, calm, and practical. Avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical. Do not give medical, legal, privacy, account-security, billing, or emergency advice. Do not claim to change data. Escalate if the user appears blocked by account state, email update, authentication, profile saving, missing Care Circle setup, data loss, or frustration. Return valid JSON exactly matching the schema.",
+    defaultUserPrompt:
+      "Use the supplied Ask thread, current page, app context, and onboarding facts. Either answer the onboarding question or recommend review when account-specific help is needed.",
+    description:
+      "Instructions used by Ask to answer low-risk onboarding and getting-started questions.",
+    historyLabel: "Ask Onboarding History",
+    label: "Ask onboarding helper",
   },
   careprep_generation: {
     defaultChangeNote: "Initial CarePrep instruction set",
@@ -2085,6 +2131,23 @@ function emailConfirmationRedirectUrl(): string | undefined {
   }
 }
 
+function googleAuthRedirectUrl(): string | undefined {
+  const baseUrl = authRedirectUrl();
+
+  if (!baseUrl) {
+    return undefined;
+  }
+
+  try {
+    const googleUrl = new URL(baseUrl);
+    googleUrl.searchParams.set("auth_action", "google_sign_in");
+    return googleUrl.toString();
+  } catch {
+    const separator = baseUrl.includes("?") ? "&" : "?";
+    return `${baseUrl}${separator}auth_action=google_sign_in`;
+  }
+}
+
 function isPasswordRecoveryRedirect(): boolean {
   if (typeof window === "undefined") {
     return false;
@@ -2098,6 +2161,20 @@ function isPasswordRecoveryRedirect(): boolean {
     searchParams.get("type") === "recovery" ||
     hashParams.get("auth_action") === "password_recovery" ||
     hashParams.get("type") === "recovery"
+  );
+}
+
+function isGoogleAuthRedirect(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+
+  return (
+    searchParams.get("auth_action") === "google_sign_in" ||
+    hashParams.get("auth_action") === "google_sign_in"
   );
 }
 
@@ -3176,6 +3253,11 @@ export default function Home() {
   const idleSigningOutRef = useRef(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [hasAnySavedAppointments, setHasAnySavedAppointments] = useState(false);
+  const [
+    welcomeExistingAppointmentsVariant,
+    setWelcomeExistingAppointmentsVariant,
+  ] = useState<"firstActions" | "returnHome">("returnHome");
   const [homeNextAppointment, setHomeNextAppointment] =
     useState<Appointment | null>(null);
   const [homeNextGuidance, setHomeNextGuidance] =
@@ -3960,6 +4042,7 @@ export default function Home() {
 
     async function restoreSession() {
       const isRecoveryRedirect = isPasswordRecoveryRedirect();
+      const isGoogleRedirect = isGoogleAuthRedirect();
       const isConfirmationRedirect = isEmailConfirmationRedirect();
 
       if (isRecoveryRedirect) {
@@ -3984,6 +4067,52 @@ export default function Home() {
           setMessage(
             "This password reset link could not be opened. Please request a fresh reset email and use the newest link."
           );
+        } finally {
+          setLoading(false);
+          setSessionRestored(true);
+        }
+
+        return;
+      }
+
+      if (isGoogleRedirect) {
+        setLoading(true);
+
+        try {
+          const redirectError =
+            new URLSearchParams(window.location.search).get(
+              "error_description"
+            ) ??
+            new URLSearchParams(window.location.hash.replace(/^#/, "")).get(
+              "error_description"
+            );
+
+          if (redirectError) {
+            throw new Error(redirectError);
+          }
+
+          const googleEmail = await establishAuthRedirectSession();
+
+          if (!googleEmail) {
+            throw new Error("Google sign-in did not return an active session.");
+          }
+
+          setSessionProfileLoaded(false);
+          setSignedInEmail(googleEmail);
+          setWelcomeGuideDismissed(false);
+          setEmail(googleEmail);
+          recordSessionActivity();
+          clearAuthRedirectUrl();
+          await Promise.all([loadAppContent(), loadAppSessionSettings()]);
+          await loadAppointments();
+        } catch (error) {
+          logAuthError("googleOAuthSession", error);
+          setAuthMode("signIn");
+          setSignedInEmail(null);
+          setMessage(
+            "Google sign-in could not be completed. Please try again, or use email and password."
+          );
+          clearAuthRedirectUrl();
         } finally {
           setLoading(false);
           setSessionRestored(true);
@@ -4739,6 +4868,7 @@ export default function Home() {
       !profileRow?.beta_terms_acknowledged_at
     ) {
       setAppointments([]);
+      setHasAnySavedAppointments(false);
       setHomeNextAppointment(null);
       setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
@@ -4754,6 +4884,7 @@ export default function Home() {
 
     if (userRequiresEmailUpdate || !profileRow?.onboarding_completed_at) {
       setAppointments([]);
+      setHasAnySavedAppointments(false);
       setHomeNextAppointment(null);
       setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
@@ -4783,6 +4914,7 @@ export default function Home() {
 
     if (circleIds.length === 0) {
       setAppointments([]);
+      setHasAnySavedAppointments(false);
       setHomeNextAppointment(null);
       setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
@@ -4919,6 +5051,7 @@ export default function Home() {
       throw reminderError;
     }
 
+    setHasAnySavedAppointments((appointmentRows?.length ?? 0) > 0);
     setNotesReminderAppointment(reminderRows?.[0] ?? null);
     const nextHomeAppointment =
       appointmentRows
@@ -5091,6 +5224,36 @@ export default function Home() {
       logAuthError("signIn", error);
       setMessage(getAuthErrorMessage(error));
     } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleGoogleSignIn() {
+    setLoading(true);
+    setMessage("");
+
+    try {
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error(
+          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel."
+        );
+      }
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: googleAuthRedirectUrl(),
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      logAuthError("googleSignIn", error);
+      setMessage(
+        "Google sign-in could not be started. Please try again, or use email and password."
+      );
       setLoading(false);
     }
   }
@@ -8168,9 +8331,35 @@ export default function Home() {
           context: {
             email: signedInEmail,
             has_open_support_ticket: Boolean(currentSupportTicket),
+            is_profile_setup: needsOnboarding,
             profile_label: savedProfileLabel,
+            profile_setup: needsOnboarding
+              ? {
+                  required_fields: [
+                    "email",
+                    "first name",
+                    "last name",
+                    "phone",
+                    "time zone",
+                    "ZIP code",
+                  ],
+                  requires_email_update: requiresEmailUpdate,
+                  optional_fields: [
+                    "display name",
+                    "address line 1",
+                    "address line 2",
+                    "city",
+                    "state / region",
+                    "country",
+                  ],
+                }
+              : null,
           },
-          currentPage: mainTab,
+          currentPage: needsOnboarding
+            ? "profile_setup"
+            : showWelcomeGuide
+              ? "welcome_guide"
+              : mainTab,
           message: outgoingMessage,
           threadId: askThreadId,
         }),
@@ -8930,6 +9119,7 @@ export default function Home() {
     setPassword("");
     setConfirmPassword("");
     setAppointments([]);
+    setHasAnySavedAppointments(false);
     setNotesReminderAppointment(null);
     setCareSubjects([]);
     setEntitlement(defaultEntitlement);
@@ -11923,6 +12113,15 @@ export default function Home() {
     const homeCarePrepGenerationError = homeNextAppointment
       ? carePrepGenerationErrors[homeNextAppointment.id]
       : null;
+    const hasExistingWelcomeAppointments =
+      hasAnySavedAppointments ||
+      Boolean(homeNextAppointment) ||
+      Boolean(notesReminderAppointment);
+    const welcomeActionsMode =
+      hasExistingWelcomeAppointments &&
+      welcomeExistingAppointmentsVariant === "returnHome"
+        ? "returnHome"
+        : "firstActions";
     const welcomePanels = [
       {
         alt: "Appointment notes feeding CarePrep and context",
@@ -11960,25 +12159,7 @@ export default function Home() {
     return (
       <div className="mt-6 space-y-5">
         {showWelcomeGuide ? (
-          <section className="px-2 py-6 sm:px-5">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="max-w-3xl">
-                <h1 className="text-3xl font-semibold text-[#2B6198]">
-                  Welcome to CarePland
-                </h1>
-                <p className="mt-2 text-xl font-medium text-[#2B6198]">
-                  Appointment context, simply.
-                </p>
-              </div>
-              <button
-                className={gentleSmallSecondaryButtonClass}
-                onClick={markWelcomeGuideRead}
-                type="button"
-              >
-                Dismiss
-              </button>
-            </div>
-
+          <section className="py-6">
             <div className="mx-auto mt-5 w-full max-w-[720px] overflow-hidden rounded-lg border-4 border-black bg-black shadow-sm">
               <iframe
                 allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
@@ -12044,57 +12225,138 @@ export default function Home() {
               </article>
             </div>
 
-            <div className="text-center">
-              <h2 className="text-xl font-semibold text-[#2B6198]">
-                Get started
-              </h2>
-            </div>
+            <div className="mx-auto mt-1 h-0.5 w-40 max-w-[48%] rounded-full bg-blue-200 sm:w-52" />
 
-            <div className="mt-4 flex flex-wrap justify-center gap-3">
-              <button
-                className={`${gentlePrimaryButtonClass} px-5 py-2.5 text-sm`}
-                onClick={async () => {
-                  await markWelcomeGuideRead();
-                  startAppointmentPanel("add");
-                }}
-                type="button"
-              >
-                Add your first appointment
-              </button>
-              <button
-                className={`${gentleSecondaryButtonClass} px-5 py-2.5 text-sm text-[#2B6198]`}
-                onClick={async () => {
-                  await markWelcomeGuideRead();
-                  startAppointmentPanel("quickAdd");
-                }}
-                type="button"
-              >
-                Import appointments
-              </button>
-            </div>
+            {welcomeActionsMode === "firstActions" ? (
+              <p className="mt-7 text-center text-xl font-semibold text-[#2B6198]">
+                Let&apos;s start building your context
+              </p>
+            ) : null}
 
-            {!sampleDataSeededAt ? (
-              <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-sm text-slate-600">
-                <span>Not sure?</span>
+            <div
+              className={`relative mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-3 md:min-h-12 ${
+                welcomeActionsMode === "firstActions" ? "mt-4" : "mt-7"
+              }`}
+            >
+              {welcomeActionsMode === "returnHome" ? (
                 <button
-                  className="rounded-full border border-blue-100 bg-white/60 px-3.5 py-1.5 text-sm font-medium text-slate-500 shadow-sm transition hover:bg-blue-50 hover:text-[#2B6198] disabled:text-slate-400"
-                  disabled={seedingSampleData}
+                  className={`${gentlePrimaryButtonClass} px-5 py-2.5 text-sm`}
                   onClick={async () => {
                     await markWelcomeGuideRead();
-                    await handleSeedSampleDataForCurrentUser(true);
                   }}
                   type="button"
                 >
-                  {seedingSampleData
-                    ? "Adding..."
-                    : "We'll add examples for you to explore"}
+                  Return home
+                </button>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      className={`${gentlePrimaryButtonClass} px-5 py-2.5 text-sm`}
+                      onClick={async () => {
+                        await markWelcomeGuideRead();
+                        startAppointmentPanel("add");
+                      }}
+                      type="button"
+                    >
+                      Add your first appointment
+                    </button>
+                    <button
+                      className={`${gentleSecondaryButtonClass} px-5 py-2.5 text-sm text-[#2B6198]`}
+                      onClick={async () => {
+                        await markWelcomeGuideRead();
+                        startAppointmentPanel("quickAdd");
+                      }}
+                      type="button"
+                    >
+                      Import appointments
+                    </button>
+                  </div>
+                  {sampleDataSeededAt ? (
+                    <button
+                      className="text-sm font-semibold text-[#2B6198] underline decoration-blue-200 underline-offset-4 transition hover:text-blue-800 hover:decoration-blue-400 md:absolute md:right-0 md:top-1/2 md:-translate-y-1/2"
+                      onClick={() => {
+                        setAskPanelOpen(true);
+                        setAskCloseConfirmOpen(false);
+                      }}
+                      type="button"
+                    >
+                      Need help?
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </div>
+
+            {welcomeActionsMode === "firstActions" && !sampleDataSeededAt ? (
+              <div className="relative mx-auto mt-3 flex max-w-4xl flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-slate-600 md:min-h-11">
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <span>Not sure?</span>
+                  <button
+                    className="rounded-full border border-blue-100 bg-white/60 px-3.5 py-1.5 text-sm font-medium text-slate-500 shadow-sm transition hover:bg-blue-50 hover:text-[#2B6198] disabled:text-slate-400"
+                    disabled={seedingSampleData}
+                    onClick={async () => {
+                      await markWelcomeGuideRead();
+                      await handleSeedSampleDataForCurrentUser(true);
+                    }}
+                    type="button"
+                  >
+                    {seedingSampleData
+                      ? "Adding..."
+                      : "We'll add examples for you to explore"}
+                  </button>
+                </div>
+                <button
+                  className="text-sm font-semibold text-[#2B6198] underline decoration-blue-200 underline-offset-4 transition hover:text-blue-800 hover:decoration-blue-400 md:absolute md:right-0 md:top-1/2 md:-translate-y-1/2"
+                  onClick={() => {
+                    setAskPanelOpen(true);
+                    setAskCloseConfirmOpen(false);
+                  }}
+                  type="button"
+                >
+                  Need help?
                 </button>
               </div>
             ) : null}
-            <p className="mt-5 text-center text-sm text-slate-600">
-              Need help? Support is always nearby in the top-right corner of
-              the screen.
-            </p>
+
+            {isAdmin && hasExistingWelcomeAppointments ? (
+              <div className="mx-auto mt-5 flex max-w-4xl justify-start">
+                <div className="flex items-center rounded-full border border-slate-200 bg-white/70 p-0.5 text-[11px] font-semibold text-slate-400 shadow-sm">
+                  <button
+                    aria-pressed={
+                      welcomeExistingAppointmentsVariant === "firstActions"
+                    }
+                    className={`rounded-full px-2.5 py-1 transition ${
+                      welcomeExistingAppointmentsVariant === "firstActions"
+                        ? "bg-blue-50 text-blue-800"
+                        : "hover:text-blue-700"
+                    }`}
+                    onClick={() => {
+                      setWelcomeExistingAppointmentsVariant("firstActions");
+                    }}
+                    type="button"
+                  >
+                    First time
+                  </button>
+                  <button
+                    aria-pressed={
+                      welcomeExistingAppointmentsVariant === "returnHome"
+                    }
+                    className={`rounded-full px-2.5 py-1 transition ${
+                      welcomeExistingAppointmentsVariant === "returnHome"
+                        ? "bg-blue-50 text-blue-800"
+                        : "hover:text-blue-700"
+                    }`}
+                    onClick={() => {
+                      setWelcomeExistingAppointmentsVariant("returnHome");
+                    }}
+                    type="button"
+                  >
+                    Returning users
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
         ) : (
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -12396,7 +12658,13 @@ export default function Home() {
     authMode !== "updatePassword" &&
     !needsBetaAgreement &&
     !needsOnboarding;
-  const canShowAskEntry = isSignedInAppShell;
+  const canUseAskPanel =
+    isSignedInAppShell ||
+    (Boolean(signedInEmail) &&
+      authMode !== "updatePassword" &&
+      !needsBetaAgreement &&
+      needsOnboarding);
+  const canShowAskEntry = canUseAskPanel && !showWelcomeGuide && !needsOnboarding;
   const signedInDisplayName = savedProfileLabel || signedInEmail;
   const locationSheetAppointment =
     locationSheetAppointmentId
@@ -12481,7 +12749,11 @@ export default function Home() {
           <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 sm:gap-2 lg:gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <button
-                aria-label="Home"
+                aria-label={
+                  isSignedInAppShell
+                    ? "Home"
+                    : "Go to the CarePland website"
+                }
                 className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300"
                 onClick={async () => {
                   if (isSignedInAppShell) {
@@ -12492,7 +12764,7 @@ export default function Home() {
                     return;
                   }
 
-                  setAuthMode("signIn");
+                  window.location.assign("https://www.carepland.com");
                 }}
                 type="button"
               >
@@ -12513,6 +12785,16 @@ export default function Home() {
                   width={isSignedInAppShell ? 460 : 160}
                 />
               </button>
+              {showWelcomeGuide ? (
+                <div className="min-w-0 text-[#2B6198]">
+                  <h1 className="text-xl font-semibold leading-tight sm:text-2xl">
+                    Welcome to CarePland
+                  </h1>
+                  <p className="mt-1 text-sm font-medium leading-tight sm:text-base">
+                    Appointment context, simply.
+                  </p>
+                </div>
+              ) : null}
               <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 xl:inline-flex">
                 Personal
               </span>
@@ -12526,7 +12808,7 @@ export default function Home() {
               ) : null}
             </div>
 
-            {isSignedInAppShell ? (
+            {isSignedInAppShell && !showWelcomeGuide ? (
               <nav
                 className={`flex min-w-0 items-center gap-1 sm:gap-2 ${
                   isAdmin ? "justify-center" : "justify-start"
@@ -12592,12 +12874,12 @@ export default function Home() {
             ) : null}
 
             <div className="flex min-w-0 items-center justify-end gap-1 text-sm text-slate-600 sm:gap-2">
-              {isSignedInAppShell ? (
+              {isSignedInAppShell && !showWelcomeGuide ? (
                 <span className="hidden min-w-0 truncate font-semibold text-slate-900 md:inline xl:max-w-60 2xl:max-w-none">
                   {signedInDisplayName}
                 </span>
               ) : null}
-              {isSignedInAppShell ? (
+              {isSignedInAppShell && !showWelcomeGuide ? (
                 <button
                   aria-label="Profile"
 	                className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center rounded-full border px-2.5 shadow-sm transition sm:h-11 sm:min-w-11 sm:px-3 md:hidden ${
@@ -12617,7 +12899,7 @@ export default function Home() {
                   <UserIcon className="h-5 w-5" />
                 </button>
               ) : null}
-              {isSignedInAppShell && isAdmin ? (
+              {isSignedInAppShell && isAdmin && !showWelcomeGuide ? (
                 <button
                   className="hidden items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm min-[410px]:inline-flex"
                   onClick={async () => {
@@ -12779,13 +13061,25 @@ export default function Home() {
                   {appContentText("beta_notice_intro")}
                 </p>
               </div>
-              <button
-                className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
-                onClick={() => void handleSignOut()}
-                type="button"
-              >
-                Sign out
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className={gentleSmallSecondaryButtonClass}
+                  onClick={() => {
+                    setAskPanelOpen(true);
+                    setAskCloseConfirmOpen(false);
+                  }}
+                  type="button"
+                >
+                  Need help?
+                </button>
+                <button
+                  className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
+                  onClick={() => void handleSignOut()}
+                  type="button"
+                >
+                  Sign out
+                </button>
+              </div>
             </div>
 
             <form className="mt-5 space-y-4" onSubmit={handleAcceptBetaAgreement}>
@@ -13591,13 +13885,79 @@ export default function Home() {
                       : handleSignIn
                 }
               >
-                <h2 className="text-xl font-semibold">
+                <h2 className="text-xl font-semibold text-slate-950">
                   {authMode === "signUp"
-                    ? "Create account"
+                    ? "Create your account"
                     : authMode === "reset"
                       ? "Reset password"
-                      : "Sign in"}
+                      : "Welcome back"}
                 </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  {authMode === "signUp"
+                    ? "Create an account with email, or continue directly with Google."
+                    : authMode === "reset"
+                      ? "Enter your email and CarePland will send a reset link."
+                      : "Choose how you'd like to continue"}
+                </p>
+                {authMode !== "reset" ? (
+                  <>
+                    <button
+                      className={`${gentleSecondaryButtonClass} mt-5 flex w-full items-center justify-center gap-3`}
+                      disabled={loading}
+                      onClick={handleGoogleSignIn}
+                      type="button"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 text-sm font-bold text-blue-700"
+                      >
+                        G
+                      </span>
+                      Continue with Google
+                    </button>
+                    <div className="my-5 flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      <span className="h-px flex-1 bg-slate-200" />
+                      <span>Or use email</span>
+                      <span className="h-px flex-1 bg-slate-200" />
+                    </div>
+                    <div
+                      aria-label="Email account action"
+                      className="grid grid-cols-2 rounded-full border border-blue-100 bg-blue-50/70 p-1 text-sm font-semibold"
+                      role="group"
+                    >
+                      <button
+                        aria-pressed={authMode === "signIn"}
+                        className={`rounded-full px-3 py-2 transition ${
+                          authMode === "signIn"
+                            ? "bg-white text-blue-800 shadow-sm"
+                            : "text-slate-500 hover:text-blue-800"
+                        }`}
+                        onClick={() => {
+                          setAuthMode("signIn");
+                          setMessage("");
+                        }}
+                        type="button"
+                      >
+                        Sign in
+                      </button>
+                      <button
+                        aria-pressed={authMode === "signUp"}
+                        className={`rounded-full px-3 py-2 transition ${
+                          authMode === "signUp"
+                            ? "bg-white text-blue-800 shadow-sm"
+                            : "text-slate-500 hover:text-blue-800"
+                        }`}
+                        onClick={() => {
+                          setAuthMode("signUp");
+                          setMessage("");
+                        }}
+                        type="button"
+                      >
+                        Create account
+                      </button>
+                    </div>
+                  </>
+                ) : null}
                 <label className="mt-5 block text-sm font-medium text-slate-700">
                   Email
                   <input
@@ -13654,7 +14014,7 @@ export default function Home() {
                 ) : null}
 
                 <button
-                  className="mt-5 w-full rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+                  className={`${gentlePrimaryButtonClass} mt-5 w-full`}
                   disabled={!canSubmitAuth}
                   type="submit"
                 >
@@ -13666,8 +14026,8 @@ export default function Home() {
                         ? "Send reset email"
                         : "Sign in"}
                 </button>
-                <div className="mt-4 space-y-2 text-sm">
-                  {authMode !== "signIn" ? (
+                <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+                  {authMode === "reset" ? (
                     <button
                       className="font-semibold text-blue-700"
                       onClick={() => {
@@ -13679,28 +14039,16 @@ export default function Home() {
                       Back to sign in
                     </button>
                   ) : (
-                    <>
-                      <button
-                        className="block font-semibold text-blue-700"
-                        onClick={() => {
-                          setAuthMode("signUp");
-                          setMessage("");
-                        }}
-                        type="button"
-                      >
-                        Don&apos;t have an account? Sign up
-                      </button>
-                      <button
-                        className="block font-semibold text-blue-700"
-                        onClick={() => {
-                          setAuthMode("reset");
-                          setMessage("");
-                        }}
-                        type="button"
-                      >
-                        Forgot your password?
-                      </button>
-                    </>
+                    <button
+                      className="font-semibold text-blue-700"
+                      onClick={() => {
+                        setAuthMode("reset");
+                        setMessage("");
+                      }}
+                      type="button"
+                    >
+                      Forgot your password?
+                    </button>
                   )}
                 </div>
               </form>
@@ -19022,7 +19370,7 @@ export default function Home() {
           </footer>
         ) : null}
       </section>
-      {canShowAskEntry && askPanelOpen ? (
+      {canUseAskPanel && askPanelOpen ? (
         <>
 	          <button
 	            aria-label="Close Ask panel"

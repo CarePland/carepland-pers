@@ -72,6 +72,7 @@ export type AskModuleLabKey =
   | "ask_bug_interpreter"
   | "ask_clarifier"
   | "ask_feature_interpreter"
+  | "ask_onboarding_helper"
   | "ask_off_topic_handler"
   | "ask_router";
 
@@ -168,6 +169,7 @@ const routingStateOptions: AskRoutingState[] = [
 const moduleLabOptions: Array<{ label: string; value: AskModuleLabKey }> = [
   { label: "Ask Router", value: "ask_router" },
   { label: "The Clarifier", value: "ask_clarifier" },
+  { label: "Onboarding Helper", value: "ask_onboarding_helper" },
   { label: "Feature / Workflow Interpreter", value: "ask_feature_interpreter" },
   { label: "Bug / Friction Interpreter", value: "ask_bug_interpreter" },
   { label: "Off-topic Handler", value: "ask_off_topic_handler" },

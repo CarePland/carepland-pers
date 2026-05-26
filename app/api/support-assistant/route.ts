@@ -40,7 +40,7 @@ const defaultAgentKnowledge = {
   support_agent_known_limitations:
     "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests. Self-service billing and plan changes are not wired up yet; plan questions or account-specific tier issues should be escalated to support.",
   support_agent_product_facts:
-    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask support questions in the app. Early Access currently gives early adopters full access, including multiple Care VIPs and automatic appointment preparation where available. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual, Group, and Early Access tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask questions in the app. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Early Access currently gives early adopters full access, including multiple Care VIPs and automatic appointment preparation where available. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual, Group, and Early Access tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
 };
 
 function errorMessage(error: unknown): string {
@@ -230,6 +230,9 @@ export async function POST(request: NextRequest) {
         defaultAgentKnowledge.support_agent_voice_guidance
       }`,
       "Core areas: Home, Appointments, Upcoming, Logged, Archived, Import, appointment notes, CarePrep, Profile, demo data, support questions.",
+      "Onboarding path: new users complete profile basics, Early Access acknowledgements, Care Circle setup, and then land on Home with the first-run welcome guide.",
+      "Welcome guide behavior: it explains the appointment loop, keeps the first actions focused, and may hide normal header navigation while still offering a Need help link that opens Ask.",
+      "First useful actions from welcome are adding a real appointment, importing appointment details the user already has, or adding clearly labeled fictional demo examples.",
       "Demo data can be removed from Profile with the Remove demo data control.",
       "Archived appointments are read-only and can be restored from the Archived tab.",
       "Import can interpret pasted text, images, or reviewed calendar file events into appointment drafts, but users should review before saving.",

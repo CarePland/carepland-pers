@@ -1,6 +1,6 @@
 # CarePland Stable Project Context
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This document is the stable architectural and operational memory for CarePland Personal. It should be updated as assumptions change. Do not preserve obsolete decisions for historical completeness here; keep this document current, clear, and useful for future implementation chats.
 
@@ -194,11 +194,13 @@ Current Home direction:
 - The three welcome panels should explain the gap between appointments, context as the missing connection, and the CarePland loop from Visit Notes to CarePrep to future context.
 - Welcome panels should appear one at a time in a calm slideshow so the images can be large enough to read without making the page feel dense.
 - Primary first-run actions should help users add their first real appointment or import appointment details they already have.
+- While the first-run welcome guide is active, hide top-level Appointments/Profile navigation and right-side header utilities such as Ask/account indicators so the user is guided toward the welcome page's get-started actions instead of leaving through ambiguous header links.
+- The welcome page can include a simple `Need help?` link near the bottom that opens the Ask/help panel directly; do not point users to a hidden top-right help control while welcome header utilities are suppressed.
 - Demo data should be offered as clearly labeled examples to explore, not as a required setup step.
 - Demo-data copy should reassure users that examples are fictional/clearly labeled and removable without affecting real appointments.
 - Regular user-facing Home, Appointments, and Profile pages should include a tiny soft-gray footer with centered `© 2026 CarePland` and a subtle `Why CarePland` pill on the right that opens the welcome explanation. Keep it off the welcome page itself.
 - For admins viewing user-facing pages, show build metadata quietly on the left side of the same footer rather than as a separate patient-facing footer block.
-- Welcome dismissal is database-backed on `profiles` with `welcome_guide_dismissed_at` and `welcome_guide_dismissed_version`, not browser-local storage. Reset by clearing the fields or bumping the app's current welcome version. Deliberate clicks away from Welcome, including Dismiss, main navigation, and get-started actions, mark it read; closing the browser/window without action should leave it unread.
+- Welcome dismissal is database-backed on `profiles` with `welcome_guide_dismissed_at` and `welcome_guide_dismissed_version`, not browser-local storage. Reset by clearing the fields or bumping the app's current welcome version. Deliberate clicks away from Welcome, including get-started actions, mark it read; closing the browser/window without action should leave it unread.
 - The last-appointment notes reminder should stay gentle and compact on Home.
 - The next appointment and CarePrep preview should remain the main recurring Home utility after setup.
 - The Home next-appointment panel should share the Appointments page visual language: appointment title/details at the top, with CarePrep presented as a blue-shell panel and white content interior.
@@ -318,6 +320,9 @@ Agent knowledge:
 - The support assistant injects current Agent Knowledge into its context.
 - Agent Knowledge should be updated when product capabilities change to prevent context drift.
 - Agent Knowledge includes Early Access plan tier facts, CarePrep metering context, and the limitation that self-service billing/plan changes are not wired up yet.
+- Ask includes a dedicated onboarding helper module/prompt for low-risk getting-started questions. It covers profile basics, Early Access acknowledgements, Care Circle setup, the Home welcome guide, focused first actions, demo examples, and when account-specific onboarding blockers should be escalated. Keep onboarding-specific assistant behavior in this module rather than bloating the general Ask router or support assistant prompt.
+- When a user expresses confusion on the welcome/onboarding experience, the onboarding helper should respond with gentle orientation rather than procedural troubleshooting: reassure them, restate the appointment-context idea, name examples such as what changed, what mattered, and what to ask next, and point them toward adding or importing a first appointment.
+- The onboarding helper is also available from profile setup. It should explain required profile fields as basic account/contact details for dates, time zones, reminders, and support follow-up; first and last name, phone, time zone, and ZIP are required, while display name and street address details are optional unless the UI marks them otherwise. Keep this from sounding like a medical intake form.
 - Agent Knowledge should evolve toward a proposal-based lifecycle: automated or manual checks can propose changes with justifications, source evidence, confidence, and risk category; Admin should approve, edit, reject, defer, or publish those changes.
 - Agent Knowledge proposals should preserve the original current text, AI-proposed text, and Admin-final text when edited. Admin edits are first-class QA signal and should not overwrite the original proposal trail.
 - Rollbacks should be granular where possible by Agent Knowledge block/entry and should create new current versions rather than deleting history.
@@ -347,6 +352,7 @@ Support:
 - Ask should use a centralized intake architecture: conversation threads/messages first, then an intake submission snapshot with transcript, AI summary, routing recommendation, confidence, rationale, risk flags, and recommended downstream actions.
 - Ask should be modular. The router/classifier should not become one giant prompt. Separate dynamic instruction paths should exist for routing, clarification, feature/workflow interpretation, bug/friction interpretation, off-topic handling, and the existing support assistant.
 - Ask runtime now uses a router-first pattern with optional downstream module passes. When the router recommends clarification, The Clarifier module decides whether one more question is actually useful or whether the item should be summarized for review. Feature/workflow and bug/friction routes can be enriched by their own AI instruction sets and schemas before Admin review, producing structured recommended actions while preserving the original conversation snapshot. The off-topic handler is a bounded fallback module: it may briefly redirect harmless out-of-scope messages, but risky off-topic content should be sent to review rather than closed casually.
+- Ask onboarding/help questions can be handled by the dedicated onboarding helper after routing. The router should stay broad and the onboarding helper should own low-risk getting-started answers plus escalation recommendations for account-specific onboarding blockers.
 - AI workflows should use the shared operation-cost logging pattern where practical: capture provider, model, prompt/workflow key, usage tokens, pricing snapshot, estimated cost, and source record link. Admin cost summaries should stay admin-only, summarize by operation type/model, and be treated as estimates. Pricing snapshots must be revisited when provider pricing changes.
 - Ask AI behavior should not deny that it is AI or pretend to be human, but AI framing should stay in the background unless the user asks or it matters for consent, review, or trust.
 - Ask user-facing module responses should avoid first-person assistant language such as `I`, `me`, `my`, `we`, `we're`, `we've`, and `we'll` whenever practical. Use neutral routing language such as `This will be raised for review`, `This may need a closer look`, or `A little more detail would help route this correctly` so Ask does not sound like a human agent.
@@ -448,6 +454,7 @@ Current website direction:
 - The public website should route primary top-level calls to action toward Early Access signup rather than directly into the app during Early Access.
 - Early Access signup should write consented prospect records into `early_access_intake` with `source = public_website`; Admin remains the review/follow-up surface.
 - The public website should be calm, patient-centered, and concrete rather than startup-generic.
+- Basic public Privacy Policy and Terms of Service pages live at `/privacy` and `/terms`; they should stay conservative, plain-language, and aligned with the data dignity/admin-audit and Early Access/not-medical-advice posture until formal legal review replaces them.
 
 Core public positioning:
 
@@ -540,11 +547,13 @@ SQL rules:
 Current auth:
 
 - Supabase email/password.
+- Supabase Google OAuth is available from the signed-out auth gateway as `Continue with Google`; it uses the same profile setup, Early Access acknowledgement, onboarding, Care Circle, and idle-timeout behavior after session creation.
 - Email confirmation.
 - Password reset/update password flow.
 - Profile setup after signup.
 - Required profile basics include name, phone, ZIP, and time zone.
 - Supabase signup confirmation and password-reset links must resolve to `https://app.carepland.com`, not `carepland.com` / `www.carepland.com` or the Vercel deployment URL. The public domains are the website/front door; auth handoff belongs in the app.
+- OAuth redirect links must also resolve to the app auth handoff and include an explicit `auth_action=google_sign_in` marker so the app does not confuse OAuth authorization-code redirects with email-confirmation redirects.
 - Browser sessions are persisted through Supabase, but CarePland adds an app-level idle timeout. Session timeout settings live in `app_session_settings` and are editable in Admin > Tools. Default behavior is 24 hours of no browser activity for normal users and no timeout for admins. A null timeout means no automatic sign-out for that role.
 
 MFA:

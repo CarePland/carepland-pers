@@ -143,6 +143,9 @@ Supabase SQL editor history.
 - `2026-05-25_ask_user_response_rubric_instruction.sql`
   Migration/admin utility: adds an Admin-visible global Ask user-facing response rubric in AI Prompts and appends it to current Ask module prompts.
 
+- `2026-05-26_onboarding_assistant_knowledge.sql`
+  Migration/admin utility: adds the dedicated Ask onboarding helper module/prompt and light supporting Dynamic Text / Agent Knowledge copy.
+
 - `2026-05-23_early_access_plan_tier.sql`
   Admin utility: adds the Early Access plan tier with current Group-level/full-access feature settings and updates editable plan/agent text.
 
