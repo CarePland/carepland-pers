@@ -807,6 +807,30 @@ const defaultEntitlement: CareCircleEntitlement = {
   plan_name: "Free",
 };
 
+function authProviderFromUser(
+  user: { app_metadata?: { provider?: unknown; providers?: unknown } } | null
+) {
+  const provider = user?.app_metadata?.provider;
+
+  if (typeof provider === "string" && provider.trim()) {
+    return provider.trim().toLowerCase();
+  }
+
+  const providers = user?.app_metadata?.providers;
+
+  if (Array.isArray(providers)) {
+    const firstProvider = providers.find(
+      (item): item is string => typeof item === "string" && Boolean(item.trim())
+    );
+
+    if (firstProvider) {
+      return firstProvider.trim().toLowerCase();
+    }
+  }
+
+  return "email";
+}
+
 const defaultAgentKnowledgeAutomationSettings: AgentKnowledgeAutomationSettings = {
   auto_generation_enabled: false,
   background_generation_period_days: 7,
@@ -1464,7 +1488,7 @@ const aiWorkflows: Record<
       type: "object",
     },
     defaultSystemPrompt:
-      "You are the CarePland Personal Ask onboarding helper. Answer low-risk getting-started questions about profile setup, Early Access acknowledgements, Care Circle setup, the first-run Home welcome guide, adding a first appointment, importing appointment details, and demo examples. For profile setup, explain that CarePland asks for basic account/contact details so dates, reminders, time zones, and support follow-up work correctly: first and last name, phone, time zone, and ZIP are required; display name and street address details are optional unless the app marks them otherwise. Keep this from sounding like a medical intake form. If the user says they are confused, lost, unsure what the welcome screen means, or asks what to do next, respond with gentle orientation: reassure them briefly, explain that CarePland helps carry important appointment context forward from one visit to the next, name a few examples such as what changed, what mattered, and what to ask next, then suggest the easiest next step: adding or importing a first appointment. Keep answers brief, calm, and practical. Avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical. Do not give medical, legal, privacy, account-security, billing, or emergency advice. Do not claim to change data. Escalate if the user appears blocked by account state, email update, authentication, profile saving, missing Care Circle setup, data loss, or frustration. Return valid JSON exactly matching the schema.",
+      "You are the CarePland Personal Ask onboarding helper. Answer low-risk getting-started questions about profile setup, Early Access acknowledgements, Care Circle setup, the first-run Home welcome guide, adding a first appointment, importing appointment details, and demo examples. For profile setup, explain that CarePland keeps profile details lighter when a user authenticates with Google or Apple: email comes from auth, and extra contact details are optional unless the UI marks them otherwise. For email/password or email-update setup, the UI may require basic account/contact fields such as first and last name, phone, time zone, and ZIP so dates, account recovery, and support follow-up work correctly. Keep this from sounding like a medical intake form. If the user says they are confused, lost, unsure what the welcome screen means, or asks what to do next, respond with gentle orientation: reassure them briefly, explain that CarePland helps carry important appointment context forward from one visit to the next, name a few examples such as what changed, what mattered, and what to ask next, then suggest the easiest next step: adding or importing a first appointment. Keep answers brief, calm, and practical. Avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical. Do not give medical, legal, privacy, account-security, billing, or emergency advice. Do not claim to change data. Escalate if the user appears blocked by account state, email update, authentication, profile saving, missing Care Circle setup, data loss, or frustration. Return valid JSON exactly matching the schema.",
     defaultUserPrompt:
       "Use the supplied Ask thread, current page, app context, and onboarding facts. Either answer the onboarding question or recommend review when account-specific help is needed.",
     description:
@@ -3275,6 +3299,7 @@ export default function Home() {
     message: string;
   } | null>(null);
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
+  const [authProvider, setAuthProvider] = useState("email");
   const [requiresEmailUpdate, setRequiresEmailUpdate] = useState(false);
   const signedInEmailRef = useRef<string | null>(null);
   const isAdminRef = useRef(false);
@@ -3863,13 +3888,16 @@ export default function Home() {
     return new Map(careSubjects.map((subject) => [subject.id, subject]));
   }, [careSubjects]);
 
-  const careVipLimit = Math.max(entitlement.max_active_subjects || 1, 1);
   const actualPricingTier = pricingTierForEntitlement(entitlement);
   const previewPricingTier =
     isAdmin && adminPlanPreviewId
       ? pricingTiers.find((tier) => tier.id === adminPlanPreviewId)
       : null;
   const currentPricingTier = previewPricingTier ?? actualPricingTier;
+  const careVipLimit = Math.max(
+    entitlement.max_active_subjects || 1,
+    currentPricingTier.id === "early_access" ? 5 : 1
+  );
   const isPreviewingPlan = Boolean(
     previewPricingTier && previewPricingTier.id !== actualPricingTier.id
   );
@@ -4106,6 +4134,7 @@ export default function Home() {
     Boolean(signedInEmail) &&
     hasAcceptedBetaAgreement &&
     (!onboardingCompletedAt || requiresEmailUpdate);
+  const profileDetailsRequired = requiresEmailUpdate || authProvider === "email";
   const verifiedAccountEmail = signedInEmail ?? profileDraft.email;
   const passwordsMismatch =
     (authMode === "signUp" || authMode === "updatePassword") &&
@@ -5026,6 +5055,7 @@ export default function Home() {
 
     const userRequiresEmailUpdate =
       user.user_metadata?.requires_email_update === true;
+    setAuthProvider(authProviderFromUser(user));
     const profileEmail = user.email ?? signedInEmail ?? "";
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
@@ -9337,6 +9367,7 @@ export default function Home() {
     setWelcomeGuideDismissed(false);
     setIsAdmin(false);
     setSessionProfileLoaded(false);
+    setAuthProvider("email");
     setRequiresEmailUpdate(false);
     setOnboardingCompletedAt(null);
     setProfileDraft(emptyProfileDraft);
@@ -9472,33 +9503,38 @@ export default function Home() {
         throw new Error("Enter an email you can access.");
       }
 
-      if (!profileDraft.givenName.trim()) {
+      if (profileDetailsRequired && !profileDraft.givenName.trim()) {
         throw new Error("First name is required.");
       }
 
-      if (!profileDraft.familyName.trim()) {
+      if (profileDetailsRequired && !profileDraft.familyName.trim()) {
         throw new Error("Last name is required.");
       }
 
-      if (!profileDraft.timezone.trim()) {
+      if (profileDetailsRequired && !profileDraft.timezone.trim()) {
         throw new Error("Time zone is required.");
       }
 
-      if (!profileDraft.phone.trim()) {
+      if (profileDetailsRequired && !profileDraft.phone.trim()) {
         throw new Error("Phone number is required.");
       }
 
-      if (!profileDraft.postalCode.trim()) {
+      if (profileDetailsRequired && !profileDraft.postalCode.trim()) {
         throw new Error("ZIP code is required.");
       }
 
-      if (!isValidUsZip(profileDraft.postalCode)) {
+      if (
+        profileDraft.postalCode.trim() &&
+        !isValidUsZip(profileDraft.postalCode)
+      ) {
         throw new Error("Enter a valid ZIP code, like 12345 or 12345-6789.");
       }
 
-      const normalizedPhone = normalizeUsPhone(profileDraft.phone);
+      const normalizedPhone = profileDraft.phone.trim()
+        ? normalizeUsPhone(profileDraft.phone)
+        : null;
 
-      if (!normalizedPhone) {
+      if ((profileDetailsRequired || profileDraft.phone.trim()) && !normalizedPhone) {
         throw new Error("Enter a valid 10-digit U.S. phone number.");
       }
 
@@ -9533,7 +9569,7 @@ export default function Home() {
         email: profileEmail,
         familyName: profileDraft.familyName.trim(),
         givenName: profileDraft.givenName.trim(),
-        phone: normalizedPhone.display,
+        phone: normalizedPhone?.display ?? "",
         postalCode: profileDraft.postalCode.trim(),
         region: profileDraft.region.trim(),
         timezone: profileDraft.timezone.trim(),
@@ -13328,7 +13364,9 @@ export default function Home() {
                 <p className="mt-1 text-slate-600">
                   {requiresEmailUpdate
                     ? "Start by adding an email you can access, then confirm the basics CarePland needs for dates and contact."
-                    : "Confirm the basics CarePland needs for dates, contact, and support follow-up."}
+                    : profileDetailsRequired
+                      ? "Confirm the basics CarePland needs for dates, contact, and support follow-up."
+                      : "Add anything helpful now, or continue with your verified account."}
                 </p>
               </div>
               <button
@@ -13378,7 +13416,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>Phone</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <input
@@ -13391,7 +13429,7 @@ export default function Home() {
                   }
                   inputMode="numeric"
                   placeholder="(___) ___-____"
-                  required
+                  required={profileDetailsRequired}
                   type="tel"
                   value={profileDraft.phone}
                 />
@@ -13400,7 +13438,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>First name</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <input
@@ -13408,7 +13446,7 @@ export default function Home() {
                   onChange={(event) =>
                     updateProfileDraft("givenName", event.target.value)
                   }
-                  required
+                  required={profileDetailsRequired}
                   type="text"
                   value={profileDraft.givenName}
                 />
@@ -13417,7 +13455,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>Last name</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <input
@@ -13425,7 +13463,7 @@ export default function Home() {
                   onChange={(event) =>
                     updateProfileDraft("familyName", event.target.value)
                   }
-                  required
+                  required={profileDetailsRequired}
                   type="text"
                   value={profileDraft.familyName}
                 />
@@ -13446,7 +13484,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>Time zone</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <select
@@ -13454,7 +13492,7 @@ export default function Home() {
                   onChange={(event) =>
                     updateProfileDraft("timezone", event.target.value)
                   }
-                  required
+                  required={profileDetailsRequired}
                   value={profileDraft.timezone}
                 >
                   <option value="">Select time zone</option>
@@ -13518,7 +13556,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>ZIP code</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <input
@@ -13528,7 +13566,7 @@ export default function Home() {
                     updateProfileDraft("postalCode", event.target.value)
                   }
                   placeholder="12345 or 12345-6789"
-                  required
+                  required={profileDetailsRequired}
                   value={profileDraft.postalCode}
                 />
               </label>
@@ -13687,7 +13725,7 @@ export default function Home() {
                         title="Plan changes are not wired up yet."
                         type="button"
                       >
-                        Plan change options coming later
+                        Plan options coming later
                       </button>
                     </div>
                   </div>
@@ -13704,9 +13742,7 @@ export default function Home() {
                       </p>
                     </div>
                     <p className="mt-3 text-sm text-slate-600">
-                      Manage everyone whose appointments
-                      <br />
-                      are connected to your account.
+                      Everyone you manage.
                     </p>
                     {careSubjects.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -13816,10 +13852,6 @@ export default function Home() {
                   <h3 className="text-lg font-semibold text-slate-900">
                     Contact details
                   </h3>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Required basics are used to keep appointment timing and
-                    support follow-up accurate.
-                  </p>
                 </div>
               </div>
               <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -13857,7 +13889,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>Phone</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <input
@@ -13870,7 +13902,7 @@ export default function Home() {
                     )
                   }
                   placeholder="(___) ___-____"
-                  required
+                  required={profileDetailsRequired}
                   type="tel"
                   value={profileDraft.phone}
                 />
@@ -13879,7 +13911,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>First name</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <input
@@ -13887,7 +13919,7 @@ export default function Home() {
                   onChange={(event) =>
                     updateProfileDraft("givenName", event.target.value)
                   }
-                  required
+                  required={profileDetailsRequired}
                   type="text"
                   value={profileDraft.givenName}
                 />
@@ -13896,7 +13928,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>Last name</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <input
@@ -13904,7 +13936,7 @@ export default function Home() {
                   onChange={(event) =>
                     updateProfileDraft("familyName", event.target.value)
                   }
-                  required
+                  required={profileDetailsRequired}
                   type="text"
                   value={profileDraft.familyName}
                 />
@@ -13925,7 +13957,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>Time zone</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <select
@@ -13933,7 +13965,7 @@ export default function Home() {
                   onChange={(event) =>
                     updateProfileDraft("timezone", event.target.value)
                   }
-                  required
+                  required={profileDetailsRequired}
                   value={profileDraft.timezone}
                 >
                   <option value="">Select time zone</option>
@@ -13997,7 +14029,7 @@ export default function Home() {
                 <span className="flex items-center justify-between gap-3">
                   <span>ZIP code</span>
                   <span className="text-xs font-normal text-slate-400">
-                    required
+                    {profileDetailsRequired ? "required" : "optional"}
                   </span>
                 </span>
                 <input
@@ -14007,7 +14039,7 @@ export default function Home() {
                     updateProfileDraft("postalCode", event.target.value)
                   }
                   placeholder="12345 or 12345-6789"
-                  required
+                  required={profileDetailsRequired}
                   value={profileDraft.postalCode}
                 />
               </label>

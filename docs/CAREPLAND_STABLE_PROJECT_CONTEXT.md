@@ -123,6 +123,7 @@ Current assumptions:
 - If more than one Care VIP exists, filtering controls can appear as "Showing: [All appts]".
 - Appointment records may reference a `care_subject_id`.
 - Multi-user access, role-based family sharing, and permission management are future work.
+- Future Care VIP management should add more control before broad release, including delete/remove behavior and permission/confirmation handling for adults or age-based thresholds. Do not add this yet without a focused workflow decision.
 
 UX rule:
 
@@ -322,7 +323,7 @@ Agent knowledge:
 - Agent Knowledge includes Early Access plan tier facts, CarePrep metering context, and the limitation that self-service billing/plan changes are not wired up yet.
 - Ask includes a dedicated onboarding helper module/prompt for low-risk getting-started questions. It covers profile basics, Early Access acknowledgements, Care Circle setup, the Home welcome guide, focused first actions, demo examples, and when account-specific onboarding blockers should be escalated. Keep onboarding-specific assistant behavior in this module rather than bloating the general Ask router or support assistant prompt.
 - When a user expresses confusion on the welcome/onboarding experience, the onboarding helper should respond with gentle orientation rather than procedural troubleshooting: reassure them, restate the appointment-context idea, name examples such as what changed, what mattered, and what to ask next, and point them toward adding or importing a first appointment.
-- The onboarding helper is also available from profile setup. It should explain required profile fields as basic account/contact details for dates, time zones, reminders, and support follow-up; first and last name, phone, time zone, and ZIP are required, while display name and street address details are optional unless the UI marks them otherwise. Keep this from sounding like a medical intake form.
+- The onboarding helper is also available from profile setup. It should explain that profile requirements depend on auth source: Google/Apple-style OAuth should keep extra contact/profile fields optional unless the UI marks them otherwise, while email/password or email-update setup may require basic account/contact fields such as first and last name, phone, time zone, and ZIP for dates, account recovery, and support follow-up. Keep this from sounding like a medical intake form.
 - Agent Knowledge should evolve toward a proposal-based lifecycle: automated or manual checks can propose changes with justifications, source evidence, confidence, and risk category; Admin should approve, edit, reject, defer, or publish those changes.
 - Agent Knowledge proposals should preserve the original current text, AI-proposed text, and Admin-final text when edited. Admin edits are first-class QA signal and should not overwrite the original proposal trail.
 - Rollbacks should be granular where possible by Agent Knowledge block/entry and should create new current versions rather than deleting history.
@@ -548,6 +549,7 @@ Current auth:
 
 - Supabase email/password.
 - Supabase Google OAuth is available from the signed-out auth gateway as `Continue with Google`; it uses the same profile setup, Early Access acknowledgement, onboarding, Care Circle, and idle-timeout behavior after session creation.
+- Profile setup should be lighter for OAuth accounts than email/password accounts. Authenticated OAuth email is enough to proceed; name, phone, ZIP, and similar contact details should be optional unless a future workflow genuinely requires them. Email/password and imported email-update flows can still require a small set of basics.
 - Email confirmation.
 - Password reset/update password flow.
 - Profile setup after signup.
