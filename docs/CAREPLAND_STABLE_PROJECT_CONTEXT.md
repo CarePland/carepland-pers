@@ -1,6 +1,6 @@
 # CarePland Stable Project Context
 
-Last updated: 2026-05-26
+Last updated: 2026-05-28
 
 This document is the stable architectural and operational memory for CarePland Personal. It should be updated as assumptions change. Do not preserve obsolete decisions for historical completeness here; keep this document current, clear, and useful for future implementation chats.
 
@@ -29,7 +29,7 @@ Core philosophy:
 - Data dignity is a core trust principle. User data should be treated as borrowed context for helping the user, not as casually available operational raw material.
 - Prefer calm patient-facing surfaces over admin-style control panels.
 
-CarePland Personal is internally managed as a beta product, but user-facing product language should call this phase `Early Access`, not `Beta Testing` or `beta`, unless referring to internal operations. Early Access means the same rollout/testing phase as internal beta testing while presenting a more confident user-facing posture. The old Adalo/Make/Twilio implementation is treated as product-discovery history, not as a code architecture to clone.
+CarePland Personal is internally managed as a beta product, but user-facing product language should call this phase `Early Access`, not `Beta Testing` or `beta`, unless referring to internal operations. Early Access means the same rollout/testing phase as internal beta testing while presenting a more confident user-facing posture. Future terminology plan: Early Access will likely be renamed `Founding Member`; do not make that copy change until Andrew explicitly starts the rename. The old Adalo/Make/Twilio implementation is treated as product-discovery history, not as a code architecture to clone.
 
 ## Legacy Adalo
 
@@ -84,7 +84,7 @@ Current implemented assumptions:
 - Tier 2: Active Use supports active healthcare management with larger manual CarePrep and import allowances, CarePland assistant/chat support access, and increased historical/context depth. It remains primarily manually triggered.
 - Tier 3: Premium Individual supports one Care VIP with automatic CarePrep for medical appointments, smart reminders, proactive preparation workflows, generous import allowances, enhanced support responsiveness, and reduced manual effort.
 - Tier 4: Group supports multiple Care VIPs, automatic CarePrep across multiple people, shared continuity workflows, group-oriented coordination, highest import allowances, and most generous support access.
-- Early Access is a distinct plan tier for early adopters. Functionally, it currently matches Group/full-access behavior, supports multiple Care VIPs, includes automatic CarePrep, and should help distinguish early adopters from later paid subscribers.
+- Early Access is a distinct plan tier for early adopters. Functionally, it currently matches Group/full-access behavior, supports multiple Care VIPs, includes automatic CarePrep, and should help distinguish early adopters from later paid subscribers. Future terminology plan: this tier/user-facing status is expected to be renamed `Founding Member`.
 - Existing database plan ids are currently preserved for compatibility: `personal` maps to Free and `personal_plus` maps to Group. `early_access` maps to Early Access.
 - During the pre-billing phase, real new onboarded users and imported early adopters should be assigned to `early_access` by default so they are distinguishable from later paid subscribers and can later choose a standard plan.
 - Admin is not a pricing tier. Admin access remains controlled by admin flags/permissions, but the Profile plan display may show an Admin badge next to the actual plan for admin users.
@@ -595,6 +595,9 @@ Patient-facing UX:
 - Treat small UI choices as subconscious directors toward context, calmness, clarity, and continuity. Button shape, color weight, spacing, copy, confirmation behavior, and visual hierarchy should quietly help users understand what matters, feel safe continuing, and avoid accidental loss. These details do not need to announce themselves; they should make the product feel nice to use.
 - Avoid confirmation prompts for harmless, reversible actions such as signing out. Use confirmation or warning prompts when an action would discard unsaved user-entered changes, remove user data, or otherwise create meaningful loss.
 - Treat copy fit and line breaks as part of the design system, not incidental cleanup. Patient-facing UI should avoid awkward orphaned words, stranded helping verbs, cramped labels, and accidental wraps when a small wording change, deliberate line break, or modest layout adjustment can make the surface feel calmer and more polished. Single words should generally not wrap alone to a new line, and intentional multi-line word groups should look visually balanced.
+- Current patient-facing visual direction favors the refined Home pattern: rounded paper-like containers with soft, diffuse shadows; restrained blue hover/focus states; secondary metadata in lighter WCAG-compliant grey; fewer nested boxes; and spacing that separates workflow phases without turning each phase into a separate module. Use blue for active/decision states, routine focus, and AI-generated user-facing output where practical; reserve amber/rose for true caution/destructive/error states.
+- AI-generated CarePrep and Visit Notes should share a mellow soft-blue visual language when displayed as saved output. Prefer continuous blue-tinted surfaces with section-level padding and quiet icon utilities over white inset cards or loud command buttons. This helps users recognize organized CarePland-generated material without making the interface feel clinical or system-heavy.
+- On Home and Appointments, primary content regions should feel like continuity surfaces, not admin cards. Titles, summaries, and main content can act as calm open targets when that reduces button noise, while map/date/refresh/destructive actions remain distinct.
 
 Admin UX:
 
@@ -694,7 +697,7 @@ Demo/test users:
 - Cap normal signed-in user-facing pages at 900px; allow Admin to be wider.
 - Appointment toolbar extracted to `app/components/AppointmentViewToolbar.tsx` because it has a clean low-coupling boundary.
 - Do not extract the full appointment card yet; it is too coupled to page-local state and would create a large prop bundle.
-- Appointment records use one white workspace with divider-separated records rather than individual card borders/shadows.
+- Appointment records use a softly rounded white workspace with gentle separators and paper-like shadow, not individually heavy cards. Expanded CarePrep and Visit Notes regions may remain inline workflow panels rather than fully rounded cards because they expand/collapse inside the appointment record; keep them visually calm through restrained blue treatment, spacing, and quieter actions.
 - Public website CTA should point to Early Access signup during the internal beta phase rather than repeatedly sending users to the app.
 - Public website video should be embedded from a hosted video service/CDN rather than committed as a large deployment asset.
 - Admin `View as user` is implemented as read-only admin snapshot/reveal RPCs with audit logging rather than true session impersonation. Sensitive data should be fetched only after an explicit reveal action.

@@ -70,6 +70,7 @@ import {
 } from "./components/admin/AdminUserActivityPanel";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
+import { HomeNextAppointmentPanel } from "./components/HomeNextAppointmentPanel";
 import { PublicWebsite } from "./components/PublicWebsite";
 import { UserFacingFooter } from "./components/UserFacingFooter";
 import {
@@ -465,6 +466,26 @@ function PencilSquareIcon({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
+function RefreshCircleIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M21 12a9 9 0 0 1-15.2 6.5" />
+      <path d="M3 12A9 9 0 0 1 18.2 5.5" />
+      <path d="M18 2v4h-4" />
+      <path d="M6 22v-4h4" />
+    </svg>
+  );
+}
+
 function GearIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
     <svg
@@ -768,6 +789,12 @@ type StoredDraftState = {
   textIntakeValue?: string;
 };
 
+type UnsavedChangeSummary = {
+  detail?: string;
+  key: string;
+  label: string;
+};
+
 const ALL_SUBJECTS = "all";
 const appUiStateStorageKey = "carepland-ui-state:v1";
 const appDraftStateStorageKey = "carepland-draft-state:v1";
@@ -1005,7 +1032,7 @@ const appContentOptions = [
     category: "messages",
     contentKey: "careprep_auto_success_message",
     description:
-      "Expiring green status shown after automatic CarePrep prepares an appointment. Supported placeholder: {appointmentTitle}.",
+      "Expiring blue status shown after automatic CarePrep prepares an appointment. Supported placeholder: {appointmentTitle}.",
     label: "Automatic CarePrep success message",
   },
 ];
@@ -2257,11 +2284,11 @@ function AppointmentDetailUpdateOption({
   }
 
   return (
-    <section className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
-      <h4 className="font-semibold text-amber-950">
+    <section className="mt-4 rounded-md border border-blue-100 bg-[#f4faff] p-3">
+      <h4 className="font-semibold text-blue-950">
         Appointment details found
       </h4>
-      <div className="mt-2 space-y-2 text-sm text-amber-950">
+      <div className="mt-2 space-y-2 text-sm text-blue-950">
         {changes.map((change) => (
           <p key={change.field}>
             <span className="font-semibold">{change.label}:</span>{" "}
@@ -2269,7 +2296,7 @@ function AppointmentDetailUpdateOption({
           </p>
         ))}
       </div>
-      <label className="mt-3 flex items-start gap-2 text-sm font-semibold text-amber-950">
+      <label className="mt-3 flex items-start gap-2 text-sm font-semibold text-blue-950">
         <input
           checked={checked}
           className="mt-1"
@@ -3112,9 +3139,10 @@ export default function Home() {
   );
   const [expandedVisitNotesAppointmentId, setExpandedVisitNotesAppointmentId] =
     useState<string | null>(null);
-  const [pendingModifierSwitch, setPendingModifierSwitch] =
-    useState<PendingModifierSwitch | null>(null);
-  const [loading, setLoading] = useState(false);
+	  const [pendingModifierSwitch, setPendingModifierSwitch] =
+	    useState<PendingModifierSwitch | null>(null);
+	  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
+	  const [loading, setLoading] = useState(false);
   const [sessionRestored, setSessionRestored] = useState(false);
   const [welcomePanelIndex, setWelcomePanelIndex] = useState(0);
   const [creatingAppointment, setCreatingAppointment] = useState(false);
@@ -3262,7 +3290,6 @@ export default function Home() {
     useState<Appointment | null>(null);
   const [homeNextGuidance, setHomeNextGuidance] =
     useState<CarePrepGuidance | null>(null);
-  const [homeCarePrepExpanded, setHomeCarePrepExpanded] = useState(true);
   const [notesReminderAppointment, setNotesReminderAppointment] =
     useState<NotesReminderAppointment | null>(null);
   const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
@@ -3806,9 +3833,13 @@ export default function Home() {
     );
   }
 
-  const notesByAppointment = useMemo(() => {
-    return new Map(notes.map((note) => [note.appointment_id, note]));
-  }, [notes]);
+	  const notesByAppointment = useMemo(() => {
+	    return new Map(notes.map((note) => [note.appointment_id, note]));
+	  }, [notes]);
+
+	  const appointmentsById = useMemo(() => {
+	    return new Map(appointments.map((appointment) => [appointment.id, appointment]));
+	  }, [appointments]);
 
   const guidanceByAppointment = useMemo(() => {
     return new Map(
@@ -3861,13 +3892,210 @@ export default function Home() {
   const canUseMultipleCareVips = careVipLimit > 1;
   const canFilterCareVips = careSubjects.length > 1;
   const canAddCareVip = careSubjects.length < careVipLimit;
-  const hasUnsavedProfileChanges =
-    profileDraftKey(profileDraft) !== profileDraftKey(savedProfileDraft);
-  const hasUnaddedCareVipName = newCareVipName.trim().length > 0;
-  const shouldWarnBeforeProfileSignOut =
-    mainTab === "profile" && (hasUnsavedProfileChanges || hasUnaddedCareVipName);
-  const hasAcceptedBetaAgreement =
-    Boolean(betaDisclaimerAcknowledgedAt) &&
+	  const hasUnsavedProfileChanges =
+	    profileDraftKey(profileDraft) !== profileDraftKey(savedProfileDraft);
+	  const hasUnaddedCareVipName = newCareVipName.trim().length > 0;
+	  const shouldWarnBeforeProfileSignOut =
+	    mainTab === "profile" && (hasUnsavedProfileChanges || hasUnaddedCareVipName);
+	  const unsavedSignOutChanges = useMemo(() => {
+	    const changes = new Map<string, UnsavedChangeSummary>();
+	    const addChange = (change: UnsavedChangeSummary) => {
+	      changes.set(change.key, change);
+	    };
+	    const appointmentLabel = (appointmentId: string, fallback = "") => {
+	      const appointment = appointmentsById.get(appointmentId);
+	      const draft = appointmentDrafts[appointmentId];
+
+	      return (
+	        appointment?.title?.trim() ||
+	        draft?.title?.trim() ||
+	        fallback ||
+	        "Appointment draft"
+	      );
+	    };
+
+	    if (hasUnsavedProfileChanges) {
+	      addChange({ key: "profile", label: "Profile" });
+	    }
+
+	    if (hasUnaddedCareVipName) {
+	      addChange({
+	        detail: newCareVipName.trim(),
+	        key: "care-vip",
+	        label: "New Care VIP",
+	      });
+	    }
+
+	    if (
+	      newAppointmentTitle.trim() ||
+	      newAppointmentReason.trim() ||
+	      newAppointmentStartsAt.trim() ||
+	      newAppointmentProviderName.trim() ||
+	      newAppointmentProviderOrganization.trim() ||
+	      newAppointmentLocationName.trim() ||
+	      newAppointmentLocationAddress.trim() ||
+	      newAppointmentLocationPhone.trim()
+	    ) {
+	      addChange({
+	        detail: newAppointmentTitle.trim() || "Untitled appointment",
+	        key: "new-appointment",
+	        label: "New appointment",
+	      });
+	    }
+
+	    if (bulkAppointmentDrafts.length > 0) {
+	      addChange({
+	        detail: `${bulkAppointmentDrafts.length} draft${
+	          bulkAppointmentDrafts.length === 1 ? "" : "s"
+	        }`,
+	        key: "bulk-appointments",
+	        label: "Appointment import",
+	      });
+	    }
+
+	    if (
+	      textIntakeTargetAppointmentId &&
+	      (contextualTextIntakeValue.trim() ||
+	        textIntakeDraft ||
+	        textIntakeAiDraft ||
+	        textIntakeItemId)
+	    ) {
+	      addChange({
+	        detail: appointmentLabel(textIntakeTargetAppointmentId, "Appointment"),
+	        key: `visit-notes-intake-${textIntakeTargetAppointmentId}`,
+	        label: "Visit notes intake",
+	      });
+	    } else if (
+	      textIntakeValue.trim() ||
+	      textIntakeDraft ||
+	      textIntakeAiDraft ||
+	      textIntakeItemId ||
+	      textIntakeMatches.length > 0
+	    ) {
+	      addChange({
+	        key: "text-intake",
+	        label: "Appointment or notes intake",
+	      });
+	    }
+
+	    Object.entries(editingAppointmentIds).forEach(([appointmentId, isEditing]) => {
+	      if (!isEditing) {
+	        return;
+	      }
+
+	      const appointment = appointmentsById.get(appointmentId);
+	      if (appointment) {
+	        const draft = appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
+	        const hasChanges =
+	          draft.locationAddress !== (appointment.location_address ?? "") ||
+	          draft.locationName !== (appointment.location_name ?? "") ||
+	          draft.locationPhone !== (appointment.location_phone ?? "") ||
+	          draft.providerName !== (appointment.provider_name ?? "") ||
+	          draft.providerOrganization !==
+	            (appointment.provider_organization ?? "") ||
+	          draft.reason !== (appointment.reason ?? "") ||
+	          draft.startsAt !== toDatetimeLocalValue(appointment.starts_at) ||
+	          draft.status !== appointment.status ||
+	          draft.title !== (appointment.title ?? "");
+
+	        if (!hasChanges) {
+	          return;
+	        }
+	      }
+
+	      addChange({
+	        detail: appointmentLabel(appointmentId),
+	        key: `appointment-edit-${appointmentId}`,
+	        label: "Appointment details",
+	      });
+	    });
+
+	    Object.entries(editingNoteIds).forEach(([appointmentId, isEditing]) => {
+	      if (!isEditing) {
+	        return;
+	      }
+
+	      const appointment = appointmentsById.get(appointmentId);
+	      if (appointment) {
+	        const draft = noteDrafts[appointment.id] ?? emptyNoteDraft;
+	        const existingNote = notesByAppointment.get(appointment.id);
+	        const hasChanges = existingNote
+	          ? draft.summary !== (existingNote.summary_short ?? "") ||
+	            draft.takeaways !== asTextList(existingNote.takeaways).join("\n") ||
+	            draft.followups !== asTextList(existingNote.followups).join("\n")
+	          : Boolean(
+	              draft.summary.trim() ||
+	                draft.takeaways.trim() ||
+	                draft.followups.trim()
+	            );
+
+	        if (!hasChanges) {
+	          return;
+	        }
+	      }
+
+	      addChange({
+	        detail: appointmentLabel(appointmentId),
+	        key: `note-edit-${appointmentId}`,
+	        label: "Visit notes",
+	      });
+	    });
+
+	    Object.entries(carePrepDrafts).forEach(([appointmentId, draft]) => {
+	      const hasDraftText = Object.values(draft).some((value) =>
+	        String(value ?? "").trim()
+	      );
+
+	      if (!hasDraftText && !editingCarePrepIds[appointmentId]) {
+	        return;
+	      }
+
+	      addChange({
+	        detail: appointmentLabel(appointmentId),
+	        key: `careprep-${appointmentId}`,
+	        label: "CarePrep",
+	      });
+	    });
+
+	    if (askInput.trim() || (askMessages.length > 0 && !askConversationComplete)) {
+	      addChange({ key: "ask", label: "Ask conversation" });
+	    }
+
+	    return Array.from(changes.values());
+	  }, [
+	    appointmentDrafts,
+	    appointmentsById,
+	    askConversationComplete,
+	    askInput,
+	    askMessages.length,
+	    bulkAppointmentDrafts.length,
+	    carePrepDrafts,
+	    contextualTextIntakeValue,
+	    editingAppointmentIds,
+	    editingCarePrepIds,
+	    editingNoteIds,
+	    hasUnaddedCareVipName,
+	    hasUnsavedProfileChanges,
+	    newAppointmentLocationAddress,
+	    newAppointmentLocationName,
+	    newAppointmentLocationPhone,
+	    newAppointmentProviderName,
+	    newAppointmentProviderOrganization,
+	    newAppointmentReason,
+	    newAppointmentStartsAt,
+	    newAppointmentTitle,
+	    newCareVipName,
+	    noteDrafts,
+	    notesByAppointment,
+	    textIntakeAiDraft,
+	    textIntakeDraft,
+	    textIntakeItemId,
+	    textIntakeMatches.length,
+	    textIntakeTargetAppointmentId,
+	    textIntakeValue,
+	  ]);
+	  const hasAcceptedBetaAgreement =
+	    Boolean(betaDisclaimerAcknowledgedAt) &&
     Boolean(betaPrivacyAcknowledgedAt) &&
     Boolean(betaTermsAcknowledgedAt);
   const needsBetaAgreement =
@@ -5573,10 +5801,11 @@ export default function Home() {
     }
   }
 
-  async function handleChangeAppointmentView(view: AppointmentView) {
-    setAppointmentView(view);
-    setLoading(true);
-    setMessage("");
+	  async function handleChangeAppointmentView(view: AppointmentView) {
+	    setAppointmentView(view);
+	    setPendingModifierSwitch(null);
+	    setLoading(true);
+	    setMessage("");
 
     try {
       await loadAppointments(view);
@@ -5587,10 +5816,11 @@ export default function Home() {
     }
   }
 
-  async function handleChangeSubject(subjectId: string) {
-    setSelectedSubjectId(subjectId);
+	  async function handleChangeSubject(subjectId: string) {
+	    setSelectedSubjectId(subjectId);
+	    setPendingModifierSwitch(null);
 
-    if (subjectId !== ALL_SUBJECTS) {
+	    if (subjectId !== ALL_SUBJECTS) {
       setNewAppointmentSubjectId(subjectId);
     }
 
@@ -9066,25 +9296,22 @@ export default function Home() {
     }
   }
 
-  async function handleSignOut({
-    bypassUnsavedChangesWarning = false,
-    message: signOutMessage = "Signed out.",
+	  async function handleSignOut({
+	    bypassUnsavedChangesWarning = false,
+	    message: signOutMessage = "Signed out.",
   }: {
     bypassUnsavedChangesWarning?: boolean;
     message?: string;
-  } = {}) {
-    if (
-      !bypassUnsavedChangesWarning &&
-      shouldWarnBeforeProfileSignOut &&
-      typeof window !== "undefined" &&
-      !window.confirm(
-        "You have unsaved Profile changes. Sign out and discard them?"
-      )
-    ) {
-      return;
-    }
+	  } = {}) {
+	    if (
+	      !bypassUnsavedChangesWarning &&
+	      (shouldWarnBeforeProfileSignOut || unsavedSignOutChanges.length > 0)
+	    ) {
+	      setSignOutConfirmOpen(true);
+	      return;
+	    }
 
-    await supabase.auth.signOut();
+	    await supabase.auth.signOut();
     if (typeof window !== "undefined") {
       removeStoredValue(window.localStorage, appUiStateStorageKey);
       removeStoredValue(window.sessionStorage, appDraftStateStorageKey);
@@ -9997,15 +10224,24 @@ export default function Home() {
     return null;
   }
 
-  function hasUnsavedAppointmentModifierChanges(
-    appointment: Appointment,
-    modifier: AppointmentModifier | null
-  ) {
-    if (modifier === "add") {
-      const draft = noteDrafts[appointment.id] ?? emptyNoteDraft;
+	  function hasUnsavedAppointmentModifierChanges(
+	    appointment: Appointment,
+	    modifier: AppointmentModifier | null
+	  ) {
+	    if (modifier === "add") {
+	      const draft = noteDrafts[appointment.id] ?? emptyNoteDraft;
+	      const existingNote = notesByAppointment.get(appointment.id);
 
-      return Boolean(
-        draft.summary.trim() ||
+	      if (existingNote) {
+	        return (
+	          draft.summary !== (existingNote.summary_short ?? "") ||
+	          draft.takeaways !== asTextList(existingNote.takeaways).join("\n") ||
+	          draft.followups !== asTextList(existingNote.followups).join("\n")
+	        );
+	      }
+
+	      return Boolean(
+	        draft.summary.trim() ||
           draft.takeaways.trim() ||
           draft.followups.trim()
       );
@@ -10109,6 +10345,30 @@ export default function Home() {
     setPendingModifierSwitch(null);
     openAppointmentModifier(appointment, target);
   }
+
+	  function requestCloseTextIntake(appointment: Appointment) {
+	    if (hasUnsavedAppointmentModifierChanges(appointment, "import")) {
+	      setPendingModifierSwitch({
+        appointmentId: appointment.id,
+        target: null,
+      });
+      return;
+    }
+
+	    cancelTextIntake();
+	  }
+
+	  function requestCloseNoteEditing(appointment: Appointment) {
+	    if (hasUnsavedAppointmentModifierChanges(appointment, "add")) {
+	      setPendingModifierSwitch({
+	        appointmentId: appointment.id,
+	        target: null,
+	      });
+	      return;
+	    }
+
+	    cancelEditingNote(appointment.id);
+	  }
 
   function discardAndSwitchAppointmentModifier(appointment: Appointment) {
     if (!pendingModifierSwitch) {
@@ -11956,10 +12216,16 @@ export default function Home() {
     "rounded-full border border-blue-100 bg-white/80 px-3 py-1.5 text-sm font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300";
   const gentleSmallSecondaryButtonClass =
     "rounded-full border border-slate-200 bg-white/85 px-3 py-2 text-sm font-semibold text-[#2B6198] shadow-sm transition hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700 disabled:bg-slate-50 disabled:text-slate-400";
-  const gentleCautionButtonClass =
-    "rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:border-rose-200 hover:bg-rose-100 disabled:bg-slate-50 disabled:text-slate-400";
-  const gentleWarmButtonClass =
-    "rounded-full border border-amber-100 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 shadow-sm transition hover:border-amber-200 hover:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400";
+	  const gentleCautionButtonClass =
+	    "rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:border-rose-200 hover:bg-rose-100 disabled:bg-slate-50 disabled:text-slate-400";
+	  const gentleWarmButtonClass =
+	    "rounded-full border border-blue-200 bg-white/85 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-900 disabled:bg-slate-50 disabled:text-slate-400";
+  const appointmentSectionButtonClass =
+    "inline-flex items-center justify-center rounded-lg border border-blue-100 bg-[#f4faff] px-4 py-2.5 text-lg font-semibold text-blue-950 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400";
+  const appointmentSectionTitleButtonClass =
+    "-ml-3 inline-flex items-center justify-center rounded-lg px-3 py-2.5 text-lg font-semibold text-blue-950 transition hover:bg-blue-50 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-200";
+  const appointmentToolIconButtonClass =
+    "inline-flex h-10 w-10 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400";
 
   function renderPlaceLookup(className = "") {
     const canFavorite =
@@ -12004,7 +12270,7 @@ export default function Home() {
         />
 
         {placesStatusMessage ? (
-          <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+          <p className="mt-2 rounded-md bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-900">
             {placesStatusMessage}
           </p>
         ) : null}
@@ -12359,166 +12625,47 @@ export default function Home() {
             ) : null}
           </section>
         ) : (
-        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-blue-700">
-                Next appointment
-              </p>
-              <h2 className="mt-2 text-2xl font-semibold text-slate-950">
-                {homeNextAppointment?.title || "Nothing scheduled"}
-              </h2>
-              {!homeNextAppointment ? (
-                <p className="mt-2 text-slate-600">
-                  Add an appointment when something is coming up.
-                </p>
-              ) : null}
-            </div>
-            <div className="text-left md:min-w-64 md:text-right">
-              {homeNextAppointment ? (
-                <>
-                  <p className="text-lg font-medium text-slate-700">
-                    {formatDate(homeNextAppointment.starts_at)}
-                  </p>
-                  {nextSubject ? (
-                    <p className="mt-1 text-sm font-medium text-slate-500">
-                      for {nextSubject}
-                    </p>
-                  ) : null}
-                  <button
-                    className={`mt-3 ${gentleSmallSecondaryButtonClass}`}
-                    onClick={() => {
-                      void handleChangeMainTab("appointments");
-                      void handleChangeAppointmentView("upcoming");
-                    }}
-                    type="button"
-                  >
-                    Open
-                  </button>
-                </>
-              ) : (
-                <button
-                  className={`${gentlePrimaryButtonClass} text-sm`}
-                  onClick={() => startAppointmentPanel("add")}
-                  type="button"
-                >
-                  Add appointment
-                </button>
-              )}
-            </div>
-          </div>
-
-          {homeNextAppointment ? (
-            <div className="mt-4 flex flex-wrap gap-2 text-sm text-slate-700">
-              {homeNextAppointment.provider_name ? (
-                <span className="rounded-full bg-slate-100 px-3 py-1">
-                  {homeNextAppointment.provider_name}
-                </span>
-              ) : null}
-              {homePracticeLabel ? (
-                homeMapsLink ? (
-                  <a
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-800"
-                    href={homeMapsLink}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <MapPinIcon className="h-3.5 w-3.5" />
-                    {homePracticeLabel}
-                  </a>
-                ) : (
-                  <span className="rounded-full bg-slate-100 px-3 py-1">
-                    {homePracticeLabel}
-                  </span>
-                )
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="mt-5 overflow-hidden rounded-md border border-blue-200 bg-blue-50">
-            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-              <button
-                className="-ml-4 inline-flex w-36 items-center justify-center rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
-                onClick={() =>
-                  setHomeCarePrepExpanded((isExpanded) => !isExpanded)
-                }
-                type="button"
-              >
-                CarePrep
-              </button>
-              {homeNextAppointment ? (
-                <button
-                  className={gentleSmallBlueButtonClass}
-                  disabled={generatingCarePrepForId === homeNextAppointment.id}
-                  onClick={() => handleGenerateCarePrep(homeNextAppointment)}
-                  type="button"
-                >
-                  {homeNextGuidance ? "Refresh" : "Prep for visit"}
-                </button>
-              ) : null}
-            </div>
-
-            {homeCarePrepExpanded ? (
-              <div className="border-t border-blue-100 p-4">
-                <div className="rounded-md bg-white p-4">
-                  <h3 className="text-lg font-semibold text-slate-950">
-                    {homeNextGuidance
-                      ? homeNextGuidance.review_status === "draft"
-                        ? "Review draft"
-                        : "Highlights"
-                      : "Ready when you are"}
-                  </h3>
-                  {homeNextGuidance ? (
-                    <>
-                      <p className="mt-3 text-sm leading-6 text-slate-700">
-                        {homeNextGuidance.summary}
-                      </p>
-                      {homeCarePrepHighlights.length > 0 ? (
-                        <div className="mt-5 grid gap-5 md:grid-cols-3">
-                          {homeCarePrepHighlights.map((section) => (
-                            <section key={section.label}>
-                              <h4 className="font-semibold text-slate-900">
-                                {section.label}
-                              </h4>
-                              <ul className="mt-2 space-y-1 text-sm text-slate-700">
-                                {section.items.map((item, index) => (
-                                  <li key={`${section.label}-${index}`}>
-                                    {item}
-                                  </li>
-                                ))}
-                              </ul>
-                            </section>
-                          ))}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p className="mt-3 text-sm leading-6 text-slate-600">
-                      Generate a short prep view for your next appointment.
-                    </p>
-                  )}
-                  {generatingCarePrepForId === homeNextAppointment?.id ? (
-                    <span className="mt-4 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
-                      Generating...
-                    </span>
-                  ) : null}
-                  {homeCarePrepGenerationError ? (
-                    <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
-                      {homeCarePrepGenerationError}
-                    </p>
-                  ) : null}
-                  </div>
-              </div>
-            ) : null}
-          </div>
-        </section>
+          <HomeNextAppointmentPanel
+            appointment={homeNextAppointment}
+            formatDate={formatDate}
+            generationError={homeCarePrepGenerationError}
+            guidance={homeNextGuidance}
+            highlights={homeCarePrepHighlights}
+            isGenerating={
+              generatingCarePrepForId === homeNextAppointment?.id
+            }
+            mapsLink={homeMapsLink}
+            nextSubject={nextSubject ?? ""}
+            onAddAppointment={() => startAppointmentPanel("add")}
+            onGenerateCarePrep={() => {
+              if (homeNextAppointment) {
+                void handleGenerateCarePrep(homeNextAppointment);
+              }
+            }}
+            onOpenAppointment={() => {
+              void handleChangeMainTab("appointments");
+              void handleChangeAppointmentView("upcoming");
+            }}
+            practiceLabel={homePracticeLabel}
+          />
         )}
 
         {!showWelcomeGuide && notesReminderAppointment ? (
           <section>
             <button
-              className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-left text-sm font-semibold text-blue-800 hover:bg-blue-100"
-              onClick={() => startContextualTextIntake(notesReminderAppointment)}
+              className={`inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border px-4 py-2 text-left text-sm font-semibold text-blue-800 ${
+                textIntakeTargetAppointmentId === notesReminderAppointment.id
+                  ? "border-blue-300 bg-white shadow-sm"
+                  : "border-blue-200 bg-[#f4faff] hover:bg-[#eef7ff]"
+              }`}
+              onClick={() => {
+                if (textIntakeTargetAppointmentId === notesReminderAppointment.id) {
+                  requestCloseTextIntake(notesReminderAppointment);
+                  return;
+                }
+
+                startContextualTextIntake(notesReminderAppointment);
+              }}
               type="button"
             >
               <span>Add notes to:</span>
@@ -12534,6 +12681,36 @@ export default function Home() {
                 </span>
               ) : null}
             </button>
+            {pendingModifierSwitch?.appointmentId ===
+            notesReminderAppointment.id ? (
+              <section className="mt-3 rounded-lg border border-blue-200 bg-[#f4faff] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-blue-950">
+                    Closing will discard your unsaved changes. Proceed?
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+		              <button
+		                className="rounded-full bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:bg-slate-50 disabled:text-slate-400"
+		                onClick={() =>
+                        discardAndSwitchAppointmentModifier(
+                          notesReminderAppointment
+                        )
+                      }
+                      type="button"
+                    >
+                      Discard and close
+                    </button>
+                    <button
+                      className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900"
+                      onClick={() => setPendingModifierSwitch(null)}
+                      type="button"
+                    >
+                      Return to editing
+                    </button>
+                  </div>
+                </div>
+              </section>
+            ) : null}
             {textIntakeTargetAppointmentId === notesReminderAppointment.id ? (
               <form
                 className="mt-3 rounded-lg border border-blue-100 bg-white p-4 shadow-sm"
@@ -12543,22 +12720,23 @@ export default function Home() {
                     : handleInterpretTextIntake
                 }
               >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-semibold text-blue-950">
-                      Notes for this appointment
-                    </h3>
-                    <p className="mt-1 text-sm text-slate-600">
-                      Type or paste what happened. CarePland will organize it
-                      before saving.
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                  <div className="min-w-0">
+                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                      <span className="font-semibold">
+                        Type or paste what happened.
+                      </span>{" "}
+                      <span className="block sm:inline">
+                        CarePland will organize it before saving.
+                      </span>
                     </p>
                   </div>
                   <button
-                    className={gentleSmallSecondaryButtonClass}
-                    onClick={cancelTextIntake}
+                    className="justify-self-end rounded-md px-2 py-1 text-xs font-normal text-[#767676] transition hover:bg-slate-100 hover:text-slate-700"
+                    onClick={() => requestCloseTextIntake(notesReminderAppointment)}
                     type="button"
                   >
-                    Cancel
+                    Close
                   </button>
                 </div>
 
@@ -12576,7 +12754,7 @@ export default function Home() {
                       />
                     </label>
                     <button
-                      className={`mt-4 ${gentlePrimaryButtonClass}`}
+                      className="mt-4 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
                       disabled={processingTextIntake}
                       type="submit"
                     >
@@ -12634,8 +12812,8 @@ export default function Home() {
                         />
                       </label>
                       <div className="flex items-end">
-                        <button
-                          className={gentlePrimaryButtonClass}
+	                  <button
+	                    className={gentleWarmButtonClass}
                           disabled={savingTextIntake}
                           type="submit"
                         >
@@ -12795,9 +12973,11 @@ export default function Home() {
                   </p>
                 </div>
               ) : null}
-              <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 xl:inline-flex">
-                Personal
-              </span>
+	              {signedInEmail ? (
+	                <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 xl:inline-flex">
+	                  {currentPricingTier.name}
+	                </span>
+	              ) : null}
               {runtimeEnvironmentLabel ? (
                 <span
                   className="hidden rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-900 xl:inline-flex"
@@ -14523,13 +14703,13 @@ export default function Home() {
             {toast ? (
               <div
                 className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm shadow-sm ${
-                  toast.type === "success"
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+	                  toast.type === "success"
+	                    ? "border-blue-200 bg-[#f4faff] text-blue-950"
                     : toast.type === "warning"
                       ? "border-amber-200 bg-amber-50 text-amber-950"
                       : toast.type === "error"
                         ? "border-rose-200 bg-rose-50 text-rose-950"
-                        : "border-blue-200 bg-blue-50 text-blue-950"
+	                        : "border-blue-200 bg-[#f4faff] text-blue-950"
                 }`}
               >
                 <span className="font-medium">{toast.message}</span>
@@ -14559,11 +14739,11 @@ export default function Home() {
             ) : null}
 
             {signedInEmail && autoCarePrepStatus ? (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-950 shadow-sm">
+	              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-blue-200 bg-[#f4faff] p-3 text-sm font-medium text-blue-950 shadow-sm">
                 <span>{autoCarePrepStatus.message}</span>
                 <span className="flex flex-wrap items-center gap-2">
                   <button
-                    className="rounded-md bg-white px-3 py-1 font-semibold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
+	                    className="rounded-md bg-white px-3 py-1 font-semibold text-blue-800 ring-1 ring-blue-200 hover:bg-blue-50"
                     onClick={() =>
                       focusAppointmentCarePrep(autoCarePrepStatus.appointmentId)
                     }
@@ -14573,7 +14753,7 @@ export default function Home() {
                   </button>
                   <button
                     aria-label="Dismiss automatic CarePrep status"
-                    className="rounded-md bg-white px-3 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100"
+	                    className="rounded-md bg-white px-3 py-1 font-semibold text-blue-700 ring-1 ring-blue-200 hover:bg-blue-50"
                     onClick={() => setAutoCarePrepStatus(null)}
                     type="button"
                   >
@@ -17930,7 +18110,7 @@ export default function Home() {
                     : "No upcoming appointments found yet."}
               </div>
             ) : (
-              <div className="-mt-4 overflow-hidden rounded-xl border border-slate-200/80 bg-white">
+              <div className="-mt-4 overflow-hidden rounded-lg border border-slate-200/80 bg-white shadow-sm">
               {appointments.map((appointment) => {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
@@ -17995,14 +18175,49 @@ export default function Home() {
                       ? "add"
                       : null;
                 const calendarLink = agicalUrl(appointment);
-                const practiceLabel =
-                  appointment.provider_organization ||
-                  appointment.location_name ||
-                  "";
-                return (
+	                const practiceLabel =
+	                  appointment.provider_organization ||
+	                  appointment.location_name ||
+	                  "";
+		                const appointmentSubject = appointment.care_subject_id
+		                  ? subjectsById.get(appointment.care_subject_id)?.display_name
+		                  : "";
+		                const pendingModifierWarning =
+		                  pendingModifierSwitch?.appointmentId === appointment.id ? (
+		                    <section className="mt-3 rounded-lg border border-blue-200 bg-[#f4faff] p-4">
+		                      <div className="flex flex-wrap items-center justify-between gap-3">
+		                        <p className="text-sm font-medium text-blue-950">
+		                          {pendingModifierSwitch.target
+		                            ? "Switching will discard your unsaved changes. Proceed?"
+		                            : "Closing will discard your unsaved changes. Proceed?"}
+		                        </p>
+		                        <div className="flex flex-wrap gap-2">
+		                          <button
+		                            className={gentleWarmButtonClass}
+		                            onClick={() =>
+		                              discardAndSwitchAppointmentModifier(appointment)
+		                            }
+		                            type="button"
+		                          >
+		                            {pendingModifierSwitch.target
+		                              ? "Discard and switch"
+		                              : "Discard and close"}
+		                          </button>
+		                          <button
+		                            className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900"
+		                            onClick={() => setPendingModifierSwitch(null)}
+		                            type="button"
+		                          >
+		                            Return to editing
+		                          </button>
+		                        </div>
+		                      </div>
+		                    </section>
+		                  ) : null;
+		                return (
                   <article
                     id={`appointment-${appointment.id}`}
-                    className="relative flex flex-col px-5 py-7 before:absolute before:left-5 before:right-5 before:top-0 before:h-0.5 before:rounded-full before:bg-slate-300 first:before:hidden"
+                    className="relative flex flex-col px-5 py-8 before:absolute before:left-5 before:right-5 before:top-0 before:h-px before:bg-slate-200 first:before:hidden sm:px-6"
                     key={appointment.id}
                   >
                     <div
@@ -18012,7 +18227,7 @@ export default function Home() {
                       <button
                         aria-expanded={openAppointmentMenuId === appointment.id}
                         aria-label="Appointment options"
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition hover:bg-blue-50 hover:text-blue-800"
                         onClick={() =>
                           setOpenAppointmentMenuId((currentId) =>
                             currentId === appointment.id ? null : appointment.id
@@ -18023,11 +18238,11 @@ export default function Home() {
                         <EllipsisVerticalIcon className="h-5 w-5" />
                       </button>
                       {openAppointmentMenuId === appointment.id ? (
-                        <div className="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-md border border-slate-200 bg-white text-left shadow-lg">
+                        <div className="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-lg">
                           {!isArchived ? (
                             <>
                               <button
-                                className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-blue-50/70 hover:text-blue-800"
                                 onClick={() => {
                                   setOpenAppointmentMenuId(null);
                                   requestAppointmentModifier(
@@ -18040,7 +18255,7 @@ export default function Home() {
                                 Edit
                               </button>
                               <button
-                                className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:text-slate-400"
+                                className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-blue-50/70 hover:text-blue-800 disabled:text-slate-400"
                                 disabled={
                                   archivingAppointmentForId === appointment.id
                                 }
@@ -18054,9 +18269,26 @@ export default function Home() {
                                   : "Archive"}
                               </button>
                             </>
-                          ) : null}
-                          <button
-                            className="block w-full px-3 py-2 text-left text-sm font-semibold text-rose-700 hover:bg-rose-50"
+	                          ) : null}
+	                          {isArchived ? (
+	                            <button
+	                              className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-blue-50/70 hover:text-blue-800 disabled:text-slate-400"
+	                              disabled={
+	                                restoringAppointmentForId === appointment.id
+	                              }
+	                              onClick={() => {
+	                                setOpenAppointmentMenuId(null);
+	                                restoreAppointment(appointment.id);
+	                              }}
+	                              type="button"
+	                            >
+	                              {restoringAppointmentForId === appointment.id
+	                                ? "Restoring..."
+	                                : "Restore"}
+	                            </button>
+	                          ) : null}
+	                          <button
+	                            className="block w-full px-3 py-2 text-left text-sm font-semibold text-rose-700 hover:bg-rose-50"
                             onClick={() => {
                               setOpenAppointmentMenuId(null);
                               setPendingDeleteAppointmentId(appointment.id);
@@ -18075,7 +18307,7 @@ export default function Home() {
                             className={`text-2xl font-semibold ${
                               appointment.is_sample_data
                                 ? "text-slate-500"
-                                : "text-slate-900"
+                                : "text-slate-950"
                             }`}
                           >
                             {appointment.title || "Untitled appointment"}
@@ -18085,23 +18317,10 @@ export default function Home() {
                               Demo
                             </span>
                           ) : null}
-                          {isArchived ? (
-                            <button
-                              className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700 ring-1 ring-blue-100 hover:ring-blue-200 disabled:text-slate-400"
-                              disabled={
-                                restoringAppointmentForId === appointment.id
-                              }
-                              onClick={() => restoreAppointment(appointment.id)}
-                              type="button"
-                            >
-                              {restoringAppointmentForId === appointment.id
-                                ? "Restoring..."
-                                : "Restore"}
-                            </button>
-                          ) : appointment.status !== "scheduled" ? (
-                            <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
-                              {appointment.status}
-                            </span>
+	                          {!isArchived && appointment.status !== "scheduled" ? (
+	                            <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700">
+	                              {appointment.status}
+	                            </span>
                           ) : null}
                         </div>
                         {appointment.is_sample_data ? (
@@ -18116,7 +18335,7 @@ export default function Home() {
                           {calendarLink && !isArchived ? (
                             <a
                               aria-label="Add to Calendar"
-                              className="inline-flex text-slate-500 hover:text-blue-700"
+                              className="inline-flex text-[#767676] hover:text-blue-700"
                               href={calendarLink}
                               rel="noreferrer"
                               target="_blank"
@@ -18129,10 +18348,10 @@ export default function Home() {
                         {practiceLabel ||
                         appointment.location_address ||
                         appointment.location_phone ? (
-                          <div className="mt-2 text-sm text-slate-600 md:pr-12">
+                          <div className="mt-2 text-sm text-[#767676] md:pr-12">
                             {practiceLabel ? (
                               <button
-                                className="inline-flex items-center gap-1 text-left font-medium text-slate-700 hover:text-blue-800 md:justify-end md:text-right"
+                                className="inline-flex items-center gap-1 text-left font-medium text-[#767676] hover:text-blue-800 md:justify-end md:text-right"
                                 onClick={() =>
                                   setLocationSheetAppointmentId(appointment.id)
                                 }
@@ -18151,37 +18370,9 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {pendingModifierSwitch?.appointmentId === appointment.id ? (
-                      <section className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <p className="text-sm font-medium text-amber-950">
-                            {pendingModifierSwitch.target
-                              ? "Switching will discard your unsaved changes. Proceed?"
-                              : "Closing will discard your unsaved changes. Proceed?"}
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              className={gentleWarmButtonClass}
-                              onClick={() =>
-                                discardAndSwitchAppointmentModifier(appointment)
-                              }
-                              type="button"
-                            >
-                              {pendingModifierSwitch.target
-                                ? "Discard and switch"
-                                : "Discard and close"}
-                            </button>
-                            <button
-                              className="rounded-full border border-amber-100 bg-white/85 px-3 py-2 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-50"
-                              onClick={() => setPendingModifierSwitch(null)}
-                              type="button"
-                            >
-                              Return to editing
-                            </button>
-                          </div>
-                        </div>
-                      </section>
-                    ) : null}
+		                    {!activeModifier
+		                      ? pendingModifierWarning
+		                      : null}
 
                     {pendingDeleteAppointmentId === appointment.id ? (
                       <section className="mt-4 rounded-md border border-rose-200 bg-rose-50 p-4">
@@ -18220,7 +18411,7 @@ export default function Home() {
                     activeModifier !== "import" ? (
                       <div className="order-30 mt-4 flex flex-wrap gap-3">
                         <button
-                          className="inline-flex w-36 items-center justify-center gap-1.5 rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                          className={`${appointmentSectionButtonClass} gap-1.5`}
                           onClick={() =>
                             requestAppointmentModifier(appointment, "import")
                           }
@@ -18242,7 +18433,7 @@ export default function Home() {
 
                     {isContextualTextIntake && canPasteContextualNotes ? (
                       <form
-                        className="order-30 mt-4 rounded-md border border-blue-100 bg-blue-50 p-4"
+                        className="order-30 mt-5 border border-blue-100 bg-[#f4faff] p-4"
                         onSubmit={
                           textIntakeDraft
                             ? handleSaveTextIntakeDraft
@@ -18253,7 +18444,7 @@ export default function Home() {
                           <>
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <button
-                                className="-ml-4 inline-flex w-36 items-center justify-center gap-1.5 rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                                className={`${appointmentSectionTitleButtonClass} gap-1.5`}
                                 onClick={() =>
                                   requestAppointmentModifier(
                                     appointment,
@@ -18289,9 +18480,10 @@ export default function Home() {
                                   }}
                                   type="file"
                                 />
-                              </label>
-                            </div>
-                            <textarea
+	                              </label>
+	                            </div>
+	                            {pendingModifierWarning}
+	                            <textarea
                               className="mt-3 min-h-56 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-base leading-7"
                               onChange={(event) =>
                                 setContextualTextIntakeValue(event.target.value)
@@ -18306,7 +18498,7 @@ export default function Home() {
                             ) : null}
                             <div className="mt-4 flex flex-wrap items-center gap-4">
                               <button
-                                className={gentlePrimaryButtonClass}
+                                className="rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
                                 disabled={processingTextIntake}
                                 type="submit"
                               >
@@ -18315,7 +18507,7 @@ export default function Home() {
                                   : "Create summary"}
                               </button>
                               <button
-                                className="text-sm font-semibold text-slate-500 transition hover:text-blue-700"
+                                className="rounded-md px-2 py-1 text-sm font-normal text-[#767676] transition hover:bg-blue-50 hover:text-slate-700"
                                 onClick={cancelTextIntake}
                                 type="button"
                               >
@@ -18405,27 +18597,22 @@ export default function Home() {
                         className="order-30 mt-5 rounded-md border border-blue-100 bg-blue-50 p-4"
                         onSubmit={(event) => handleSaveNote(event, appointment)}
                       >
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <h3 className="text-lg font-semibold text-slate-900">
-                              {note ? "Edit notes" : "Add notes"}
-                            </h3>
-                            {note ? (
-                              <p className="mt-1 text-sm text-slate-500">
-                                Saving creates version {note.version_number + 1}
-                                and keeps the old one archived.
-                              </p>
-                            ) : null}
-                          </div>
-                          <button
-                            className={gentleSmallSecondaryButtonClass}
-                            onClick={() => cancelEditingNote(appointment.id)}
-                            type="button"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+	                        <div className="flex flex-wrap items-center justify-between gap-3">
+	                          <div>
+		                            <h3 className="text-lg font-semibold text-slate-900">
+		                              {note ? "Edit notes" : "Add notes"}
+		                            </h3>
+		                          </div>
+	                          <button
+	                            className="rounded-md px-2 py-1 text-sm font-normal text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+		                            onClick={() => requestCloseNoteEditing(appointment)}
+	                            type="button"
+	                          >
+		                            Close
+		                          </button>
+	                        </div>
+		                        {pendingModifierWarning}
+	                        <div className="mt-4 grid gap-4 lg:grid-cols-3">
                           <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
                             Visit summary
                             <textarea
@@ -18505,17 +18692,20 @@ export default function Home() {
                             <p className="mt-1 text-sm text-slate-500">
                               Update the appointment details saved on this record.
                             </p>
-                          </div>
-                          <button
-                            className={gentleSmallSecondaryButtonClass}
-                            onClick={() => cancelEditingAppointment(appointment.id)}
-                            type="button"
-                          >
-                            Cancel
-                          </button>
-                        </div>
+	                          </div>
+	                          <button
+	                            className="rounded-md px-2 py-1 text-sm font-normal text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+	                            onClick={() =>
+	                              requestAppointmentModifier(appointment, "edit")
+	                            }
+	                            type="button"
+	                          >
+	                            Close
+	                          </button>
+	                        </div>
+	                        {pendingModifierWarning}
 
-                        <div className="mt-4 grid gap-4 md:grid-cols-2">
+	                        <div className="mt-4 grid gap-4 md:grid-cols-2">
                           <label className="block text-sm font-medium text-slate-700">
                             Title
                             <input
@@ -18682,7 +18872,7 @@ export default function Home() {
                     ) : null}
 
                     {shouldShowCarePrep && carePrepDraft && !isArchived ? (
-                      <section className="order-20 mt-5 rounded-md border border-blue-200 bg-blue-50 p-4">
+                      <section className="order-20 mt-6 border border-blue-100 bg-[#f4faff] p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <h3 className="text-lg font-semibold text-blue-900">
@@ -18705,7 +18895,7 @@ export default function Home() {
                           </button>
                         </div>
                         {generatingCarePrepForId === appointment.id ? (
-                          <span className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
+                          <span className="mt-3 inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-900">
                             Generating...
                           </span>
                         ) : null}
@@ -18878,7 +19068,7 @@ export default function Home() {
                       !isVisitNotesExpanded ? (
                         <div className="order-30 mt-5 flex flex-wrap gap-3">
                           <button
-                            className="inline-flex w-36 items-center justify-center rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                            className={appointmentSectionButtonClass}
                             onClick={() =>
                               setExpandedVisitNotesAppointmentId(appointment.id)
                             }
@@ -18895,65 +19085,65 @@ export default function Home() {
                           </button>
                         </div>
                       ) : (
-                        <section className="order-30 mt-5 overflow-hidden rounded-md border border-blue-200 bg-blue-50">
-                          <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-                            <button
-                              className="-ml-4 inline-flex w-36 items-center justify-center rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
-                              onClick={() =>
-                                setExpandedVisitNotesAppointmentId(null)
-                              }
-                              title="Close Visit notes"
-                              type="button"
-                            >
-                              Visit notes
-                              <span
-                                aria-hidden="true"
-                                className="text-sm leading-none text-blue-950"
-                              >
-                                ✓
-                              </span>
-                            </button>
-                            {!isEditingNote && !isArchived ? (
-                              <button
-                                className={`${gentleSmallBlueButtonClass} inline-flex items-center gap-2`}
-                                onClick={() =>
-                                  startEditingNote(appointment.id, note)
-                                }
-                                type="button"
-                              >
-                                <PencilSquareIcon className="h-4 w-4" />
-                                Edit
-                              </button>
-                            ) : null}
-                            <span className="text-xs font-medium text-blue-700">
-                              Current version {note.version_number}
-                            </span>
-                          </div>
-                          <div className="border-t border-blue-100 p-4">
-                            <div className="rounded-md bg-white p-4">
-                              {note.summary_short ? (
-                                <section>
-                                  <h4 className="font-semibold text-slate-900">
-                                    Visit summary
+	                        <section className="order-30 mt-6 overflow-hidden border border-blue-100 bg-[#f4faff]">
+	                          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+	                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+	                              <button
+	                                className={appointmentSectionTitleButtonClass}
+	                                onClick={() =>
+	                                  setExpandedVisitNotesAppointmentId(null)
+	                                }
+	                                title="Close Visit notes"
+	                                type="button"
+	                              >
+	                                Visit notes
+	                                <span
+	                                  aria-hidden="true"
+	                                  className="text-sm leading-none text-blue-950"
+	                                >
+	                                  ✓
+	                                </span>
+	                              </button>
+	                            </div>
+	                            {!isEditingNote && !isArchived ? (
+	                              <button
+	                                aria-label="Edit visit notes"
+	                                className={appointmentToolIconButtonClass}
+	                                onClick={() =>
+	                                  startEditingNote(appointment.id, note)
+	                                }
+	                                title="Edit visit notes"
+	                                type="button"
+	                              >
+	                                <PencilSquareIcon className="h-5 w-5" />
+	                              </button>
+	                            ) : null}
+	                          </div>
+	                          <div className="border-t border-blue-100/70 p-4">
+	                            <div className="grid gap-4">
+	                              {note.summary_short ? (
+	                                <section className="px-2 py-1 sm:px-3">
+	                                  <h4 className="font-semibold text-slate-900">
+	                                    Visit summary
                                   </h4>
                                   <p className="mt-1 text-slate-700">
                                     {note.summary_short}
                                   </p>
                                 </section>
                               ) : null}
-                              <div className="mt-5 grid gap-5 md:grid-cols-2">
-                                <section>
-                                  <h4 className="font-semibold text-slate-900">
-                                    Takeaways
+	                              <div className="grid gap-4 md:grid-cols-2">
+	                                <section className="px-2 py-1 sm:px-3">
+	                                  <h4 className="font-semibold text-slate-900">
+	                                    Takeaways
                                   </h4>
                                   <DetailList
                                     emptyLabel="No takeaways saved yet."
                                     items={takeaways}
                                   />
                                 </section>
-                                <section>
-                                  <h4 className="font-semibold text-slate-900">
-                                    Follow-ups
+	                                <section className="px-2 py-1 sm:px-3">
+	                                  <h4 className="font-semibold text-slate-900">
+	                                    Follow-ups
                                   </h4>
                                   <DetailList
                                     emptyLabel="No follow-ups saved yet."
@@ -18970,7 +19160,7 @@ export default function Home() {
                     {note && !isVisitNotesExpandableView ? (
                       <div className="order-30 mt-5 flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <h3 className="font-semibold text-blue-800">
+                          <h3 className="font-semibold text-slate-900">
                             Visit notes
                           </h3>
                           <p className="mt-1 text-sm text-slate-500">
@@ -18991,7 +19181,7 @@ export default function Home() {
 
                     {note?.summary_short && !isVisitNotesExpandableView ? (
                       <section className="order-30 mt-5">
-                        <h3 className="font-semibold text-blue-800">Visit summary</h3>
+                        <h3 className="font-semibold text-slate-900">Visit summary</h3>
                         <p className="mt-1 text-slate-700">{note.summary_short}</p>
                       </section>
                     ) : null}
@@ -18999,7 +19189,7 @@ export default function Home() {
                     {shouldShowPostVisitSections ? (
                       <div className="order-30 mt-5 grid gap-4 md:grid-cols-2">
                         <section className="rounded-md border border-slate-200 p-4">
-                          <h3 className="font-semibold text-blue-800">
+                          <h3 className="font-semibold text-slate-900">
                             Takeaways
                           </h3>
                           <DetailList
@@ -19009,7 +19199,7 @@ export default function Home() {
                         </section>
 
                         <section className="rounded-md border border-slate-200 p-4">
-                          <h3 className="font-semibold text-blue-800">
+                          <h3 className="font-semibold text-slate-900">
                             Follow-ups
                           </h3>
                           <DetailList
@@ -19029,7 +19219,7 @@ export default function Home() {
                         {!isCarePrepExpanded ? (
                           <div className="order-20 mt-5 flex flex-wrap items-center gap-3">
                             <button
-                              className="inline-flex w-36 items-center justify-center gap-1.5 rounded-md bg-blue-50 px-4 py-3 text-xl font-semibold text-blue-950 ring-1 ring-blue-100 hover:ring-blue-200 active:bg-blue-50 active:ring-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:text-slate-400"
+                              className={`${appointmentSectionButtonClass} gap-1.5`}
                               disabled={generatingCarePrepForId === appointment.id}
                               onClick={() => {
                                 if (hasCarePrepAvailable) {
@@ -19056,23 +19246,23 @@ export default function Home() {
                               ) : null}
                             </button>
                             {generatingCarePrepForId === appointment.id ? (
-                              <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
+                              <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-900">
                                 Generating...
                               </span>
                             ) : null}
                           </div>
                         ) : null}
                         {carePrepGenerationError && !isCarePrepExpanded ? (
-                          <p className="order-20 mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+                          <p className="order-20 mt-3 rounded-md border border-blue-200 bg-[#f4faff] px-3 py-2 text-sm font-medium text-blue-950">
                             {carePrepGenerationError}
                           </p>
                         ) : null}
                         {isCarePrepExpanded && prep?.summary ? (
-                          <section className="order-20 mt-5 overflow-hidden rounded-md border border-blue-200 bg-blue-50">
+                          <section className="order-20 mt-6 overflow-hidden border border-blue-100 bg-[#f4faff]">
                             <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  className="-ml-4 inline-flex w-36 items-center justify-center gap-1.5 rounded-md text-xl font-semibold text-blue-950 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
+	                              <div className="flex flex-wrap items-center gap-2">
+	                                <button
+	                                  className={`${appointmentSectionTitleButtonClass} gap-1.5`}
                                   onClick={() =>
                                     setExpandedCarePrepIds((currentIds) => ({
                                       ...currentIds,
@@ -19088,50 +19278,51 @@ export default function Home() {
                                     className="text-sm leading-none text-blue-950"
                                   >
                                     ✓
-                                  </span>
-                                </button>
-                                {!isArchived && !isEditingCarePrep ? (
-                                  <button
-                                    className={`${gentleSmallBlueButtonClass} inline-flex items-center gap-2`}
-                                    onClick={() =>
-                                      startEditingCarePrep(appointment.id, prep)
-                                    }
-                                    type="button"
-                                  >
-                                    <PencilSquareIcon className="h-4 w-4" />
-                                    Edit
-                                  </button>
-                                ) : null}
-                              </div>
-                              {!isArchived && !isEditingCarePrep ? (
-                                <button
-                                  className={gentleSmallBlueButtonClass}
-                                  disabled={
-                                    generatingCarePrepForId === appointment.id
-                                  }
-                                  onClick={() =>
-                                    handleGenerateCarePrep(appointment)
-                                  }
-                                  type="button"
-                                >
-                                  {generatingCarePrepForId === appointment.id
-                                    ? "Refreshing..."
-                                    : "Refresh"}
-                                </button>
-                              ) : null}
-                            </div>
+	                                  </span>
+	                                </button>
+	                              </div>
+	                              {!isArchived && !isEditingCarePrep ? (
+	                                <div className="flex items-center gap-2">
+	                                  <button
+	                                    aria-label="Edit CarePrep"
+	                                    className={appointmentToolIconButtonClass}
+	                                    onClick={() =>
+	                                      startEditingCarePrep(appointment.id, prep)
+	                                    }
+	                                    title="Edit CarePrep"
+	                                    type="button"
+	                                  >
+	                                    <PencilSquareIcon className="h-5 w-5" />
+	                                  </button>
+	                                  <button
+	                                    aria-label="Refresh CarePrep"
+	                                    className={appointmentToolIconButtonClass}
+	                                    disabled={
+	                                      generatingCarePrepForId === appointment.id
+	                                    }
+	                                    onClick={() =>
+	                                      handleGenerateCarePrep(appointment)
+	                                    }
+	                                    title="Refresh CarePrep"
+	                                    type="button"
+	                                  >
+	                                    <RefreshCircleIcon className="h-5 w-5" />
+	                                  </button>
+	                                </div>
+	                              ) : null}
+	                            </div>
                             {generatingCarePrepForId === appointment.id ? (
-                              <span className="mx-4 mb-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-900">
+                              <span className="mx-4 mb-3 inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-900">
                                 Generating...
                               </span>
                             ) : null}
                             {carePrepGenerationError ? (
-                              <p className="mx-4 mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+                              <p className="mx-4 mb-3 rounded-md border border-blue-200 bg-[#f4faff] px-3 py-2 text-sm font-medium text-blue-950">
                                 {carePrepGenerationError}
                               </p>
                             ) : null}
                             {isEditingCarePrep ? (
-                              <div className="grid gap-4 border-t border-blue-100 p-4">
+                              <div className="grid gap-4 border-t border-blue-100/70 p-4">
                             <label className="block text-sm font-medium text-slate-700">
                               Summary
                               <textarea
@@ -19266,9 +19457,9 @@ export default function Home() {
                             </div>
                           </div>
                         ) : (
-                          <div className="border-t border-blue-100 p-4">
-                            <div className="rounded-md bg-white p-4">
-                              <section>
+                          <div className="border-t border-blue-100/70 p-4">
+                            <div className="grid gap-4">
+                              <section className="px-2 py-1 sm:px-3">
                                 <h4 className="font-semibold text-slate-900">
                                   Summary
                                 </h4>
@@ -19277,8 +19468,8 @@ export default function Home() {
                                 </p>
                               </section>
 
-                              <div className="mt-5 grid gap-5 lg:grid-cols-3">
-                              <section>
+                              <div className="grid gap-4 lg:grid-cols-3">
+                              <section className="px-2 py-1 sm:px-3">
                                 <h4 className="font-semibold text-slate-900">
                                   Bring
                                 </h4>
@@ -19288,7 +19479,7 @@ export default function Home() {
                                 />
                               </section>
 
-                              <section>
+                              <section className="px-2 py-1 sm:px-3">
                                 <h4 className="font-semibold text-slate-900">Ask</h4>
                                 <DetailList
                                   emptyLabel="No questions saved yet."
@@ -19296,7 +19487,7 @@ export default function Home() {
                                 />
                               </section>
 
-                              <section>
+                              <section className="px-2 py-1 sm:px-3">
                                 <h4 className="font-semibold text-slate-900">
                                   Watch for
                                 </h4>
@@ -19308,8 +19499,8 @@ export default function Home() {
                             </div>
 
                             {(medReview.length > 0 || sinceLastVisit.length > 0) && (
-                              <div className="mt-5 grid gap-5 md:grid-cols-2">
-                                <section>
+                              <div className="grid gap-4 md:grid-cols-2">
+                                <section className="px-2 py-1 sm:px-3">
                                   <h4 className="font-semibold text-slate-900">
                                     Medication review
                                   </h4>
@@ -19319,7 +19510,7 @@ export default function Home() {
                                   />
                                 </section>
 
-                                <section>
+                                <section className="px-2 py-1 sm:px-3">
                                   <h4 className="font-semibold text-slate-900">
                                     Since last visit
                                   </h4>
@@ -19338,9 +19529,17 @@ export default function Home() {
                       </>
                     ) : null}
 
-                  </article>
-                );
-              })
+	                    {appointment.provider_name || appointmentSubject ? (
+	                      <div className="order-40 mt-7 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs font-medium text-[#767676]">
+	                        <span>{appointment.provider_name || ""}</span>
+	                        {appointmentSubject ? (
+	                          <span>for {appointmentSubject}</span>
+	                        ) : null}
+	                      </div>
+	                    ) : null}
+	                  </article>
+	                );
+	              })
               }
               </div>
               )
@@ -19401,8 +19600,8 @@ export default function Home() {
 	            </div>
 
             {askCloseConfirmOpen ? (
-              <section className="mt-4 rounded-xl border border-amber-100 bg-white/85 p-3 shadow-sm">
-                <p className="text-sm font-medium text-slate-700">
+              <section className="mt-4 rounded-xl border border-blue-200 bg-[#f4faff] p-3 shadow-sm">
+                <p className="text-sm font-medium text-blue-950">
                   This Ask has unsent text or an active conversation. Close it
                   and discard what is here?
                 </p>
@@ -19477,9 +19676,66 @@ export default function Home() {
             ) : null}
           </section>
         </>
-      ) : null}
-      <button
-        className="fixed bottom-2 left-2 z-[60] rounded px-2 py-1 text-[11px] font-semibold text-slate-300 hover:bg-white hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
+	      ) : null}
+	      {signOutConfirmOpen ? (
+	        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/20 px-4 py-6">
+	          <button
+	            aria-label="Review unsaved changes"
+	            className="absolute inset-0 cursor-default"
+	            onClick={() => setSignOutConfirmOpen(false)}
+	            type="button"
+	          />
+	          <section className="relative w-full max-w-lg rounded-xl border border-blue-200 bg-[#f4faff] p-5 text-blue-950 shadow-lg">
+	            <div>
+	              <h2 className="text-xl font-semibold text-slate-950">
+	                You have unsaved changes
+	              </h2>
+	              <p className="mt-2 text-sm leading-6 text-slate-700">
+	                Signing out will discard this work.
+	              </p>
+	            </div>
+	            {unsavedSignOutChanges.length > 0 ? (
+	              <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
+	                {unsavedSignOutChanges.map((change) => (
+	                  <li
+	                    className="rounded-lg border border-blue-100 bg-white/75 px-3 py-2 text-sm"
+	                    key={change.key}
+	                  >
+	                    <span className="font-semibold text-slate-950">
+	                      {change.label}
+	                    </span>
+	                    {change.detail ? (
+	                      <span className="ml-2 text-slate-600">
+	                        {change.detail}
+	                      </span>
+	                    ) : null}
+	                  </li>
+	                ))}
+	              </ul>
+	            ) : null}
+	            <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
+	              <button
+	                className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900"
+	                onClick={() => setSignOutConfirmOpen(false)}
+	                type="button"
+	              >
+	                Go back
+	              </button>
+	              <button
+	                className={gentleWarmButtonClass}
+	                onClick={() =>
+	                  void handleSignOut({ bypassUnsavedChangesWarning: true })
+	                }
+	                type="button"
+	              >
+	                Discard and sign out
+	              </button>
+	            </div>
+	          </section>
+	        </div>
+	      ) : null}
+	      <button
+	        className="fixed bottom-2 left-2 z-[60] rounded px-2 py-1 text-[11px] font-semibold text-slate-300 hover:bg-white hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-300"
         onClick={() => setShowVersionInfo(true)}
         title="Show version info"
         type="button"
