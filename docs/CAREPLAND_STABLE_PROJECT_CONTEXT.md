@@ -578,6 +578,7 @@ Build/admin context:
 - Admin pages show build context at the bottom.
 - Example: build number/hash and build datetime.
 - This helps Andrew distinguish deployed context during testing.
+- Build datetime should not be hardcoded in app UI. The build command generates `app/build-info.ts` via `scripts/write-build-info.mjs` so Version info can show the current build timestamp when no explicit `NEXT_PUBLIC_CAREPLAND_BUILD_DTTM` is supplied. Preserve this generated-build-info pattern in future iterations unless replacing it with an equivalent deployment metadata source.
 
 ## UX Principles And Design Philosophy
 

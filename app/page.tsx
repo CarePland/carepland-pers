@@ -90,6 +90,7 @@ import {
   pricingTierForEntitlement,
   pricingTiers,
 } from "./lib/pricingTiers";
+import { generatedBuildDttm, generatedBuildNumber } from "./build-info";
 import {
   AppSessionSettings,
   defaultAppSessionSettings,
@@ -1508,12 +1509,13 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
 const productionAppUrl = "https://app.carepland.com";
+const generatedBuildNumberFallback = generatedBuildNumber || "Unknown";
 const careplandBuildNumber =
   process.env.NEXT_PUBLIC_CAREPLAND_BUILD_NUMBER ??
   process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 8) ??
-  "02345e9a";
+  generatedBuildNumberFallback;
 const careplandBuildDttm =
-  process.env.NEXT_PUBLIC_CAREPLAND_BUILD_DTTM ?? "05/21/26 12:51 PM";
+  process.env.NEXT_PUBLIC_CAREPLAND_BUILD_DTTM ?? generatedBuildDttm;
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -12973,11 +12975,6 @@ export default function Home() {
                   </p>
                 </div>
               ) : null}
-	              {signedInEmail ? (
-	                <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 xl:inline-flex">
-	                  {currentPricingTier.name}
-	                </span>
-	              ) : null}
               {runtimeEnvironmentLabel ? (
                 <span
                   className="hidden rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-900 xl:inline-flex"
@@ -12995,61 +12992,66 @@ export default function Home() {
                 }`}
                 aria-label="Main navigation"
               >
-              <button
-                className={`h-10 shrink-0 rounded-full border px-3 text-sm font-semibold leading-none shadow-sm transition sm:h-11 sm:px-4 md:text-base ${
-                  mainTab === "appointments"
-                    ? "border-blue-200 bg-blue-50 text-blue-800"
-                    : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
-                }`}
-                onClick={async () => {
-                  if (showWelcomeGuide) {
-                    await markWelcomeGuideRead();
-                  }
-                  await handleChangeMainTab("appointments");
-                }}
-                type="button"
-              >
-                Appointments
-              </button>
-              <button
-                aria-label="Profile"
-                className={`hidden h-11 min-w-11 shrink-0 items-center justify-center rounded-full border px-4 text-sm font-semibold shadow-sm transition md:flex md:text-base ${
-                  mainTab === "profile"
-                    ? "border-blue-200 bg-blue-50 text-blue-800"
-                    : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
-                }`}
-                onClick={async () => {
-                  if (showWelcomeGuide) {
-                    await markWelcomeGuideRead();
-                  }
-                  await handleChangeMainTab("profile");
-                }}
-                type="button"
-                title="Profile"
-              >
-                Profile
-              </button>
-              {isAdmin ? (
                 <button
-                  aria-label="Admin"
-	                  className={`flex h-10 min-w-10 shrink-0 items-center justify-center rounded-full border px-2.5 text-sm font-semibold shadow-sm transition sm:h-11 sm:min-w-11 sm:px-3 md:px-4 md:text-base ${
-	                    mainTab === "admin"
-	                      ? "border-blue-200 bg-blue-50 text-blue-800"
-	                      : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
-	                  }`}
+                  className={`h-10 shrink-0 rounded-full border px-3 text-sm font-semibold leading-none shadow-sm transition sm:h-11 sm:px-4 md:text-base ${
+                    mainTab === "appointments"
+                      ? "border-blue-200 bg-blue-50 text-blue-800"
+                      : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
+                  }`}
                   onClick={async () => {
                     if (showWelcomeGuide) {
                       await markWelcomeGuideRead();
                     }
-                    await handleChangeMainTab("admin");
+                    await handleChangeMainTab("appointments");
                   }}
                   type="button"
-                  title="Admin"
                 >
-                  <GearIcon className="h-5 w-5 md:hidden" />
-                  <span className="hidden md:inline">Admin</span>
+                  Appointments
                 </button>
-              ) : null}
+                <button
+                  aria-label="Profile"
+                  className={`hidden h-11 min-w-11 shrink-0 items-center justify-center rounded-full border px-4 text-sm font-semibold shadow-sm transition md:flex md:text-base ${
+                    mainTab === "profile"
+                      ? "border-blue-200 bg-blue-50 text-blue-800"
+                      : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
+                  }`}
+                  onClick={async () => {
+                    if (showWelcomeGuide) {
+                      await markWelcomeGuideRead();
+                    }
+                    await handleChangeMainTab("profile");
+                  }}
+                  type="button"
+                  title="Profile"
+                >
+                  Profile
+                </button>
+                {isAdmin ? (
+                  <button
+                    aria-label="Admin"
+                    className={`flex h-10 min-w-10 shrink-0 items-center justify-center rounded-full border px-2.5 text-sm font-semibold shadow-sm transition sm:h-11 sm:min-w-11 sm:px-3 md:px-4 md:text-base ${
+                      mainTab === "admin"
+                        ? "border-blue-200 bg-blue-50 text-blue-800"
+                        : "border-slate-200 bg-white/80 text-slate-600 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
+                    }`}
+                    onClick={async () => {
+                      if (showWelcomeGuide) {
+                        await markWelcomeGuideRead();
+                      }
+                      await handleChangeMainTab("admin");
+                    }}
+                    type="button"
+                    title="Admin"
+                  >
+                    <GearIcon className="h-5 w-5 md:hidden" />
+                    <span className="hidden md:inline">Admin</span>
+                  </button>
+                ) : null}
+                {signedInEmail ? (
+                  <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 md:inline-flex">
+                    {currentPricingTier.name}
+                  </span>
+                ) : null}
               </nav>
             ) : null}
 
