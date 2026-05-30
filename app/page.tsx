@@ -71,8 +71,30 @@ import {
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import { HomeNextAppointmentPanel } from "./components/HomeNextAppointmentPanel";
+import { InlineConfirmation } from "./components/InlineConfirmation";
 import { PublicWebsite } from "./components/PublicWebsite";
 import { UserFacingFooter } from "./components/UserFacingFooter";
+import {
+  appointmentDetailsDraftHasChanges,
+  asTextList,
+  carePrepDraftHasChanges,
+  intakeDraftHasMeaningfulContent,
+  intakeDraftHasSaveableNotes,
+  linesToList,
+  sectionNoteDraftHasChanges,
+} from "./lib/editorState";
+import {
+  appointmentSectionButtonClass,
+  appointmentSectionTitleButtonClass,
+  appointmentToolIconButtonClass,
+  gentleCautionButtonClass,
+  gentlePrimaryButtonClass,
+  gentleSecondaryButtonClass,
+  gentleSmallBlueButtonClass,
+  gentleSmallSecondaryButtonClass,
+  gentleSoftBlueButtonClass,
+  gentleWarmButtonClass,
+} from "./lib/uiStyles";
 import {
   favoriteLocationLabel,
   FavoriteLocation,
@@ -1668,26 +1690,6 @@ function logAuthError(action: string, error: unknown) {
   });
 }
 
-function asTextList(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((item) => {
-      if (typeof item === "string") {
-        return item;
-      }
-
-      if (item && typeof item === "object" && "text" in item) {
-        return String(item.text);
-      }
-
-      return "";
-    })
-    .filter(Boolean);
-}
-
 function adminSensitiveKey(
   resourceType: AdminSensitiveResourceType,
   resourceId: string | null = null
@@ -1697,13 +1699,6 @@ function adminSensitiveKey(
 
 function shortId(value: string | null): string {
   return value ? value.slice(0, 8) : "—";
-}
-
-function linesToList(value: string): string[] {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
 }
 
 const matchStopWords = new Set([
@@ -3177,6 +3172,17 @@ export default function Home() {
   const [fileImportStatus, setFileImportStatus] = useState("");
   const [savingTextIntake, setSavingTextIntake] = useState(false);
   const [creatingCareVip, setCreatingCareVip] = useState(false);
+  const [deactivatingCareVipId, setDeactivatingCareVipId] = useState<
+    string | null
+  >(null);
+  const [pendingDeactivateCareVipId, setPendingDeactivateCareVipId] = useState<
+    string | null
+  >(null);
+  const [pendingReactivateCareVip, setPendingReactivateCareVip] = useState<{
+    displayName: string;
+    id: string;
+  } | null>(null);
+  const [careVipFormMessage, setCareVipFormMessage] = useState("");
   const [appointmentView, setAppointmentView] = useState<AppointmentView>(
     initialUiState?.appointmentView ?? "upcoming"
   );
@@ -3983,30 +3989,29 @@ export default function Home() {
 	      });
 	    }
 
-	    if (
-	      textIntakeTargetAppointmentId &&
-	      (contextualTextIntakeValue.trim() ||
-	        textIntakeDraft ||
-	        textIntakeAiDraft ||
-	        textIntakeItemId)
-	    ) {
-	      addChange({
-	        detail: appointmentLabel(textIntakeTargetAppointmentId, "Appointment"),
-	        key: `visit-notes-intake-${textIntakeTargetAppointmentId}`,
-	        label: "Visit notes intake",
-	      });
-	    } else if (
-	      textIntakeValue.trim() ||
-	      textIntakeDraft ||
-	      textIntakeAiDraft ||
-	      textIntakeItemId ||
-	      textIntakeMatches.length > 0
-	    ) {
-	      addChange({
-	        key: "text-intake",
-	        label: "Appointment or notes intake",
-	      });
-	    }
+    if (textIntakeTargetAppointmentId) {
+      if (
+        textIntakeDraft
+          ? intakeDraftHasSaveableNotes(textIntakeDraft)
+          : contextualTextIntakeValue.trim()
+      ) {
+        addChange({
+          detail: appointmentLabel(textIntakeTargetAppointmentId, "Appointment"),
+          key: `visit-notes-intake-${textIntakeTargetAppointmentId}`,
+          label: "Visit notes intake",
+        });
+      }
+    } else if (
+      (textIntakeDraft
+        ? intakeDraftHasMeaningfulContent(textIntakeDraft)
+        : textIntakeValue.trim()) ||
+      (!textIntakeDraft && textIntakeMatches.length > 0)
+    ) {
+      addChange({
+        key: "text-intake",
+        label: "Appointment or notes intake",
+      });
+    }
 
 	    Object.entries(editingAppointmentIds).forEach(([appointmentId, isEditing]) => {
 	      if (!isEditing) {
@@ -4016,17 +4021,10 @@ export default function Home() {
 	      const appointment = appointmentsById.get(appointmentId);
 	      if (appointment) {
 	        const draft = appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
-	        const hasChanges =
-	          draft.locationAddress !== (appointment.location_address ?? "") ||
-	          draft.locationName !== (appointment.location_name ?? "") ||
-	          draft.locationPhone !== (appointment.location_phone ?? "") ||
-	          draft.providerName !== (appointment.provider_name ?? "") ||
-	          draft.providerOrganization !==
-	            (appointment.provider_organization ?? "") ||
-	          draft.reason !== (appointment.reason ?? "") ||
-	          draft.startsAt !== toDatetimeLocalValue(appointment.starts_at) ||
-	          draft.status !== appointment.status ||
-	          draft.title !== (appointment.title ?? "");
+	        const hasChanges = appointmentDetailsDraftHasChanges(draft, {
+	          ...appointment,
+	          startsAt: toDatetimeLocalValue(appointment.starts_at),
+	        });
 
 	        if (!hasChanges) {
 	          return;
@@ -4049,15 +4047,7 @@ export default function Home() {
 	      if (appointment) {
 	        const draft = noteDrafts[appointment.id] ?? emptyNoteDraft;
 	        const existingNote = notesByAppointment.get(appointment.id);
-	        const hasChanges = existingNote
-	          ? draft.summary !== (existingNote.summary_short ?? "") ||
-	            draft.takeaways !== asTextList(existingNote.takeaways).join("\n") ||
-	            draft.followups !== asTextList(existingNote.followups).join("\n")
-	          : Boolean(
-	              draft.summary.trim() ||
-	                draft.takeaways.trim() ||
-	                draft.followups.trim()
-	            );
+	        const hasChanges = sectionNoteDraftHasChanges(draft, existingNote);
 
 	        if (!hasChanges) {
 	          return;
@@ -4072,11 +4062,17 @@ export default function Home() {
 	    });
 
 	    Object.entries(carePrepDrafts).forEach(([appointmentId, draft]) => {
-	      const hasDraftText = Object.values(draft).some((value) =>
-	        String(value ?? "").trim()
-	      );
+	      const savedCarePrep =
+	        guidanceByAppointment.get(appointmentId) ??
+	        draftGuidanceByAppointment.get(appointmentId);
+	      const hasChanges = savedCarePrep
+	        ? carePrepDraftHasChanges(
+	            draft,
+	            carePrepBaseFormValues(savedCarePrep)
+	          )
+	        : Object.values(draft).some((value) => String(value ?? "").trim());
 
-	      if (!hasDraftText && !editingCarePrepIds[appointmentId]) {
+	      if (!hasChanges) {
 	        return;
 	      }
 
@@ -4101,9 +4097,10 @@ export default function Home() {
 	    bulkAppointmentDrafts.length,
 	    carePrepDrafts,
 	    contextualTextIntakeValue,
+	    draftGuidanceByAppointment,
 	    editingAppointmentIds,
-	    editingCarePrepIds,
 	    editingNoteIds,
+	    guidanceByAppointment,
 	    hasUnaddedCareVipName,
 	    hasUnsavedProfileChanges,
 	    newAppointmentLocationAddress,
@@ -4117,9 +4114,7 @@ export default function Home() {
 	    newCareVipName,
 	    noteDrafts,
 	    notesByAppointment,
-	    textIntakeAiDraft,
 	    textIntakeDraft,
-	    textIntakeItemId,
 	    textIntakeMatches.length,
 	    textIntakeTargetAppointmentId,
 	    textIntakeValue,
@@ -4128,10 +4123,17 @@ export default function Home() {
 	    Boolean(betaDisclaimerAcknowledgedAt) &&
     Boolean(betaPrivacyAcknowledgedAt) &&
     Boolean(betaTermsAcknowledgedAt);
+  const isSignedInProfileLoading =
+    Boolean(signedInEmail) &&
+    authMode !== "updatePassword" &&
+    !sessionProfileLoaded;
   const needsBetaAgreement =
-    Boolean(signedInEmail) && !hasAcceptedBetaAgreement;
+    Boolean(signedInEmail) &&
+    sessionProfileLoaded &&
+    !hasAcceptedBetaAgreement;
   const needsOnboarding =
     Boolean(signedInEmail) &&
+    sessionProfileLoaded &&
     hasAcceptedBetaAgreement &&
     (!onboardingCompletedAt || requiresEmailUpdate);
   const profileDetailsRequired = requiresEmailUpdate || authProvider === "email";
@@ -5311,11 +5313,23 @@ export default function Home() {
       throw reminderError;
     }
 
-    setHasAnySavedAppointments((appointmentRows?.length ?? 0) > 0);
-    setNotesReminderAppointment(reminderRows?.[0] ?? null);
+    const activeSubjectIds = new Set(subjects.map((subject) => subject.id));
+    const activeAppointmentRows =
+      appointmentRows?.filter(
+        (item) =>
+          !item.care_subject_id || activeSubjectIds.has(item.care_subject_id)
+      ) ?? [];
+    const activeReminderRows =
+      reminderRows?.filter(
+        (item) =>
+          !item.care_subject_id || activeSubjectIds.has(item.care_subject_id)
+      ) ?? [];
+
+    setHasAnySavedAppointments(activeAppointmentRows.length > 0);
+    setNotesReminderAppointment(activeReminderRows[0] ?? null);
     const nextHomeAppointment =
-      appointmentRows
-        ?.filter((item) => {
+      activeAppointmentRows
+        .filter((item) => {
           if (item.status === "archived" || item.current_note_id) {
             return false;
           }
@@ -5347,7 +5361,7 @@ export default function Home() {
     setHomeNextAppointment(nextHomeAppointment);
 
     const visibleAppointments =
-      appointmentRows?.filter((item) =>
+      activeAppointmentRows.filter((item) =>
         view === "archived"
           ? item.status === "archived"
           : view === "logged"
@@ -5356,7 +5370,7 @@ export default function Home() {
               !item.current_note_id &&
               (!item.starts_at ||
                 new Date(item.starts_at) >= upcomingStart)
-      ) ?? [];
+      );
     visibleAppointments.sort((firstAppointment, secondAppointment) => {
       if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
         return 0;
@@ -5392,13 +5406,6 @@ export default function Home() {
       setNotes([]);
       setGuidance([]);
       setHomeNextGuidance(null);
-      setMessage(
-        view === "archived"
-          ? "No archived appointments found."
-          : view === "logged"
-            ? "No logged appointments found yet."
-            : "No upcoming appointments found yet."
-      );
       return;
     }
 
@@ -6787,7 +6794,6 @@ export default function Home() {
     setMainTab(tab);
 
     if (tab !== "appointments") {
-      cancelTextIntake();
       resetPlaceLookup();
       setActiveAppointmentPanel(null);
     }
@@ -9866,12 +9872,31 @@ export default function Home() {
     event.preventDefault();
     setCreatingCareVip(true);
     setMessage("");
+    setCareVipFormMessage("");
 
     try {
       const displayName = newCareVipName.trim();
 
       if (!displayName) {
         throw new Error("Please enter a Care VIP name.");
+      }
+
+      const normalizedDisplayName = displayName.toLowerCase();
+      const isEmailEntry = isLikelyEmail(displayName);
+      const activeMatch = isEmailEntry
+        ? careSubjects.find(
+            (subject) =>
+              subject.display_name.trim().toLowerCase() ===
+              normalizedDisplayName
+          )
+        : null;
+
+      if (activeMatch) {
+        setCareVipFormMessage(
+          "Sorry, that email is already in use. Please enter a different email."
+        );
+        setPendingReactivateCareVip(null);
+        return;
       }
 
       if (!canAddCareVip) {
@@ -9881,6 +9906,35 @@ export default function Home() {
       }
 
       const { careCircleId } = await getPrimaryCareContext();
+      const { data: inactiveMatches, error: inactiveMatchesError } =
+        await supabase
+          .from("care_subjects")
+          .select("id,display_name")
+          .eq("care_circle_id", careCircleId)
+          .eq("is_active", false);
+
+      if (inactiveMatchesError) {
+        throw inactiveMatchesError;
+      }
+
+      const inactiveMatch = isEmailEntry
+        ? inactiveMatches?.find(
+            (subject) =>
+              subject.display_name.trim().toLowerCase() ===
+              normalizedDisplayName
+          )
+        : null;
+
+      if (inactiveMatch) {
+        setCareVipFormMessage("");
+        setPendingReactivateCareVip({
+          displayName: inactiveMatch.display_name,
+          id: inactiveMatch.id,
+        });
+        setCreatingCareVip(false);
+        return;
+      }
+
       const isFirstCareVip = careSubjects.length === 0;
 
       const { data: newSubject, error } = await supabase
@@ -9900,15 +9954,86 @@ export default function Home() {
       }
 
       setNewCareVipName("");
+      setCareVipFormMessage("");
+      setPendingReactivateCareVip(null);
       setSelectedSubjectId(newSubject.id);
       setNewAppointmentSubjectId(newSubject.id);
       setManagingCareVips(false);
       await loadAppointments(appointmentView, newSubject.id);
       setMessage("Care VIP added.");
     } catch (error) {
+      setCareVipFormMessage(getErrorMessage(error));
+    } finally {
+      setCreatingCareVip(false);
+    }
+  }
+
+  async function handleReactivateCareVip() {
+    if (!pendingReactivateCareVip) {
+      return;
+    }
+
+    setCreatingCareVip(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase
+        .from("care_subjects")
+        .update({ is_active: true })
+        .eq("id", pendingReactivateCareVip.id);
+
+      if (error) {
+        throw error;
+      }
+
+      const reactivatedId = pendingReactivateCareVip.id;
+      setPendingReactivateCareVip(null);
+      setCareVipFormMessage("");
+      setNewCareVipName("");
+      setSelectedSubjectId(reactivatedId);
+      setNewAppointmentSubjectId(reactivatedId);
+      await loadAppointments(appointmentView, reactivatedId);
+      setMessage("Care VIP reactivated.");
+    } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
       setCreatingCareVip(false);
+    }
+  }
+
+  async function handleDeactivateCareVip(subject: CareSubject) {
+    if (subject.is_default) {
+      return;
+    }
+
+    setDeactivatingCareVipId(subject.id);
+    setMessage("");
+
+    try {
+      const { error } = await supabase
+        .from("care_subjects")
+        .update({ is_active: false })
+        .eq("id", subject.id)
+        .eq("is_default", false);
+
+      if (error) {
+        throw error;
+      }
+
+      setPendingDeactivateCareVipId(null);
+      setPendingReactivateCareVip(null);
+      setSelectedSubjectId((currentSubjectId) =>
+        currentSubjectId === subject.id ? ALL_SUBJECTS : currentSubjectId
+      );
+      setNewAppointmentSubjectId((currentSubjectId) =>
+        currentSubjectId === subject.id ? "" : currentSubjectId
+      );
+      await loadAppointments(appointmentView, ALL_SUBJECTS);
+      setMessage("Care VIP deactivated.");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setDeactivatingCareVipId(null);
     }
   }
 
@@ -10269,46 +10394,31 @@ export default function Home() {
 	    if (modifier === "add") {
 	      const draft = noteDrafts[appointment.id] ?? emptyNoteDraft;
 	      const existingNote = notesByAppointment.get(appointment.id);
-
-	      if (existingNote) {
-	        return (
-	          draft.summary !== (existingNote.summary_short ?? "") ||
-	          draft.takeaways !== asTextList(existingNote.takeaways).join("\n") ||
-	          draft.followups !== asTextList(existingNote.followups).join("\n")
-	        );
-	      }
-
-	      return Boolean(
-	        draft.summary.trim() ||
-          draft.takeaways.trim() ||
-          draft.followups.trim()
-      );
+	      return sectionNoteDraftHasChanges(draft, existingNote);
     }
 
     if (modifier === "import") {
+      if (textIntakeTargetAppointmentId === appointment.id) {
+        return Boolean(
+          textIntakeDraft
+            ? intakeDraftHasSaveableNotes(textIntakeDraft)
+            : contextualTextIntakeValue.trim()
+        );
+      }
+
       return Boolean(
-        contextualTextIntakeValue.trim() ||
-          textIntakeDraft ||
-          textIntakeAiDraft ||
-          textIntakeItemId
+        textIntakeDraft
+          ? intakeDraftHasMeaningfulContent(textIntakeDraft)
+          : contextualTextIntakeValue.trim()
       );
     }
 
     if (modifier === "edit") {
       const draft = appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
-
-      return (
-        draft.locationAddress !== (appointment.location_address ?? "") ||
-        draft.locationName !== (appointment.location_name ?? "") ||
-        draft.locationPhone !== (appointment.location_phone ?? "") ||
-        draft.providerName !== (appointment.provider_name ?? "") ||
-        draft.providerOrganization !==
-          (appointment.provider_organization ?? "") ||
-        draft.reason !== (appointment.reason ?? "") ||
-        draft.startsAt !== toDatetimeLocalValue(appointment.starts_at) ||
-        draft.status !== appointment.status ||
-        draft.title !== (appointment.title ?? "")
-      );
+      return appointmentDetailsDraftHasChanges(draft, {
+        ...appointment,
+        startsAt: toDatetimeLocalValue(appointment.starts_at),
+      });
     }
 
     return false;
@@ -11920,15 +12030,7 @@ export default function Home() {
     const baseValues = carePrepBaseFormValues(draft);
     const currentValues = carePrepFormValues(appointmentId, draft);
 
-    return (
-      currentValues.bringList !== baseValues.bringList ||
-      currentValues.keyQuestions !== baseValues.keyQuestions ||
-      currentValues.medReview !== baseValues.medReview ||
-      currentValues.nextSteps !== baseValues.nextSteps ||
-      currentValues.sinceLastVisit !== baseValues.sinceLastVisit ||
-      currentValues.summary !== baseValues.summary ||
-      currentValues.watchouts !== baseValues.watchouts
-    );
+    return carePrepDraftHasChanges(currentValues, baseValues);
   }
 
   function updateCarePrepDraft(
@@ -12243,27 +12345,6 @@ export default function Home() {
       setSavingNoteForId(null);
     }
   }
-
-  const gentlePrimaryButtonClass =
-    "rounded-full bg-[#2B6198] px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-[#24547f] disabled:bg-slate-300 disabled:text-white";
-  const gentleSecondaryButtonClass =
-    "rounded-full border border-blue-100 bg-white/85 px-4 py-2 font-semibold text-[#2B6198] shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800 disabled:bg-slate-50 disabled:text-slate-400";
-  const gentleSoftBlueButtonClass =
-    "rounded-full border border-blue-100 bg-blue-50 px-4 py-2 font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100 disabled:bg-slate-50 disabled:text-slate-400";
-  const gentleSmallBlueButtonClass =
-    "rounded-full border border-blue-100 bg-white/80 px-3 py-1.5 text-sm font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300";
-  const gentleSmallSecondaryButtonClass =
-    "rounded-full border border-slate-200 bg-white/85 px-3 py-2 text-sm font-semibold text-[#2B6198] shadow-sm transition hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700 disabled:bg-slate-50 disabled:text-slate-400";
-	  const gentleCautionButtonClass =
-	    "rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:border-rose-200 hover:bg-rose-100 disabled:bg-slate-50 disabled:text-slate-400";
-	  const gentleWarmButtonClass =
-	    "rounded-full border border-blue-200 bg-white/85 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-900 disabled:bg-slate-50 disabled:text-slate-400";
-  const appointmentSectionButtonClass =
-    "inline-flex items-center justify-center rounded-lg border border-blue-100 bg-[#f4faff] px-4 py-2.5 text-lg font-semibold text-blue-950 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400";
-  const appointmentSectionTitleButtonClass =
-    "-ml-3 inline-flex items-center justify-center rounded-lg px-3 py-2.5 text-lg font-semibold text-blue-950 transition hover:bg-blue-50 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-200";
-  const appointmentToolIconButtonClass =
-    "inline-flex h-10 w-10 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400";
 
   function renderPlaceLookup(className = "") {
     const canFavorite =
@@ -12721,33 +12802,16 @@ export default function Home() {
             </button>
             {pendingModifierSwitch?.appointmentId ===
             notesReminderAppointment.id ? (
-              <section className="mt-3 rounded-lg border border-blue-200 bg-[#f4faff] p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm font-medium text-blue-950">
-                    Closing will discard your unsaved changes. Proceed?
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-		              <button
-		                className="rounded-full bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:bg-slate-50 disabled:text-slate-400"
-		                onClick={() =>
-                        discardAndSwitchAppointmentModifier(
-                          notesReminderAppointment
-                        )
-                      }
-                      type="button"
-                    >
-                      Discard and close
-                    </button>
-                    <button
-                      className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900"
-                      onClick={() => setPendingModifierSwitch(null)}
-                      type="button"
-                    >
-                      Return to editing
-                    </button>
-                  </div>
-                </div>
-              </section>
+              <InlineConfirmation
+                cancelLabel="Return to editing"
+                className="mt-3"
+                confirmLabel="Discard and close"
+                message="Closing will discard your unsaved changes. Proceed?"
+                onCancel={() => setPendingModifierSwitch(null)}
+                onConfirm={() =>
+                  discardAndSwitchAppointmentModifier(notesReminderAppointment)
+                }
+              />
             ) : null}
             {textIntakeTargetAppointmentId === notesReminderAppointment.id ? (
               <form
@@ -12851,8 +12915,15 @@ export default function Home() {
                       </label>
                       <div className="flex items-end">
 	                  <button
-	                    className={gentleWarmButtonClass}
-                          disabled={savingTextIntake}
+	                    className={
+	                      intakeDraftHasSaveableNotes(textIntakeDraft)
+	                        ? gentlePrimaryButtonClass
+	                        : gentleSecondaryButtonClass
+	                    }
+                          disabled={
+                            savingTextIntake ||
+                            !intakeDraftHasSaveableNotes(textIntakeDraft)
+                          }
                           type="submit"
                         >
                           {savingTextIntake ? "Saving..." : "Save notes"}
@@ -12871,6 +12942,7 @@ export default function Home() {
 
   const isSignedInAppShell =
     Boolean(signedInEmail) &&
+    sessionProfileLoaded &&
     authMode !== "updatePassword" &&
     !needsBetaAgreement &&
     !needsOnboarding;
@@ -12912,7 +12984,7 @@ export default function Home() {
     ? `Build Number ${careplandBuildNumber} * Build dttm: ${careplandBuildDttm}`
     : null;
 
-  if (!sessionRestored) {
+  if (!sessionRestored || isSignedInProfileLoading) {
     return (
       <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900">
         <section className="mx-auto flex min-h-[60vh] max-w-3xl items-center justify-center">
@@ -13601,17 +13673,15 @@ export default function Home() {
           renderHomeView()
         ) : signedInEmail && mainTab === "profile" ? (
           <div className="mt-6 space-y-5">
-            <section className="rounded-lg bg-blue-50 px-5 py-5 ring-1 ring-blue-100">
-              <div className="flex flex-wrap items-start justify-between gap-4">
+            <section>
+              <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <h2 className="break-words text-xl font-semibold text-slate-950">
-                    {savedProfileLabel
-                      ? `${savedProfileLabel}'s CarePland account`
-                      : "Your CarePland account"}
+                  <h2 className="break-words pt-1 text-xl font-semibold text-slate-950">
+                    Your CarePland Account
                   </h2>
                 </div>
                 <button
-                  className={`${gentleSecondaryButtonClass} text-sm`}
+                  className={`${gentleSecondaryButtonClass} self-center text-sm`}
                   onClick={() => void handleSignOut()}
                   type="button"
                 >
@@ -13619,9 +13689,9 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
-                <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-1">
-                  <div className="flex items-center justify-between gap-2">
+              <div className="mt-3 grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 sm:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
+                <section className="relative p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 sm:order-1 xl:after:hidden">
+                  <div className="flex h-7 items-center justify-between gap-2">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                       Plan
                     </div>
@@ -13656,7 +13726,7 @@ export default function Home() {
                       </label>
                     ) : (
                       <button
-                        className="h-7 whitespace-nowrap text-xs font-semibold text-slate-400"
+                        className="h-7 whitespace-nowrap text-xs font-semibold text-slate-300"
                         disabled
                         title="Plan changes are not wired up yet."
                         type="button"
@@ -13665,7 +13735,7 @@ export default function Home() {
                       </button>
                     )}
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center gap-2 font-semibold text-slate-950">
                       <span>{currentPricingTier.name}</span>
                       {isAdmin ? (
@@ -13678,7 +13748,7 @@ export default function Home() {
                       ) : null}
                       {isPreviewingPlan ? (
                         <span
-                          className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[0.68rem] font-bold uppercase tracking-wide text-blue-700"
+                          className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[0.68rem] font-bold uppercase tracking-wide text-slate-600"
                           title={`Previewing ${currentPricingTier.name}; actual plan is ${actualPricingTier.name}.`}
                         >
                           Preview
@@ -13687,7 +13757,7 @@ export default function Home() {
                       <button
                         aria-expanded={planHelpExpanded}
                         aria-label="Explain CarePland plan tiers"
-                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-blue-200 bg-white text-xs font-bold text-blue-700"
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 bg-white text-xs font-bold text-slate-600"
                         onClick={() =>
                           setPlanHelpExpanded((isExpanded) => !isExpanded)
                         }
@@ -13699,7 +13769,7 @@ export default function Home() {
                   </div>
                   <div
                     aria-hidden={!planHelpExpanded}
-                    className={`mt-3 rounded-md border border-blue-100 bg-white p-3 text-sm text-slate-700 ${
+                    className={`mt-3 text-sm text-slate-700 ${
                       planHelpExpanded ? "" : "hidden"
                     }`}
                   >
@@ -13718,22 +13788,12 @@ export default function Home() {
                         </div>
                       ))}
                     </dl>
-                    <div className="mt-4 border-t border-blue-100 pt-3">
-                      <button
-                        className="text-sm font-semibold text-slate-400"
-                        disabled
-                        title="Plan changes are not wired up yet."
-                        type="button"
-                      >
-                        Plan options coming later
-                      </button>
-                    </div>
                   </div>
                 </section>
 
                 {canUseMultipleCareVips ? (
-                  <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-3 sm:col-span-2 xl:order-2 xl:col-span-1">
-                    <div className="flex items-center justify-between gap-3">
+                  <section className="relative flex flex-col p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 xl:before:absolute xl:before:inset-y-4 xl:before:left-0 xl:before:w-px xl:before:bg-slate-200 xl:after:inset-y-4 xl:after:bottom-auto xl:after:left-auto xl:after:right-0 xl:after:h-auto xl:after:w-px sm:order-3 sm:col-span-2 xl:order-2 xl:col-span-1">
+                    <div className="flex h-7 items-center justify-between gap-3">
                       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         CARE VIPs
                       </h3>
@@ -13741,42 +13801,143 @@ export default function Home() {
                         {careSubjects.length}/{careVipLimit}
                       </p>
                     </div>
-                    <p className="mt-3 text-sm text-slate-600">
-                      Everyone you manage.
-                    </p>
                     {careSubjects.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {careSubjects.map((subject) => (
                           <span
-                            className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
+                            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
                             key={subject.id}
                           >
                             {subject.display_name}
+                            {!subject.is_default ? (
+                              <button
+                                aria-label={`Deactivate ${subject.display_name}`}
+                                className="-mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                                disabled={deactivatingCareVipId === subject.id}
+                                onClick={() =>
+                                  setPendingDeactivateCareVipId(subject.id)
+                                }
+                                type="button"
+                              >
+                                ×
+                              </button>
+                            ) : null}
                           </span>
                         ))}
                       </div>
                     ) : null}
-                    <form className="mt-4" onSubmit={handleCreateCareVip}>
-                      <label className="block text-sm font-medium text-slate-700">
-                        Add Care VIP
-                          <input
-                            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                          disabled={!canAddCareVip}
-                          onChange={(event) =>
-                            setNewCareVipName(event.target.value)
+                    {pendingDeactivateCareVipId ? (
+                      <section className="mt-3 rounded-md border border-rose-100 bg-rose-50 p-3">
+                        <p className="text-sm font-medium text-rose-950">
+                          Deactivate{" "}
+                          {
+                            careSubjects.find(
+                              (subject) =>
+                                subject.id === pendingDeactivateCareVipId
+                            )?.display_name
                           }
-                          placeholder="Name"
+                          ?
+                        </p>
+                        <p className="mt-1 text-sm text-rose-900">
+                          Their saved appointments stay in CarePland and can be
+                          restored later.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            className={gentleCautionButtonClass}
+                            disabled={
+                              deactivatingCareVipId === pendingDeactivateCareVipId
+                            }
+                            onClick={() => {
+                              const subject = careSubjects.find(
+                                (item) => item.id === pendingDeactivateCareVipId
+                              );
+
+                              if (subject) {
+                                void handleDeactivateCareVip(subject);
+                              }
+                            }}
+                            type="button"
+                          >
+                            {deactivatingCareVipId === pendingDeactivateCareVipId
+                              ? "Deactivating..."
+                              : "Deactivate"}
+                          </button>
+                          <button
+                            className={gentleSmallSecondaryButtonClass}
+                            onClick={() => setPendingDeactivateCareVipId(null)}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </section>
+                    ) : null}
+                    <form className="mt-7 xl:mt-auto" onSubmit={handleCreateCareVip}>
+                      <label className="sr-only" htmlFor="new-care-vip-name">
+                        Care VIP name or email
+                      </label>
+                      <div className="flex items-center gap-2">
+                          <input
+                            className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-base"
+                          disabled={!canAddCareVip}
+                          id="new-care-vip-name"
+                          onChange={(event) => {
+                            setNewCareVipName(event.target.value);
+                            setCareVipFormMessage("");
+                            setPendingReactivateCareVip(null);
+                          }}
+                          placeholder="Name or email"
                           type="text"
                           value={newCareVipName}
                         />
-                      </label>
-                      <button
-                        className={`mt-3 w-full ${gentleSoftBlueButtonClass}`}
-                        disabled={creatingCareVip || !canAddCareVip}
-                        type="submit"
-                      >
-                        {creatingCareVip ? "Adding..." : "Add Care VIP"}
-                      </button>
+                        <button
+                          className={gentleSoftBlueButtonClass}
+                          disabled={
+                            creatingCareVip ||
+                            !canAddCareVip ||
+                            !newCareVipName.trim()
+                          }
+                          type="submit"
+                        >
+                          {creatingCareVip ? "Adding..." : "Add"}
+                        </button>
+                      </div>
+                      {careVipFormMessage ? (
+                        <p className="mt-2 text-sm font-medium text-rose-700">
+                          {careVipFormMessage}
+                        </p>
+                      ) : null}
+                      {pendingReactivateCareVip ? (
+                        <section className="mt-3 rounded-md border border-blue-100 bg-blue-50 p-3">
+                          <p className="text-sm font-medium text-blue-950">
+                            Reactivate {pendingReactivateCareVip.displayName}?
+                          </p>
+                          <p className="mt-1 text-sm text-blue-900">
+                            This email belongs to an inactive Care VIP.
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              className={gentlePrimaryButtonClass}
+                              disabled={creatingCareVip}
+                              onClick={() => void handleReactivateCareVip()}
+                              type="button"
+                            >
+                              Reactivate
+                            </button>
+                            <button
+                              className={gentleSmallSecondaryButtonClass}
+                              onClick={() => {
+                                setPendingReactivateCareVip(null);
+                                setNewCareVipName("");
+                              }}
+                              type="button"
+                            >
+                              Enter a different email
+                            </button>
+                          </div>
+                        </section>
+                      ) : null}
                       {!canAddCareVip ? (
                         <p className="mt-3 text-sm text-slate-500">
                           {entitlement.plan_name} includes {careVipLimit}{" "}
@@ -13787,11 +13948,17 @@ export default function Home() {
                   </section>
                 ) : null}
 
-                <section className="rounded-md bg-white/75 p-4 ring-1 ring-blue-100 sm:order-2 xl:order-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Account tools
-                  </h3>
-                  <div className="mt-3 border-b border-blue-100 pb-4">
+                <section className="p-4 sm:order-2 xl:order-3">
+                  <div className="flex h-7 items-center">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Account tools
+                    </h3>
+                  </div>
+                  <div
+                    className={`mt-3 ${
+                      isAdmin ? "" : "border-b border-slate-200 pb-4"
+                    }`}
+                  >
                     <p className="text-sm text-slate-600">
                       Send reset link to your verified email.
                     </p>
@@ -13804,41 +13971,43 @@ export default function Home() {
                       {sendingPasswordReset ? "Sending..." : "Reset password"}
                     </button>
                   </div>
-                  <div className="mt-4">
-                    {sampleDataSeededAt ? (
-                      <p className="text-sm text-slate-600">
-                        Remove sample data only.
-                        <br />
-                        Your own appointments are safe.
-                      </p>
-                    ) : (
-                      <p className="text-sm text-slate-600">
-                        Add sample appointments and data to quickly try out
-                        CarePland features.
-                      </p>
-                    )}
-                    {sampleDataSeededAt ? (
-	                      <button
-	                        className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
-	                        disabled={removingSampleData}
-	                        onClick={handleRemoveSampleData}
-                        type="button"
-                      >
-                        {removingSampleData
-                          ? "Removing..."
-                          : "Remove demo data"}
-                      </button>
-                    ) : (
-                      <button
-                        className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
-                        disabled={seedingSampleData}
-                        onClick={() => handleSeedSampleDataForCurrentUser(true)}
-                        type="button"
-                      >
-                        {seedingSampleData ? "Adding..." : "Add demo data"}
-                      </button>
-                    )}
-                  </div>
+                  {!isAdmin ? (
+                    <div className="mt-4">
+                      {sampleDataSeededAt ? (
+                        <p className="text-sm text-slate-600">
+                          Remove sample data only.
+                          <br />
+                          Your own appointments are safe.
+                        </p>
+                      ) : (
+                        <p className="text-sm text-slate-600">
+                          Add sample appointments and data to quickly try out
+                          CarePland features.
+                        </p>
+                      )}
+                      {sampleDataSeededAt ? (
+                        <button
+                          className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
+                          disabled={removingSampleData}
+                          onClick={handleRemoveSampleData}
+                          type="button"
+                        >
+                          {removingSampleData
+                            ? "Removing..."
+                            : "Remove demo data"}
+                        </button>
+                      ) : (
+                        <button
+                          className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
+                          disabled={seedingSampleData}
+                          onClick={() => handleSeedSampleDataForCurrentUser(true)}
+                          type="button"
+                        >
+                          {seedingSampleData ? "Adding..." : "Add demo data"}
+                        </button>
+                      )}
+                    </div>
+                  ) : null}
                 </section>
               </div>
             </section>
@@ -13847,14 +14016,14 @@ export default function Home() {
               className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
               onSubmit={handleSaveProfile}
             >
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex h-7 flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Contact details
                   </h3>
                 </div>
               </div>
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <div className="mt-3 grid gap-4 md:grid-cols-2">
               <label className="block text-sm font-medium text-slate-700">
                 <span className="flex items-center justify-between gap-3">
                   <span>Email</span>
@@ -14055,8 +14224,12 @@ export default function Home() {
               </label>
               <div className="md:col-span-2">
                 <button
-                  className={gentlePrimaryButtonClass}
-                  disabled={savingProfile}
+                  className={
+                    hasUnsavedProfileChanges
+                      ? gentlePrimaryButtonClass
+                      : gentleSecondaryButtonClass
+                  }
+                  disabled={savingProfile || !hasUnsavedProfileChanges}
                   type="submit"
                 >
                   {savingProfile ? "Saving..." : "Save profile"}
@@ -18126,6 +18299,7 @@ export default function Home() {
                 canFilterCareVips={canFilterCareVips}
                 careSubjects={careSubjects}
                 disabled={loading}
+                key={appointmentView}
                 onChangeSubject={handleChangeSubject}
                 onChangeView={handleChangeAppointmentView}
                 selectedSubjectId={selectedSubjectId}
@@ -18216,37 +18390,32 @@ export default function Home() {
 		                const appointmentSubject = appointment.care_subject_id
 		                  ? subjectsById.get(appointment.care_subject_id)?.display_name
 		                  : "";
+		                const pendingModifierHasUnsavedChanges =
+		                  pendingModifierSwitch?.appointmentId === appointment.id &&
+		                  hasUnsavedAppointmentModifierChanges(
+		                    appointment,
+		                    activeModifier
+		                  );
 		                const pendingModifierWarning =
-		                  pendingModifierSwitch?.appointmentId === appointment.id ? (
-		                    <section className="mt-3 rounded-lg border border-blue-200 bg-[#f4faff] p-4">
-		                      <div className="flex flex-wrap items-center justify-between gap-3">
-		                        <p className="text-sm font-medium text-blue-950">
-		                          {pendingModifierSwitch.target
-		                            ? "Switching will discard your unsaved changes. Proceed?"
-		                            : "Closing will discard your unsaved changes. Proceed?"}
-		                        </p>
-		                        <div className="flex flex-wrap gap-2">
-		                          <button
-		                            className={gentleWarmButtonClass}
-		                            onClick={() =>
-		                              discardAndSwitchAppointmentModifier(appointment)
-		                            }
-		                            type="button"
-		                          >
-		                            {pendingModifierSwitch.target
-		                              ? "Discard and switch"
-		                              : "Discard and close"}
-		                          </button>
-		                          <button
-		                            className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900"
-		                            onClick={() => setPendingModifierSwitch(null)}
-		                            type="button"
-		                          >
-		                            Return to editing
-		                          </button>
-		                        </div>
-		                      </div>
-		                    </section>
+		                  pendingModifierHasUnsavedChanges ? (
+		                    <InlineConfirmation
+		                      cancelLabel="Return to editing"
+		                      className="mt-3"
+		                      confirmLabel={
+		                        pendingModifierSwitch.target
+		                          ? "Discard and switch"
+		                          : "Discard and close"
+		                      }
+		                      message={
+		                        pendingModifierSwitch.target
+		                          ? "Switching will discard your unsaved changes. Proceed?"
+		                          : "Closing will discard your unsaved changes. Proceed?"
+		                      }
+		                      onCancel={() => setPendingModifierSwitch(null)}
+		                      onConfirm={() =>
+		                        discardAndSwitchAppointmentModifier(appointment)
+		                      }
+		                    />
 		                  ) : null;
 		                return (
                   <article
@@ -19634,28 +19803,14 @@ export default function Home() {
 	            </div>
 
             {askCloseConfirmOpen ? (
-              <section className="mt-4 rounded-xl border border-blue-200 bg-[#f4faff] p-3 shadow-sm">
-                <p className="text-sm font-medium text-blue-950">
-                  This Ask has unsent text or an active conversation. Close it
-                  and discard what is here?
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    className={gentlePrimaryButtonClass}
-                    onClick={resetAskPanelState}
-                    type="button"
-                  >
-                    Discard and close
-                  </button>
-                  <button
-                    className={gentleSmallSecondaryButtonClass}
-                    onClick={() => setAskCloseConfirmOpen(false)}
-                    type="button"
-                  >
-                    Keep writing
-                  </button>
-                </div>
-              </section>
+              <InlineConfirmation
+                cancelLabel="Keep writing"
+                className="mt-4 shadow-sm"
+                confirmLabel="Discard and close"
+                message="This Ask has unsent text or an active conversation. Close it and discard what is here?"
+                onCancel={() => setAskCloseConfirmOpen(false)}
+                onConfirm={resetAskPanelState}
+              />
             ) : null}
 
 	            {askMessages.length > 0 ? (

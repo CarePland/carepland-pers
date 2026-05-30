@@ -49,6 +49,7 @@ export function AppointmentViewToolbar({
   view,
 }: AppointmentViewToolbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [optimisticView, setOptimisticView] = useState(view);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const viewOptions: Array<{ label: string; value: AppointmentView }> = [
     { label: "Upcoming", value: "upcoming" },
@@ -93,7 +94,7 @@ export function AppointmentViewToolbar({
         <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
           <div className="order-2 flex flex-wrap items-center gap-1.5 rounded-full border border-blue-100 bg-white/70 p-1 shadow-sm md:order-1">
             {viewOptions.map((option) => {
-              const selected = view === option.value;
+              const selected = optimisticView === option.value;
 
               return (
                 <button
@@ -103,9 +104,11 @@ export function AppointmentViewToolbar({
                       ? "bg-blue-50 text-blue-800 ring-1 ring-blue-100"
                       : "text-slate-600 hover:bg-blue-50/70 hover:text-blue-800"
                   }`}
-                  disabled={disabled}
                   key={option.value}
-                  onClick={() => onChangeView(option.value)}
+                  onClick={() => {
+                    setOptimisticView(option.value);
+                    onChangeView(option.value);
+                  }}
                   type="button"
                 >
                   {option.label}
