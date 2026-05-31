@@ -122,6 +122,7 @@ import {
 
 type Appointment = {
   id: string;
+  care_circle_id?: string | null;
   care_subject_id: string | null;
   current_note_id: string | null;
   location_address: string | null;
@@ -3313,6 +3314,13 @@ export default function Home() {
   const appSessionSettingsRef = useRef(defaultAppSessionSettings);
   const idleSigningOutRef = useRef(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [appointmentPool, setAppointmentPool] = useState<Appointment[]>([]);
+  const appointmentPoolRef = useRef<Appointment[]>([]);
+  const appointmentViewRef = useRef<AppointmentView>(appointmentView);
+  const selectedSubjectIdRef = useRef(selectedSubjectId);
+  appointmentPoolRef.current = appointmentPool;
+  appointmentViewRef.current = appointmentView;
+  selectedSubjectIdRef.current = selectedSubjectId;
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [hasAnySavedAppointments, setHasAnySavedAppointments] = useState(false);
   const [
@@ -4364,7 +4372,8 @@ export default function Home() {
           setEmail(googleEmail);
           recordSessionActivity();
           clearAuthRedirectUrl();
-          await Promise.all([loadAppContent(), loadAppSessionSettings()]);
+          void loadAppContent();
+          void loadAppSessionSettings();
           await loadAppointments();
         } catch (error) {
           logAuthError("googleOAuthSession", error);
@@ -4423,41 +4432,42 @@ export default function Home() {
         setLoading(true);
 
         try {
-          await Promise.all([loadAppContent(), loadAppSessionSettings()]);
+          void loadAppContent();
+          void loadAppSessionSettings();
           await loadAppointments(
             initialUiState?.appointmentView,
             initialUiState?.selectedSubjectId
           );
-          await loadCurrentUserSupportTickets();
+          void loadCurrentUserSupportTickets();
 
           if (initialUiState?.mainTab === "admin") {
             if (initialUiState.adminTab === "ai") {
-              await Promise.all([
+              void Promise.all([
                 loadAiInstructions(initialUiState.selectedAiWorkflow),
                 loadAppContent(),
                 loadAgentKnowledgeProposals(),
               ]);
             } else if (initialUiState.adminTab === "product") {
-              await loadProductMgmt();
+              void loadProductMgmt();
             } else if (initialUiState.adminTab === "tickets") {
-              await loadAdminSupportTickets();
+              void loadAdminSupportTickets();
             } else if (initialUiState.adminTab === "assistantReview") {
-              await Promise.all([
+              void Promise.all([
                 loadAskReviewSubmissions(),
                 loadAssistantReviewInteractions(),
               ]);
             } else if (initialUiState.adminTab === "users") {
-              await loadAdminUserActivity();
+              void loadAdminUserActivity();
             } else if (initialUiState.adminTab === "intake") {
-              await loadEarlyAccessIntake();
+              void loadEarlyAccessIntake();
             } else if (initialUiState.adminTab === "userAudit") {
-              await loadAdminAccessEvents();
+              void loadAdminAccessEvents();
             } else if (initialUiState.adminTab === "errors") {
-              await loadAdminIntegrationErrors();
+              void loadAdminIntegrationErrors();
             } else if (initialUiState.adminTab === "content") {
-              await loadAppContent(initialUiState.selectedAppContentKey);
+              void loadAppContent(initialUiState.selectedAppContentKey);
             } else if (initialUiState.adminTab === "dashboard") {
-              await loadAdminAttentionOverview();
+              void loadAdminAttentionOverview();
             }
           }
         } catch (error) {
@@ -5039,6 +5049,203 @@ export default function Home() {
     }));
   }
 
+  function appointmentMatchesSubject(
+    appointment: Appointment,
+    subjectId: string
+  ) {
+    return (
+      subjectId === ALL_SUBJECTS || appointment.care_subject_id === subjectId
+    );
+  }
+
+  function sortAppointmentsForView(
+    appointmentsToSort: Appointment[],
+    view: AppointmentView
+  ) {
+    appointmentsToSort.sort((firstAppointment, secondAppointment) => {
+      if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
+        return 0;
+      }
+
+      if (!firstAppointment.starts_at) {
+        return 1;
+      }
+
+      if (!secondAppointment.starts_at) {
+        return -1;
+      }
+
+      const firstTime = new Date(firstAppointment.starts_at).getTime();
+      const secondTime = new Date(secondAppointment.starts_at).getTime();
+
+      if (view === "upcoming") {
+        return firstTime - secondTime;
+      }
+
+      return secondTime - firstTime;
+    });
+  }
+
+  function applyAppointmentSelection(
+    loadedAppointments: Appointment[],
+    view: AppointmentView,
+    subjectId: string,
+    loadedGuidance: CarePrepGuidance[] = guidance
+  ) {
+    const upcomingStart = startOfToday();
+    const subjectAppointments = loadedAppointments.filter((appointment) =>
+      appointmentMatchesSubject(appointment, subjectId)
+    );
+    const reminderAppointment =
+      subjectAppointments
+        .filter(
+          (appointment) =>
+            appointment.care_circle_id &&
+            appointment.status !== "archived" &&
+            !appointment.current_note_id &&
+            appointment.starts_at &&
+            new Date(appointment.starts_at) < upcomingStart
+        )
+        .sort((firstAppointment, secondAppointment) => {
+          if (!firstAppointment.starts_at || !secondAppointment.starts_at) {
+            return 0;
+          }
+
+          return (
+            new Date(secondAppointment.starts_at).getTime() -
+            new Date(firstAppointment.starts_at).getTime()
+          );
+        })[0] ?? null;
+    const nextHomeAppointment =
+      subjectAppointments
+        .filter((appointment) => {
+          if (appointment.status === "archived" || appointment.current_note_id) {
+            return false;
+          }
+
+          if (!appointment.starts_at) {
+            return true;
+          }
+
+          return new Date(appointment.starts_at) >= upcomingStart;
+        })
+        .sort((firstAppointment, secondAppointment) => {
+          if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
+            return 0;
+          }
+
+          if (!firstAppointment.starts_at) {
+            return 1;
+          }
+
+          if (!secondAppointment.starts_at) {
+            return -1;
+          }
+
+          return (
+            new Date(firstAppointment.starts_at).getTime() -
+            new Date(secondAppointment.starts_at).getTime()
+          );
+        })[0] ?? null;
+    const visibleAppointments = subjectAppointments.filter((appointment) =>
+      view === "archived"
+        ? appointment.status === "archived"
+        : view === "logged"
+          ? appointment.status !== "archived" &&
+            Boolean(appointment.current_note_id)
+          : appointment.status !== "archived" &&
+            !appointment.current_note_id &&
+            (!appointment.starts_at ||
+              new Date(appointment.starts_at) >= upcomingStart)
+    );
+
+    sortAppointmentsForView(visibleAppointments, view);
+    setHasAnySavedAppointments(loadedAppointments.length > 0);
+    setNotesReminderAppointment(
+      reminderAppointment && reminderAppointment.care_circle_id
+        ? {
+            ...reminderAppointment,
+            care_circle_id: reminderAppointment.care_circle_id,
+          }
+        : null
+    );
+    setHomeNextAppointment(nextHomeAppointment);
+    setAppointments(visibleAppointments);
+    setHomeNextGuidance(
+      nextHomeAppointment
+        ? loadedGuidance.find(
+            (row) =>
+              row.appointment_id === nextHomeAppointment.id &&
+              row.review_status === "draft"
+          ) ??
+            loadedGuidance.find(
+              (row) =>
+                row.appointment_id === nextHomeAppointment.id && row.is_current
+            ) ??
+            null
+        : null
+    );
+  }
+
+  async function hydrateAppointmentDetails(
+    loadedAppointments: Appointment[]
+  ) {
+    const appointmentIds = loadedAppointments.map((item) => item.id);
+
+    if (appointmentIds.length === 0) {
+      setNotes([]);
+      setGuidance([]);
+      applyAppointmentSelection([], appointmentViewRef.current, selectedSubjectIdRef.current, []);
+      return;
+    }
+
+    try {
+      const [
+        { data: noteRows, error: notesError },
+        { data: guidanceRows, error: guidanceError },
+      ] = await Promise.all([
+        supabase
+          .from("appointment_notes")
+          .select(
+            "id,appointment_id,summary_short,takeaways,followups,is_current,version_number,superseded_at,superseded_by_note_id"
+          )
+          .in("appointment_id", appointmentIds)
+          .eq("is_current", true),
+        supabase
+          .from("careprep_guidance")
+          .select(
+            "id,appointment_id,generated_at,summary,key_questions,bring_list,watchouts,med_review,since_last_visit,next_steps,is_current,version_number,review_status,source,superseded_at,superseded_by_guidance_id,edited_from_guidance_id,ai_generated_guidance_id"
+          )
+          .in("appointment_id", appointmentIds)
+          .or("is_current.eq.true,review_status.eq.draft")
+          .order("generated_at", { ascending: true }),
+      ]);
+
+      if (notesError) {
+        throw notesError;
+      }
+
+      if (guidanceError) {
+        throw guidanceError;
+      }
+
+      const loadedGuidanceRows = guidanceRows ?? [];
+      const currentPool = appointmentPoolRef.current.length
+        ? appointmentPoolRef.current
+        : loadedAppointments;
+      setNotes(noteRows ?? []);
+      setGuidance(loadedGuidanceRows);
+      applyAppointmentSelection(
+        currentPool,
+        appointmentViewRef.current,
+        selectedSubjectIdRef.current,
+        loadedGuidanceRows
+      );
+    } catch (error) {
+      console.warn("Unable to hydrate appointment details", error);
+    }
+  }
+
   async function loadAppointments(
     view: AppointmentView = appointmentView,
     subjectId: string = selectedSubjectId
@@ -5085,9 +5292,6 @@ export default function Home() {
     const userIsAdmin = profileRow?.is_admin === true;
     setIsAdmin(userIsAdmin);
     setSessionProfileLoaded(true);
-    if (userIsAdmin) {
-      void loadAdminAttentionOverview();
-    }
     if (!userIsAdmin) {
       setMainTab((currentTab) =>
         currentTab === "admin" ? "home" : currentTab
@@ -5130,6 +5334,7 @@ export default function Home() {
       !profileRow?.beta_terms_acknowledged_at
     ) {
       setAppointments([]);
+      setAppointmentPool([]);
       setHasAnySavedAppointments(false);
       setHomeNextAppointment(null);
       setHomeNextGuidance(null);
@@ -5146,6 +5351,7 @@ export default function Home() {
 
     if (userRequiresEmailUpdate || !profileRow?.onboarding_completed_at) {
       setAppointments([]);
+      setAppointmentPool([]);
       setHasAnySavedAppointments(false);
       setHomeNextAppointment(null);
       setHomeNextGuidance(null);
@@ -5176,6 +5382,7 @@ export default function Home() {
 
     if (circleIds.length === 0) {
       setAppointments([]);
+      setAppointmentPool([]);
       setHasAnySavedAppointments(false);
       setHomeNextAppointment(null);
       setHomeNextGuidance(null);
@@ -5190,14 +5397,45 @@ export default function Home() {
       return;
     }
 
-    const { data: entitlementRows, error: entitlementError } = await supabase
-      .from("care_circle_entitlements")
-      .select("care_circle_id,plan_id,status")
-      .in("care_circle_id", circleIds)
-      .eq("status", "active");
+    const [
+      { data: entitlementRows, error: entitlementError },
+      { data: subjectRows, error: subjectsError },
+      { data: appointmentRows, error: appointmentsError },
+    ] = await Promise.all([
+      supabase
+        .from("care_circle_entitlements")
+        .select("care_circle_id,plan_id,status")
+        .in("care_circle_id", circleIds)
+        .eq("status", "active"),
+      supabase
+        .from("care_subjects")
+        .select(
+          "id,care_circle_id,display_name,subject_type,is_default,is_active"
+        )
+        .in("care_circle_id", circleIds)
+        .eq("is_active", true)
+        .order("is_default", { ascending: false })
+        .order("display_name", { ascending: true }),
+      supabase
+        .from("appointments")
+        .select(
+          "id,care_circle_id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data,deleted_at"
+        )
+        .in("care_circle_id", circleIds)
+        .is("deleted_at", null)
+        .order("starts_at", { ascending: true }),
+    ]);
 
     if (entitlementError) {
       throw entitlementError;
+    }
+
+    if (subjectsError) {
+      throw subjectsError;
+    }
+
+    if (appointmentsError) {
+      throw appointmentsError;
     }
 
     const planId = entitlementRows?.[0]?.plan_id ?? defaultEntitlement.plan_id;
@@ -5222,18 +5460,6 @@ export default function Home() {
       : defaultEntitlement;
 
     setEntitlement(currentEntitlement);
-
-    const { data: subjectRows, error: subjectsError } = await supabase
-      .from("care_subjects")
-      .select("id,care_circle_id,display_name,subject_type,is_default,is_active")
-      .in("care_circle_id", circleIds)
-      .eq("is_active", true)
-      .order("is_default", { ascending: false })
-      .order("display_name", { ascending: true });
-
-    if (subjectsError) {
-      throw subjectsError;
-    }
 
     const subjects = subjectRows ?? [];
     const canUseMultipleSubjects = currentEntitlement.max_active_subjects > 1;
@@ -5270,189 +5496,16 @@ export default function Home() {
         : defaultSubjectId;
     });
 
-    let appointmentQuery = supabase
-      .from("appointments")
-      .select("id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data,deleted_at")
-      .in("care_circle_id", circleIds)
-      .is("deleted_at", null)
-      .order("starts_at", { ascending: true });
-
-    if (effectiveSubjectId !== ALL_SUBJECTS) {
-      appointmentQuery = appointmentQuery.eq("care_subject_id", effectiveSubjectId);
-    }
-
-    let notesReminderQuery = supabase
-      .from("appointments")
-      .select("id,care_circle_id,care_subject_id,current_note_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,is_sample_data,deleted_at")
-      .in("care_circle_id", circleIds)
-      .is("deleted_at", null)
-      .neq("status", "archived")
-      .is("current_note_id", null)
-      .lt("starts_at", startOfToday().toISOString())
-      .order("starts_at", { ascending: false })
-      .limit(1);
-
-    if (effectiveSubjectId !== ALL_SUBJECTS) {
-      notesReminderQuery = notesReminderQuery.eq(
-        "care_subject_id",
-        effectiveSubjectId
-      );
-    }
-
-    const upcomingStart = startOfToday();
-    const [
-      { data: appointmentRows, error: appointmentsError },
-      { data: reminderRows, error: reminderError },
-    ] = await Promise.all([appointmentQuery, notesReminderQuery]);
-
-    if (appointmentsError) {
-      throw appointmentsError;
-    }
-
-    if (reminderError) {
-      throw reminderError;
-    }
-
     const activeSubjectIds = new Set(subjects.map((subject) => subject.id));
     const activeAppointmentRows =
       appointmentRows?.filter(
         (item) =>
           !item.care_subject_id || activeSubjectIds.has(item.care_subject_id)
       ) ?? [];
-    const activeReminderRows =
-      reminderRows?.filter(
-        (item) =>
-          !item.care_subject_id || activeSubjectIds.has(item.care_subject_id)
-      ) ?? [];
+    setAppointmentPool(activeAppointmentRows);
+    applyAppointmentSelection(activeAppointmentRows, view, effectiveSubjectId);
 
-    setHasAnySavedAppointments(activeAppointmentRows.length > 0);
-    setNotesReminderAppointment(activeReminderRows[0] ?? null);
-    const nextHomeAppointment =
-      activeAppointmentRows
-        .filter((item) => {
-          if (item.status === "archived" || item.current_note_id) {
-            return false;
-          }
-
-          if (!item.starts_at) {
-            return true;
-          }
-
-          return new Date(item.starts_at) >= upcomingStart;
-        })
-        .sort((firstAppointment, secondAppointment) => {
-          if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
-            return 0;
-          }
-
-          if (!firstAppointment.starts_at) {
-            return 1;
-          }
-
-          if (!secondAppointment.starts_at) {
-            return -1;
-          }
-
-          return (
-            new Date(firstAppointment.starts_at).getTime() -
-            new Date(secondAppointment.starts_at).getTime()
-          );
-        })[0] ?? null;
-    setHomeNextAppointment(nextHomeAppointment);
-
-    const visibleAppointments =
-      activeAppointmentRows.filter((item) =>
-        view === "archived"
-          ? item.status === "archived"
-          : view === "logged"
-            ? item.status !== "archived" && Boolean(item.current_note_id)
-            : item.status !== "archived" &&
-              !item.current_note_id &&
-              (!item.starts_at ||
-                new Date(item.starts_at) >= upcomingStart)
-      );
-    visibleAppointments.sort((firstAppointment, secondAppointment) => {
-      if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
-        return 0;
-      }
-
-      if (!firstAppointment.starts_at) {
-        return 1;
-      }
-
-      if (!secondAppointment.starts_at) {
-        return -1;
-      }
-
-      const firstTime = new Date(firstAppointment.starts_at).getTime();
-      const secondTime = new Date(secondAppointment.starts_at).getTime();
-
-      if (view === "upcoming") {
-        return firstTime - secondTime;
-      }
-
-      return secondTime - firstTime;
-    });
-    const appointmentIds = visibleAppointments.map((item) => item.id);
-    const appointmentIdsForDetails = Array.from(
-      new Set([
-        ...appointmentIds,
-        ...(nextHomeAppointment ? [nextHomeAppointment.id] : []),
-      ])
-    );
-    setAppointments(visibleAppointments);
-
-    if (appointmentIdsForDetails.length === 0) {
-      setNotes([]);
-      setGuidance([]);
-      setHomeNextGuidance(null);
-      return;
-    }
-
-    const [{ data: noteRows, error: notesError }, { data: guidanceRows, error: guidanceError }] =
-      await Promise.all([
-        supabase
-          .from("appointment_notes")
-          .select(
-            "id,appointment_id,summary_short,takeaways,followups,is_current,version_number,superseded_at,superseded_by_note_id"
-          )
-          .in("appointment_id", appointmentIdsForDetails)
-          .eq("is_current", true),
-        supabase
-          .from("careprep_guidance")
-          .select(
-            "id,appointment_id,generated_at,summary,key_questions,bring_list,watchouts,med_review,since_last_visit,next_steps,is_current,version_number,review_status,source,superseded_at,superseded_by_guidance_id,edited_from_guidance_id,ai_generated_guidance_id"
-          )
-          .in("appointment_id", appointmentIdsForDetails)
-          .or("is_current.eq.true,review_status.eq.draft")
-          .order("generated_at", { ascending: true }),
-      ]);
-
-    if (notesError) {
-      throw notesError;
-    }
-
-    if (guidanceError) {
-      throw guidanceError;
-    }
-
-    const loadedGuidanceRows = guidanceRows ?? [];
-    setNotes(noteRows ?? []);
-    setGuidance(loadedGuidanceRows);
-    setHomeNextGuidance(
-      nextHomeAppointment
-        ? loadedGuidanceRows.find(
-            (row) =>
-              row.appointment_id === nextHomeAppointment.id &&
-              row.review_status === "draft"
-          ) ??
-            loadedGuidanceRows.find(
-              (row) =>
-                row.appointment_id === nextHomeAppointment.id && row.is_current
-            ) ??
-            null
-        : null
-    );
+    void hydrateAppointmentDetails(activeAppointmentRows);
   }
 
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
@@ -5485,11 +5538,16 @@ export default function Home() {
       setSignedInEmail(trimmedEmail);
       setWelcomeGuideDismissed(false);
       recordSessionActivity();
-      await Promise.all([loadAppContent(), loadAppSessionSettings()]);
-      await loadAppointments();
+      setLoading(false);
+      void loadAppContent();
+      void loadAppSessionSettings();
+      void loadAppointments().catch((loadError) => {
+        setMessage(getErrorMessage(loadError));
+      });
     } catch (error) {
       logAuthError("signIn", error);
       setMessage(getAuthErrorMessage(error));
+      setLoading(false);
     } finally {
       setLoading(false);
     }
@@ -5840,22 +5898,14 @@ export default function Home() {
     }
   }
 
-	  async function handleChangeAppointmentView(view: AppointmentView) {
+	  function handleChangeAppointmentView(view: AppointmentView) {
 	    setAppointmentView(view);
 	    setPendingModifierSwitch(null);
-	    setLoading(true);
 	    setMessage("");
-
-    try {
-      await loadAppointments(view);
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
+    applyAppointmentSelection(appointmentPool, view, selectedSubjectId);
   }
 
-	  async function handleChangeSubject(subjectId: string) {
+	  function handleChangeSubject(subjectId: string) {
 	    setSelectedSubjectId(subjectId);
 	    setPendingModifierSwitch(null);
 
@@ -5863,16 +5913,8 @@ export default function Home() {
       setNewAppointmentSubjectId(subjectId);
     }
 
-    setLoading(true);
     setMessage("");
-
-    try {
-      await loadAppointments(appointmentView, subjectId);
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
+    applyAppointmentSelection(appointmentPool, appointmentView, subjectId);
   }
 
   async function loadAiInstructions(workflowKey = selectedAiWorkflow) {
@@ -7291,7 +7333,7 @@ export default function Home() {
     }
   }
 
-  async function loadAdminIntegrationErrors() {
+  async function loadAdminIntegrationErrors({ announce = false } = {}) {
     setLoadingAdminIntegrationErrors(true);
     setMessage("");
 
@@ -7308,7 +7350,9 @@ export default function Home() {
       setAdminIntegrationErrors(rows);
       setSelectedAdminIntegrationErrorKeys([]);
       void loadAdminAttentionSummary();
-      setMessage(`Loaded ${rows.length} integration error summary row(s).`);
+      if (announce) {
+        setMessage(`Loaded ${rows.length} integration error summary row(s).`);
+      }
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -18299,7 +18343,7 @@ export default function Home() {
                 canFilterCareVips={canFilterCareVips}
                 careSubjects={careSubjects}
                 disabled={loading}
-                key={appointmentView}
+                key={`${appointmentView}-${selectedSubjectId}`}
                 onChangeSubject={handleChangeSubject}
                 onChangeView={handleChangeAppointmentView}
                 selectedSubjectId={selectedSubjectId}

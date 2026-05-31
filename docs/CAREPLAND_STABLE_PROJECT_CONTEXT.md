@@ -1,6 +1,6 @@
 # CarePland Stable Project Context
 
-Last updated: 2026-05-28
+Last updated: 2026-05-31
 
 This document is the stable architectural and operational memory for CarePland Personal. It should be updated as assumptions change. Do not preserve obsolete decisions for historical completeness here; keep this document current, clear, and useful for future implementation chats.
 
@@ -148,6 +148,12 @@ Appointment views:
 - Upcoming
 - Logged
 - Archived
+
+Performance rule:
+
+- Appointment view switches and Care VIP `Showing` filters should derive from the already-loaded appointment pool whenever possible. Do not rehydrate profile, Care Circle, entitlement, Care VIP, and onboarding context for simple local view/filter changes. Broad appointment/account reloads should be reserved for mutations, session hydration, and explicit data refreshes.
+- Initial appointment load should prioritize first useful paint: load the base appointment pool first, render the list, and hydrate richer details such as current Notes and CarePrep guidance in the background unless the user action specifically requires those details immediately.
+- Email/password sign-in should treat authentication and app hydration as separate phases. Once credentials are accepted, move out of the sign-in form promptly and let profile, appointment, content, session-setting, support, and admin-specific hydration continue from the signed-in app shell.
 
 Current user-facing appointment page direction:
 

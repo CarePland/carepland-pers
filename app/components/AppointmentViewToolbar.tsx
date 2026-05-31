@@ -49,6 +49,8 @@ export function AppointmentViewToolbar({
   view,
 }: AppointmentViewToolbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [optimisticSubjectId, setOptimisticSubjectId] =
+    useState(selectedSubjectId);
   const [optimisticView, setOptimisticView] = useState(view);
   const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const viewOptions: Array<{ label: string; value: AppointmentView }> = [
@@ -138,12 +140,13 @@ export function AppointmentViewToolbar({
                     Showing
                     <select
                       className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                      disabled={disabled || careSubjects.length === 0}
+                      disabled={careSubjects.length === 0}
                       onChange={(event) => {
+                        setOptimisticSubjectId(event.target.value);
                         onChangeSubject(event.target.value);
                         setMobileMenuOpen(false);
                       }}
-                      value={selectedSubjectId}
+                      value={optimisticSubjectId}
                     >
                       <option value={allSubjectsValue}>All appts</option>
                       {careSubjects.map((subject) => (
@@ -164,9 +167,12 @@ export function AppointmentViewToolbar({
                 <span>Showing:</span>
                 <select
                   className="max-w-48 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                  disabled={disabled || careSubjects.length === 0}
-                  onChange={(event) => onChangeSubject(event.target.value)}
-                  value={selectedSubjectId}
+                  disabled={careSubjects.length === 0}
+                  onChange={(event) => {
+                    setOptimisticSubjectId(event.target.value);
+                    onChangeSubject(event.target.value);
+                  }}
+                  value={optimisticSubjectId}
                 >
                   <option value={allSubjectsValue}>All appts</option>
                   {careSubjects.map((subject) => (
