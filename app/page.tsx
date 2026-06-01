@@ -13733,7 +13733,7 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="mt-3 grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 sm:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
+              <div className="mt-3 grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 sm:grid-cols-[minmax(0,1fr)_18rem] xl:min-h-[14rem] xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
                 <section className="relative p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 sm:order-1 xl:after:hidden">
                   <div className="flex h-7 items-center justify-between gap-2">
                     <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
