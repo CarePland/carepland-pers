@@ -1,19 +1,5 @@
 import { FormEvent } from "react";
-
-type ProfileDraft = {
-  addressLine1: string;
-  addressLine2: string;
-  city: string;
-  country: string;
-  displayName: string;
-  email: string;
-  familyName: string;
-  givenName: string;
-  phone: string;
-  postalCode: string;
-  region: string;
-  timezone: string;
-};
+import { type ProfileDraft } from "../../lib/profile/profileDraft";
 
 type TimeZoneOption = {
   label: string;

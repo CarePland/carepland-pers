@@ -1,6 +1,6 @@
 # CarePland Stable Project Context
 
-Last updated: 2026-05-31
+Last updated: 2026-06-02
 
 This document is the stable architectural and operational memory for CarePland Personal. It should be updated as assumptions change. Do not preserve obsolete decisions for historical completeness here; keep this document current, clear, and useful for future implementation chats.
 
@@ -14,6 +14,34 @@ This document is the stable architectural and operational memory for CarePland P
 - Modularize progressively and intentionally as patterns stabilize. Avoid premature abstraction and unnecessary micro-components.
 - Separate logic from `app/page.tsx` when it improves architectural clarity, maintainability, and separation of concerns, not merely for stylistic purity.
 - Profile modularization has begun with focused presentational components under `app/components/profile/` and Care VIP workflow logic under `app/lib/profile/`; keep extracting stable profile sections and rules there before broad page-level rewrites.
+- Refactor large pages through behavior-preserving extraction first: move stable UI regions into focused components, move repeated field/workflow rules into `app/lib/...`, then consider hooks once ownership boundaries are clear.
+- Profile draft shape, Supabase row-to-draft hydration, normalization, phone/ZIP validation, display-name derivation, and dirty-state keying live in `app/lib/profile/profileDraft.ts`; onboarding and signed-in profile flows should use this shared policy instead of reimplementing field rules.
+- Sign-out unsaved-change summaries, appointment modifier close/switch checks, and Import panel close checks live in `app/lib/unsavedChanges.ts`; keep the policy for what counts as discardable work centralized instead of rebuilding it in page-level UI.
+- CarePrep guidance-to-form normalization and CarePrep edit comparison live in `app/lib/editorState.ts` with the other draft comparison helpers.
+
+## Refactoring Direction
+
+Current modularization is intentionally incremental:
+
+- `app/page.tsx` remains the top-level orchestration shell for now.
+- Stable Profile UI sections belong under `app/components/profile/`.
+- Care VIP add, duplicate-email, reactivation, and soft-deactivation behavior belongs in `app/lib/profile/careVipActions.ts`.
+- Profile draft hydration, normalization, and validation belongs in `app/lib/profile/profileDraft.ts`.
+- Unsaved-change summary, appointment modifier close/switch, and Import panel close policy belongs in `app/lib/unsavedChanges.ts`; page components may own warning UI, but should not duplicate the rules for which drafts count.
+- Draft normalization and comparison rules, including CarePrep guidance form values, belong in `app/lib/editorState.ts` unless they are specific to a narrower domain module.
+
+Justification:
+
+- Reduce `app/page.tsx` size and blast radius without broad rewrites.
+- Make field-policy changes once, especially around required/optional profile details, auth-source behavior, phone formatting, ZIP validation, and saved-vs-draft comparison.
+- Preserve the current UI while making later design and behavior changes easier to apply consistently.
+
+Guardrails:
+
+- Do not introduce new Profile workflows during refactors unless explicitly requested.
+- Keep extracted components mostly presentational until workflow ownership is stable.
+- Prefer shared helper modules for rules that must behave consistently across onboarding, Profile, navigation warnings, and save actions.
+- Run lint/build/diff-check after profile workflow extractions.
 
 ## Product Philosophy And Positioning
 

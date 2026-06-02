@@ -58,6 +58,16 @@ export type CarePrepFormDraft = {
   watchouts: string;
 };
 
+export type SavedCarePrepGuidance = {
+  bring_list: unknown;
+  key_questions: unknown;
+  med_review?: unknown;
+  next_steps?: unknown;
+  since_last_visit?: unknown;
+  summary: string | null;
+  watchouts: unknown;
+};
+
 export function asTextList(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -199,5 +209,31 @@ export function carePrepDraftHasChanges(
     normalizeText(draft.summary) !== normalizeText(savedCarePrep.summary) ||
     normalizeLineList(draft.watchouts) !==
       normalizeLineList(savedCarePrep.watchouts)
+  );
+}
+
+export function carePrepGuidanceFormValues(
+  guidance: SavedCarePrepGuidance,
+  draftOverrides: Partial<CarePrepFormDraft> = {}
+): CarePrepFormDraft {
+  return {
+    bringList: asTextList(guidance.bring_list).join("\n"),
+    keyQuestions: asTextList(guidance.key_questions).join("\n"),
+    medReview: asTextList(guidance.med_review).join("\n"),
+    nextSteps: asTextList(guidance.next_steps).join("\n"),
+    sinceLastVisit: asTextList(guidance.since_last_visit).join("\n"),
+    summary: guidance.summary ?? "",
+    watchouts: asTextList(guidance.watchouts).join("\n"),
+    ...draftOverrides,
+  };
+}
+
+export function carePrepGuidanceHasDraftChanges(
+  guidance: SavedCarePrepGuidance,
+  draftOverrides: Partial<CarePrepFormDraft> = {}
+): boolean {
+  return carePrepDraftHasChanges(
+    carePrepGuidanceFormValues(guidance, draftOverrides),
+    carePrepGuidanceFormValues(guidance)
   );
 }

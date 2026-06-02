@@ -76,14 +76,18 @@ import { ProfilePage } from "./components/profile/ProfilePage";
 import { PublicWebsite } from "./components/PublicWebsite";
 import { UserFacingFooter } from "./components/UserFacingFooter";
 import {
-  appointmentDetailsDraftHasChanges,
   asTextList,
-  carePrepDraftHasChanges,
-  intakeDraftHasMeaningfulContent,
+  carePrepGuidanceFormValues,
+  carePrepGuidanceHasDraftChanges,
   intakeDraftHasSaveableNotes,
   linesToList,
-  sectionNoteDraftHasChanges,
 } from "./lib/editorState";
+import {
+  appointmentModifierHasUnsavedChanges,
+  buildUnsavedSignOutChanges,
+  textIntakePanelHasUnsavedChanges,
+  type AppointmentModifier,
+} from "./lib/unsavedChanges";
 import {
   appointmentSectionButtonClass,
   appointmentSectionTitleButtonClass,
@@ -114,6 +118,17 @@ import {
   pricingTiers,
 } from "./lib/pricingTiers";
 import { createCareVipActions } from "./lib/profile/careVipActions";
+import {
+  emptyProfileDraft,
+  formatUsPhoneFromDigits,
+  phoneDigits,
+  profileDisplayName,
+  profileDraftFromRow,
+  profileDraftKey,
+  trimProfileDraft,
+  type ProfileDraft,
+  validateProfileDraft,
+} from "./lib/profile/profileDraft";
 import { generatedBuildDttm, generatedBuildNumber } from "./build-info";
 import {
   AppSessionSettings,
@@ -616,7 +631,6 @@ type AiWorkflowKey =
   | "support_assistant";
 type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
-type AppointmentModifier = "add" | "edit" | "import";
 type MainTab = "admin" | "appointments" | "home" | "profile";
 type ProductMgmtSection = string;
 type ProductMgmtStatus = "deferred" | "in_progress" | "open" | "resolved";
@@ -746,21 +760,6 @@ type AppointmentDetailChange = {
   newValue: string;
 };
 
-type ProfileDraft = {
-  addressLine1: string;
-  addressLine2: string;
-  city: string;
-  country: string;
-  displayName: string;
-  email: string;
-  familyName: string;
-  givenName: string;
-  phone: string;
-  postalCode: string;
-  region: string;
-  timezone: string;
-};
-
 type SampleDataStatus = {
   appointments_created?: number;
   declined_at?: string | null;
@@ -813,12 +812,6 @@ type StoredDraftState = {
   textIntakeSubjectId?: string;
   textIntakeTargetAppointmentId?: string | null;
   textIntakeValue?: string;
-};
-
-type UnsavedChangeSummary = {
-  detail?: string;
-  key: string;
-  label: string;
 };
 
 const ALL_SUBJECTS = "all";
@@ -1161,48 +1154,6 @@ const productMgmtSections = [
 
 const betaAgreementVersion = "beta-2026-05-19";
 const currentWelcomeGuideVersion = "welcome-2026-05-23";
-
-const emptyProfileDraft: ProfileDraft = {
-  addressLine1: "",
-  addressLine2: "",
-  city: "",
-  country: "US",
-  displayName: "",
-  email: "",
-  familyName: "",
-  givenName: "",
-  phone: "",
-  postalCode: "",
-  region: "",
-  timezone: "",
-};
-
-function profileDisplayName(
-  profile: Pick<ProfileDraft, "displayName" | "email" | "familyName" | "givenName">
-) {
-  const fullName = [profile.givenName.trim(), profile.familyName.trim()]
-    .filter(Boolean)
-    .join(" ");
-
-  return profile.displayName.trim() || fullName || profile.email.trim();
-}
-
-function profileDraftKey(profile: ProfileDraft) {
-  return JSON.stringify({
-    addressLine1: profile.addressLine1.trim(),
-    addressLine2: profile.addressLine2.trim(),
-    city: profile.city.trim(),
-    country: profile.country.trim(),
-    displayName: profile.displayName.trim(),
-    email: profile.email.trim(),
-    familyName: profile.familyName.trim(),
-    givenName: profile.givenName.trim(),
-    phone: profile.phone.trim(),
-    postalCode: profile.postalCode.trim(),
-    region: profile.region.trim(),
-    timezone: profile.timezone.trim(),
-  });
-}
 
 const timeZoneOptions = [
   { label: "Eastern", value: "America/New_York" },
@@ -2000,53 +1951,8 @@ function browserTimezone(): string {
   return "";
 }
 
-function formatUsPhoneFromDigits(digits: string): string {
-  const area = digits.slice(0, 3);
-  const prefix = digits.slice(3, 6);
-  const line = digits.slice(6, 10);
-
-  if (digits.length <= 3) {
-    return area ? `(${area}` : "";
-  }
-
-  if (digits.length <= 6) {
-    return `(${area}) ${prefix}`;
-  }
-
-  return `(${area}) ${prefix}-${line}`;
-}
-
-function phoneDigits(value: string): string {
-  let digits = value.replace(/\D/g, "");
-
-  if (digits.length > 10 && digits.startsWith("1")) {
-    digits = digits.slice(1);
-  }
-
-  return digits.slice(0, 10);
-}
-
-function normalizeUsPhone(value: string):
-  | { display: string; e164: string }
-  | null {
-  const digits = phoneDigits(value);
-
-  if (digits.length !== 10) {
-    return null;
-  }
-
-  return {
-    display: formatUsPhoneFromDigits(digits),
-    e164: `+1${digits}`,
-  };
-}
-
 function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function isValidUsZip(value: string): boolean {
-  return /^\d{5}(-\d{4})?$/.test(value.trim());
 }
 
 function sampleDataStatusFromValue(value: unknown): SampleDataStatus {
@@ -3152,6 +3058,9 @@ export default function Home() {
   const [editingCarePrepIds, setEditingCarePrepIds] = useState<
     Record<string, boolean>
   >(initialDraftState?.editingCarePrepIds ?? {});
+  const [pendingCarePrepCloseId, setPendingCarePrepCloseId] = useState<
+    string | null
+  >(null);
   const [expandedCarePrepIds, setExpandedCarePrepIds] = useState<
     Record<string, boolean>
   >({});
@@ -3173,6 +3082,8 @@ export default function Home() {
   const [processingTextIntake, setProcessingTextIntake] = useState(false);
   const [extractingImageText, setExtractingImageText] = useState(false);
   const [fileImportStatus, setFileImportStatus] = useState("");
+  const [pendingTextIntakePanelAction, setPendingTextIntakePanelAction] =
+    useState<AppointmentPanel | "close" | null>(null);
   const [savingTextIntake, setSavingTextIntake] = useState(false);
   const [creatingCareVip, setCreatingCareVip] = useState(false);
   const [deactivatingCareVipId, setDeactivatingCareVipId] = useState<
@@ -3943,162 +3854,53 @@ export default function Home() {
 	  const hasUnaddedCareVipName = newCareVipName.trim().length > 0;
 	  const shouldWarnBeforeProfileSignOut =
 	    mainTab === "profile" && (hasUnsavedProfileChanges || hasUnaddedCareVipName);
-	  const unsavedSignOutChanges = useMemo(() => {
-	    const changes = new Map<string, UnsavedChangeSummary>();
-	    const addChange = (change: UnsavedChangeSummary) => {
-	      changes.set(change.key, change);
-	    };
-	    const appointmentLabel = (appointmentId: string, fallback = "") => {
-	      const appointment = appointmentsById.get(appointmentId);
-	      const draft = appointmentDrafts[appointmentId];
+  const unsavedSignOutChanges = useMemo(() => {
+    return buildUnsavedSignOutChanges({
+      appointmentDrafts,
+      appointmentsById,
+      askConversationComplete,
+      askInput,
+      askMessagesLength: askMessages.length,
+      bulkAppointmentDraftsLength: bulkAppointmentDrafts.length,
+      carePrepDrafts,
+      contextualTextIntakeValue,
+      editingAppointmentIds,
+      editingNoteIds,
+      emptyAppointmentDraft,
+      emptyNoteDraft,
+      getCarePrepSavedDraft: (appointmentId) => {
+        const savedCarePrep =
+          guidanceByAppointment.get(appointmentId) ??
+          draftGuidanceByAppointment.get(appointmentId);
 
-	      return (
-	        appointment?.title?.trim() ||
-	        draft?.title?.trim() ||
-	        fallback ||
-	        "Appointment draft"
-	      );
-	    };
-
-	    if (hasUnsavedProfileChanges) {
-	      addChange({ key: "profile", label: "Profile" });
-	    }
-
-	    if (hasUnaddedCareVipName) {
-	      addChange({
-	        detail: newCareVipName.trim(),
-	        key: "care-vip",
-	        label: "New Care VIP",
-	      });
-	    }
-
-	    if (
-	      newAppointmentTitle.trim() ||
-	      newAppointmentReason.trim() ||
-	      newAppointmentStartsAt.trim() ||
-	      newAppointmentProviderName.trim() ||
-	      newAppointmentProviderOrganization.trim() ||
-	      newAppointmentLocationName.trim() ||
-	      newAppointmentLocationAddress.trim() ||
-	      newAppointmentLocationPhone.trim()
-	    ) {
-	      addChange({
-	        detail: newAppointmentTitle.trim() || "Untitled appointment",
-	        key: "new-appointment",
-	        label: "New appointment",
-	      });
-	    }
-
-	    if (bulkAppointmentDrafts.length > 0) {
-	      addChange({
-	        detail: `${bulkAppointmentDrafts.length} draft${
-	          bulkAppointmentDrafts.length === 1 ? "" : "s"
-	        }`,
-	        key: "bulk-appointments",
-	        label: "Appointment import",
-	      });
-	    }
-
-    if (textIntakeTargetAppointmentId) {
-      if (
-        textIntakeDraft
-          ? intakeDraftHasSaveableNotes(textIntakeDraft)
-          : contextualTextIntakeValue.trim()
-      ) {
-        addChange({
-          detail: appointmentLabel(textIntakeTargetAppointmentId, "Appointment"),
-          key: `visit-notes-intake-${textIntakeTargetAppointmentId}`,
-          label: "Visit notes intake",
-        });
-      }
-    } else if (
-      (textIntakeDraft
-        ? intakeDraftHasMeaningfulContent(textIntakeDraft)
-        : textIntakeValue.trim()) ||
-      (!textIntakeDraft && textIntakeMatches.length > 0)
-    ) {
-      addChange({
-        key: "text-intake",
-        label: "Appointment or notes intake",
-      });
-    }
-
-	    Object.entries(editingAppointmentIds).forEach(([appointmentId, isEditing]) => {
-	      if (!isEditing) {
-	        return;
-	      }
-
-	      const appointment = appointmentsById.get(appointmentId);
-	      if (appointment) {
-	        const draft = appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
-	        const hasChanges = appointmentDetailsDraftHasChanges(draft, {
-	          ...appointment,
-	          startsAt: toDatetimeLocalValue(appointment.starts_at),
-	        });
-
-	        if (!hasChanges) {
-	          return;
-	        }
-	      }
-
-	      addChange({
-	        detail: appointmentLabel(appointmentId),
-	        key: `appointment-edit-${appointmentId}`,
-	        label: "Appointment details",
-	      });
-	    });
-
-	    Object.entries(editingNoteIds).forEach(([appointmentId, isEditing]) => {
-	      if (!isEditing) {
-	        return;
-	      }
-
-	      const appointment = appointmentsById.get(appointmentId);
-	      if (appointment) {
-	        const draft = noteDrafts[appointment.id] ?? emptyNoteDraft;
-	        const existingNote = notesByAppointment.get(appointment.id);
-	        const hasChanges = sectionNoteDraftHasChanges(draft, existingNote);
-
-	        if (!hasChanges) {
-	          return;
-	        }
-	      }
-
-	      addChange({
-	        detail: appointmentLabel(appointmentId),
-	        key: `note-edit-${appointmentId}`,
-	        label: "Visit notes",
-	      });
-	    });
-
-	    Object.entries(carePrepDrafts).forEach(([appointmentId, draft]) => {
-	      const savedCarePrep =
-	        guidanceByAppointment.get(appointmentId) ??
-	        draftGuidanceByAppointment.get(appointmentId);
-	      const hasChanges = savedCarePrep
-	        ? carePrepDraftHasChanges(
-	            draft,
-	            carePrepBaseFormValues(savedCarePrep)
-	          )
-	        : Object.values(draft).some((value) => String(value ?? "").trim());
-
-	      if (!hasChanges) {
-	        return;
-	      }
-
-	      addChange({
-	        detail: appointmentLabel(appointmentId),
-	        key: `careprep-${appointmentId}`,
-	        label: "CarePrep",
-	      });
-	    });
-
-	    if (askInput.trim() || (askMessages.length > 0 && !askConversationComplete)) {
-	      addChange({ key: "ask", label: "Ask conversation" });
-	    }
-
-	    return Array.from(changes.values());
-	  }, [
+        return savedCarePrep ? carePrepGuidanceFormValues(savedCarePrep) : null;
+      },
+      getSavedAppointmentDetails: (appointment) => ({
+        ...appointment,
+        startsAt: toDatetimeLocalValue(appointment.starts_at),
+      }),
+      hasUnaddedCareVipName,
+      hasUnsavedProfileChanges,
+      newAppointmentDraft: {
+        locationAddress: newAppointmentLocationAddress,
+        locationName: newAppointmentLocationName,
+        locationPhone: newAppointmentLocationPhone,
+        providerName: newAppointmentProviderName,
+        providerOrganization: newAppointmentProviderOrganization,
+        reason: newAppointmentReason,
+        startsAt: newAppointmentStartsAt,
+        status: "scheduled",
+        title: newAppointmentTitle,
+      },
+      newCareVipName,
+      noteDrafts,
+      notesByAppointment,
+      textIntakeDraft,
+      textIntakeMatchesLength: textIntakeMatches.length,
+      textIntakeTargetAppointmentId,
+      textIntakeValue,
+    });
+  }, [
 	    appointmentDrafts,
 	    appointmentsById,
 	    askConversationComplete,
@@ -5016,34 +4818,6 @@ export default function Home() {
     }
   }
 
-  function profileDraftFromRow(
-    row: Record<string, unknown> | null | undefined,
-    fallbackEmail: string
-  ): ProfileDraft {
-    return {
-      addressLine1: String(row?.address_line1 ?? ""),
-      addressLine2: String(row?.address_line2 ?? ""),
-      city: String(row?.city ?? ""),
-      country: String(row?.country ?? "US"),
-      displayName: String(row?.display_name ?? ""),
-      email: String(row?.email ?? fallbackEmail),
-      familyName: String(row?.family_name ?? ""),
-      givenName: String(row?.given_name ?? ""),
-      phone: String(
-        row?.phone ??
-          (typeof row?.phone_e164 === "string"
-            ? formatUsPhoneFromDigits(phoneDigits(row.phone_e164))
-            : "")
-      ),
-      postalCode: String(row?.postal_code ?? ""),
-      region: String(row?.region ?? ""),
-      timezone:
-        typeof row?.timezone === "string" && row.timezone
-          ? row.timezone
-          : browserTimezone(),
-    };
-  }
-
   function updateProfileDraft(field: keyof ProfileDraft, value: string) {
     setProfileDraft((currentDraft) => ({
       ...currentDraft,
@@ -5281,7 +5055,11 @@ export default function Home() {
     }
 
     const loadedProfileDraft = {
-      ...profileDraftFromRow(profileRow, profileEmail),
+      ...profileDraftFromRow({
+        fallbackEmail: profileEmail,
+        fallbackTimezone: browserTimezone(),
+        row: profileRow,
+      }),
       email: userRequiresEmailUpdate ? "" : profileRow?.email ?? profileEmail,
     };
     setProfileDraft(loadedProfileDraft);
@@ -6852,6 +6630,20 @@ export default function Home() {
   }
 
   function startAppointmentPanel(panel: AppointmentPanel) {
+    if (
+      activeAppointmentPanel === "quickAdd" &&
+      panel !== "quickAdd" &&
+      textIntakePanelHasUnsavedChanges({
+        bulkAppointmentDraftsLength: bulkAppointmentDrafts.length,
+        textIntakeDraft,
+        textIntakeMatchesLength: textIntakeMatches.length,
+        textIntakeValue,
+      })
+    ) {
+      setPendingTextIntakePanelAction(panel);
+      return;
+    }
+
     setMessage("");
     setAppointmentView("upcoming");
     setSelectedSubjectId(ALL_SUBJECTS);
@@ -9538,57 +9330,14 @@ export default function Home() {
       }
 
       const profileEmail = user.email ?? profileDraft.email.trim();
-
-      if (!profileEmail) {
-        throw new Error("Email is required.");
-      }
-
-      if (!isLikelyEmail(profileEmail)) {
-        throw new Error("Enter a valid email address.");
-      }
-
-      if (
-        requiresEmailUpdate &&
-        user.email &&
-        profileEmail.toLowerCase() === user.email.toLowerCase()
-      ) {
-        throw new Error("Enter an email you can access.");
-      }
-
-      if (profileDetailsRequired && !profileDraft.givenName.trim()) {
-        throw new Error("First name is required.");
-      }
-
-      if (profileDetailsRequired && !profileDraft.familyName.trim()) {
-        throw new Error("Last name is required.");
-      }
-
-      if (profileDetailsRequired && !profileDraft.timezone.trim()) {
-        throw new Error("Time zone is required.");
-      }
-
-      if (profileDetailsRequired && !profileDraft.phone.trim()) {
-        throw new Error("Phone number is required.");
-      }
-
-      if (profileDetailsRequired && !profileDraft.postalCode.trim()) {
-        throw new Error("ZIP code is required.");
-      }
-
-      if (
-        profileDraft.postalCode.trim() &&
-        !isValidUsZip(profileDraft.postalCode)
-      ) {
-        throw new Error("Enter a valid ZIP code, like 12345 or 12345-6789.");
-      }
-
-      const normalizedPhone = profileDraft.phone.trim()
-        ? normalizeUsPhone(profileDraft.phone)
-        : null;
-
-      if ((profileDetailsRequired || profileDraft.phone.trim()) && !normalizedPhone) {
-        throw new Error("Enter a valid 10-digit U.S. phone number.");
-      }
+      const { normalizedPhone } = validateProfileDraft({
+        isLikelyEmail,
+        profileDetailsRequired,
+        profileDraft,
+        profileEmail,
+        requiresEmailUpdate,
+        userEmail: user.email,
+      });
 
       if (requiresEmailUpdate) {
         const { error: authUpdateError } = await supabase.auth.updateUser({
@@ -9605,43 +9354,35 @@ export default function Home() {
       }
 
       const completedAt = new Date().toISOString();
-      const storedDisplayName = profileDraft.displayName.trim() || null;
+      const trimmedProfileDraft = trimProfileDraft(profileDraft);
+      const storedDisplayName = trimmedProfileDraft.displayName || null;
       const visibleDisplayName = profileDisplayName({
-        displayName: profileDraft.displayName,
+        displayName: trimmedProfileDraft.displayName,
         email: profileEmail,
-        familyName: profileDraft.familyName,
-        givenName: profileDraft.givenName,
+        familyName: trimmedProfileDraft.familyName,
+        givenName: trimmedProfileDraft.givenName,
       });
       const savedDraft: ProfileDraft = {
-        addressLine1: profileDraft.addressLine1.trim(),
-        addressLine2: profileDraft.addressLine2.trim(),
-        city: profileDraft.city.trim(),
-        country: profileDraft.country.trim(),
-        displayName: profileDraft.displayName.trim(),
+        ...trimmedProfileDraft,
         email: profileEmail,
-        familyName: profileDraft.familyName.trim(),
-        givenName: profileDraft.givenName.trim(),
         phone: normalizedPhone?.display ?? "",
-        postalCode: profileDraft.postalCode.trim(),
-        region: profileDraft.region.trim(),
-        timezone: profileDraft.timezone.trim(),
       };
       const { error } = await supabase.from("profiles").upsert({
-        address_line1: profileDraft.addressLine1.trim() || null,
-        address_line2: profileDraft.addressLine2.trim() || null,
-        city: profileDraft.city.trim() || null,
-        country: profileDraft.country.trim() || null,
+        address_line1: trimmedProfileDraft.addressLine1 || null,
+        address_line2: trimmedProfileDraft.addressLine2 || null,
+        city: trimmedProfileDraft.city || null,
+        country: trimmedProfileDraft.country || null,
         display_name: storedDisplayName,
         email: profileEmail,
-        family_name: profileDraft.familyName.trim(),
-        given_name: profileDraft.givenName.trim(),
+        family_name: trimmedProfileDraft.familyName,
+        given_name: trimmedProfileDraft.givenName,
         id: user.id,
         onboarding_completed_at: completedAt,
         phone: normalizedPhone?.display ?? null,
         phone_e164: normalizedPhone?.e164 ?? null,
-        postal_code: profileDraft.postalCode.trim() || null,
-        region: profileDraft.region.trim() || null,
-        timezone: profileDraft.timezone.trim(),
+        postal_code: trimmedProfileDraft.postalCode || null,
+        region: trimmedProfileDraft.region || null,
+        timezone: trimmedProfileDraft.timezone,
       });
 
       if (error) {
@@ -10297,37 +10038,18 @@ export default function Home() {
 	    appointment: Appointment,
 	    modifier: AppointmentModifier | null
 	  ) {
-	    if (modifier === "add") {
-	      const draft = noteDrafts[appointment.id] ?? emptyNoteDraft;
-	      const existingNote = notesByAppointment.get(appointment.id);
-	      return sectionNoteDraftHasChanges(draft, existingNote);
-    }
-
-    if (modifier === "import") {
-      if (textIntakeTargetAppointmentId === appointment.id) {
-        return Boolean(
-          textIntakeDraft
-            ? intakeDraftHasSaveableNotes(textIntakeDraft)
-            : contextualTextIntakeValue.trim()
-        );
-      }
-
-      return Boolean(
-        textIntakeDraft
-          ? intakeDraftHasMeaningfulContent(textIntakeDraft)
-          : contextualTextIntakeValue.trim()
-      );
-    }
-
-    if (modifier === "edit") {
-      const draft = appointmentDrafts[appointment.id] ?? emptyAppointmentDraft;
-      return appointmentDetailsDraftHasChanges(draft, {
+    return appointmentModifierHasUnsavedChanges({
+      appointmentDraft: appointmentDrafts[appointment.id] ?? emptyAppointmentDraft,
+      contextualTextIntakeValue,
+      existingNote: notesByAppointment.get(appointment.id),
+      modifier,
+      noteDraft: noteDrafts[appointment.id] ?? emptyNoteDraft,
+      savedAppointmentDetails: {
         ...appointment,
         startsAt: toDatetimeLocalValue(appointment.starts_at),
-      });
-    }
-
-    return false;
+      },
+      textIntakeDraft,
+    });
   }
 
   function discardAppointmentModifier(
@@ -10412,17 +10134,48 @@ export default function Home() {
 	    cancelTextIntake();
 	  }
 
-	  function requestCloseNoteEditing(appointment: Appointment) {
-	    if (hasUnsavedAppointmentModifierChanges(appointment, "add")) {
-	      setPendingModifierSwitch({
-	        appointmentId: appointment.id,
-	        target: null,
+  function requestCloseNoteEditing(appointment: Appointment) {
+    if (hasUnsavedAppointmentModifierChanges(appointment, "add")) {
+      setPendingModifierSwitch({
+        appointmentId: appointment.id,
+        target: null,
 	      });
 	      return;
 	    }
 
-	    cancelEditingNote(appointment.id);
-	  }
+    cancelEditingNote(appointment.id);
+  }
+
+  function requestCloseTextIntakePanel() {
+    if (
+      textIntakePanelHasUnsavedChanges({
+        bulkAppointmentDraftsLength: bulkAppointmentDrafts.length,
+        textIntakeDraft,
+        textIntakeMatchesLength: textIntakeMatches.length,
+        textIntakeValue,
+      })
+    ) {
+      setPendingTextIntakePanelAction("close");
+      return;
+    }
+
+    cancelTextIntake();
+    setActiveAppointmentPanel(null);
+  }
+
+  function discardAndApplyTextIntakePanelAction() {
+    const action = pendingTextIntakePanelAction;
+
+    cancelTextIntake();
+
+    if (action === "close" || !action) {
+      setActiveAppointmentPanel(null);
+      return;
+    }
+
+    resetPlaceLookup();
+    setActiveAppointmentPanel(action);
+  }
 
   function discardAndSwitchAppointmentModifier(appointment: Appointment) {
     if (!pendingModifierSwitch) {
@@ -10481,6 +10234,7 @@ export default function Home() {
   }
 
   function cancelTextIntake() {
+    setPendingTextIntakePanelAction(null);
     setPendingModifierSwitch(null);
     setTextIntakeValue("");
     setTextIntakeDraft(null);
@@ -11910,33 +11664,15 @@ export default function Home() {
     }
   }
 
-  function carePrepBaseFormValues(draft: CarePrepGuidance) {
-    return {
-      bringList: asTextList(draft.bring_list).join("\n"),
-      keyQuestions: asTextList(draft.key_questions).join("\n"),
-      medReview: asTextList(draft.med_review).join("\n"),
-      nextSteps: asTextList(draft.next_steps).join("\n"),
-      sinceLastVisit: asTextList(draft.since_last_visit).join("\n"),
-      summary: draft.summary ?? "",
-      watchouts: asTextList(draft.watchouts).join("\n"),
-    };
-  }
-
   function carePrepFormValues(appointmentId: string, draft: CarePrepGuidance) {
-    return {
-      ...carePrepBaseFormValues(draft),
-      ...carePrepDrafts[appointmentId],
-    };
+    return carePrepGuidanceFormValues(draft, carePrepDrafts[appointmentId]);
   }
 
   function hasCarePrepDraftChanges(
     appointmentId: string,
     draft: CarePrepGuidance
   ) {
-    const baseValues = carePrepBaseFormValues(draft);
-    const currentValues = carePrepFormValues(appointmentId, draft);
-
-    return carePrepDraftHasChanges(currentValues, baseValues);
+    return carePrepGuidanceHasDraftChanges(draft, carePrepDrafts[appointmentId]);
   }
 
   function updateCarePrepDraft(
@@ -11956,6 +11692,7 @@ export default function Home() {
   }
 
   function startEditingCarePrep(appointmentId: string, prep: CarePrepGuidance) {
+    setPendingCarePrepCloseId(null);
     setCarePrepDrafts((currentDrafts) => ({
       ...currentDrafts,
       [appointmentId]: carePrepFormValues(appointmentId, prep),
@@ -11967,6 +11704,7 @@ export default function Home() {
   }
 
   function cancelEditingCarePrep(appointmentId: string) {
+    setPendingCarePrepCloseId(null);
     setCarePrepDrafts((currentDrafts) => {
       const nextDrafts = { ...currentDrafts };
       delete nextDrafts[appointmentId];
@@ -11976,6 +11714,18 @@ export default function Home() {
       ...currentIds,
       [appointmentId]: false,
     }));
+  }
+
+  function requestCloseCarePrepEdit(
+    appointmentId: string,
+    prep: CarePrepGuidance
+  ) {
+    if (hasCarePrepDraftChanges(appointmentId, prep)) {
+      setPendingCarePrepCloseId(appointmentId);
+      return;
+    }
+
+    cancelEditingCarePrep(appointmentId);
   }
 
   async function saveCurrentCarePrepEdit(
@@ -14946,16 +14696,32 @@ export default function Home() {
                         </button>
                         <button
                           className={gentleSecondaryButtonClass}
-                          onClick={() => {
-                            cancelTextIntake();
-                            setActiveAppointmentPanel(null);
-                          }}
+                          onClick={requestCloseTextIntakePanel}
                           type="button"
                         >
                           Cancel
                         </button>
                       </div>
                     </form>
+
+                    {pendingTextIntakePanelAction ? (
+                      <InlineConfirmation
+                        cancelLabel="Return to editing"
+                        className="mt-4"
+                        confirmLabel={
+                          pendingTextIntakePanelAction === "close"
+                            ? "Discard and close"
+                            : "Discard and switch"
+                        }
+                        message={
+                          pendingTextIntakePanelAction === "close"
+                            ? "Closing will discard your unsaved changes. Proceed?"
+                            : "Switching will discard your unsaved changes. Proceed?"
+                        }
+                        onCancel={() => setPendingTextIntakePanelAction(null)}
+                        onConfirm={discardAndApplyTextIntakePanelAction}
+                      />
+                    ) : null}
 
                     {textIntakeDraft && !textIntakeTargetAppointmentId ? (
                       <form
@@ -15079,7 +14845,7 @@ export default function Home() {
                           </button>
                           <button
                             className={gentleSecondaryButtonClass}
-                            onClick={cancelTextIntake}
+                            onClick={requestCloseTextIntakePanel}
                             type="button"
                           >
                             Cancel
@@ -15300,7 +15066,7 @@ export default function Home() {
                           </button>
                           <button
                             className={gentleSecondaryButtonClass}
-                            onClick={cancelTextIntake}
+                            onClick={requestCloseTextIntakePanel}
                             type="button"
                           >
                             Cancel
@@ -17766,6 +17532,10 @@ export default function Home() {
                 const prepEditValues = prep
                   ? carePrepFormValues(appointment.id, prep)
                   : emptyCarePrepDraft;
+                const shouldWarnBeforeClosingCarePrepEdit =
+                  prep && pendingCarePrepCloseId === appointment.id
+                    ? hasCarePrepDraftChanges(appointment.id, prep)
+                    : false;
                 const isArchived = appointment.status === "archived";
                 const isLogged = Boolean(appointment.current_note_id);
                 const isVisitNotesExpandableView =
@@ -18119,7 +17889,7 @@ export default function Home() {
                               </button>
                               <button
                                 className="rounded-md px-2 py-1 text-sm font-normal text-[#767676] transition hover:bg-blue-50 hover:text-slate-700"
-                                onClick={cancelTextIntake}
+                                onClick={() => requestCloseTextIntake(appointment)}
                                 type="button"
                               >
                                 Cancel
@@ -18934,6 +18704,17 @@ export default function Home() {
                             ) : null}
                             {isEditingCarePrep ? (
                               <div className="grid gap-4 border-t border-blue-100/70 p-4">
+                            {shouldWarnBeforeClosingCarePrepEdit && prep ? (
+                              <InlineConfirmation
+                                cancelLabel="Return to editing"
+                                confirmLabel="Discard and close"
+                                message="Closing will discard your unsaved changes. Proceed?"
+                                onCancel={() => setPendingCarePrepCloseId(null)}
+                                onConfirm={() =>
+                                  cancelEditingCarePrep(appointment.id)
+                                }
+                              />
+                            ) : null}
                             <label className="block text-sm font-medium text-slate-700">
                               Summary
                               <textarea
@@ -19059,7 +18840,7 @@ export default function Home() {
                               <button
                                 className={`${gentleSecondaryButtonClass} text-sm`}
                                 onClick={() =>
-                                  cancelEditingCarePrep(appointment.id)
+                                  requestCloseCarePrepEdit(appointment.id, prep)
                                 }
                                 type="button"
                               >
