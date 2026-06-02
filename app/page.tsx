@@ -72,6 +72,7 @@ import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import { HomeNextAppointmentPanel } from "./components/HomeNextAppointmentPanel";
 import { InlineConfirmation } from "./components/InlineConfirmation";
+import { ProfilePage } from "./components/profile/ProfilePage";
 import { PublicWebsite } from "./components/PublicWebsite";
 import { UserFacingFooter } from "./components/UserFacingFooter";
 import {
@@ -112,6 +113,7 @@ import {
   pricingTierForEntitlement,
   pricingTiers,
 } from "./lib/pricingTiers";
+import { createCareVipActions } from "./lib/profile/careVipActions";
 import { generatedBuildDttm, generatedBuildNumber } from "./build-info";
 import {
   AppSessionSettings,
@@ -9912,174 +9914,34 @@ export default function Home() {
     }
   }
 
-  async function handleCreateCareVip(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setCreatingCareVip(true);
-    setMessage("");
-    setCareVipFormMessage("");
-
-    try {
-      const displayName = newCareVipName.trim();
-
-      if (!displayName) {
-        throw new Error("Please enter a Care VIP name.");
-      }
-
-      const normalizedDisplayName = displayName.toLowerCase();
-      const isEmailEntry = isLikelyEmail(displayName);
-      const activeMatch = isEmailEntry
-        ? careSubjects.find(
-            (subject) =>
-              subject.display_name.trim().toLowerCase() ===
-              normalizedDisplayName
-          )
-        : null;
-
-      if (activeMatch) {
-        setCareVipFormMessage(
-          "Sorry, that email is already in use. Please enter a different email."
-        );
-        setPendingReactivateCareVip(null);
-        return;
-      }
-
-      if (!canAddCareVip) {
-        throw new Error(
-          `${entitlement.plan_name} allows ${entitlement.max_active_subjects} active Care VIP.`
-        );
-      }
-
-      const { careCircleId } = await getPrimaryCareContext();
-      const { data: inactiveMatches, error: inactiveMatchesError } =
-        await supabase
-          .from("care_subjects")
-          .select("id,display_name")
-          .eq("care_circle_id", careCircleId)
-          .eq("is_active", false);
-
-      if (inactiveMatchesError) {
-        throw inactiveMatchesError;
-      }
-
-      const inactiveMatch = isEmailEntry
-        ? inactiveMatches?.find(
-            (subject) =>
-              subject.display_name.trim().toLowerCase() ===
-              normalizedDisplayName
-          )
-        : null;
-
-      if (inactiveMatch) {
-        setCareVipFormMessage("");
-        setPendingReactivateCareVip({
-          displayName: inactiveMatch.display_name,
-          id: inactiveMatch.id,
-        });
-        setCreatingCareVip(false);
-        return;
-      }
-
-      const isFirstCareVip = careSubjects.length === 0;
-
-      const { data: newSubject, error } = await supabase
-        .from("care_subjects")
-        .insert({
-          care_circle_id: careCircleId,
-          display_name: displayName,
-          is_active: true,
-          is_default: isFirstCareVip,
-          subject_type: "other",
-        })
-        .select("id")
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      setNewCareVipName("");
-      setCareVipFormMessage("");
-      setPendingReactivateCareVip(null);
-      setSelectedSubjectId(newSubject.id);
-      setNewAppointmentSubjectId(newSubject.id);
-      setManagingCareVips(false);
-      await loadAppointments(appointmentView, newSubject.id);
-      setMessage("Care VIP added.");
-    } catch (error) {
-      setCareVipFormMessage(getErrorMessage(error));
-    } finally {
-      setCreatingCareVip(false);
-    }
-  }
-
-  async function handleReactivateCareVip() {
-    if (!pendingReactivateCareVip) {
-      return;
-    }
-
-    setCreatingCareVip(true);
-    setMessage("");
-
-    try {
-      const { error } = await supabase
-        .from("care_subjects")
-        .update({ is_active: true })
-        .eq("id", pendingReactivateCareVip.id);
-
-      if (error) {
-        throw error;
-      }
-
-      const reactivatedId = pendingReactivateCareVip.id;
-      setPendingReactivateCareVip(null);
-      setCareVipFormMessage("");
-      setNewCareVipName("");
-      setSelectedSubjectId(reactivatedId);
-      setNewAppointmentSubjectId(reactivatedId);
-      await loadAppointments(appointmentView, reactivatedId);
-      setMessage("Care VIP reactivated.");
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setCreatingCareVip(false);
-    }
-  }
-
-  async function handleDeactivateCareVip(subject: CareSubject) {
-    if (subject.is_default) {
-      return;
-    }
-
-    setDeactivatingCareVipId(subject.id);
-    setMessage("");
-
-    try {
-      const { error } = await supabase
-        .from("care_subjects")
-        .update({ is_active: false })
-        .eq("id", subject.id)
-        .eq("is_default", false);
-
-      if (error) {
-        throw error;
-      }
-
-      setPendingDeactivateCareVipId(null);
-      setPendingReactivateCareVip(null);
-      setSelectedSubjectId((currentSubjectId) =>
-        currentSubjectId === subject.id ? ALL_SUBJECTS : currentSubjectId
-      );
-      setNewAppointmentSubjectId((currentSubjectId) =>
-        currentSubjectId === subject.id ? "" : currentSubjectId
-      );
-      await loadAppointments(appointmentView, ALL_SUBJECTS);
-      setMessage("Care VIP deactivated.");
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setDeactivatingCareVipId(null);
-    }
-  }
+  const {
+    createCareVip: handleCreateCareVip,
+    deactivateCareVip: handleDeactivateCareVip,
+    reactivateCareVip: handleReactivateCareVip,
+  } = createCareVipActions({
+    allSubjectsValue: ALL_SUBJECTS,
+    appointmentView,
+    canAddCareVip,
+    careSubjects,
+    entitlement,
+    getErrorMessage,
+    getPrimaryCareContext,
+    isLikelyEmail,
+    loadAppointments,
+    newCareVipName,
+    pendingReactivateCareVip,
+    setCareVipFormMessage,
+    setCreatingCareVip,
+    setDeactivatingCareVipId,
+    setManagingCareVips,
+    setMessage,
+    setNewAppointmentSubjectId,
+    setNewCareVipName,
+    setPendingDeactivateCareVipId,
+    setPendingReactivateCareVip,
+    setSelectedSubjectId,
+    supabase,
+  });
 
   async function handleInterpretTextIntake(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -13716,578 +13578,80 @@ export default function Home() {
         ) : signedInEmail && mainTab === "home" ? (
           renderHomeView()
         ) : signedInEmail && mainTab === "profile" ? (
-          <div className="mt-6 space-y-5">
-            <section>
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="break-words pt-1 text-xl font-semibold text-slate-950">
-                    Your CarePland Account
-                  </h2>
-                </div>
-                <button
-                  className={`${gentleSecondaryButtonClass} self-center text-sm`}
-                  onClick={() => void handleSignOut()}
-                  type="button"
-                >
-                  Sign out
-                </button>
-              </div>
-
-              <div className="mt-3 grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 sm:grid-cols-[minmax(0,1fr)_18rem] xl:min-h-[14rem] xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
-                <section className="relative p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 sm:order-1 xl:after:hidden">
-                  <div className="flex h-7 items-center justify-between gap-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Plan
-                    </div>
-                    {isAdmin ? (
-                      <label className="w-[7.5rem]">
-                        <span className="sr-only">Preview plan</span>
-                        <select
-                          aria-label="Preview plan"
-                          className="h-7 w-full rounded-md border border-blue-100 bg-white px-2 text-xs font-semibold leading-none text-slate-500"
-                          onChange={(event) => {
-                            const selectedTierId = event.target.value;
-                            setAdminPlanPreviewId(
-                              selectedTierId === actualPricingTier.id
-                                ? ""
-                                : selectedTierId
-                            );
-                            setPlanHelpExpanded(true);
-                          }}
-                          title="Admin-only local plan preview. Does not change the real account plan."
-                          value={currentPricingTier.id}
-                        >
-                          {pricingTiers.map((tier) => (
-                            <option key={tier.id} value={tier.id}>
-                              {tier.id === "premium_individual"
-                                ? "Premium"
-                                : tier.id === "early_access"
-                                  ? "Early"
-                                  : tier.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : (
-                      <button
-                        className="h-7 whitespace-nowrap text-xs font-semibold text-slate-300"
-                        disabled
-                        title="Plan changes are not wired up yet."
-                        type="button"
-                      >
-                        Change Plan
-                      </button>
-                    )}
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-2 font-semibold text-slate-950">
-                      <span>{currentPricingTier.name}</span>
-                      {isAdmin ? (
-                        <span
-                          className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[0.68rem] font-bold uppercase tracking-wide text-amber-800"
-                          title="Admin access is managed separately from plan billing."
-                        >
-                          Admin
-                        </span>
-                      ) : null}
-                      {isPreviewingPlan ? (
-                        <span
-                          className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[0.68rem] font-bold uppercase tracking-wide text-slate-600"
-                          title={`Previewing ${currentPricingTier.name}; actual plan is ${actualPricingTier.name}.`}
-                        >
-                          Preview
-                        </span>
-                      ) : null}
-                      <button
-                        aria-expanded={planHelpExpanded}
-                        aria-label="Explain CarePland plan tiers"
-                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 bg-white text-xs font-bold text-slate-600"
-                        onClick={() =>
-                          setPlanHelpExpanded((isExpanded) => !isExpanded)
-                        }
-                        type="button"
-                      >
-                        ?
-                      </button>
-                    </span>
-                  </div>
-                  <div
-                    aria-hidden={!planHelpExpanded}
-                    className={`mt-3 text-sm text-slate-700 ${
-                      planHelpExpanded ? "" : "hidden"
-                    }`}
-                  >
-                    <p className="mb-3 leading-5 text-slate-800">
-                      {currentPlanSummary}
-                    </p>
-                    <dl className="space-y-3">
-                      {currentPlanFeatureRows.map(([label, value]) => (
-                        <div className="grid gap-1 sm:grid-cols-[6rem_minmax(0,1fr)]" key={label}>
-                          {label ? (
-                            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {label}
-                            </dt>
-                          ) : null}
-                          <dd className="leading-5 text-slate-800">{value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                </section>
-
-                {canUseMultipleCareVips ? (
-                  <section className="relative flex flex-col p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 xl:before:absolute xl:before:inset-y-4 xl:before:left-0 xl:before:w-px xl:before:bg-slate-200 xl:after:inset-y-4 xl:after:bottom-auto xl:after:left-auto xl:after:right-0 xl:after:h-auto xl:after:w-px sm:order-3 sm:col-span-2 xl:order-2 xl:col-span-1">
-                    <div className="flex h-7 items-center justify-between gap-3">
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        CARE VIPs
-                      </h3>
-                      <p className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {careSubjects.length}/{careVipLimit}
-                      </p>
-                    </div>
-                    {careSubjects.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {careSubjects.map((subject) => (
-                          <span
-                            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
-                            key={subject.id}
-                          >
-                            {subject.display_name}
-                            {!subject.is_default ? (
-                              <button
-                                aria-label={`Deactivate ${subject.display_name}`}
-                                className="-mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
-                                disabled={deactivatingCareVipId === subject.id}
-                                onClick={() =>
-                                  setPendingDeactivateCareVipId(subject.id)
-                                }
-                                type="button"
-                              >
-                                ×
-                              </button>
-                            ) : null}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {pendingDeactivateCareVipId ? (
-                      <section className="mt-3 rounded-md border border-rose-100 bg-rose-50 p-3">
-                        <p className="text-sm font-medium text-rose-950">
-                          Deactivate{" "}
-                          {
-                            careSubjects.find(
-                              (subject) =>
-                                subject.id === pendingDeactivateCareVipId
-                            )?.display_name
-                          }
-                          ?
-                        </p>
-                        <p className="mt-1 text-sm text-rose-900">
-                          Their saved appointments stay in CarePland and can be
-                          restored later.
-                        </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            className={gentleCautionButtonClass}
-                            disabled={
-                              deactivatingCareVipId === pendingDeactivateCareVipId
-                            }
-                            onClick={() => {
-                              const subject = careSubjects.find(
-                                (item) => item.id === pendingDeactivateCareVipId
-                              );
-
-                              if (subject) {
-                                void handleDeactivateCareVip(subject);
-                              }
-                            }}
-                            type="button"
-                          >
-                            {deactivatingCareVipId === pendingDeactivateCareVipId
-                              ? "Deactivating..."
-                              : "Deactivate"}
-                          </button>
-                          <button
-                            className={gentleSmallSecondaryButtonClass}
-                            onClick={() => setPendingDeactivateCareVipId(null)}
-                            type="button"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </section>
-                    ) : null}
-                    <form className="mt-7 xl:mt-auto" onSubmit={handleCreateCareVip}>
-                      <label className="sr-only" htmlFor="new-care-vip-name">
-                        Care VIP name or email
-                      </label>
-                      <div className="flex items-center gap-2">
-                          <input
-                            className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-base"
-                          disabled={!canAddCareVip}
-                          id="new-care-vip-name"
-                          onChange={(event) => {
-                            setNewCareVipName(event.target.value);
-                            setCareVipFormMessage("");
-                            setPendingReactivateCareVip(null);
-                          }}
-                          placeholder="Name or email"
-                          type="text"
-                          value={newCareVipName}
-                        />
-                        <button
-                          className={gentleSoftBlueButtonClass}
-                          disabled={
-                            creatingCareVip ||
-                            !canAddCareVip ||
-                            !newCareVipName.trim()
-                          }
-                          type="submit"
-                        >
-                          {creatingCareVip ? "Adding..." : "Add"}
-                        </button>
-                      </div>
-                      {careVipFormMessage ? (
-                        <p className="mt-2 text-sm font-medium text-rose-700">
-                          {careVipFormMessage}
-                        </p>
-                      ) : null}
-                      {pendingReactivateCareVip ? (
-                        <section className="mt-3 rounded-md border border-blue-100 bg-blue-50 p-3">
-                          <p className="text-sm font-medium text-blue-950">
-                            Reactivate {pendingReactivateCareVip.displayName}?
-                          </p>
-                          <p className="mt-1 text-sm text-blue-900">
-                            This email belongs to an inactive Care VIP.
-                          </p>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <button
-                              className={gentlePrimaryButtonClass}
-                              disabled={creatingCareVip}
-                              onClick={() => void handleReactivateCareVip()}
-                              type="button"
-                            >
-                              Reactivate
-                            </button>
-                            <button
-                              className={gentleSmallSecondaryButtonClass}
-                              onClick={() => {
-                                setPendingReactivateCareVip(null);
-                                setNewCareVipName("");
-                              }}
-                              type="button"
-                            >
-                              Enter a different email
-                            </button>
-                          </div>
-                        </section>
-                      ) : null}
-                      {!canAddCareVip ? (
-                        <p className="mt-3 text-sm text-slate-500">
-                          {entitlement.plan_name} includes {careVipLimit}{" "}
-                          active Care VIPs.
-                        </p>
-                      ) : null}
-                    </form>
-                  </section>
-                ) : null}
-
-                <section className="p-4 sm:order-2 xl:order-3">
-                  <div className="flex h-7 items-center">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Account tools
-                    </h3>
-                  </div>
-                  <div
-                    className={`mt-3 ${
-                      isAdmin ? "" : "border-b border-slate-200 pb-4"
-                    }`}
-                  >
-                    <p className="text-sm text-slate-600">
-                      Send reset link to your verified email.
-                    </p>
-                    <button
-                      className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
-                      disabled={sendingPasswordReset}
-                      onClick={handleSendProfilePasswordReset}
-                      type="button"
-                    >
-                      {sendingPasswordReset ? "Sending..." : "Reset password"}
-                    </button>
-                  </div>
-                  {!isAdmin ? (
-                    <div className="mt-4">
-                      {sampleDataSeededAt ? (
-                        <p className="text-sm text-slate-600">
-                          Remove sample data only.
-                          <br />
-                          Your own appointments are safe.
-                        </p>
-                      ) : (
-                        <p className="text-sm text-slate-600">
-                          Add sample appointments and data to quickly try out
-                          CarePland features.
-                        </p>
-                      )}
-                      {sampleDataSeededAt ? (
-                        <button
-                          className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
-                          disabled={removingSampleData}
-                          onClick={handleRemoveSampleData}
-                          type="button"
-                        >
-                          {removingSampleData
-                            ? "Removing..."
-                            : "Remove demo data"}
-                        </button>
-                      ) : (
-                        <button
-                          className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
-                          disabled={seedingSampleData}
-                          onClick={() => handleSeedSampleDataForCurrentUser(true)}
-                          type="button"
-                        >
-                          {seedingSampleData ? "Adding..." : "Add demo data"}
-                        </button>
-                      )}
-                    </div>
-                  ) : null}
-                </section>
-              </div>
-            </section>
-
-            <form
-              className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-              onSubmit={handleSaveProfile}
-            >
-              <div className="flex h-7 flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Contact details
-                  </h3>
-                </div>
-              </div>
-              <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>Email</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    required
-                  </span>
-                </span>
-                {requiresEmailUpdate ? (
-                  <>
-                    <input
-                      autoComplete="email"
-                      className="mt-2 w-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-base"
-                      onChange={(event) =>
-                        updateProfileDraft("email", event.target.value)
-                      }
-                      placeholder="you@example.com"
-                      required
-                      type="email"
-                      value={profileDraft.email}
-                    />
-                    <span className="mt-2 block text-xs font-normal text-amber-800">
-                      Enter an email you can access for account recovery.
-                    </span>
-                  </>
-                ) : (
-                  <div className="mt-2 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-base text-slate-700">
-                    {verifiedAccountEmail || "Verified account email"}
-                  </div>
-                )}
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>Phone</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  inputMode="numeric"
-                  onChange={(event) =>
-                    updateProfileDraft(
-                      "phone",
-                      formatUsPhoneFromDigits(phoneDigits(event.target.value))
-                    )
-                  }
-                  placeholder="(___) ___-____"
-                  required={profileDetailsRequired}
-                  type="tel"
-                  value={profileDraft.phone}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>First name</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("givenName", event.target.value)
-                  }
-                  required={profileDetailsRequired}
-                  type="text"
-                  value={profileDraft.givenName}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>Last name</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("familyName", event.target.value)
-                  }
-                  required={profileDetailsRequired}
-                  type="text"
-                  value={profileDraft.familyName}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                Display name
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("displayName", event.target.value)
-                  }
-                  placeholder="Optional, if different"
-                  type="text"
-                  value={profileDraft.displayName}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>Time zone</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <select
-                  className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("timezone", event.target.value)
-                  }
-                  required={profileDetailsRequired}
-                  value={profileDraft.timezone}
-                >
-                  <option value="">Select time zone</option>
-                  {!timeZoneOptions.some(
-                    (option) => option.value === profileDraft.timezone
-                  ) && profileDraft.timezone ? (
-                    <option value={profileDraft.timezone}>
-                      {profileDraft.timezone}
-                    </option>
-                  ) : null}
-                  {timeZoneOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label} · {option.value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm font-medium text-slate-700 md:col-span-2">
-                Address line 1
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("addressLine1", event.target.value)
-                  }
-                  placeholder="Optional"
-                  value={profileDraft.addressLine1}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700 md:col-span-2">
-                Address line 2
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("addressLine2", event.target.value)
-                  }
-                  placeholder="Optional"
-                  value={profileDraft.addressLine2}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                City
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("city", event.target.value)
-                  }
-                  value={profileDraft.city}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                State / region
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("region", event.target.value)
-                  }
-                  value={profileDraft.region}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>ZIP code</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  inputMode="numeric"
-                  onChange={(event) =>
-                    updateProfileDraft("postalCode", event.target.value)
-                  }
-                  placeholder="12345 or 12345-6789"
-                  required={profileDetailsRequired}
-                  value={profileDraft.postalCode}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                Country
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("country", event.target.value)
-                  }
-                  value={profileDraft.country}
-                />
-              </label>
-              <div className="md:col-span-2">
-                <button
-                  className={
-                    hasUnsavedProfileChanges
-                      ? gentlePrimaryButtonClass
-                      : gentleSecondaryButtonClass
-                  }
-                  disabled={savingProfile || !hasUnsavedProfileChanges}
-                  type="submit"
-                >
-                  {savingProfile ? "Saving..." : "Save profile"}
-                </button>
-              </div>
-              </div>
-            </form>
-
-            {message ? (
-              <p className="rounded-md bg-slate-100 p-3 text-sm text-slate-700">
-                {message}
-              </p>
-            ) : null}
-          </div>
+          <ProfilePage
+            accountSummaryProps={{
+              actualPricingTier,
+              canAddCareVip,
+              canUseMultipleCareVips,
+              careSubjects,
+              careVipFormMessage,
+              careVipLimit,
+              creatingCareVip,
+              currentPlanFeatureRows,
+              currentPlanSummary,
+              currentPricingTier,
+              deactivatingCareVipId,
+              entitlementPlanName: entitlement.plan_name,
+              isAdmin,
+              isPreviewingPlan,
+              newCareVipName,
+              onAddDemoData: () => handleSeedSampleDataForCurrentUser(true),
+              onChangeNewCareVipName: (value) => {
+                setNewCareVipName(value);
+                setCareVipFormMessage("");
+                setPendingReactivateCareVip(null);
+              },
+              onChangePlanPreview: (selectedTierId) => {
+                setAdminPlanPreviewId(
+                  selectedTierId === actualPricingTier.id
+                    ? ""
+                    : selectedTierId
+                );
+                setPlanHelpExpanded(true);
+              },
+              onClearPendingReactivateCareVip: () => {
+                setPendingReactivateCareVip(null);
+                setNewCareVipName("");
+              },
+              onCreateCareVip: handleCreateCareVip,
+              onDeactivateCareVip: (subject) => {
+                void handleDeactivateCareVip(subject);
+              },
+              onReactivateCareVip: () => void handleReactivateCareVip(),
+              onRemoveDemoData: handleRemoveSampleData,
+              onRequestDeactivateCareVip: setPendingDeactivateCareVipId,
+              onSendPasswordReset: handleSendProfilePasswordReset,
+              onSignOut: () => void handleSignOut(),
+              pendingDeactivateCareVipId,
+              pendingReactivateCareVip,
+              planHelpExpanded,
+              pricingTiers,
+              removingSampleData,
+              sampleDataSeededAt,
+              seedingSampleData,
+              sendingPasswordReset,
+              setPlanHelpExpanded,
+            }}
+            contactDetailsProps={{
+              hasUnsavedProfileChanges,
+              onChangeField: updateProfileDraft,
+              onChangePhone: (value) =>
+                updateProfileDraft(
+                  "phone",
+                  formatUsPhoneFromDigits(phoneDigits(value))
+                ),
+              onSubmit: handleSaveProfile,
+              primaryButtonClassName: gentlePrimaryButtonClass,
+              profileDetailsRequired,
+              profileDraft,
+              requiresEmailUpdate,
+              savingProfile,
+              secondaryButtonClassName: gentleSecondaryButtonClass,
+              timeZoneOptions,
+              verifiedAccountEmail,
+            }}
+            message={message}
+          />
         ) : (
         <div className="mt-8 space-y-4">
           <aside

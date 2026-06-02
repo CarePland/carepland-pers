@@ -13,6 +13,7 @@ This document is the stable architectural and operational memory for CarePland P
 - More than one implementation chat may run at the same time. Each chat should stay contextually focused and avoid overlapping edits where possible to minimize conflicts.
 - Modularize progressively and intentionally as patterns stabilize. Avoid premature abstraction and unnecessary micro-components.
 - Separate logic from `app/page.tsx` when it improves architectural clarity, maintainability, and separation of concerns, not merely for stylistic purity.
+- Profile modularization has begun with focused presentational components under `app/components/profile/` and Care VIP workflow logic under `app/lib/profile/`; keep extracting stable profile sections and rules there before broad page-level rewrites.
 
 ## Product Philosophy And Positioning
 
