@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "declaration": false,
+    "incremental": false,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": ".tmp-tests",
+    "rootDir": ".",
+    "tsBuildInfoFile": ".tmp-tests/tsconfig.test.tsbuildinfo"
+  },
+  "include": [
+    "app/lib/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    ".tmp-tests"
+  ]
+}

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "node scripts/write-build-info.mjs && next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "tsc -p tsconfig.test.json && node --test .tmp-tests/app/lib/*.test.js .tmp-tests/app/lib/profile/*.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",

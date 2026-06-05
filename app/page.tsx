@@ -72,6 +72,7 @@ import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import { HomeNextAppointmentPanel } from "./components/HomeNextAppointmentPanel";
 import { InlineConfirmation } from "./components/InlineConfirmation";
+import { ProfileContactDetailsForm } from "./components/profile/ProfileContactDetailsForm";
 import { ProfilePage } from "./components/profile/ProfilePage";
 import { PublicWebsite } from "./components/PublicWebsite";
 import { UserFacingFooter } from "./components/UserFacingFooter";
@@ -81,10 +82,12 @@ import {
   carePrepGuidanceHasDraftChanges,
   intakeDraftHasSaveableNotes,
   linesToList,
+  type IntakeReviewDraftContent,
 } from "./lib/editorState";
 import {
   appointmentModifierHasUnsavedChanges,
   buildUnsavedSignOutChanges,
+  hasAnyUnsavedWork,
   textIntakePanelHasUnsavedChanges,
   type AppointmentModifier,
 } from "./lib/unsavedChanges";
@@ -710,22 +713,6 @@ type IntakeHistoryRow = {
   status: string | null;
 };
 
-type TextIntakeDraft = {
-  appointmentReason: string;
-  appointmentTitle: string;
-  confidence: number;
-  followups: string;
-  locationAddress: string;
-  locationName: string;
-  locationPhone: string;
-  notesSummary: string;
-  providerName: string;
-  providerOrganization: string;
-  startsAt: string;
-  suggestedAction: string;
-  takeaways: string;
-};
-
 type BulkAppointmentDraft = {
   appointmentReason: string;
   appointmentTitle: string;
@@ -804,8 +791,8 @@ type StoredDraftState = {
     title: string;
   };
   noteDrafts?: Record<string, typeof emptyNoteDraft>;
-  textIntakeAiDraft?: TextIntakeDraft | null;
-  textIntakeDraft?: TextIntakeDraft | null;
+  textIntakeAiDraft?: IntakeReviewDraftContent | null;
+  textIntakeDraft?: IntakeReviewDraftContent | null;
   textIntakeItemId?: string | null;
   textIntakeMatches?: TextIntakeMatch[];
   selectedTextIntakeMatchId?: string;
@@ -1154,6 +1141,7 @@ const productMgmtSections = [
 
 const betaAgreementVersion = "beta-2026-05-19";
 const currentWelcomeGuideVersion = "welcome-2026-05-23";
+const fallbackTimeZone = "America/Los_Angeles";
 
 const timeZoneOptions = [
   { label: "Eastern", value: "America/New_York" },
@@ -1537,7 +1525,7 @@ const emptyAppointmentDraft = {
   title: "",
 };
 
-const emptyTextIntakeDraft: TextIntakeDraft = {
+const emptyTextIntakeDraft: IntakeReviewDraftContent = {
   appointmentReason: "",
   appointmentTitle: "",
   confidence: 0,
@@ -1721,7 +1709,7 @@ function fieldTokenOverlap(
 
 function appointmentDetailChanges(
   appointment: Appointment,
-  draft: TextIntakeDraft
+  draft: IntakeReviewDraftContent
 ): AppointmentDetailChange[] {
   const fields: Array<{
     currentValue: string | null;
@@ -1948,7 +1936,9 @@ function browserTimezone(): string {
     return detectedTimezone;
   }
 
-  return "";
+  return timeZoneOptions.some((option) => option.value === fallbackTimeZone)
+    ? fallbackTimeZone
+    : timeZoneOptions[0]?.value ?? "";
 }
 
 function isLikelyEmail(value: string): boolean {
@@ -2360,7 +2350,7 @@ function isActionableAdminAttentionScope(
   return true;
 }
 
-function intakeDraftFromResult(value: unknown): TextIntakeDraft {
+function intakeDraftFromResult(value: unknown): IntakeReviewDraftContent {
   const draft =
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -2672,9 +2662,13 @@ export default function Home() {
     initialDraftState?.textIntakeValue ?? ""
   );
   const [textIntakeDraft, setTextIntakeDraft] =
-    useState<TextIntakeDraft | null>(initialDraftState?.textIntakeDraft ?? null);
+    useState<IntakeReviewDraftContent | null>(
+      initialDraftState?.textIntakeDraft ?? null
+    );
   const [textIntakeAiDraft, setTextIntakeAiDraft] =
-    useState<TextIntakeDraft | null>(initialDraftState?.textIntakeAiDraft ?? null);
+    useState<IntakeReviewDraftContent | null>(
+      initialDraftState?.textIntakeAiDraft ?? null
+    );
   const [textIntakeItemId, setTextIntakeItemId] = useState<string | null>(
     initialDraftState?.textIntakeItemId ?? null
   );
@@ -3075,6 +3069,7 @@ export default function Home() {
 	  const [pendingModifierSwitch, setPendingModifierSwitch] =
 	    useState<PendingModifierSwitch | null>(null);
 	  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
+  const [pendingMainTab, setPendingMainTab] = useState<MainTab | null>(null);
 	  const [loading, setLoading] = useState(false);
   const [sessionRestored, setSessionRestored] = useState(false);
   const [welcomePanelIndex, setWelcomePanelIndex] = useState(0);
@@ -3852,8 +3847,6 @@ export default function Home() {
 	  const hasUnsavedProfileChanges =
 	    profileDraftKey(profileDraft) !== profileDraftKey(savedProfileDraft);
 	  const hasUnaddedCareVipName = newCareVipName.trim().length > 0;
-	  const shouldWarnBeforeProfileSignOut =
-	    mainTab === "profile" && (hasUnsavedProfileChanges || hasUnaddedCareVipName);
   const unsavedSignOutChanges = useMemo(() => {
     return buildUnsavedSignOutChanges({
       appointmentDrafts,
@@ -3896,7 +3889,6 @@ export default function Home() {
       noteDrafts,
       notesByAppointment,
       textIntakeDraft,
-      textIntakeMatchesLength: textIntakeMatches.length,
       textIntakeTargetAppointmentId,
       textIntakeValue,
     });
@@ -3927,10 +3919,10 @@ export default function Home() {
 	    noteDrafts,
 	    notesByAppointment,
 	    textIntakeDraft,
-	    textIntakeMatches.length,
 	    textIntakeTargetAppointmentId,
 	    textIntakeValue,
 	  ]);
+  const hasUnsavedWorkForLeave = hasAnyUnsavedWork(unsavedSignOutChanges);
 	  const hasAcceptedBetaAgreement =
 	    Boolean(betaDisclaimerAcknowledgedAt) &&
     Boolean(betaPrivacyAcknowledgedAt) &&
@@ -4635,6 +4627,23 @@ export default function Home() {
     textIntakeTargetAppointmentId,
     textIntakeValue,
   ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !signedInEmail || !hasUnsavedWorkForLeave) {
+      return;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [hasUnsavedWorkForLeave, signedInEmail]);
 
   function showToast(
     messageText: string,
@@ -6607,7 +6616,7 @@ export default function Home() {
     }
   }
 
-  async function handleChangeMainTab(tab: MainTab) {
+  async function applyMainTabChange(tab: MainTab) {
     if (tab === "admin" && !isAdmin) {
       setMessage("Admin access is not enabled for this account.");
       return;
@@ -6629,6 +6638,40 @@ export default function Home() {
     }
   }
 
+  async function handleChangeMainTab(tab: MainTab) {
+    if (tab === mainTab) {
+      return;
+    }
+
+    if (tab === "admin" && !isAdmin) {
+      setMessage("Admin access is not enabled for this account.");
+      return;
+    }
+
+    if (hasUnsavedWorkForLeave) {
+      setPendingMainTab(tab);
+      return;
+    }
+
+    await applyMainTabChange(tab);
+  }
+
+  function cancelPendingMainTabChange() {
+    setPendingMainTab(null);
+  }
+
+  function confirmPendingMainTabChange() {
+    const tab = pendingMainTab;
+
+    setPendingMainTab(null);
+
+    if (!tab) {
+      return;
+    }
+
+    void applyMainTabChange(tab);
+  }
+
   function startAppointmentPanel(panel: AppointmentPanel) {
     if (
       activeAppointmentPanel === "quickAdd" &&
@@ -6636,7 +6679,6 @@ export default function Home() {
       textIntakePanelHasUnsavedChanges({
         bulkAppointmentDraftsLength: bulkAppointmentDrafts.length,
         textIntakeDraft,
-        textIntakeMatchesLength: textIntakeMatches.length,
         textIntakeValue,
       })
     ) {
@@ -9181,7 +9223,7 @@ export default function Home() {
 	  } = {}) {
 	    if (
 	      !bypassUnsavedChangesWarning &&
-	      (shouldWarnBeforeProfileSignOut || unsavedSignOutChanges.length > 0)
+	      hasUnsavedWorkForLeave
 	    ) {
 	      setSignOutConfirmOpen(true);
 	      return;
@@ -10007,7 +10049,7 @@ export default function Home() {
   }
 
   function updateTextIntakeDraft(
-    field: keyof TextIntakeDraft,
+    field: keyof IntakeReviewDraftContent,
     value: string | number
   ) {
     setTextIntakeDraft((currentDraft) => ({
@@ -10151,7 +10193,6 @@ export default function Home() {
       textIntakePanelHasUnsavedChanges({
         bulkAppointmentDraftsLength: bulkAppointmentDrafts.length,
         textIntakeDraft,
-        textIntakeMatchesLength: textIntakeMatches.length,
         textIntakeValue,
       })
     ) {
@@ -10251,7 +10292,7 @@ export default function Home() {
   }
 
   async function findTextIntakeMatches(
-    draft: TextIntakeDraft,
+    draft: IntakeReviewDraftContent,
     careCircleId: string,
     careSubjectId: string
   ): Promise<TextIntakeMatch[]> {
@@ -13106,218 +13147,28 @@ export default function Home() {
               </button>
             </div>
 
-            <form
-              className="mt-5 grid gap-4 md:grid-cols-2"
+            <ProfileContactDetailsForm
+              disableWhenUnchanged={false}
+              hasUnsavedProfileChanges={hasUnsavedProfileChanges}
+              onChangeField={updateProfileDraft}
+              onChangePhone={(value) =>
+                updateProfileDraft(
+                  "phone",
+                  formatUsPhoneFromDigits(phoneDigits(value))
+                )
+              }
               onSubmit={handleSaveProfile}
-            >
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>Email</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    required
-                  </span>
-                </span>
-                {requiresEmailUpdate ? (
-                  <>
-                    <input
-                      autoComplete="email"
-                      className="mt-2 w-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-base"
-                      onChange={(event) =>
-                        updateProfileDraft("email", event.target.value)
-                      }
-                      placeholder="you@example.com"
-                      required
-                      type="email"
-                      value={profileDraft.email}
-                    />
-                    <span className="mt-2 block text-xs font-normal text-amber-800">
-                      Enter an email you can access for account recovery.
-                    </span>
-                  </>
-                ) : (
-                  <div className="mt-2 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-base text-slate-700">
-                    {verifiedAccountEmail || "Verified account email"}
-                  </div>
-                )}
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>Phone</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft(
-                      "phone",
-                      formatUsPhoneFromDigits(phoneDigits(event.target.value))
-                    )
-                  }
-                  inputMode="numeric"
-                  placeholder="(___) ___-____"
-                  required={profileDetailsRequired}
-                  type="tel"
-                  value={profileDraft.phone}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>First name</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("givenName", event.target.value)
-                  }
-                  required={profileDetailsRequired}
-                  type="text"
-                  value={profileDraft.givenName}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>Last name</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("familyName", event.target.value)
-                  }
-                  required={profileDetailsRequired}
-                  type="text"
-                  value={profileDraft.familyName}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                Display name
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("displayName", event.target.value)
-                  }
-                  placeholder="Optional, if different"
-                  type="text"
-                  value={profileDraft.displayName}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>Time zone</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <select
-                  className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("timezone", event.target.value)
-                  }
-                  required={profileDetailsRequired}
-                  value={profileDraft.timezone}
-                >
-                  <option value="">Select time zone</option>
-                  {!timeZoneOptions.some(
-                    (option) => option.value === profileDraft.timezone
-                  ) && profileDraft.timezone ? (
-                    <option value={profileDraft.timezone}>
-                      {profileDraft.timezone}
-                    </option>
-                  ) : null}
-                  {timeZoneOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label} · {option.value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm font-medium text-slate-700 md:col-span-2">
-                Address line 1
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("addressLine1", event.target.value)
-                  }
-                  placeholder="Optional"
-                  value={profileDraft.addressLine1}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700 md:col-span-2">
-                Address line 2
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("addressLine2", event.target.value)
-                  }
-                  placeholder="Optional"
-                  value={profileDraft.addressLine2}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                City
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("city", event.target.value)
-                  }
-                  value={profileDraft.city}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                State / region
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("region", event.target.value)
-                  }
-                  value={profileDraft.region}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                <span className="flex items-center justify-between gap-3">
-                  <span>ZIP code</span>
-                  <span className="text-xs font-normal text-slate-400">
-                    {profileDetailsRequired ? "required" : "optional"}
-                  </span>
-                </span>
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  inputMode="numeric"
-                  onChange={(event) =>
-                    updateProfileDraft("postalCode", event.target.value)
-                  }
-                  placeholder="12345 or 12345-6789"
-                  required={profileDetailsRequired}
-                  value={profileDraft.postalCode}
-                />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">
-                Country
-                <input
-                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                  onChange={(event) =>
-                    updateProfileDraft("country", event.target.value)
-                  }
-                  value={profileDraft.country}
-                />
-              </label>
-              <div className="md:col-span-2">
-                <button
-                  className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                  disabled={savingProfile}
-                  type="submit"
-                >
-                  {savingProfile ? "Saving..." : "Continue"}
-                </button>
-              </div>
-            </form>
+              primaryButtonClassName="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+              profileDetailsRequired={profileDetailsRequired}
+              profileDraft={profileDraft}
+              requiresEmailUpdate={requiresEmailUpdate}
+              savingProfile={savingProfile}
+              secondaryButtonClassName="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+              submitLabel="Continue"
+              timeZoneOptions={timeZoneOptions}
+              variant="inline"
+              verifiedAccountEmail={verifiedAccountEmail}
+            />
 
             {message ? (
               <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
@@ -19055,6 +18906,62 @@ export default function Home() {
           </section>
         </>
 	      ) : null}
+      {pendingMainTab ? (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/20 px-4 py-6">
+          <button
+            aria-label="Stay on this page"
+            className="absolute inset-0 cursor-default"
+            onClick={cancelPendingMainTabChange}
+            type="button"
+          />
+          <section className="relative w-full max-w-lg rounded-xl border border-blue-200 bg-[#f4faff] p-5 text-blue-950 shadow-lg">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-950">
+                You have unfinished work
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-700">
+                Changing pages will leave this work unfinished. CarePland will
+                keep it in this browser for now.
+              </p>
+            </div>
+            {unsavedSignOutChanges.length > 0 ? (
+              <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
+                {unsavedSignOutChanges.map((change) => (
+                  <li
+                    className="rounded-lg border border-blue-100 bg-white/75 px-3 py-2 text-sm"
+                    key={change.key}
+                  >
+                    <span className="font-semibold text-slate-950">
+                      {change.label}
+                    </span>
+                    {change.detail ? (
+                      <span className="ml-2 text-slate-600">
+                        {change.detail}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
+              <button
+                className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900"
+                onClick={cancelPendingMainTabChange}
+                type="button"
+              >
+                Go back
+              </button>
+              <button
+                className={gentlePrimaryButtonClass}
+                onClick={confirmPendingMainTabChange}
+                type="button"
+              >
+                Continue
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 	      {signOutConfirmOpen ? (
 	        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/20 px-4 py-6">
 	          <button

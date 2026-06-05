@@ -57,7 +57,6 @@ type BuildUnsavedSignOutChangesInput = {
   noteDrafts: Record<string, SectionNoteDraft>;
   notesByAppointment: Map<string, SavedSectionNote>;
   textIntakeDraft: IntakeDraftContent | null;
-  textIntakeMatchesLength: number;
   textIntakeTargetAppointmentId: string | null;
   textIntakeValue: string;
 };
@@ -84,7 +83,6 @@ export function buildUnsavedSignOutChanges({
   noteDrafts,
   notesByAppointment,
   textIntakeDraft,
-  textIntakeMatchesLength,
   textIntakeTargetAppointmentId,
   textIntakeValue,
 }: BuildUnsavedSignOutChangesInput): UnsavedChangeSummary[] {
@@ -150,7 +148,6 @@ export function buildUnsavedSignOutChanges({
     textIntakePanelHasUnsavedChanges({
       bulkAppointmentDraftsLength: 0,
       textIntakeDraft,
-      textIntakeMatchesLength,
       textIntakeValue,
     })
   ) {
@@ -232,6 +229,12 @@ export function buildUnsavedSignOutChanges({
   return Array.from(changes.values());
 }
 
+export function hasAnyUnsavedWork(
+  changes: readonly UnsavedChangeSummary[]
+): boolean {
+  return changes.length > 0;
+}
+
 export function newAppointmentDraftHasContent(
   draft: AppointmentDetailsDraft
 ): boolean {
@@ -250,20 +253,18 @@ export function newAppointmentDraftHasContent(
 export function textIntakePanelHasUnsavedChanges({
   bulkAppointmentDraftsLength,
   textIntakeDraft,
-  textIntakeMatchesLength,
   textIntakeValue,
 }: {
   bulkAppointmentDraftsLength: number;
   textIntakeDraft: IntakeDraftContent | null;
-  textIntakeMatchesLength: number;
   textIntakeValue: string;
 }): boolean {
+  // Match candidates are process state; warnings require visible/saveable work.
   return Boolean(
     bulkAppointmentDraftsLength > 0 ||
       (textIntakeDraft
         ? intakeDraftHasMeaningfulContent(textIntakeDraft)
-        : textIntakeValue.trim()) ||
-      (!textIntakeDraft && textIntakeMatchesLength > 0)
+        : textIntakeValue.trim())
   );
 }
 

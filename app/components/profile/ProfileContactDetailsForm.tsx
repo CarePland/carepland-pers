@@ -7,6 +7,7 @@ type TimeZoneOption = {
 };
 
 type ProfileContactDetailsFormProps = {
+  disableWhenUnchanged?: boolean;
   hasUnsavedProfileChanges: boolean;
   onChangeField: (field: keyof ProfileDraft, value: string) => void;
   onChangePhone: (value: string) => void;
@@ -17,11 +18,14 @@ type ProfileContactDetailsFormProps = {
   requiresEmailUpdate: boolean;
   savingProfile: boolean;
   secondaryButtonClassName: string;
+  submitLabel?: string;
   timeZoneOptions: TimeZoneOption[];
+  variant?: "card" | "inline";
   verifiedAccountEmail: string;
 };
 
 export function ProfileContactDetailsForm({
+  disableWhenUnchanged = true,
   hasUnsavedProfileChanges,
   onChangeField,
   onChangePhone,
@@ -32,24 +36,32 @@ export function ProfileContactDetailsForm({
   requiresEmailUpdate,
   savingProfile,
   secondaryButtonClassName,
+  submitLabel = "Save profile",
   timeZoneOptions,
+  variant = "card",
   verifiedAccountEmail,
 }: ProfileContactDetailsFormProps) {
   const requirementLabel = profileDetailsRequired ? "required" : "optional";
+  const isInline = variant === "inline";
+  const buttonDisabled =
+    savingProfile || (disableWhenUnchanged && !hasUnsavedProfileChanges);
+  const formClassName = isInline
+    ? "mt-5 grid gap-4 md:grid-cols-2"
+    : "rounded-lg border border-slate-200 bg-white p-5 shadow-sm";
+  const fieldsClassName = isInline ? "contents" : "mt-3 grid gap-4 md:grid-cols-2";
 
   return (
-    <form
-      className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-      onSubmit={onSubmit}
-    >
-      <div className="flex h-7 flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Contact details
-          </h3>
+    <form className={formClassName} onSubmit={onSubmit}>
+      {isInline ? null : (
+        <div className="flex h-7 flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Contact details
+            </h3>
+          </div>
         </div>
-      </div>
-      <div className="mt-3 grid gap-4 md:grid-cols-2">
+      )}
+      <div className={fieldsClassName}>
         <label className="block text-sm font-medium text-slate-700">
           <span className="flex items-center justify-between gap-3">
             <span>Email</span>
@@ -60,6 +72,7 @@ export function ProfileContactDetailsForm({
               <input
                 autoComplete="email"
                 className="mt-2 w-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-base"
+                inputMode="email"
                 onChange={(event) =>
                   onChangeField("email", event.target.value)
                 }
@@ -86,8 +99,9 @@ export function ProfileContactDetailsForm({
             </span>
           </span>
           <input
+            autoComplete="tel"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-            inputMode="numeric"
+            inputMode="tel"
             onChange={(event) => onChangePhone(event.target.value)}
             placeholder="(___) ___-____"
             required={profileDetailsRequired}
@@ -103,6 +117,7 @@ export function ProfileContactDetailsForm({
             </span>
           </span>
           <input
+            autoComplete="given-name"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) =>
               onChangeField("givenName", event.target.value)
@@ -120,6 +135,7 @@ export function ProfileContactDetailsForm({
             </span>
           </span>
           <input
+            autoComplete="family-name"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) =>
               onChangeField("familyName", event.target.value)
@@ -132,6 +148,7 @@ export function ProfileContactDetailsForm({
         <label className="block text-sm font-medium text-slate-700">
           Display name
           <input
+            autoComplete="nickname"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) =>
               onChangeField("displayName", event.target.value)
@@ -174,6 +191,7 @@ export function ProfileContactDetailsForm({
         <label className="block text-sm font-medium text-slate-700 md:col-span-2">
           Address line 1
           <input
+            autoComplete="address-line1"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) =>
               onChangeField("addressLine1", event.target.value)
@@ -185,6 +203,7 @@ export function ProfileContactDetailsForm({
         <label className="block text-sm font-medium text-slate-700 md:col-span-2">
           Address line 2
           <input
+            autoComplete="address-line2"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) =>
               onChangeField("addressLine2", event.target.value)
@@ -196,6 +215,7 @@ export function ProfileContactDetailsForm({
         <label className="block text-sm font-medium text-slate-700">
           City
           <input
+            autoComplete="address-level2"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) => onChangeField("city", event.target.value)}
             value={profileDraft.city}
@@ -204,6 +224,7 @@ export function ProfileContactDetailsForm({
         <label className="block text-sm font-medium text-slate-700">
           State / region
           <input
+            autoComplete="address-level1"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) => onChangeField("region", event.target.value)}
             value={profileDraft.region}
@@ -217,6 +238,7 @@ export function ProfileContactDetailsForm({
             </span>
           </span>
           <input
+            autoComplete="postal-code"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             inputMode="numeric"
             onChange={(event) =>
@@ -230,6 +252,7 @@ export function ProfileContactDetailsForm({
         <label className="block text-sm font-medium text-slate-700">
           Country
           <input
+            autoComplete="country"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) => onChangeField("country", event.target.value)}
             value={profileDraft.country}
@@ -242,10 +265,10 @@ export function ProfileContactDetailsForm({
                 ? primaryButtonClassName
                 : secondaryButtonClassName
             }
-            disabled={savingProfile || !hasUnsavedProfileChanges}
+            disabled={buttonDisabled}
             type="submit"
           >
-            {savingProfile ? "Saving..." : "Save profile"}
+            {savingProfile ? "Saving..." : submitLabel}
           </button>
         </div>
       </div>

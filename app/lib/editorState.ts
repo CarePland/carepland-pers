@@ -24,6 +24,11 @@ export type IntakeDraftContent = {
   takeaways: string;
 };
 
+export type IntakeReviewDraftContent = IntakeDraftContent & {
+  confidence: number;
+  suggestedAction: string;
+};
+
 export type AppointmentDetailsDraft = {
   locationAddress: string;
   locationName: string;
