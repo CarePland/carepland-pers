@@ -72,10 +72,14 @@ import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import { HomeNextAppointmentPanel } from "./components/HomeNextAppointmentPanel";
 import { InlineConfirmation } from "./components/InlineConfirmation";
-import { ProfileContactDetailsForm } from "./components/profile/ProfileContactDetailsForm";
+import { OnboardingGate } from "./components/OnboardingGate";
 import { ProfilePage } from "./components/profile/ProfilePage";
 import { PublicWebsite } from "./components/PublicWebsite";
 import { UserFacingFooter } from "./components/UserFacingFooter";
+import {
+  WelcomeGuide,
+  welcomeGuidePanelCount,
+} from "./components/WelcomeGuide";
 import {
   asTextList,
   carePrepGuidanceFormValues,
@@ -12204,36 +12208,13 @@ export default function Home() {
       welcomeExistingAppointmentsVariant === "returnHome"
         ? "returnHome"
         : "firstActions";
-    const welcomePanels = [
-      {
-        alt: "Appointment notes feeding CarePrep and context",
-        body: "Important context is often lost over time.",
-        emphasis: "We all live in this gap.",
-        src: "/welcome/panel1.png",
-      },
-      {
-        alt: "CarePrep questions and missed appointment context",
-        body: "Context is what connects one visit to the next.",
-        src: "/welcome/panel2.png",
-      },
-      {
-        alt: "CarePrep created from appointment notes",
-        body:
-          "Visit Notes help CarePland create CarePrep and carry forward context into future visits.",
-        src: "/welcome/panel3.jpg",
-      },
-    ];
-    const activeWelcomePanel =
-      welcomePanels[welcomePanelIndex] ?? welcomePanels[0];
-    const isFirstWelcomePanel = welcomePanelIndex === 0;
-    const isLastWelcomePanel = welcomePanelIndex === welcomePanels.length - 1;
     const showPreviousWelcomePanel = () =>
       setWelcomePanelIndex((currentIndex) =>
         currentIndex === 0 ? currentIndex : currentIndex - 1
       );
     const showNextWelcomePanel = () =>
       setWelcomePanelIndex((currentIndex) =>
-        currentIndex === welcomePanels.length - 1
+        currentIndex === welcomeGuidePanelCount - 1
           ? currentIndex
           : currentIndex + 1
       );
@@ -12241,205 +12222,49 @@ export default function Home() {
     return (
       <div className="mt-6 space-y-5">
         {showWelcomeGuide ? (
-          <section className="py-6">
-            <div className="mx-auto mt-5 w-full max-w-[720px] overflow-hidden rounded-lg border-4 border-black bg-black shadow-sm">
-              <iframe
-                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-                allowFullScreen
-                className="aspect-video w-full border-0"
-                src="https://player.mux.com/Ypm2KjtOwCsiE6Kb6vexjyJFm7jpSI005jadJyOHW4VU?autoplay=muted&muted=true&playsinline=true&loop=false&controls=false&poster=https%3A%2F%2Fimage.mux.com%2FYpm2KjtOwCsiE6Kb6vexjyJFm7jpSI005jadJyOHW4VU%2Fthumbnail.png%3Fwidth%3D214%26height%3D121%26time%3D0"
-                title="CarePland - The Gap"
-              />
-            </div>
-
-            <p className="mx-auto mt-5 max-w-2xl text-center text-lg leading-8 text-slate-700">
-              CarePland helps carry forward important context between
-              appointments, helping you remember what changed, what mattered,
-              and what comes next.
-            </p>
-
-            <div className="mx-auto mt-8 max-w-4xl">
-              <h2 className="mb-4 text-center text-xl font-semibold text-[#2B6198]">
-                Continuity, shown through just three slides
-              </h2>
-              <article className="text-center">
-                <div className="relative aspect-[3/2] w-full overflow-hidden rounded-xl">
-                  <Image
-                    alt={activeWelcomePanel.alt}
-                    className="object-contain"
-                    fill
-                    sizes="(min-width: 768px) 672px, 100vw"
-                    src={activeWelcomePanel.src}
-                  />
-                  <button
-                    aria-label="Previous welcome panel"
-                    className={`absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/25 text-4xl font-light leading-none text-[#2B6198]/60 hover:bg-white/40 hover:text-[#2B6198]/80 ${
-                      isFirstWelcomePanel ? "opacity-25" : ""
-                    }`}
-                    disabled={isFirstWelcomePanel}
-                    onClick={showPreviousWelcomePanel}
-                    type="button"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    aria-label="Next welcome panel"
-                    className={`absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/25 text-4xl font-light leading-none text-[#2B6198]/60 hover:bg-white/40 hover:text-[#2B6198]/80 ${
-                      isLastWelcomePanel ? "opacity-25" : ""
-                    }`}
-                    disabled={isLastWelcomePanel}
-                    onClick={showNextWelcomePanel}
-                    type="button"
-                  >
-                    ›
-                  </button>
-                </div>
-                <div className="mx-auto mt-4 flex min-h-28 max-w-4xl flex-col items-center justify-start sm:min-h-24">
-                  <p className="text-lg leading-8 text-slate-700">
-                    {activeWelcomePanel.body}
-                  </p>
-                  {activeWelcomePanel.emphasis ? (
-                    <p className="mt-1 text-xl font-semibold text-[#2B6198]">
-                      {activeWelcomePanel.emphasis}
-                    </p>
-                  ) : null}
-                </div>
-              </article>
-            </div>
-
-            <div className="mx-auto mt-1 h-0.5 w-40 max-w-[48%] rounded-full bg-blue-200 sm:w-52" />
-
-            {welcomeActionsMode === "firstActions" ? (
-              <p className="mt-7 text-center text-xl font-semibold text-[#2B6198]">
-                Let&apos;s start building your context
-              </p>
-            ) : null}
-
-            <div
-              className={`relative mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-3 md:min-h-12 ${
-                welcomeActionsMode === "firstActions" ? "mt-4" : "mt-7"
-              }`}
-            >
-              {welcomeActionsMode === "returnHome" ? (
-                <button
-                  className={`${gentlePrimaryButtonClass} px-5 py-2.5 text-sm`}
-                  onClick={async () => {
-                    await markWelcomeGuideRead();
-                  }}
-                  type="button"
-                >
-                  Return home
-                </button>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center justify-center gap-3">
-                    <button
-                      className={`${gentlePrimaryButtonClass} px-5 py-2.5 text-sm`}
-                      onClick={async () => {
-                        await markWelcomeGuideRead();
-                        startAppointmentPanel("add");
-                      }}
-                      type="button"
-                    >
-                      Add your first appointment
-                    </button>
-                    <button
-                      className={`${gentleSecondaryButtonClass} px-5 py-2.5 text-sm text-[#2B6198]`}
-                      onClick={async () => {
-                        await markWelcomeGuideRead();
-                        startAppointmentPanel("quickAdd");
-                      }}
-                      type="button"
-                    >
-                      Import appointments
-                    </button>
-                  </div>
-                  {sampleDataSeededAt ? (
-                    <button
-                      className="text-sm font-semibold text-[#2B6198] underline decoration-blue-200 underline-offset-4 transition hover:text-blue-800 hover:decoration-blue-400 md:absolute md:right-0 md:top-1/2 md:-translate-y-1/2"
-                      onClick={() => {
-                        setAskPanelOpen(true);
-                        setAskCloseConfirmOpen(false);
-                      }}
-                      type="button"
-                    >
-                      Need help?
-                    </button>
-                  ) : null}
-                </>
-              )}
-            </div>
-
-            {welcomeActionsMode === "firstActions" && !sampleDataSeededAt ? (
-              <div className="relative mx-auto mt-3 flex max-w-4xl flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-slate-600 md:min-h-11">
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <span>Not sure?</span>
-                  <button
-                    className="rounded-full border border-blue-100 bg-white/60 px-3.5 py-1.5 text-sm font-medium text-slate-500 shadow-sm transition hover:bg-blue-50 hover:text-[#2B6198] disabled:text-slate-400"
-                    disabled={seedingSampleData}
-                    onClick={async () => {
-                      await markWelcomeGuideRead();
-                      await handleSeedSampleDataForCurrentUser(true);
-                    }}
-                    type="button"
-                  >
-                    {seedingSampleData
-                      ? "Adding..."
-                      : "We'll add examples for you to explore"}
-                  </button>
-                </div>
-                <button
-                  className="text-sm font-semibold text-[#2B6198] underline decoration-blue-200 underline-offset-4 transition hover:text-blue-800 hover:decoration-blue-400 md:absolute md:right-0 md:top-1/2 md:-translate-y-1/2"
-                  onClick={() => {
-                    setAskPanelOpen(true);
-                    setAskCloseConfirmOpen(false);
-                  }}
-                  type="button"
-                >
-                  Need help?
-                </button>
-              </div>
-            ) : null}
-
-            {isAdmin && hasExistingWelcomeAppointments ? (
-              <div className="mx-auto mt-5 flex max-w-4xl justify-start">
-                <div className="flex items-center rounded-full border border-slate-200 bg-white/70 p-0.5 text-[11px] font-semibold text-slate-400 shadow-sm">
-                  <button
-                    aria-pressed={
-                      welcomeExistingAppointmentsVariant === "firstActions"
-                    }
-                    className={`rounded-full px-2.5 py-1 transition ${
-                      welcomeExistingAppointmentsVariant === "firstActions"
-                        ? "bg-blue-50 text-blue-800"
-                        : "hover:text-blue-700"
-                    }`}
-                    onClick={() => {
-                      setWelcomeExistingAppointmentsVariant("firstActions");
-                    }}
-                    type="button"
-                  >
-                    First time
-                  </button>
-                  <button
-                    aria-pressed={
-                      welcomeExistingAppointmentsVariant === "returnHome"
-                    }
-                    className={`rounded-full px-2.5 py-1 transition ${
-                      welcomeExistingAppointmentsVariant === "returnHome"
-                        ? "bg-blue-50 text-blue-800"
-                        : "hover:text-blue-700"
-                    }`}
-                    onClick={() => {
-                      setWelcomeExistingAppointmentsVariant("returnHome");
-                    }}
-                    type="button"
-                  >
-                    Returning users
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </section>
+          <WelcomeGuide
+            actionsMode={welcomeActionsMode}
+            gentlePrimaryButtonClass={gentlePrimaryButtonClass}
+            gentleSecondaryButtonClass={gentleSecondaryButtonClass}
+            hasExistingWelcomeAppointments={hasExistingWelcomeAppointments}
+            isAdmin={isAdmin}
+            onAddExamples={() => {
+              void (async () => {
+                await markWelcomeGuideRead();
+                await handleSeedSampleDataForCurrentUser(true);
+              })();
+            }}
+            onAddFirstAppointment={() => {
+              void (async () => {
+                await markWelcomeGuideRead();
+                startAppointmentPanel("add");
+              })();
+            }}
+            onChangeExistingAppointmentsVariant={
+              setWelcomeExistingAppointmentsVariant
+            }
+            onImportAppointments={() => {
+              void (async () => {
+                await markWelcomeGuideRead();
+                startAppointmentPanel("quickAdd");
+              })();
+            }}
+            onNeedHelp={() => {
+              setAskPanelOpen(true);
+              setAskCloseConfirmOpen(false);
+            }}
+            onNextPanel={showNextWelcomePanel}
+            onPreviousPanel={showPreviousWelcomePanel}
+            onReturnHome={() => {
+              void markWelcomeGuideRead();
+            }}
+            panelIndex={welcomePanelIndex}
+            sampleDataSeededAt={sampleDataSeededAt}
+            seedingSampleData={seedingSampleData}
+            welcomeExistingAppointmentsVariant={
+              welcomeExistingAppointmentsVariant
+            }
+          />
         ) : (
           <HomeNextAppointmentPanel
             appointment={homeNextAppointment}
@@ -13039,143 +12864,44 @@ export default function Home() {
               </p>
             ) : null}
           </section>
-        ) : needsBetaAgreement ? (
-          <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-semibold">Early Access notice</h2>
-                <p className="mt-1 max-w-3xl text-slate-600">
-                  {appContentText("beta_notice_intro")}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  className={gentleSmallSecondaryButtonClass}
-                  onClick={() => {
-                    setAskPanelOpen(true);
-                    setAskCloseConfirmOpen(false);
-                  }}
-                  type="button"
-                >
-                  Need help?
-                </button>
-                <button
-                  className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
-                  onClick={() => void handleSignOut()}
-                  type="button"
-                >
-                  Sign out
-                </button>
-              </div>
-            </div>
-
-            <form className="mt-5 space-y-4" onSubmit={handleAcceptBetaAgreement}>
-              <label className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                <input
-                  checked={acceptBetaTerms}
-                  className="mt-1"
-                  onChange={(event) => setAcceptBetaTerms(event.target.checked)}
-                  type="checkbox"
-                />
-                <span>
-                  {appContentText("beta_terms_ack")}
-                </span>
-              </label>
-              <label className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                <input
-                  checked={acceptBetaPrivacy}
-                  className="mt-1"
-                  onChange={(event) => setAcceptBetaPrivacy(event.target.checked)}
-                  type="checkbox"
-                />
-                <span>
-                  {appContentText("beta_privacy_ack")}
-                </span>
-              </label>
-              <label className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                <input
-                  checked={acceptBetaDisclaimer}
-                  className="mt-1"
-                  onChange={(event) =>
-                    setAcceptBetaDisclaimer(event.target.checked)
-                  }
-                  type="checkbox"
-                />
-                <span>
-                  {appContentText("beta_disclaimer_ack")}
-                </span>
-              </label>
-              <button
-                className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-                disabled={
-                  loading ||
-                  !acceptBetaTerms ||
-                  !acceptBetaPrivacy ||
-                  !acceptBetaDisclaimer
-                }
-                type="submit"
-              >
-                {loading ? "Saving..." : "Continue"}
-              </button>
-            </form>
-
-            {message ? (
-              <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
-                {message}
-              </p>
-            ) : null}
-          </section>
-        ) : needsOnboarding ? (
-          <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-semibold">Set up your profile</h2>
-                <p className="mt-1 text-slate-600">
-                  {requiresEmailUpdate
-                    ? "Start by adding an email you can access, then confirm the basics CarePland needs for dates and contact."
-                    : profileDetailsRequired
-                      ? "Confirm the basics CarePland needs for dates, contact, and support follow-up."
-                      : "Add anything helpful now, or continue with your verified account."}
-                </p>
-              </div>
-              <button
-                className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700"
-                onClick={() => void handleSignOut()}
-                type="button"
-              >
-                Sign out
-              </button>
-            </div>
-
-            <ProfileContactDetailsForm
-              disableWhenUnchanged={false}
-              hasUnsavedProfileChanges={hasUnsavedProfileChanges}
-              onChangeField={updateProfileDraft}
-              onChangePhone={(value) =>
-                updateProfileDraft(
-                  "phone",
-                  formatUsPhoneFromDigits(phoneDigits(value))
-                )
-              }
-              onSubmit={handleSaveProfile}
-              primaryButtonClassName="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-              profileDetailsRequired={profileDetailsRequired}
-              profileDraft={profileDraft}
-              requiresEmailUpdate={requiresEmailUpdate}
-              savingProfile={savingProfile}
-              secondaryButtonClassName="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
-              submitLabel="Continue"
-              timeZoneOptions={timeZoneOptions}
-              variant="inline"
-              verifiedAccountEmail={verifiedAccountEmail}
-            />
-
-            {message ? (
-              <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
-                {message}
-              </p>
-            ) : null}
-          </section>
+        ) : needsBetaAgreement || needsOnboarding ? (
+          <OnboardingGate
+            acceptBetaDisclaimer={acceptBetaDisclaimer}
+            acceptBetaPrivacy={acceptBetaPrivacy}
+            acceptBetaTerms={acceptBetaTerms}
+            appContentText={appContentText}
+            gentleSmallSecondaryButtonClass={gentleSmallSecondaryButtonClass}
+            hasUnsavedProfileChanges={hasUnsavedProfileChanges}
+            loading={loading}
+            message={message}
+            needsBetaAgreement={needsBetaAgreement}
+            needsOnboarding={needsOnboarding}
+            onAcceptBetaAgreement={handleAcceptBetaAgreement}
+            onChangeProfileField={updateProfileDraft}
+            onChangeProfilePhone={(value) =>
+              updateProfileDraft(
+                "phone",
+                formatUsPhoneFromDigits(phoneDigits(value))
+              )
+            }
+            onNeedHelp={() => {
+              setAskPanelOpen(true);
+              setAskCloseConfirmOpen(false);
+            }}
+            onSaveProfile={handleSaveProfile}
+            onSetAcceptBetaDisclaimer={setAcceptBetaDisclaimer}
+            onSetAcceptBetaPrivacy={setAcceptBetaPrivacy}
+            onSetAcceptBetaTerms={setAcceptBetaTerms}
+            onSignOut={() => void handleSignOut()}
+            primaryButtonClassName="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+            profileDetailsRequired={profileDetailsRequired}
+            profileDraft={profileDraft}
+            requiresEmailUpdate={requiresEmailUpdate}
+            savingProfile={savingProfile}
+            secondaryButtonClassName="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+            timeZoneOptions={timeZoneOptions}
+            verifiedAccountEmail={verifiedAccountEmail}
+          />
         ) : signedInEmail && mainTab === "home" ? (
           renderHomeView()
         ) : signedInEmail && mainTab === "profile" ? (
