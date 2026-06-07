@@ -4344,26 +4344,15 @@ export default function Home() {
   ]);
 
   useEffect(() => {
-    const handleVersionShortcut = (event: KeyboardEvent) => {
-      const isVersionShortcut =
-        (event.ctrlKey || event.metaKey) &&
-        event.altKey &&
-        event.key.toLowerCase() === "v";
-
-      if (isVersionShortcut) {
-        event.preventDefault();
-        setShowVersionInfo((isVisible) => !isVisible);
-        return;
-      }
-
+    const handleVersionInfoKeydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setShowVersionInfo(false);
       }
     };
 
-    window.addEventListener("keydown", handleVersionShortcut);
+    window.addEventListener("keydown", handleVersionInfoKeydown);
 
-    return () => window.removeEventListener("keydown", handleVersionShortcut);
+    return () => window.removeEventListener("keydown", handleVersionInfoKeydown);
   }, []);
 
   useEffect(() => {
@@ -18803,9 +18792,6 @@ export default function Home() {
                 </dd>
               </div>
             </dl>
-            <p className="mt-5 text-xs text-slate-500">
-              Shortcut: Ctrl+Alt+V or Cmd+Option+V. Escape closes this panel.
-            </p>
           </section>
         </div>
       ) : null}
