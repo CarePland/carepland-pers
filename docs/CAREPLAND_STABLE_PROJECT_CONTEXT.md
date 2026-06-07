@@ -21,6 +21,9 @@ This document is the stable architectural and operational memory for CarePland P
 - First-run Home welcome guide UI and static slide content live in `app/components/WelcomeGuide.tsx`; keep `app/page.tsx` responsible for welcome state, dismissed/save actions, and appointment/import/sample-data callbacks.
 - Sign-out unsaved-change summaries, appointment modifier close/switch checks, and Import panel close checks live in `app/lib/unsavedChanges.ts`; keep the policy for what counts as discardable work centralized instead of rebuilding it in page-level UI.
 - CarePrep guidance-to-form normalization, intake draft content types, and CarePrep edit comparison live in `app/lib/editorState.ts` with the other draft comparison helpers.
+- Supabase server environment checks belong in `app/lib/server/env.ts`; API routes should use the shared helper as they are touched instead of reimplementing ad hoc `process.env` guards.
+- Supabase route-client creation belongs in `app/lib/server/supabase.ts`; new API routes should use the public, authenticated-user, or service-role client factory instead of rebuilding `createClient` options inline.
+- Health Focus / Reports is a future person-level context layer, not an appointment-card feature. Keep its planning details in `docs/HEALTH_FOCUS_REPORTS_FOUNDATION.md` and do not build it into `app/page.tsx`.
 
 ## Refactoring Direction
 
@@ -32,6 +35,7 @@ Current modularization is intentionally incremental:
 - Profile draft hydration, normalization, and validation belongs in `app/lib/profile/profileDraft.ts`.
 - Unsaved-change summary, appointment modifier close/switch, and Import panel close policy belongs in `app/lib/unsavedChanges.ts`; page components may own warning UI, but should not duplicate the rules for which drafts count.
 - Draft normalization and comparison rules, including CarePrep guidance form values, belong in `app/lib/editorState.ts` unless they are specific to a narrower domain module.
+- Future Health Focus / Reports work should start with dedicated domain modules such as `app/lib/healthTopics/`, `app/components/healthTopics/`, `app/lib/reports/`, and dedicated API routes as needed. `app/page.tsx` should only orchestrate visibility and high-level state for this layer.
 
 Justification:
 
@@ -46,6 +50,8 @@ Guardrails:
 - Prefer shared helper modules for rules that must behave consistently across onboarding, Profile, navigation warnings, and save actions.
 - Unit tests for pure trust-policy modules live beside the modules as `*.test.ts` and run through `npm test` using `tsconfig.test.json`. Add or update these tests when changing editor-state normalization, unsaved-change predicates, profile draft validation, or saved-vs-current comparison behavior.
 - Run test/lint/build/diff-check after trust-policy or profile workflow extractions.
+- API routes should fail clearly when required Supabase configuration is missing. Public routes should return a calm, user-safe unavailable message; authenticated/admin routes should distinguish server misconfiguration from ordinary user validation errors.
+- Before starting the Health Focus / Reports implementation, create a date/time-stamped full-folder backup clone because it is a major architectural addition.
 
 ## Product Philosophy And Positioning
 
@@ -61,6 +67,7 @@ Core philosophy:
 - Track AI operation usage and estimated cost in a reusable way so operational cost can be analyzed by workflow/type without exposing token/cost details to patient-facing surfaces.
 - Data dignity is a core trust principle. User data should be treated as borrowed context for helping the user, not as casually available operational raw material.
 - Prefer calm patient-facing surfaces over admin-style control panels.
+- Future Health Focus and Reports should extend CarePland from appointment-level preparation toward person-level context retrieval. Appointment records and saved Notes remain the source of truth; topic mentions, summaries, and reports are reusable context assets with source traceability, not replacements for source records.
 
 CarePland Personal is internally managed as a beta product, but user-facing product language should call this phase `Early Access`, not `Beta Testing` or `beta`, unless referring to internal operations. Early Access means the same rollout/testing phase as internal beta testing while presenting a more confident user-facing posture. Future terminology plan: Early Access will likely be renamed `Founding Member`; do not make that copy change until Andrew explicitly starts the rename. The old Adalo/Make/Twilio implementation is treated as product-discovery history, not as a code architecture to clone.
 

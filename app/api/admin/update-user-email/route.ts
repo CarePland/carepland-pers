@@ -1,9 +1,11 @@
-import { createClient, SupabaseClient, User } from "@supabase/supabase-js";
+import { SupabaseClient, User } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+import { isMissingServerEnvError } from "@/app/lib/server/env";
+import {
+  createSupabaseServiceClient,
+  createSupabaseUserClient,
+} from "@/app/lib/server/supabase";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -62,10 +64,6 @@ async function findAuthUserByEmail(
 
 export async function POST(request: NextRequest) {
   try {
-    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
-      throw new Error("Missing required Supabase server configuration.");
-    }
-
     const authHeader = request.headers.get("authorization") ?? "";
     const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
 
@@ -92,10 +90,7 @@ export async function POST(request: NextRequest) {
       throw new Error("The replacement email must be different.");
     }
 
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false },
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-    });
+    const userClient = createSupabaseUserClient(accessToken);
 
     const { data: userData, error: userError } =
       await userClient.auth.getUser();
@@ -124,9 +119,7 @@ export async function POST(request: NextRequest) {
       throw new Error("Admin access is required to update user email.");
     }
 
-    const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminClient = createSupabaseServiceClient();
 
     const [targetUser, existingNewEmailUser] = await Promise.all([
       findAuthUserByEmail(adminClient, currentEmail),
@@ -196,6 +189,13 @@ export async function POST(request: NextRequest) {
       userId: targetUser.id,
     });
   } catch (error) {
+    if (isMissingServerEnvError(error)) {
+      return NextResponse.json(
+        { error: "CarePland is missing required server configuration." },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
   }
 }

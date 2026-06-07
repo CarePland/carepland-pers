@@ -1,10 +1,10 @@
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+
+import { isMissingServerEnvError } from "@/app/lib/server/env";
+import { createSupabaseUserClient } from "@/app/lib/server/supabase";
 
 type JsonObject = Record<string, unknown>;
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const openAiApiKey = process.env.OPENAI_API_KEY ?? "";
 const maxImageCount = 10;
 const maxImageSizeBytes = 8 * 1024 * 1024;
@@ -59,10 +59,6 @@ function responseText(response: JsonObject): string {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!supabaseUrl || !supabaseAnonKey) {
-      throw new Error("Missing Supabase server configuration.");
-    }
-
     if (!openAiApiKey) {
       throw new Error("Missing OPENAI_API_KEY in environment variables.");
     }
@@ -74,14 +70,7 @@ export async function POST(request: NextRequest) {
       throw new Error("Please sign in before extracting text.");
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false },
-      global: {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      },
-    });
+    const supabase = createSupabaseUserClient(accessToken);
 
     const { data: userData, error: userError } = await supabase.auth.getUser();
 
@@ -173,6 +162,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ extractedText });
   } catch (error) {
+    if (isMissingServerEnvError(error)) {
+      return NextResponse.json(
+        { error: "CarePland is missing required server configuration." },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
   }
 }

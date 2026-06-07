@@ -1,8 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+import { isMissingServerEnvError } from "@/app/lib/server/env";
+import { createSupabasePublicClient } from "@/app/lib/server/supabase";
 
 function cleanText(value: unknown, maxLength: number) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -14,10 +13,6 @@ function isLikelyEmail(value: string) {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!supabaseUrl || !supabaseAnonKey) {
-      throw new Error("Early Access signup is temporarily unavailable.");
-    }
-
     const body = await request.json();
     const firstName = cleanText(body.firstName, 80);
     const lastName = cleanText(body.lastName, 80);
@@ -46,9 +41,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false },
-    });
+    const supabase = createSupabasePublicClient();
 
     const { error } = await supabase.from("early_access_intake").insert({
       admin_notes: "",
@@ -74,6 +67,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (isMissingServerEnvError(error)) {
+      return NextResponse.json(
+        { error: "Early Access signup is temporarily unavailable." },
+        { status: 503 }
+      );
+    }
+
     const message =
       error instanceof Error
         ? error.message

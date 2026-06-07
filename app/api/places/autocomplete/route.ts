@@ -1,13 +1,12 @@
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import {
   googlePlacesErrorKey,
   placesUnavailableMessage,
   PlaceAutocompleteSuggestion,
 } from "../../../lib/places";
+import { isMissingServerEnvError } from "@/app/lib/server/env";
+import { createSupabaseUserClient } from "@/app/lib/server/supabase";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY ?? "";
 
 function errorMessage(error: unknown): string {
@@ -43,10 +42,6 @@ async function recordPlacesError(
 
 export async function POST(request: NextRequest) {
   try {
-    if (!supabaseUrl || !supabaseAnonKey) {
-      throw new Error("Missing Supabase server configuration.");
-    }
-
     if (!googleMapsApiKey) {
       throw new Error("Missing GOOGLE_MAPS_API_KEY in environment variables.");
     }
@@ -58,10 +53,7 @@ export async function POST(request: NextRequest) {
       throw new Error("Please sign in before searching locations.");
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false },
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-    });
+    const supabase = createSupabaseUserClient(accessToken);
 
     const { data: userData, error: userError } = await supabase.auth.getUser();
 
@@ -148,6 +140,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ suggestions });
   } catch (error) {
+    if (isMissingServerEnvError(error)) {
+      return NextResponse.json(
+        { error: "CarePland is missing required server configuration." },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
