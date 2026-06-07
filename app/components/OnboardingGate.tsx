@@ -34,6 +34,7 @@ type OnboardingGateProps = {
   requiresEmailUpdate: boolean;
   savingProfile: boolean;
   secondaryButtonClassName: string;
+  timezoneDetectionMessage?: string;
   timeZoneOptions: TimeZoneOption[];
   verifiedAccountEmail: string;
 };
@@ -64,6 +65,7 @@ export function OnboardingGate({
   requiresEmailUpdate,
   savingProfile,
   secondaryButtonClassName,
+  timezoneDetectionMessage,
   timeZoneOptions,
   verifiedAccountEmail,
 }: OnboardingGateProps) {
@@ -184,6 +186,7 @@ export function OnboardingGate({
           savingProfile={savingProfile}
           secondaryButtonClassName={secondaryButtonClassName}
           submitLabel="Continue"
+          timezoneDetectionMessage={timezoneDetectionMessage}
           timeZoneOptions={timeZoneOptions}
           variant="inline"
           verifiedAccountEmail={verifiedAccountEmail}

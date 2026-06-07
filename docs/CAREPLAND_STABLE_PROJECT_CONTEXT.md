@@ -19,6 +19,7 @@ This document is the stable architectural and operational memory for CarePland P
 - Profile setup and signed-in Profile contact details share `app/components/profile/ProfileContactDetailsForm.tsx`; use its inline/card variants instead of duplicating profile field markup.
 - Early Access acknowledgement and profile setup gate UI lives in `app/components/OnboardingGate.tsx`; keep `app/page.tsx` responsible for state/data orchestration while the gate component owns the presentational branches.
 - First-run Home welcome guide UI and static slide content live in `app/components/WelcomeGuide.tsx`; keep `app/page.tsx` responsible for welcome state, dismissed/save actions, and appointment/import/sample-data callbacks.
+- Admin workspace chrome/navigation lives in `app/components/admin/AdminWorkspaceShell.tsx`; continue moving admin-only UI into admin components without pulling patient-facing state or workflows along with it.
 - Sign-out unsaved-change summaries, appointment modifier close/switch checks, and Import panel close checks live in `app/lib/unsavedChanges.ts`; keep the policy for what counts as discardable work centralized instead of rebuilding it in page-level UI.
 - CarePrep guidance-to-form normalization, intake draft content types, and CarePrep edit comparison live in `app/lib/editorState.ts` with the other draft comparison helpers.
 - Supabase server environment checks belong in `app/lib/server/env.ts`; API routes should use the shared helper as they are touched instead of reimplementing ad hoc `process.env` guards.

@@ -19,6 +19,7 @@ type ProfileContactDetailsFormProps = {
   savingProfile: boolean;
   secondaryButtonClassName: string;
   submitLabel?: string;
+  timezoneDetectionMessage?: string;
   timeZoneOptions: TimeZoneOption[];
   variant?: "card" | "inline";
   verifiedAccountEmail: string;
@@ -37,6 +38,7 @@ export function ProfileContactDetailsForm({
   savingProfile,
   secondaryButtonClassName,
   submitLabel = "Save profile",
+  timezoneDetectionMessage,
   timeZoneOptions,
   variant = "card",
   verifiedAccountEmail,
@@ -187,6 +189,11 @@ export function ProfileContactDetailsForm({
               </option>
             ))}
           </select>
+          {timezoneDetectionMessage ? (
+            <p className="mt-2 text-xs font-normal text-slate-500">
+              {timezoneDetectionMessage}
+            </p>
+          ) : null}
         </label>
         <label className="block text-sm font-medium text-slate-700 md:col-span-2">
           Address line 1

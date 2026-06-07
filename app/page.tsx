@@ -68,10 +68,20 @@ import {
   type AdminUserActivityRow,
   type AdminUserActivitySortKey,
 } from "./components/admin/AdminUserActivityPanel";
+import { AdminWorkspaceShell } from "./components/admin/AdminWorkspaceShell";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
 import { HomeNextAppointmentPanel } from "./components/HomeNextAppointmentPanel";
 import { InlineConfirmation } from "./components/InlineConfirmation";
+import {
+  CalendarIcon,
+  EllipsisVerticalIcon,
+  GearIcon,
+  MapPinIcon,
+  PencilSquareIcon,
+  RefreshCircleIcon,
+  UserIcon,
+} from "./components/icons";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { ProfilePage } from "./components/profile/ProfilePage";
 import { PublicWebsite } from "./components/PublicWebsite";
@@ -84,8 +94,12 @@ import {
   asTextList,
   carePrepGuidanceFormValues,
   carePrepGuidanceHasDraftChanges,
+  emptyAppointmentDraft,
+  emptyCarePrepDraft,
+  emptyNoteDraft,
   intakeDraftHasSaveableNotes,
   linesToList,
+  type AppointmentDetailsDraft,
   type IntakeReviewDraftContent,
 } from "./lib/editorState";
 import {
@@ -457,141 +471,6 @@ type SupportAssistantAnalysisRun = {
   ui_recommendations: string[];
   updated_at: string;
 };
-
-function CalendarIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M8 2v4" />
-      <path d="M16 2v4" />
-      <rect height="18" rx="2" width="18" x="3" y="4" />
-      <path d="M3 10h18" />
-    </svg>
-  );
-}
-
-function MapPinIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M20 10c0 4.5-8 11-8 11s-8-6.5-8-11a8 8 0 1 1 16 0Z" />
-      <circle cx="12" cy="10" r="3" />
-    </svg>
-  );
-}
-
-function PencilSquareIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L12 14l-4 1 1-4 7.5-7.5Z" />
-    </svg>
-  );
-}
-
-function RefreshCircleIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M21 12a9 9 0 0 1-15.2 6.5" />
-      <path d="M3 12A9 9 0 0 1 18.2 5.5" />
-      <path d="M18 2v4h-4" />
-      <path d="M6 22v-4h4" />
-    </svg>
-  );
-}
-
-function GearIcon({ className = "h-5 w-5" }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-      <path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.05.05a2.1 2.1 0 1 1-2.97 2.97l-.05-.05a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.08 1.65V21a2.1 2.1 0 1 1-4.2 0v-.07a1.8 1.8 0 0 0-1.08-1.65 1.8 1.8 0 0 0-2 .36l-.05.05a2.1 2.1 0 1 1-2.97-2.97l.05-.05a1.8 1.8 0 0 0 .36-2A1.8 1.8 0 0 0 2.57 13H2.5a2.1 2.1 0 1 1 0-4.2h.07a1.8 1.8 0 0 0 1.65-1.08 1.8 1.8 0 0 0-.36-2l-.05-.05A2.1 2.1 0 0 1 6.78 2.7l.05.05a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 9.9 1.46V1.4a2.1 2.1 0 1 1 4.2 0v.06a1.8 1.8 0 0 0 1.08 1.65 1.8 1.8 0 0 0 2-.36l.05-.05a2.1 2.1 0 1 1 2.97 2.97l-.05.05a1.8 1.8 0 0 0-.36 2 1.8 1.8 0 0 0 1.65 1.08h.06a2.1 2.1 0 1 1 0 4.2h-.06A1.8 1.8 0 0 0 19.4 15Z" />
-    </svg>
-  );
-}
-
-function UserIcon({ className = "h-5 w-5" }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M20 21a8 8 0 0 0-16 0" />
-      <path d="M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z" />
-    </svg>
-  );
-}
-
-function EllipsisVerticalIcon({
-  className = "h-5 w-5",
-}: {
-  className?: string;
-}) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="12" cy="5" r="1" />
-      <circle cx="12" cy="19" r="1" />
-    </svg>
-  );
-}
 
 type AppointmentView = "archived" | "logged" | "upcoming";
 type AiAdminTab =
@@ -1511,24 +1390,6 @@ const careplandBuildDttm =
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-const emptyNoteDraft = {
-  followups: "",
-  summary: "",
-  takeaways: "",
-};
-
-const emptyAppointmentDraft = {
-  locationAddress: "",
-  locationName: "",
-  locationPhone: "",
-  providerName: "",
-  providerOrganization: "",
-  reason: "",
-  startsAt: "",
-  status: "scheduled",
-  title: "",
-};
-
 const emptyTextIntakeDraft: IntakeReviewDraftContent = {
   appointmentReason: "",
   appointmentTitle: "",
@@ -1543,16 +1404,6 @@ const emptyTextIntakeDraft: IntakeReviewDraftContent = {
   startsAt: "",
   suggestedAction: "",
   takeaways: "",
-};
-
-const emptyCarePrepDraft = {
-  bringList: "",
-  keyQuestions: "",
-  medReview: "",
-  nextSteps: "",
-  sinceLastVisit: "",
-  summary: "",
-  watchouts: "",
 };
 
 function getErrorMessage(error: unknown): string {
@@ -1930,19 +1781,35 @@ function isTodayOrFutureDate(value: string): boolean {
   return date >= startOfToday();
 }
 
-function browserTimezone(): string {
+type BrowserTimezoneDetection = {
+  detectedTimezone: string;
+  fallbackUsed: boolean;
+  timezone: string;
+};
+
+function browserTimezone(): BrowserTimezoneDetection {
   const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   if (
     detectedTimezone &&
     timeZoneOptions.some((option) => option.value === detectedTimezone)
   ) {
-    return detectedTimezone;
+    return {
+      detectedTimezone,
+      fallbackUsed: false,
+      timezone: detectedTimezone,
+    };
   }
 
-  return timeZoneOptions.some((option) => option.value === fallbackTimeZone)
+  const fallbackTimezone = timeZoneOptions.some((option) => option.value === fallbackTimeZone)
     ? fallbackTimeZone
     : timeZoneOptions[0]?.value ?? "";
+
+  return {
+    detectedTimezone: detectedTimezone || "",
+    fallbackUsed: Boolean(detectedTimezone),
+    timezone: fallbackTimezone,
+  };
 }
 
 function isLikelyEmail(value: string): boolean {
@@ -2617,29 +2484,58 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [newAppointmentTitle, setNewAppointmentTitle] = useState(
-    initialDraftState?.newAppointmentDraft?.title ?? ""
-  );
-  const [newAppointmentReason, setNewAppointmentReason] = useState(
-    initialDraftState?.newAppointmentDraft?.reason ?? ""
-  );
-  const [newAppointmentStartsAt, setNewAppointmentStartsAt] = useState(
-    initialDraftState?.newAppointmentDraft?.startsAt ?? ""
-  );
-  const [newAppointmentProviderName, setNewAppointmentProviderName] =
-    useState(initialDraftState?.newAppointmentDraft?.providerName ?? "");
-  const [
-    newAppointmentProviderOrganization,
-    setNewAppointmentProviderOrganization,
-  ] = useState(
-    initialDraftState?.newAppointmentDraft?.providerOrganization ?? ""
-  );
-  const [newAppointmentLocationName, setNewAppointmentLocationName] =
-    useState(initialDraftState?.newAppointmentDraft?.locationName ?? "");
-  const [newAppointmentLocationAddress, setNewAppointmentLocationAddress] =
-    useState(initialDraftState?.newAppointmentDraft?.locationAddress ?? "");
-  const [newAppointmentLocationPhone, setNewAppointmentLocationPhone] =
-    useState(initialDraftState?.newAppointmentDraft?.locationPhone ?? "");
+  const [newAppointmentDraft, setNewAppointmentDraft] =
+    useState<AppointmentDetailsDraft>({
+      ...emptyAppointmentDraft,
+      locationAddress:
+        initialDraftState?.newAppointmentDraft?.locationAddress ?? "",
+      locationName: initialDraftState?.newAppointmentDraft?.locationName ?? "",
+      locationPhone:
+        initialDraftState?.newAppointmentDraft?.locationPhone ?? "",
+      providerName:
+        initialDraftState?.newAppointmentDraft?.providerName ?? "",
+      providerOrganization:
+        initialDraftState?.newAppointmentDraft?.providerOrganization ?? "",
+      reason: initialDraftState?.newAppointmentDraft?.reason ?? "",
+      startsAt: initialDraftState?.newAppointmentDraft?.startsAt ?? "",
+      title: initialDraftState?.newAppointmentDraft?.title ?? "",
+    });
+  const newAppointmentTitle = newAppointmentDraft.title;
+  const newAppointmentReason = newAppointmentDraft.reason;
+  const newAppointmentStartsAt = newAppointmentDraft.startsAt;
+  const newAppointmentProviderName = newAppointmentDraft.providerName;
+  const newAppointmentProviderOrganization =
+    newAppointmentDraft.providerOrganization;
+  const newAppointmentLocationName = newAppointmentDraft.locationName;
+  const newAppointmentLocationAddress = newAppointmentDraft.locationAddress;
+  const newAppointmentLocationPhone = newAppointmentDraft.locationPhone;
+
+  function updateNewAppointmentDraft(
+    field: keyof AppointmentDetailsDraft,
+    value: string
+  ) {
+    setNewAppointmentDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }));
+  }
+
+  const setNewAppointmentTitle = (value: string) =>
+    updateNewAppointmentDraft("title", value);
+  const setNewAppointmentReason = (value: string) =>
+    updateNewAppointmentDraft("reason", value);
+  const setNewAppointmentStartsAt = (value: string) =>
+    updateNewAppointmentDraft("startsAt", value);
+  const setNewAppointmentProviderName = (value: string) =>
+    updateNewAppointmentDraft("providerName", value);
+  const setNewAppointmentProviderOrganization = (value: string) =>
+    updateNewAppointmentDraft("providerOrganization", value);
+  const setNewAppointmentLocationName = (value: string) =>
+    updateNewAppointmentDraft("locationName", value);
+  const setNewAppointmentLocationAddress = (value: string) =>
+    updateNewAppointmentDraft("locationAddress", value);
+  const setNewAppointmentLocationPhone = (value: string) =>
+    updateNewAppointmentDraft("locationPhone", value);
   const [favoriteLocations, setFavoriteLocations] = useState<FavoriteLocation[]>(
     []
   );
@@ -3134,6 +3030,7 @@ export default function Home() {
     useState<ProfileDraft>(emptyProfileDraft);
   const [savedProfileDraft, setSavedProfileDraft] =
     useState<ProfileDraft>(emptyProfileDraft);
+  const [timezoneDetectionMessage, setTimezoneDetectionMessage] = useState("");
   const [savedProfileLabel, setSavedProfileLabel] = useState("");
   const [sampleDataSeededAt, setSampleDataSeededAt] = useState<string | null>(
     null
@@ -3878,17 +3775,7 @@ export default function Home() {
       }),
       hasUnaddedCareVipName,
       hasUnsavedProfileChanges,
-      newAppointmentDraft: {
-        locationAddress: newAppointmentLocationAddress,
-        locationName: newAppointmentLocationName,
-        locationPhone: newAppointmentLocationPhone,
-        providerName: newAppointmentProviderName,
-        providerOrganization: newAppointmentProviderOrganization,
-        reason: newAppointmentReason,
-        startsAt: newAppointmentStartsAt,
-        status: "scheduled",
-        title: newAppointmentTitle,
-      },
+      newAppointmentDraft,
       newCareVipName,
       noteDrafts,
       notesByAppointment,
@@ -3911,14 +3798,7 @@ export default function Home() {
 	    guidanceByAppointment,
 	    hasUnaddedCareVipName,
 	    hasUnsavedProfileChanges,
-	    newAppointmentLocationAddress,
-	    newAppointmentLocationName,
-	    newAppointmentLocationPhone,
-	    newAppointmentProviderName,
-	    newAppointmentProviderOrganization,
-	    newAppointmentReason,
-	    newAppointmentStartsAt,
-	    newAppointmentTitle,
+	    newAppointmentDraft,
 	    newCareVipName,
 	    noteDrafts,
 	    notesByAppointment,
@@ -4572,15 +4452,8 @@ export default function Home() {
       editingCarePrepIds,
       editingNoteIds,
       newAppointmentDraft: {
-        locationAddress: newAppointmentLocationAddress,
-        locationName: newAppointmentLocationName,
-        locationPhone: newAppointmentLocationPhone,
-        providerName: newAppointmentProviderName,
-        providerOrganization: newAppointmentProviderOrganization,
-        reason: newAppointmentReason,
-        startsAt: newAppointmentStartsAt,
+        ...newAppointmentDraft,
         subjectId: newAppointmentSubjectId,
-        title: newAppointmentTitle,
       },
       noteDrafts,
       selectedTextIntakeMatchId,
@@ -4601,15 +4474,8 @@ export default function Home() {
     editingAppointmentIds,
     editingCarePrepIds,
     editingNoteIds,
-    newAppointmentLocationAddress,
-    newAppointmentLocationName,
-    newAppointmentLocationPhone,
-    newAppointmentProviderName,
-    newAppointmentProviderOrganization,
-    newAppointmentReason,
-    newAppointmentStartsAt,
+    newAppointmentDraft,
     newAppointmentSubjectId,
-    newAppointmentTitle,
     noteDrafts,
     selectedTextIntakeMatchId,
     textIntakeAiDraft,
@@ -4821,6 +4687,10 @@ export default function Home() {
   }
 
   function updateProfileDraft(field: keyof ProfileDraft, value: string) {
+    if (field === "timezone") {
+      setTimezoneDetectionMessage("");
+    }
+
     setProfileDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
@@ -5056,10 +4926,27 @@ export default function Home() {
       throw profileError;
     }
 
+    const timezoneDetection = browserTimezone();
+    const savedTimezone =
+      typeof profileRow?.timezone === "string" ? profileRow.timezone : "";
+    const fallbackTimezoneLabel =
+      timeZoneOptions.find(
+        (option) => option.value === timezoneDetection.timezone
+      )?.label ?? timezoneDetection.timezone;
+    setTimezoneDetectionMessage(
+      !savedTimezone && timezoneDetection.fallbackUsed && timezoneDetection.timezone
+        ? `We couldn't match your browser time zone (${timezoneDetection.detectedTimezone}), so we selected ${fallbackTimezoneLabel}. Please review this selection.`
+        : !savedTimezone && timezoneDetection.fallbackUsed
+          ? `We couldn't match your browser time zone (${timezoneDetection.detectedTimezone}). Please select one.`
+        : !savedTimezone && !timezoneDetection.detectedTimezone
+          ? "We couldn't detect your browser time zone. Please select one."
+          : ""
+    );
+
     const loadedProfileDraft = {
       ...profileDraftFromRow({
         fallbackEmail: profileEmail,
-        fallbackTimezone: browserTimezone(),
+        fallbackTimezone: timezoneDetection.timezone,
         row: profileRow,
       }),
       email: userRequiresEmailUpdate ? "" : profileRow?.email ?? profileEmail,
@@ -8684,7 +8571,7 @@ export default function Home() {
             assistant_confidence: supportAssistantResult.confidence,
             assistant_interaction_id: supportAssistantResult.interactionId,
             assistant_priority: supportAssistantResult.priority,
-            browser_timezone: browserTimezone(),
+            browser_timezone: browserTimezone().timezone,
             signed_in_email: signedInEmail,
             tab: mainTab,
           },
@@ -9268,11 +9155,7 @@ export default function Home() {
     setHistoryAppointmentId("");
     setAppointmentView("upcoming");
     setSelectedSubjectId(ALL_SUBJECTS);
-    setNewAppointmentProviderName("");
-    setNewAppointmentProviderOrganization("");
-    setNewAppointmentLocationName("");
-    setNewAppointmentLocationAddress("");
-    setNewAppointmentLocationPhone("");
+    setNewAppointmentDraft({ ...emptyAppointmentDraft });
     setNewAppointmentSubjectId("");
     setTextIntakeSubjectId("");
     setTextIntakeValue("");
@@ -11183,14 +11066,7 @@ export default function Home() {
 
       await saveFavoriteLocationIfNeeded({ careCircleId, userId });
 
-      setNewAppointmentTitle("");
-      setNewAppointmentReason("");
-      setNewAppointmentStartsAt("");
-      setNewAppointmentProviderName("");
-      setNewAppointmentProviderOrganization("");
-      setNewAppointmentLocationName("");
-      setNewAppointmentLocationAddress("");
-      setNewAppointmentLocationPhone("");
+      setNewAppointmentDraft({ ...emptyAppointmentDraft });
       setNewAppointmentSubjectId(careSubjectId);
       resetPlaceLookup();
       setActiveAppointmentPanel(null);
@@ -12888,6 +12764,7 @@ export default function Home() {
             requiresEmailUpdate={requiresEmailUpdate}
             savingProfile={savingProfile}
             secondaryButtonClassName="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+            timezoneDetectionMessage={timezoneDetectionMessage}
             timeZoneOptions={timeZoneOptions}
             verifiedAccountEmail={verifiedAccountEmail}
           />
@@ -12963,6 +12840,7 @@ export default function Home() {
               requiresEmailUpdate,
               savingProfile,
               secondaryButtonClassName: gentleSecondaryButtonClass,
+              timezoneDetectionMessage,
               timeZoneOptions,
               verifiedAccountEmail,
             }}
@@ -14646,47 +14524,23 @@ export default function Home() {
             ) : null}
 
             {mainTab === "admin" && isAdmin ? (
-              <>
-              <section
-                className="sticky z-40 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
-                style={{ top: stickySecondaryOffset }}
+              <AdminWorkspaceShell
+                activeSecondaryKey={adminTab}
+                activeTopKey={activeAdminTopTab}
+                onSelectSecondary={(tab) => handleChangeAdminTab(tab)}
+                onSelectTop={(topTab) =>
+                  handleChangeAdminTab(adminTabForTopTab(topTab))
+                }
+                secondaryItems={
+                  systemAdminTabs.includes(adminTab)
+                    ? systemAdminNavItems
+                    : supportAdminTabs.includes(adminTab)
+                      ? supportAdminNavItems
+                      : undefined
+                }
+                stickyTop={stickySecondaryOffset}
+                topItems={topAdminNavItems}
               >
-                <div className="flex flex-wrap gap-2">
-                  {topAdminNavItems.map((item) => (
-                    <AdminNavButton
-                      followupCount={item.followupCount ?? 0}
-                      isSelected={activeAdminTopTab === item.key}
-                      key={item.key}
-                      newCount={item.newCount ?? 0}
-                      onClick={() => handleChangeAdminTab(adminTabForTopTab(item.key))}
-                    >
-                      {item.label}
-                    </AdminNavButton>
-                  ))}
-                </div>
-              </section>
-
-              {systemAdminTabs.includes(adminTab) ? (
-                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <AdminNavGroup
-                    activeKey={adminTab}
-                    className="mb-0 border-b-0 pb-0"
-                    items={systemAdminNavItems}
-                    onSelect={(tab) => handleChangeAdminTab(tab)}
-                  />
-                </section>
-              ) : null}
-
-              {supportAdminTabs.includes(adminTab) ? (
-                <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <AdminNavGroup
-                    activeKey={adminTab}
-                    className="mb-0 border-b-0 pb-0"
-                    items={supportAdminNavItems}
-                    onSelect={(tab) => handleChangeAdminTab(tab)}
-                  />
-                </section>
-              ) : null}
 
               {adminTab === "dashboard" ? (
                 <AdminDashboardPanel
@@ -17030,7 +16884,7 @@ export default function Home() {
                   </div>
                 </section>
               ) : null}
-              </>
+              </AdminWorkspaceShell>
             ) : null}
 
             {signedInEmail && mainTab === "appointments" ? (

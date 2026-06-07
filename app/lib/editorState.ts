@@ -73,6 +73,34 @@ export type SavedCarePrepGuidance = {
   watchouts: unknown;
 };
 
+export const emptyNoteDraft: SectionNoteDraft = {
+  followups: "",
+  summary: "",
+  takeaways: "",
+};
+
+export const emptyAppointmentDraft: AppointmentDetailsDraft = {
+  locationAddress: "",
+  locationName: "",
+  locationPhone: "",
+  providerName: "",
+  providerOrganization: "",
+  reason: "",
+  startsAt: "",
+  status: "scheduled",
+  title: "",
+};
+
+export const emptyCarePrepDraft: CarePrepFormDraft = {
+  bringList: "",
+  keyQuestions: "",
+  medReview: "",
+  nextSteps: "",
+  sinceLastVisit: "",
+  summary: "",
+  watchouts: "",
+};
+
 export function asTextList(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
