@@ -16,6 +16,8 @@ import {
 } from "@/app/lib/healthTopics/topicSummary";
 import { createSupabaseUserClient } from "@/app/lib/server/supabase";
 
+const allCareSubjectsKey = "all";
+
 type TopicMentionRow = {
   appointment_id: string | null;
   appointment_starts_at: string | null;
@@ -335,6 +337,7 @@ export async function GET(request: NextRequest) {
 
     const mentionRowsForSummary = (mentionRows ?? []) as TopicMentionRow[];
     const totalVisitIdsByCareSubject = new Map<string, Set<string>>();
+    const totalVisitIdsForAllSubjects = new Set<string>();
 
     mentionRowsForSummary.forEach((mention) => {
       const sourceVisitKey =
@@ -346,6 +349,7 @@ export async function GET(request: NextRequest) {
 
       visitIds.add(sourceVisitKey);
       totalVisitIdsByCareSubject.set(mention.care_subject_id, visitIds);
+      totalVisitIdsForAllSubjects.add(sourceVisitKey);
     });
 
     const summariesByKey = new Map<string, TopicSummaryAccumulator>();
@@ -353,12 +357,13 @@ export async function GET(request: NextRequest) {
     mentionRowsForSummary.forEach((mention) => {
       const topicSlug = mention.normalized_topic_slug;
       const topic = topicsBySlug.get(topicSlug);
-      const key = `${mention.care_subject_id}:${topicSlug}`;
+      const summaryCareSubjectId = careSubjectId || allCareSubjectsKey;
+      const key = `${summaryCareSubjectId}:${topicSlug}`;
       const current =
         summariesByKey.get(key) ??
         ({
           category: topic?.category ?? "general",
-          careSubjectId: mention.care_subject_id,
+          careSubjectId: summaryCareSubjectId,
           displayName: topic?.display_name ?? displayNameFromSlug(topicSlug),
           domain: topic?.domain ?? "health",
           firstMentionAt: null,
@@ -439,8 +444,18 @@ export async function GET(request: NextRequest) {
         ),
       ] as HealthStoryStatus[];
       const totalVisitCount =
-        totalVisitIdsByCareSubject.get(summary.careSubjectId)?.size ??
-        summary.sourceVisitIds.size;
+        summary.careSubjectId === allCareSubjectsKey
+          ? totalVisitIdsForAllSubjects.size
+          : totalVisitIdsByCareSubject.get(summary.careSubjectId)?.size ??
+            summary.sourceVisitIds.size;
+      const userContextTexts =
+        summary.careSubjectId === allCareSubjectsKey
+          ? Array.from(contextTextsByKey.entries())
+              .filter(([key]) => key.endsWith(`:${summary.topicSlug}`))
+              .flatMap(([, texts]) => texts)
+          : contextTextsByKey.get(
+              `${summary.careSubjectId}:${summary.topicSlug}`
+            ) ?? [];
 
       return {
         careSubjectId: summary.careSubjectId,
@@ -468,10 +483,7 @@ export async function GET(request: NextRequest) {
           relatedTopics: narrativeRelatedTopics,
           statuses,
           topicSlug: summary.topicSlug,
-          userContextTexts:
-            contextTextsByKey.get(
-              `${summary.careSubjectId}:${summary.topicSlug}`
-            ) ?? [],
+          userContextTexts,
         }),
         openCount: summary.openCount,
         providerNames,
