@@ -2,6 +2,7 @@
 
 type HomeAppointment = {
   id: string;
+  is_sample_data?: boolean | null;
   location_address?: string | null;
   provider_name?: string | null;
   starts_at: string | null;
@@ -76,6 +77,14 @@ const primaryButtonClass =
 const openAreaButtonClass =
   "block w-full rounded-md text-left transition hover:bg-blue-50/50 focus:outline-none focus:ring-2 focus:ring-blue-200";
 
+function DemoPill() {
+  return (
+    <span className="whitespace-nowrap rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+      Demo
+    </span>
+  );
+}
+
 export function HomeNextAppointmentPanel({
   appointment,
   formatDate,
@@ -105,8 +114,11 @@ export function HomeNextAppointmentPanel({
               <span className="block text-sm font-semibold text-blue-700">
                 Next appointment
               </span>
-              <span className="block text-2xl font-semibold text-slate-950">
-                {appointment.title || "Untitled appointment"}
+              <span className="mt-1 flex flex-wrap items-center gap-2">
+                <span className="min-w-0 truncate text-2xl font-semibold text-slate-950">
+                  {appointment.title || "Untitled appointment"}
+                </span>
+                {appointment.is_sample_data ? <DemoPill /> : null}
               </span>
             </button>
           ) : (

@@ -146,6 +146,24 @@ Supabase SQL editor history.
 - `2026-05-26_onboarding_assistant_knowledge.sql`
   Migration/admin utility: adds the dedicated Ask onboarding helper module/prompt and light supporting Dynamic Text / Agent Knowledge copy.
 
+- `2026-06-07_health_focus_reports_foundation.sql`
+  Migration: adds the Health Focus topic catalog, topic mentions, saved topic summaries, saved reports, and row-stored relevance policy factors for future person-level context retrieval.
+
+- `2026-06-07_add_dental_oral_health_topic.sql`
+  Migration patch: adds the Dental / Oral Health topic to the Health Focus catalog for already-applied foundation databases.
+
+- `2026-06-07_expand_health_focus_story_topics.sql`
+  Migration patch: expands the Health Focus catalog with narrative-friendly condition, procedure, therapy, mobility, mental health, preventive care, nutrition, specialist, and home-monitoring topics.
+
+- `2026-06-08_health_focus_feedback_prompts.sql`
+  Migration/admin utility: adds first-class Health Focus / Health Story feedback and user-context correction tables, then seeds Health Focus prompt paths into the existing Admin AI Prompts system.
+
+- `2026-06-08_health_focus_context_label_content.sql`
+  Admin utility: seeds editable Health Focus context pill labels into Admin > Dynamic Text.
+
+- `2026-06-09_health_focus_sample_data_seed.sql`
+  Migration/admin utility: replaces the demo-data seed RPC with a broader Health Focus care-history seed, including a continuity-of-care hero story, caregiver Care VIP scenario, recurring topics, direct topic mentions, related-topic ambiguity, accepted/separate relationship feedback, future CarePrep payoff appointments, timelines, and richer removal cleanup.
+
 - `2026-05-23_early_access_plan_tier.sql`
   Admin utility: adds the Early Access plan tier with current Group-level/full-access feature settings and updates editable plan/agent text.
 

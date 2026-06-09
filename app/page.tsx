@@ -53,6 +53,7 @@ import {
   AdminIntegrationErrorsPanel,
   type AdminIntegrationErrorSummaryRow,
 } from "./components/admin/AdminIntegrationErrorsPanel";
+import { AdminPromptTextInventoryPanel } from "./components/admin/AdminPromptTextInventoryPanel";
 import { AdminReadonlyUserPanel } from "./components/admin/AdminReadonlyUserPanel";
 import { AdminSessionSettingsPanel } from "./components/admin/AdminSessionSettingsPanel";
 import {
@@ -71,6 +72,17 @@ import {
 import { AdminWorkspaceShell } from "./components/admin/AdminWorkspaceShell";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
+import { parseTopicContextLabelOverrides } from "./lib/healthTopics/contextSignatureLabels";
+import {
+  HealthFocusCard,
+  type HealthFocusTopicSummary,
+} from "./components/healthTopics/HealthFocusCard";
+import {
+  HealthFocusTopicDetail,
+  type HealthFocusTopicDetailData,
+  type HealthStoryFeedbackInput,
+  type HealthStoryFeedbackResult,
+} from "./components/healthTopics/HealthFocusTopicDetail";
 import { HomeNextAppointmentPanel } from "./components/HomeNextAppointmentPanel";
 import { InlineConfirmation } from "./components/InlineConfirmation";
 import {
@@ -477,6 +489,7 @@ type AiAdminTab =
   | "agentKnowledge"
   | "history"
   | "instructions"
+  | "inventory"
   | "proposals";
 type AdminTab =
   | "dashboard"
@@ -513,6 +526,17 @@ type AiWorkflowKey =
   | "ask_user_response_rubric"
   | "bulk_appointment_intake"
   | "careprep_generation"
+  | "health_focus_card_summary"
+  | "health_report_generation"
+  | "health_story_feedback_acknowledgement"
+  | "health_story_narrative_summary"
+  | "health_story_source_snippet_selection"
+  | "health_story_timeline_summary"
+  | "health_topic_correction_structuring"
+  | "health_topic_extraction"
+  | "health_topic_feedback_interpretation"
+  | "health_topic_normalization"
+  | "health_topic_relationship_detection"
   | "note_intake_interpretation"
   | "support_assistant";
 type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
@@ -757,6 +781,12 @@ const appContentDefaults = {
     "CarePrep can't be run yet because you have no additional appointments to consider.",
   careprep_auto_success_message:
     "CarePrep generated for {appointmentTitle}.",
+  health_focus_context_frequency_labels:
+    "Once = Once\nA Few Times = A Few Times;Few\nOccasionally = Occasionally\nFairly Often = Fairly Often;Often\nFrequent = Frequent\nMost Visits = Most Visits;Most",
+  health_focus_context_recency_labels:
+    "No Date = No Date;None\nToday = Today\nYesterday = Yesterday\nPast Few Days = Past Few Days;Few Days\nThis Week = This Week\nThis Month = This Month\nLast Month = Last Month\nEarlier This Year = Earlier This Year;This Year\nLast Year = Last Year\nBefore Last Year = Before Last Year;Older",
+  health_focus_context_span_labels:
+    "One Visit = One Visit\nSeveral Weeks = Several Weeks;Weeks\nSeveral Months = Several Months;Months\nAbout a Year = About a Year;Year\nMultiple Years = Multiple Years;Years",
   ask_guidance_message:
     "Questions, ideas, workflow feedback, or things that felt confusing — tell us what’s on your mind.",
   ask_acknowledgement_message:
@@ -948,6 +978,27 @@ const appContentOptions = [
       "Expiring blue status shown after automatic CarePrep prepares an appointment. Supported placeholder: {appointmentTitle}.",
     label: "Automatic CarePrep success message",
   },
+  {
+    category: "health_focus",
+    contentKey: "health_focus_context_recency_labels",
+    description:
+      "Display labels for Health Focus recency pills. Format each line as: canonical = label_full;label_short.",
+    label: "Context pill labels: Recency",
+  },
+  {
+    category: "health_focus",
+    contentKey: "health_focus_context_frequency_labels",
+    description:
+      "Display labels for Health Focus frequency pills. Format each line as: canonical = label_full;label_short.",
+    label: "Context pill labels: Frequency",
+  },
+  {
+    category: "health_focus",
+    contentKey: "health_focus_context_span_labels",
+    description:
+      "Display labels for Health Focus span pills. Format each line as: canonical = label_full;label_short.",
+    label: "Context pill labels: Span",
+  },
 ];
 
 const appContentCategories = [
@@ -986,6 +1037,12 @@ const appContentCategories = [
     description: "Short status, success, warning, and validation messages.",
     key: "messages",
     label: "Messages",
+  },
+  {
+    description:
+      "Editable labels and user-facing text for Health Focus and Health Story.",
+    key: "health_focus",
+    label: "Health Focus",
   },
 ] as const;
 
@@ -1349,6 +1406,128 @@ const aiWorkflows: Record<
     description: "Instructions used to generate appointment preparation guidance.",
     historyLabel: "CarePrep History",
     label: "CarePrep generation",
+  },
+  health_topic_extraction: {
+    defaultChangeNote: "Initial Health Focus topic extraction prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You extract Health Focus topics from CarePland source text. Use only supplied data. Prefer user-friendly topics over diagnosis coding. Return structured JSON only.",
+    defaultUserPrompt:
+      "Use the supplied source text, appointment metadata, topic catalog, and prior user corrections. Return candidate topic mentions with confidence, status suggestion, source anchor, and related topic slugs.",
+    description: "Extracts candidate Health Focus topics from saved source text.",
+    historyLabel: "Health Focus History",
+    label: "Health topic extraction",
+  },
+  health_topic_normalization: {
+    defaultChangeNote: "Initial Health Focus topic normalization prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You map health-related language to CarePland standard topic slugs. Preserve user language, avoid over-medicalizing, and return structured JSON only.",
+    defaultUserPrompt:
+      "Use the supplied candidate topic language and topic catalog. Return normalized topic slugs and any uncertain mappings.",
+    description: "Maps topic language to the standard Health Focus catalog.",
+    historyLabel: "Health Focus History",
+    label: "Health topic normalization",
+  },
+  health_topic_relationship_detection: {
+    defaultChangeNote: "Initial Health Focus relationship detection prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You decide whether co-mentioned topics appear related, separate, or unclear based only on supplied CarePland source data. Avoid medical conclusions. Return structured JSON only.",
+    defaultUserPrompt:
+      "Use the supplied topic mentions, source snippets, appointment metadata, and user corrections. Return relationship assessments and rationale.",
+    description: "Detects whether Health Focus topics appear related, separate, or unclear.",
+    historyLabel: "Health Focus History",
+    label: "Health topic relationship detection",
+  },
+  health_focus_card_summary: {
+    defaultChangeNote: "Initial Health Focus card summary prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You write condensed Health Focus card summaries. The three context pills already explain recency, frequency, and span, so do not repeat those details. Target 120-160 characters, hard max 200. Choose the most important insight and stop.",
+    defaultUserPrompt:
+      "Use the supplied source mentions, related topics, provider context, and user corrections. Return both full_summary and condensed_summary. condensed_summary must be human, specific, and under 200 characters.",
+    description: "Writes compact human-facing Health Focus card summaries.",
+    historyLabel: "Health Focus History",
+    label: "Health Focus card summary",
+  },
+  health_story_narrative_summary: {
+    defaultChangeNote: "Initial Health Story narrative prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You write concise Health Story summaries from saved CarePland data. Explain the care story in human language, not a topic relationship graph. Use varied, conversational phrase patterns. Avoid repeating phrases like appears in, was discussed in, or was mentioned in. Only include statuses or relationships that are supported by the supplied data. Do not provide medical advice or diagnosis. Return structured JSON only.",
+    defaultUserPrompt:
+      "Use the supplied source appointments, topic mentions, context signature, related topics, timeline, and user corrections. Return a concise Health Story summary. Prefer observations over explanations, avoid exact counts or percentages unless requested, and choose the most natural relevant phrasing from care journey, context, time, and connection language.",
+    description: "Writes concise plain-language Health Story summaries.",
+    historyLabel: "Health Focus History",
+    label: "Health Story narrative summary",
+  },
+  health_story_timeline_summary: {
+    defaultChangeNote: "Initial Health Story timeline prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You write approximate Health Story timeline notes. Use broad timing labels and source-backed events. Avoid timestamps unless explicitly requested. Return structured JSON only.",
+    defaultUserPrompt:
+      "Use the supplied dated source mentions and corrections. Return timeline items using approximate date labels and source-backed event summaries.",
+    description: "Summarizes Health Story timeline events.",
+    historyLabel: "Health Focus History",
+    label: "Health Story timeline summary",
+  },
+  health_story_source_snippet_selection: {
+    defaultChangeNote: "Initial Health Story source snippet prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You select short source snippets that help users trust a Health Story. Prefer meaningful source text over matched-term fallbacks. Return structured JSON only.",
+    defaultUserPrompt:
+      "Use the supplied source text and topic focus. Return the most helpful short snippets and source anchors.",
+    description: "Chooses supporting snippets for Health Story source trust.",
+    historyLabel: "Health Focus History",
+    label: "Health Story source snippet selection",
+  },
+  health_story_feedback_acknowledgement: {
+    defaultChangeNote: "Initial Health Story feedback acknowledgement prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You define how CarePland acknowledges saved Health Story feedback. Reinforce that the user is improving their own story and context. Avoid promises about model learning, permanent changes, guaranteed future behavior, or retraining. Keep the tone calm, clear, brief, and human.",
+    defaultUserPrompt:
+      "After Health Story feedback is saved, select one approved acknowledgement phrase, summarize what the user indicated, show Undo for a limited period, and then remove the acknowledgement. Approved phrases: Thank you — your context will improve future stories. Thank you — your context improves future stories. Thank you — your context helps build better stories. Thank you — your feedback helps improve your stories. Thank you — your care history improves with this feedback. Thank you — your context helps connect future visits.",
+    description:
+      "Acknowledges saved Health Story feedback without implying retraining or guaranteed outcomes.",
+    historyLabel: "Health Focus History",
+    label: "Health Story feedback acknowledgement",
+  },
+  health_topic_feedback_interpretation: {
+    defaultChangeNote: "Initial Health Focus feedback interpretation prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You interpret user feedback on Health Focus or Health Story output. Decide whether the user confirmed, corrected, clarified, or rejected the interpretation. Return structured JSON only.",
+    defaultUserPrompt:
+      "Use the system output shown to the user and the user feedback. Return feedback mode, value, relationship feedback if any, and whether it should influence future generation.",
+    description: "Interprets user feedback on Health Focus and Health Stories.",
+    historyLabel: "Health Focus History",
+    label: "Health topic feedback interpretation",
+  },
+  health_topic_correction_structuring: {
+    defaultChangeNote: "Initial Health Focus correction structuring prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You convert user clarification into structured care-context corrections that can influence future Health Focus, CarePrep, and reports. Use only the user correction and supplied CarePland context. Return structured JSON only.",
+    defaultUserPrompt:
+      "Use the user clarification and target topic/story context. Return durable structured context for future Health Focus, CarePrep, and report generation.",
+    description: "Turns user clarifications into reusable care context.",
+    historyLabel: "Health Focus History",
+    label: "Health topic correction structuring",
+  },
+  health_report_generation: {
+    defaultChangeNote: "Initial Health Focus report generation prompt",
+    defaultSchema: {},
+    defaultSystemPrompt:
+      "You generate saved CarePland Health Focus reports from source-backed topic context and user corrections. Do not provide medical advice or diagnosis. Return structured JSON only.",
+    defaultUserPrompt:
+      "Use the supplied topic summaries, source appointments, topic mentions, user corrections, and requested report type. Return a saved-report draft with source references.",
+    description: "Generates saved Health Focus reports and Health Narratives.",
+    historyLabel: "Health Focus History",
+    label: "Health report generation",
   },
   bulk_appointment_intake: {
     defaultChangeNote: "Initial bulk appointment intake instruction set",
@@ -3142,6 +3321,17 @@ export default function Home() {
     useState<CarePrepGuidance | null>(null);
   const [notesReminderAppointment, setNotesReminderAppointment] =
     useState<NotesReminderAppointment | null>(null);
+  const [healthFocusTopics, setHealthFocusTopics] = useState<
+    HealthFocusTopicSummary[]
+  >([]);
+  const [healthFocusLoading, setHealthFocusLoading] = useState(false);
+  const [selectedHealthFocusTopic, setSelectedHealthFocusTopic] =
+    useState<HealthFocusTopicSummary | null>(null);
+  const [healthFocusTopicDetail, setHealthFocusTopicDetail] =
+    useState<HealthFocusTopicDetailData | null>(null);
+  const [healthFocusDetailLoading, setHealthFocusDetailLoading] =
+    useState(false);
+  const healthFocusBackfillAttemptedRef = useRef(new Set<string>());
   const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
   const [entitlement, setEntitlement] =
     useState<CareCircleEntitlement>(defaultEntitlement);
@@ -3161,6 +3351,23 @@ export default function Home() {
         .map((version) => [version.content_key, version])
     );
   }, [appContentVersions]);
+  const healthFocusContextLabelOverrides = useMemo(
+    () => ({
+      frequency: parseTopicContextLabelOverrides(
+        currentAppContentByKey.get("health_focus_context_frequency_labels")
+          ?.body ?? appContentDefaults.health_focus_context_frequency_labels
+      ),
+      recency: parseTopicContextLabelOverrides(
+        currentAppContentByKey.get("health_focus_context_recency_labels")
+          ?.body ?? appContentDefaults.health_focus_context_recency_labels
+      ),
+      span: parseTopicContextLabelOverrides(
+        currentAppContentByKey.get("health_focus_context_span_labels")?.body ??
+          appContentDefaults.health_focus_context_span_labels
+      ),
+    }),
+    [currentAppContentByKey]
+  );
   const selectedAppContentOption = appContentOptions.find(
     (item) => item.contentKey === selectedAppContentKey
   );
@@ -3837,6 +4044,46 @@ export default function Home() {
     !needsOnboarding &&
     mainTab === "home" &&
     !welcomeGuideDismissed;
+
+  function discardUnsavedWorkState() {
+    setProfileDraft(savedProfileDraft);
+    setNewCareVipName("");
+    setManagingCareVips(false);
+    setNewAppointmentDraft({ ...emptyAppointmentDraft });
+    setNewAppointmentSubjectId("");
+    setAppointmentDrafts({});
+    setEditingAppointmentIds({});
+    setNoteDrafts({});
+    setEditingNoteIds({});
+    setCarePrepDrafts({});
+    setEditingCarePrepIds({});
+    setPendingCarePrepCloseId(null);
+    setBulkAppointmentDrafts([]);
+    setBulkAppointmentSummary("");
+    setTextIntakeSubjectId("");
+    setTextIntakeValue("");
+    setTextIntakeDraft(null);
+    setTextIntakeAiDraft(null);
+    setTextIntakeItemId(null);
+    setTextIntakeMatches([]);
+    setSelectedTextIntakeMatchId("new");
+    setTextIntakeTargetAppointmentId(null);
+    setContextualTextIntakeValue("");
+    setApplyTextIntakeAppointmentDetails(false);
+    setPendingTextIntakePanelAction(null);
+    setPendingModifierSwitch(null);
+    setAskThreadId(null);
+    setAskInput("");
+    setAskMessages([]);
+    setAskConversationComplete(false);
+    setAskPanelError("");
+    setAskCloseConfirmOpen(false);
+    resetPlaceLookup();
+
+    if (typeof window !== "undefined") {
+      removeStoredValue(window.sessionStorage, appDraftStateStorageKey);
+    }
+  }
 
   useEffect(() => {
     signedInEmailRef.current = signedInEmail;
@@ -4894,6 +5141,361 @@ export default function Home() {
     }
   }
 
+  async function loadHealthFocusSummary(subjectId: string = selectedSubjectId) {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      setHealthFocusTopics([]);
+      setSelectedHealthFocusTopic(null);
+      setHealthFocusTopicDetail(null);
+      return;
+    }
+
+    setHealthFocusLoading(true);
+
+    try {
+      const params = new URLSearchParams();
+
+      if (subjectId && subjectId !== ALL_SUBJECTS) {
+        params.set("careSubjectId", subjectId);
+      }
+
+      const response = await fetch(
+        `/api/health-topics/summary${params.size ? `?${params}` : ""}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+      const result = (await response.json()) as {
+        error?: string;
+        ok?: boolean;
+        topics?: HealthFocusTopicSummary[];
+      };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error ?? "Health Focus could not be loaded.");
+      }
+
+      let nextTopics = result.topics ?? [];
+      const backfillKey = subjectId || ALL_SUBJECTS;
+
+      if (!healthFocusBackfillAttemptedRef.current.has(backfillKey)) {
+        healthFocusBackfillAttemptedRef.current.add(backfillKey);
+
+        try {
+          const backfillBody: Record<string, unknown> = { limit: 50 };
+
+          if (subjectId && subjectId !== ALL_SUBJECTS) {
+            backfillBody.careSubjectId = subjectId;
+          }
+
+          const backfillResponse = await fetch("/api/health-topics/backfill", {
+            body: JSON.stringify(backfillBody),
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+            method: "POST",
+          });
+          const backfillResult = (await backfillResponse.json().catch(() => null)) as
+            | {
+                error?: string;
+                errors?: Array<{ error: string; noteId: string }>;
+                failedCount?: number;
+                noteCount?: number;
+                ok?: boolean;
+                processedCount?: number;
+                topicSlugs?: string[];
+              }
+            | null;
+
+          if (!backfillResponse.ok || backfillResult?.ok === false) {
+            console.warn("Health Focus backfill did not complete.", backfillResult);
+          }
+
+          if (backfillResponse.ok) {
+            const retryResponse = await fetch(
+              `/api/health-topics/summary${params.size ? `?${params}` : ""}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                },
+              }
+            );
+            const retryResult = (await retryResponse.json()) as {
+              error?: string;
+              ok?: boolean;
+              topics?: HealthFocusTopicSummary[];
+            };
+
+            if (retryResponse.ok && retryResult.ok) {
+              nextTopics = retryResult.topics ?? [];
+            }
+          }
+        } catch (error) {
+          console.warn("Unable to backfill Health Focus summary", error);
+        }
+      }
+
+      setHealthFocusTopics(nextTopics);
+
+      if (selectedHealthFocusTopic) {
+        const refreshedSelectedTopic = nextTopics.find(
+          (topic) =>
+            topic.topicSlug === selectedHealthFocusTopic.topicSlug &&
+            topic.careSubjectId === selectedHealthFocusTopic.careSubjectId
+        );
+
+        if (refreshedSelectedTopic) {
+          setSelectedHealthFocusTopic(refreshedSelectedTopic);
+        } else {
+          setSelectedHealthFocusTopic(null);
+          setHealthFocusTopicDetail(null);
+        }
+      }
+    } catch (error) {
+      console.warn("Unable to load Health Focus summary", error);
+      setHealthFocusTopics([]);
+      setSelectedHealthFocusTopic(null);
+      setHealthFocusTopicDetail(null);
+    } finally {
+      setHealthFocusLoading(false);
+    }
+  }
+
+  async function loadHealthFocusTopicDetail(topic: HealthFocusTopicSummary) {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      setHealthFocusTopicDetail(null);
+      return;
+    }
+
+    setSelectedHealthFocusTopic(topic);
+    setHealthFocusDetailLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        topicSlug: topic.topicSlug,
+      });
+
+      if (topic.careSubjectId && topic.careSubjectId !== ALL_SUBJECTS) {
+        params.set("careSubjectId", topic.careSubjectId);
+      }
+
+      const response = await fetch(`/api/health-topics/detail?${params}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+      const result = (await response.json()) as {
+        contextSignature?: HealthFocusTopicDetailData["contextSignature"];
+        displayName?: string;
+        error?: string;
+        isSampleData?: boolean;
+        latestMentionAt?: string | null;
+        mentionCount?: number;
+        mentions?: HealthFocusTopicDetailData["mentions"];
+        narrativeSummary?: string;
+        ok?: boolean;
+        providerNames?: string[];
+        relatedTopics?: HealthFocusTopicDetailData["relatedTopics"];
+        separateRelatedTopics?: HealthFocusTopicDetailData["separateRelatedTopics"];
+        topicSlug?: string;
+      };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(
+          result.error ?? "Health Focus topic detail could not be loaded."
+        );
+      }
+
+      setHealthFocusTopicDetail({
+        contextSignature: result.contextSignature ?? topic.contextSignature,
+        displayName: result.displayName ?? topic.displayName,
+        isSampleData: result.isSampleData ?? topic.isSampleData,
+        latestMentionAt: result.latestMentionAt ?? topic.latestMentionAt,
+        mentionCount: result.mentionCount ?? topic.mentionCount,
+        mentions: result.mentions ?? [],
+        narrativeSummary: result.narrativeSummary ?? topic.narrativeSummary,
+        providerNames: result.providerNames ?? topic.providerNames,
+        relatedTopics: result.relatedTopics ?? [],
+        separateRelatedTopics: result.separateRelatedTopics ?? [],
+        topicSlug: result.topicSlug ?? topic.topicSlug,
+      });
+    } catch (error) {
+      console.warn("Unable to load Health Focus topic detail", error);
+      setHealthFocusTopicDetail(null);
+    } finally {
+      setHealthFocusDetailLoading(false);
+    }
+  }
+
+  async function handleHealthStoryFeedback(
+    feedback: HealthStoryFeedbackInput
+  ): Promise<HealthStoryFeedbackResult> {
+    if (!selectedHealthFocusTopic || !healthFocusTopicDetail) {
+      throw new Error("Open a Health Story before saving feedback.");
+    }
+
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      throw new Error("Please sign in before saving Health Story feedback.");
+    }
+
+    const selectedCareSubjectId =
+      selectedHealthFocusTopic.careSubjectId &&
+      selectedHealthFocusTopic.careSubjectId !== ALL_SUBJECTS
+        ? selectedHealthFocusTopic.careSubjectId
+        : healthFocusTopicDetail.mentions[0]?.careSubjectId ?? null;
+    const { careCircleId, careSubjectId } = await getPrimaryCareContext(
+      selectedCareSubjectId ?? undefined
+    );
+    const resolvedCareSubjectId = selectedCareSubjectId ?? careSubjectId;
+
+    if (!resolvedCareSubjectId) {
+      throw new Error("Choose a Care VIP before saving Health Story feedback.");
+    }
+
+    const sourceAppointmentIds = Array.from(
+      new Set(
+        healthFocusTopicDetail.mentions
+          .map((mention) => mention.appointmentId)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+    const sourceTopicMentionIds = healthFocusTopicDetail.mentions.map(
+      (mention) => mention.id
+    );
+    const response = await fetch("/api/health-topics/feedback", {
+      body: JSON.stringify({
+        careCircleId,
+        careSubjectId: resolvedCareSubjectId,
+        feedbackMode: feedback.feedbackMode,
+        feedbackValue: feedback.feedbackValue ?? null,
+        relatedTopicSlug: feedback.relatedTopicSlug ?? null,
+        shouldInfluenceFutureGeneration: true,
+        sourceAppointmentIds,
+        sourceTopicMentionIds,
+        systemSnapshot: {
+          contextSignature: healthFocusTopicDetail.contextSignature,
+          displayName: healthFocusTopicDetail.displayName,
+          latestMentionAt: healthFocusTopicDetail.latestMentionAt,
+          mentionCount: healthFocusTopicDetail.mentionCount,
+          providerNames: healthFocusTopicDetail.providerNames,
+          relatedTopics: healthFocusTopicDetail.relatedTopics,
+          separateRelatedTopics: healthFocusTopicDetail.separateRelatedTopics,
+        },
+        systemSummaryText: healthFocusTopicDetail.narrativeSummary,
+        targetType: feedback.targetType ?? "health_story",
+        topicSlug: healthFocusTopicDetail.topicSlug,
+        userComment: feedback.userComment ?? null,
+      }),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      contextId?: string | null;
+      error?: string;
+      feedbackId?: string;
+      ok?: boolean;
+    };
+
+    if (!response.ok || !result.ok) {
+      throw new Error(
+        result.error ?? "Health Story feedback could not be saved."
+      );
+    }
+
+    if (!result.feedbackId) {
+      throw new Error("Health Story feedback was saved without an undo token.");
+    }
+
+    if (
+      feedback.feedbackMode === "clarification" ||
+      feedback.targetType === "topic_relationship"
+    ) {
+      await loadHealthFocusSummary(selectedSubjectId);
+      await loadHealthFocusTopicDetail(selectedHealthFocusTopic);
+    }
+
+    return {
+      contextId: result.contextId ?? null,
+      feedbackId: result.feedbackId,
+    };
+  }
+
+  async function handleUndoHealthStoryFeedback({
+    contextId,
+    feedbackId,
+  }: HealthStoryFeedbackResult) {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      throw new Error("Please sign in before undoing Health Story feedback.");
+    }
+
+    const response = await fetch("/api/health-topics/feedback", {
+      body: JSON.stringify({
+        contextId,
+        feedbackId,
+      }),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      method: "DELETE",
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      ok?: boolean;
+    };
+
+    if (!response.ok || !result.ok) {
+      throw new Error(
+        result.error ?? "Health Story feedback could not be undone."
+      );
+    }
+
+    if (selectedHealthFocusTopic) {
+      await loadHealthFocusTopicDetail(selectedHealthFocusTopic);
+    }
+  }
+
   async function loadAppointments(
     view: AppointmentView = appointmentView,
     subjectId: string = selectedSubjectId
@@ -5173,6 +5775,7 @@ export default function Home() {
       ) ?? [];
     setAppointmentPool(activeAppointmentRows);
     applyAppointmentSelection(activeAppointmentRows, view, effectiveSubjectId);
+    void loadHealthFocusSummary(effectiveSubjectId);
 
     void hydrateAppointmentDetails(activeAppointmentRows);
   }
@@ -6549,6 +7152,7 @@ export default function Home() {
       return;
     }
 
+    discardUnsavedWorkState();
     void applyMainTabChange(tab);
   }
 
@@ -9109,6 +9713,8 @@ export default function Home() {
 	      return;
 	    }
 
+    discardUnsavedWorkState();
+    setSignOutConfirmOpen(false);
 	    await supabase.auth.signOut();
     if (typeof window !== "undefined") {
       removeStoredValue(window.localStorage, appUiStateStorageKey);
@@ -10466,115 +11072,58 @@ export default function Home() {
       }
 
       if (shouldSaveNotes) {
-        let aiNoteId: string | null = null;
-        const existingNote = selectedMatch?.currentNote ?? null;
-        const nextVersionNumber = existingNote
-          ? existingNote.version_number + 1
-          : 1;
+        const { data: sessionData, error: sessionError } =
+          await supabase.auth.getSession();
 
-        if (textIntakeAiDraft && hasAiNoteDraft) {
-          const { data: aiNote, error: aiNoteError } = await supabase
-            .from("appointment_notes")
-            .insert({
-              accepted_by_user: false,
-              appointment_id: appointmentId,
-              care_circle_id: careCircleId,
-              followups: aiFollowups,
-              generated_by_ai: true,
-              input_text:
-                (targetAppointment
-                  ? contextualTextIntakeValue
-                  : textIntakeValue
-                ).trim() || null,
-              is_current: false,
-              source: "intake_ai_draft",
-              summary_short: textIntakeAiDraft.notesSummary.trim() || null,
-              takeaways: aiTakeaways,
-              user_id: userId,
-              version_number: nextVersionNumber,
-            })
-            .select("id")
-            .single();
-
-          if (aiNoteError) {
-            throw aiNoteError;
-          }
-
-          aiNoteId = aiNote.id;
+        if (sessionError) {
+          throw sessionError;
         }
 
-        const { data: note, error: noteError } = await supabase
-          .from("appointment_notes")
-          .insert({
-            accepted_by_user: true,
-            appointment_id: appointmentId,
-            care_circle_id: careCircleId,
-            followups,
-            generated_by_ai: false,
-            input_text:
-              (targetAppointment ? contextualTextIntakeValue : textIntakeValue)
-                .trim() || null,
-            is_current: true,
-            source: textIntakeItemId ? "intake_user_accepted" : "manual",
-            summary_short: textIntakeDraft.notesSummary.trim() || null,
-            takeaways,
-            user_id: userId,
-            version_number: aiNoteId ? nextVersionNumber + 1 : nextVersionNumber,
-          })
-          .select("id")
-          .single();
+        const accessToken = sessionData.session?.access_token;
 
-        if (noteError) {
-          throw noteError;
+        if (!accessToken) {
+          throw new Error("Please sign in before saving Visit Notes.");
         }
 
-        if (aiNoteId) {
-          const { error: aiArchiveError } = await supabase
-            .from("appointment_notes")
-            .update({
-              superseded_at: new Date().toISOString(),
-              superseded_by_note_id: note.id,
-            })
-            .eq("id", aiNoteId);
-
-          if (aiArchiveError) {
-            throw aiArchiveError;
-          }
-        }
-
-        if (existingNote) {
-          const { error: existingArchiveError } = await supabase
-            .from("appointment_notes")
-            .update({
-              is_current: false,
-              superseded_at: new Date().toISOString(),
-              superseded_by_note_id: note.id,
-            })
-            .eq("id", existingNote.id);
-
-          if (existingArchiveError) {
-            throw existingArchiveError;
-          }
-        }
-
-        const { error: appointmentNoteError } = await supabase
-          .from("appointments")
-          .update({
-            archived_at:
-              selectedMatch?.appointment.status === "archived" ? null : undefined,
-            current_note_id: note.id,
-            ...Object.fromEntries(
+        const noteInputText = (
+          targetAppointment ? contextualTextIntakeValue : textIntakeValue
+        ).trim();
+        const response = await fetch("/api/appointment-notes", {
+          body: JSON.stringify({
+            aiDraft:
+              textIntakeAiDraft && hasAiNoteDraft
+                ? {
+                    followups: aiFollowups,
+                    inputText: noteInputText,
+                    source: "intake_ai_draft",
+                    summary: textIntakeAiDraft.notesSummary,
+                    takeaways: aiTakeaways,
+                  }
+                : null,
+            appointmentId,
+            appointmentUpdates: Object.fromEntries(
               detailChanges.map((change) => [change.field, change.newValue])
             ),
-            status:
-              selectedMatch?.appointment.status === "archived"
-                ? "scheduled"
-                : undefined,
-          })
-          .eq("id", appointmentId);
+            followups,
+            inputText: noteInputText,
+            restoreIfArchived: selectedMatch?.appointment.status === "archived",
+            source: textIntakeItemId ? "intake_user_accepted" : "manual",
+            summary: textIntakeDraft.notesSummary,
+            takeaways,
+          }),
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        });
+        const result = (await response.json()) as {
+          error?: string;
+          ok?: boolean;
+        };
 
-        if (appointmentNoteError) {
-          throw appointmentNoteError;
+        if (!response.ok || !result.ok) {
+          throw new Error(result.error ?? "Visit Notes could not be saved.");
         }
       }
 
@@ -11467,15 +12016,9 @@ export default function Home() {
         contextualAppointment ?? datedFutureAppointments.sort(byDate)[0];
 
       if (!nextAppointment) {
-        setMessage("Notes saved. No upcoming appointment was available for automatic CarePrep.");
         return;
       }
 
-      setMessage(
-        `Notes saved. Preparing CarePrep for ${
-          nextAppointment.title || "the next appointment"
-        }...`
-      );
       setGeneratingCarePrepForId(nextAppointment.id);
       setCarePrepGenerationErrors((currentErrors) => {
         const nextErrors = { ...currentErrors };
@@ -11527,9 +12070,7 @@ export default function Home() {
         message: autoCarePrepSuccessText(nextAppointment),
       });
     } catch (error) {
-      const message = getErrorMessage(error);
-      setMessage(`Auto-CarePrep did not run: ${message}`);
-      showToast(message, { type: "error" });
+      console.warn("Automatic CarePrep after notes did not run.", error);
     } finally {
       setGeneratingCarePrepForId(null);
     }
@@ -11838,56 +12379,43 @@ export default function Home() {
         throw new Error("Please add a summary, takeaway, or follow-up.");
       }
 
-      const { careCircleId, userId } = await getPrimaryCareContext();
       const existingNote = notesByAppointment.get(appointment.id);
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
 
-      const { data: newNote, error: insertError } = await supabase
-        .from("appointment_notes")
-        .insert({
-        appointment_id: appointment.id,
-        care_circle_id: careCircleId,
-        user_id: userId,
-        input_text: summary || null,
-        summary_short: summary || null,
-        takeaways,
-        followups,
-        is_current: true,
-        version_number: existingNote ? existingNote.version_number + 1 : 1,
-        source: existingNote ? "manual_edit" : "manual",
-        generated_by_ai: false,
-        accepted_by_user: true,
-        })
-        .select("id")
-        .single();
-
-      if (insertError) {
-        throw insertError;
+      if (sessionError) {
+        throw sessionError;
       }
 
-      if (existingNote) {
-        const { error: archiveError } = await supabase
-          .from("appointment_notes")
-          .update({
-            is_current: false,
-            superseded_at: new Date().toISOString(),
-            superseded_by_note_id: newNote.id,
-          })
-          .eq("id", existingNote.id);
+      const accessToken = sessionData.session?.access_token;
 
-        if (archiveError) {
-          throw archiveError;
-        }
+      if (!accessToken) {
+        throw new Error("Please sign in before saving Visit Notes.");
       }
 
-      const { error: appointmentLogError } = await supabase
-        .from("appointments")
-        .update({
-          current_note_id: newNote.id,
-        })
-        .eq("id", appointment.id);
+      const response = await fetch("/api/appointment-notes", {
+        body: JSON.stringify({
+          appointmentId: appointment.id,
+          followups,
+          summary,
+          takeaways,
+        }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        careCircleId?: string;
+        careSubjectId?: string | null;
+        error?: string;
+        noteId?: string;
+        ok?: boolean;
+      };
 
-      if (appointmentLogError) {
-        throw appointmentLogError;
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error ?? "Visit Notes could not be saved.");
       }
 
       setNoteDrafts((currentDrafts) => ({
@@ -11900,11 +12428,13 @@ export default function Home() {
       }));
       await loadAppointments();
       setMessage(existingNote ? "Notes updated. Previous version archived." : "Notes added.");
-      void triggerAutoCarePrepAfterNotes({
-        careCircleId,
-        careSubjectId: appointment.care_subject_id,
-        sourceAppointmentId: appointment.id,
-      });
+      if (result.careCircleId && result.careSubjectId) {
+        void triggerAutoCarePrepAfterNotes({
+          careCircleId: result.careCircleId,
+          careSubjectId: result.careSubjectId,
+          sourceAppointmentId: appointment.id,
+        });
+      }
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -12131,29 +12661,66 @@ export default function Home() {
             }
           />
         ) : (
-          <HomeNextAppointmentPanel
-            appointment={homeNextAppointment}
-            formatDate={formatDate}
-            generationError={homeCarePrepGenerationError}
-            guidance={homeNextGuidance}
-            highlights={homeCarePrepHighlights}
-            isGenerating={
-              generatingCarePrepForId === homeNextAppointment?.id
-            }
-            mapsLink={homeMapsLink}
-            nextSubject={nextSubject ?? ""}
-            onAddAppointment={() => startAppointmentPanel("add")}
-            onGenerateCarePrep={() => {
-              if (homeNextAppointment) {
-                void handleGenerateCarePrep(homeNextAppointment);
+          <>
+            <HomeNextAppointmentPanel
+              appointment={homeNextAppointment}
+              formatDate={formatDate}
+              generationError={homeCarePrepGenerationError}
+              guidance={homeNextGuidance}
+              highlights={homeCarePrepHighlights}
+              isGenerating={
+                generatingCarePrepForId === homeNextAppointment?.id
               }
-            }}
-            onOpenAppointment={() => {
-              void handleChangeMainTab("appointments");
-              void handleChangeAppointmentView("upcoming");
-            }}
-            practiceLabel={homePracticeLabel}
-          />
+              mapsLink={homeMapsLink}
+              nextSubject={nextSubject ?? ""}
+              onAddAppointment={() => startAppointmentPanel("add")}
+              onGenerateCarePrep={() => {
+                if (homeNextAppointment) {
+                  void handleGenerateCarePrep(homeNextAppointment);
+                }
+              }}
+              onOpenAppointment={() => {
+                void handleChangeMainTab("appointments");
+                void handleChangeAppointmentView("upcoming");
+              }}
+              practiceLabel={homePracticeLabel}
+            />
+            <HealthFocusCard
+              contextLabelOverrides={healthFocusContextLabelOverrides}
+              isLoading={healthFocusLoading}
+              onOpenAppointments={() => {
+                void handleChangeMainTab("appointments");
+                void handleChangeAppointmentView("logged");
+              }}
+              onCloseTopic={() => {
+                setSelectedHealthFocusTopic(null);
+                setHealthFocusTopicDetail(null);
+              }}
+              onSelectTopic={(topic) => {
+                void loadHealthFocusTopicDetail(topic);
+              }}
+              selectedTopicKey={
+                selectedHealthFocusTopic
+                  ? `${selectedHealthFocusTopic.careSubjectId}:${selectedHealthFocusTopic.topicSlug}`
+                  : null
+              }
+              selectedTopicStory={
+                <HealthFocusTopicDetail
+                  contextLabelOverrides={healthFocusContextLabelOverrides}
+                  detail={healthFocusTopicDetail}
+                  isLoading={healthFocusDetailLoading}
+                  onClose={() => {
+                    setSelectedHealthFocusTopic(null);
+                    setHealthFocusTopicDetail(null);
+                  }}
+                  onSubmitFeedback={handleHealthStoryFeedback}
+                  onUndoFeedback={handleUndoHealthStoryFeedback}
+                  variant="inline"
+                />
+              }
+              topics={healthFocusTopics}
+            />
+          </>
         )}
 
         {!showWelcomeGuide && notesReminderAppointment ? (
@@ -15622,7 +16189,9 @@ export default function Home() {
                   </label>
 
                   <label className="block text-sm font-medium text-slate-700">
-                    Text shown in the app
+                    {selectedAppContentCategory === "health_focus"
+                      ? "Text shown in the app. Format: canonical = label_full;label_short"
+                      : "Text shown in the app"}
                     <textarea
                       className="mt-2 min-h-64 w-full rounded-md border border-slate-300 px-3 py-2 text-base leading-7"
                       onChange={(event) => setAppContentBody(event.target.value)}
@@ -15747,6 +16316,7 @@ export default function Home() {
                   <button
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
                     disabled={
+                      aiAdminTab === "inventory" ||
                       loadingInstructions ||
                       loadingCarePrepHistory ||
                       loadingAgentKnowledgeProposals
@@ -15758,9 +16328,11 @@ export default function Home() {
                           ? loadAppContent("support_agent_product_facts")
                           : aiAdminTab === "proposals"
                             ? loadAgentKnowledgeProposals()
-                            : selectedAiWorkflow === "careprep_generation"
-                              ? loadCarePrepHistory()
-                              : loadIntakeHistory()
+                            : aiAdminTab === "inventory"
+                              ? undefined
+                              : selectedAiWorkflow === "careprep_generation"
+                                ? loadCarePrepHistory()
+                                : loadIntakeHistory()
                     }
                     type="button"
                   >
@@ -15768,6 +16340,8 @@ export default function Home() {
                     loadingCarePrepHistory ||
                     loadingAgentKnowledgeProposals
                       ? "Loading..."
+                      : aiAdminTab === "inventory"
+                        ? "Read-only"
                       : "Reload"}
                   </button>
                 </div>
@@ -15779,6 +16353,7 @@ export default function Home() {
                     </p>
                     {[
                       ["instructions", "Instructions", "Prompt versions"],
+                      ["inventory", "Inventory", "Prompt/text map"],
                       ["agentKnowledge", "Agent Knowledge", "Product truth"],
                       ["proposals", "Proposals", "Review updates"],
                       ["history", selectedAiWorkflowConfig.historyLabel, "Audit trail"],
@@ -15815,7 +16390,9 @@ export default function Home() {
                   </aside>
 
                   <div>
-                {aiAdminTab !== "agentKnowledge" && aiAdminTab !== "proposals" ? (
+                {aiAdminTab !== "agentKnowledge" &&
+                aiAdminTab !== "inventory" &&
+                aiAdminTab !== "proposals" ? (
                   <label className="block max-w-xl text-sm font-medium text-slate-700">
                   AI workflow
                   <select
@@ -15833,6 +16410,10 @@ export default function Home() {
                     ))}
                   </select>
                 </label>
+                ) : null}
+
+                {aiAdminTab === "inventory" ? (
+                  <AdminPromptTextInventoryPanel />
                 ) : null}
 
                 {aiAdminTab === "instructions" ? (
@@ -18489,8 +19070,7 @@ export default function Home() {
                 You have unfinished work
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-700">
-                Changing pages will leave this work unfinished. CarePland will
-                keep it in this browser for now.
+                Changing pages will discard this unfinished work.
               </p>
             </div>
             {unsavedSignOutChanges.length > 0 ? (
@@ -18525,7 +19105,7 @@ export default function Home() {
                 onClick={confirmPendingMainTabChange}
                 type="button"
               >
-                Continue
+                Discard and continue
               </button>
             </div>
           </section>

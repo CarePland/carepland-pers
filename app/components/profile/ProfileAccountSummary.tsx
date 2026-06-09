@@ -127,8 +127,8 @@ export function ProfileAccountSummary({
         </button>
       </div>
 
-      <div className="mt-3 grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 sm:grid-cols-[minmax(0,1fr)_18rem] xl:min-h-[14rem] xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
-        <section className="relative p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 sm:order-1 xl:after:hidden">
+      <div className="mt-3 grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 sm:grid-cols-[minmax(0,1fr)_18rem] lg:min-h-[14rem] lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
+        <section className="relative p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 sm:order-1 lg:after:hidden">
           <div className="flex h-7 items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Plan
@@ -225,10 +225,13 @@ export function ProfileAccountSummary({
         </section>
 
         {canUseMultipleCareVips ? (
-          <section className="relative flex flex-col p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 xl:before:absolute xl:before:inset-y-4 xl:before:left-0 xl:before:w-px xl:before:bg-slate-200 xl:after:inset-y-4 xl:after:bottom-auto xl:after:left-auto xl:after:right-0 xl:after:h-auto xl:after:w-px sm:order-3 sm:col-span-2 xl:order-2 xl:col-span-1">
+          <section className="relative flex flex-col p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 lg:before:absolute lg:before:inset-y-4 lg:before:left-0 lg:before:w-px lg:before:bg-slate-200 lg:after:inset-y-4 lg:after:bottom-auto lg:after:left-auto lg:after:right-0 lg:after:h-auto lg:after:w-px sm:order-3 sm:col-span-2 lg:order-2 lg:col-span-1">
             <div className="flex h-7 items-center justify-between gap-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <h3 className="min-w-0 truncate text-xs font-semibold tracking-wide text-slate-500">
                 CARE VIPs
+                <span className="ml-2 font-medium normal-case tracking-normal text-slate-400">
+                  People and pets
+                </span>
               </h3>
               <p className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {careSubjects.length}/{careVipLimit}
@@ -293,7 +296,7 @@ export function ProfileAccountSummary({
                 </div>
               </section>
             ) : null}
-            <form className="mt-7 xl:mt-auto" onSubmit={onCreateCareVip}>
+            <form className="mt-7 lg:mt-auto" onSubmit={onCreateCareVip}>
               <label className="sr-only" htmlFor="new-care-vip-name">
                 Care VIP name or email
               </label>
@@ -359,7 +362,7 @@ export function ProfileAccountSummary({
           </section>
         ) : null}
 
-        <section className="p-4 sm:order-2 xl:order-3">
+        <section className="p-4 sm:order-2 lg:order-3">
           <div className="flex h-7 items-center">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Account tools
