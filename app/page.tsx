@@ -83,7 +83,19 @@ import {
   type HealthStoryFeedbackInput,
   type HealthStoryFeedbackResult,
 } from "./components/healthTopics/HealthFocusTopicDetail";
+import {
+  HomeContextPanel,
+  type HomeContextAskContext,
+} from "./components/HomeContextPanel";
 import { HomeNextAppointmentPanel } from "./components/HomeNextAppointmentPanel";
+import {
+  homeContextClassifierDefaultSchema,
+  homeContextClassifierDefaultSystemPrompt,
+  homeContextClassifierDefaultUserPrompt,
+  homeContextDefaultSchema,
+  homeContextDefaultSystemPrompt,
+  homeContextDefaultUserPrompt,
+} from "./lib/homeContext/prompts";
 import { InlineConfirmation } from "./components/InlineConfirmation";
 import {
   CalendarIcon,
@@ -537,6 +549,8 @@ type AiWorkflowKey =
   | "health_topic_feedback_interpretation"
   | "health_topic_normalization"
   | "health_topic_relationship_detection"
+  | "home_context_answer"
+  | "home_context_intent_classifier"
   | "note_intake_interpretation"
   | "support_assistant";
 type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
@@ -1528,6 +1542,26 @@ const aiWorkflows: Record<
     description: "Generates saved Health Focus reports and Health Narratives.",
     historyLabel: "Health Focus History",
     label: "Health report generation",
+  },
+  home_context_answer: {
+    defaultChangeNote: "Initial Home context answer prompt",
+    defaultSchema: homeContextDefaultSchema,
+    defaultSystemPrompt: homeContextDefaultSystemPrompt,
+    defaultUserPrompt: homeContextDefaultUserPrompt,
+    description:
+      "Answers short context questions using saved appointments, notes, CarePrep, providers, Health Focus, and the active Ask context.",
+    historyLabel: "Home Context History",
+    label: "Home context answer",
+  },
+  home_context_intent_classifier: {
+    defaultChangeNote: "Initial Home context intent classifier prompt",
+    defaultSchema: homeContextClassifierDefaultSchema,
+    defaultSystemPrompt: homeContextClassifierDefaultSystemPrompt,
+    defaultUserPrompt: homeContextClassifierDefaultUserPrompt,
+    description:
+      "Classifies context questions before answer generation, using the active Ask context and redirecting out-of-scope requests.",
+    historyLabel: "Home Context History",
+    label: "Home context intent classifier",
   },
   bulk_appointment_intake: {
     defaultChangeNote: "Initial bulk appointment intake instruction set",
@@ -3319,6 +3353,15 @@ export default function Home() {
     useState<Appointment | null>(null);
   const [homeNextGuidance, setHomeNextGuidance] =
     useState<CarePrepGuidance | null>(null);
+  const [homeContextAnswer, setHomeContextAnswer] = useState("");
+  const [homeContextError, setHomeContextError] = useState<string | null>(null);
+  const [homeContextLoading, setHomeContextLoading] = useState(false);
+  const [healthStoryContextAnswer, setHealthStoryContextAnswer] = useState("");
+  const [healthStoryContextError, setHealthStoryContextError] = useState<
+    string | null
+  >(null);
+  const [healthStoryContextLoading, setHealthStoryContextLoading] =
+    useState(false);
   const [notesReminderAppointment, setNotesReminderAppointment] =
     useState<NotesReminderAppointment | null>(null);
   const [healthFocusTopics, setHealthFocusTopics] = useState<
@@ -5272,6 +5315,87 @@ export default function Home() {
     }
   }
 
+  async function handleHomeContextQuestion(
+    question: string,
+    askContext: HomeContextAskContext = { level: "global" }
+  ) {
+    const trimmedQuestion = question.trim();
+
+    if (!trimmedQuestion) {
+      return;
+    }
+
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    const isHealthStoryContext = askContext.level === "health_focus";
+    const setContextError = isHealthStoryContext
+      ? setHealthStoryContextError
+      : setHomeContextError;
+    const setContextAnswer = isHealthStoryContext
+      ? setHealthStoryContextAnswer
+      : setHomeContextAnswer;
+    const setContextLoading = isHealthStoryContext
+      ? setHealthStoryContextLoading
+      : setHomeContextLoading;
+
+    if (sessionError) {
+      setContextError(errorMessage(sessionError));
+      return;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      setContextError("Please sign in before asking for more context.");
+      return;
+    }
+
+    setContextLoading(true);
+    setContextError(null);
+
+    try {
+      const body: {
+        askContext: HomeContextAskContext;
+        careSubjectId?: string;
+        question: string;
+      } = {
+        askContext,
+        question: trimmedQuestion,
+      };
+
+      if (askContext.careSubjectId) {
+        body.careSubjectId = askContext.careSubjectId;
+      } else if (selectedSubjectId && selectedSubjectId !== ALL_SUBJECTS) {
+        body.careSubjectId = selectedSubjectId;
+      }
+
+      const response = await fetch("/api/home-context", {
+        body: JSON.stringify(body),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        answer?: string;
+        error?: string;
+        ok?: boolean;
+      };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error ?? "CarePland could not answer that yet.");
+      }
+
+      setContextAnswer(result.answer ?? "");
+    } catch (error) {
+      setContextError(errorMessage(error));
+    } finally {
+      setContextLoading(false);
+    }
+  }
+
   async function loadHealthFocusTopicDetail(topic: HealthFocusTopicSummary) {
     const { data: sessionData, error: sessionError } =
       await supabase.auth.getSession();
@@ -5289,6 +5413,8 @@ export default function Home() {
 
     setSelectedHealthFocusTopic(topic);
     setHealthFocusDetailLoading(true);
+    setHealthStoryContextAnswer("");
+    setHealthStoryContextError(null);
 
     try {
       const params = new URLSearchParams({
@@ -12685,6 +12811,12 @@ export default function Home() {
               }}
               practiceLabel={homePracticeLabel}
             />
+            <HomeContextPanel
+              answer={homeContextAnswer}
+              error={homeContextError}
+              isLoading={homeContextLoading}
+              onAsk={handleHomeContextQuestion}
+            />
             <HealthFocusCard
               contextLabelOverrides={healthFocusContextLabelOverrides}
               isLoading={healthFocusLoading}
@@ -12695,6 +12827,8 @@ export default function Home() {
               onCloseTopic={() => {
                 setSelectedHealthFocusTopic(null);
                 setHealthFocusTopicDetail(null);
+                setHealthStoryContextAnswer("");
+                setHealthStoryContextError(null);
               }}
               onSelectTopic={(topic) => {
                 void loadHealthFocusTopicDetail(topic);
@@ -12712,9 +12846,37 @@ export default function Home() {
                   onClose={() => {
                     setSelectedHealthFocusTopic(null);
                     setHealthFocusTopicDetail(null);
+                    setHealthStoryContextAnswer("");
+                    setHealthStoryContextError(null);
                   }}
                   onSubmitFeedback={handleHealthStoryFeedback}
                   onUndoFeedback={handleUndoHealthStoryFeedback}
+                  contextPanel={
+                    selectedHealthFocusTopic ? (
+                      <HomeContextPanel
+                        answer={healthStoryContextAnswer}
+                        askContext={{
+                          careSubjectId:
+                            selectedHealthFocusTopic.careSubjectId ===
+                            ALL_SUBJECTS
+                              ? null
+                              : selectedHealthFocusTopic.careSubjectId,
+                          level: "health_focus",
+                          sourceIds:
+                            healthFocusTopicDetail?.mentions
+                              .map((mention) => mention.appointmentId)
+                              .filter((id): id is string => Boolean(id)) ??
+                            [],
+                          topicId: selectedHealthFocusTopic.topicSlug,
+                          topicName: selectedHealthFocusTopic.displayName,
+                        }}
+                        error={healthStoryContextError}
+                        isLoading={healthStoryContextLoading}
+                        onAsk={handleHomeContextQuestion}
+                        variant="compact"
+                      />
+                    ) : null
+                  }
                   variant="inline"
                 />
               }

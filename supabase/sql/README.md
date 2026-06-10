@@ -164,6 +164,11 @@ Supabase SQL editor history.
 - `2026-06-09_health_focus_sample_data_seed.sql`
   Migration/admin utility: replaces the demo-data seed RPC with a broader Health Focus care-history seed, including a continuity-of-care hero story, caregiver Care VIP scenario, recurring topics, direct topic mentions, related-topic ambiguity, accepted/separate relationship feedback, future CarePrep payoff appointments, timelines, and richer removal cleanup.
 
+- `2026-06-09_home_context_answer_prompt.sql`
+  Admin utility: seeds the Home `Get more context` intent classifier and answer prompts into the existing Admin AI Prompts system. These prompts are independent from the existing Ask assistant.
+- `2026-06-09_home_context_hierarchical_context_prompt.sql`
+  Admin utility: creates a new current version of the Home context prompts so `Get more context` can use the active context level, such as global Home or a selected Health Focus topic.
+
 - `2026-05-23_early_access_plan_tier.sql`
   Admin utility: adds the Early Access plan tier with current Group-level/full-access feature settings and updates editable plan/agent text.
 

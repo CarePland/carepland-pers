@@ -279,8 +279,14 @@ Admin-managed Health Focus prompt paths:
 - `health_topic_feedback_interpretation`
 - `health_topic_correction_structuring`
 - `health_report_generation`
+- `home_context_intent_classifier`
+- `home_context_answer`
 
 These use the existing `ai_instruction_sets` / `ai_instruction_versions` Admin AI Prompts architecture. Do not create a parallel prompt-management system for Health Focus. Anything that shapes user-facing Health Focus context should be inspectable, versioned, editable in Admin, reversible, and testable.
+
+`home_context_intent_classifier` and `home_context_answer` power the `Get more context` panel. They are intentionally distinct from the existing Ask assistant. The classifier should reject unrelated questions before the answer prompt runs, and the answer prompt should answer only from saved CarePland context.
+
+The context path now receives an explicit `askContext` object. Supported levels are `global`, `health_focus`, `appointment`, `visit_note`, and `careprep`. The Home panel currently uses `global`; expanded Health Focus stories use `health_focus` with the selected topic name and source appointment IDs. Future appointment and document surfaces should pass the same object shape instead of creating a parallel Ask flow.
 
 ## Architecture Guardrails
 

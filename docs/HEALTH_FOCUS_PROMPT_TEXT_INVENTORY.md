@@ -19,6 +19,64 @@ Health Focus prompts should use the existing Admin AI Prompts system through `ai
 
 ## Current Admin Prompt Paths
 
+### `home_context_answer`
+
+Admin label: Home context answer
+
+Purpose: Answer short context questions using saved appointments, notes, CarePrep, providers, Health Focus context, and the active Ask context level.
+
+Current/future trigger:
+
+- when the user submits a question in the Home `Get more context` panel
+- when the user submits a question from a selected Health Focus topic story
+- future appointment, Visit Note, and CarePrep context panels
+
+User-facing impact:
+
+- the plain-language answer shown below the Home context input
+- whether topic-level questions name the active topic instead of saying “this issue”
+- whether answers feel like contextual understanding rather than database retrieval
+- how strongly the app handles uncertainty, approximate timing, and non-advice boundaries
+
+Refine if users say:
+
+- “that answer was too long”
+- “that sounded like a report”
+- “that was too precise”
+- “that gave advice instead of context”
+- “that missed the point of my notes”
+- “it answered globally when I was asking about a specific Health Story”
+
+This prompt is independent from the existing Ask assistant.
+
+### `home_context_intent_classifier`
+
+Admin label: Home context intent classifier
+
+Purpose: Classify `Get more context` questions before answer generation, use the active context level, and redirect out-of-scope requests.
+
+Current/future trigger:
+
+- before the Home context answer prompt runs
+- before topic-level Health Story context answers
+- future appointment, Visit Note, and CarePrep context answers
+
+User-facing impact:
+
+- whether a question receives an answer or a gentle out-of-scope redirect
+- which source buckets are gathered for the answer
+- whether short contextual questions like “Summarize this story” are understood when a topic is selected
+- whether CarePland behaves like a care-context assistant rather than a general chatbot
+
+Refine if users say:
+
+- “why did it answer that unrelated question?”
+- “why did it refuse a care-history question?”
+- “it searched too much unrelated data”
+- “it missed that this was about follow-up/provider/Health Focus context”
+
+This prompt is independent from the existing Ask assistant.
+
 ### `health_topic_extraction`
 
 Admin label: Health topic extraction

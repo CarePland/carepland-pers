@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { TopicContextLabelOverrides } from "@/app/lib/healthTopics/contextSignatureLabels";
 import {
@@ -75,6 +75,7 @@ type HealthFocusTopicDetailProps = {
     feedback: HealthStoryFeedbackInput
   ) => Promise<HealthStoryFeedbackResult>;
   onUndoFeedback?: (feedback: HealthStoryFeedbackResult) => Promise<void>;
+  contextPanel?: ReactNode;
   variant?: "inline" | "standalone";
 };
 
@@ -201,6 +202,7 @@ export function HealthFocusTopicDetail({
   onClose,
   onSubmitFeedback,
   onUndoFeedback,
+  contextPanel = null,
   variant = "standalone",
 }: HealthFocusTopicDetailProps) {
   const [acknowledgement, setAcknowledgement] =
@@ -793,6 +795,7 @@ export function HealthFocusTopicDetail({
               ) : null}
             </div>
           ) : null}
+          {contextPanel ? <div className="mt-4">{contextPanel}</div> : null}
           {canSubmitFeedback ? (
             <div className="mt-4">
               {generalAcknowledgement ? (

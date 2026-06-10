@@ -17,6 +17,37 @@ type TextInventoryItem = {
 
 const healthFocusPromptInventory: PromptInventoryItem[] = [
   {
+    affects: [
+      "Home context answer",
+      "uncertainty phrasing",
+      "plain-language care understanding",
+    ],
+    key: "home_context_answer",
+    label: "Home context answer",
+    refineWhen: [
+      "answers are too long",
+      "answers sound like reports",
+      "answers give advice instead of context",
+      "topic-level answers sound global",
+    ],
+    usedWhen: ["Get more context question is submitted"],
+  },
+  {
+    affects: [
+      "intent routing",
+      "out-of-scope redirects",
+      "source bucket selection",
+    ],
+    key: "home_context_intent_classifier",
+    label: "Home context intent classifier",
+    refineWhen: [
+      "unrelated questions get answered",
+      "care-history questions are rejected",
+      "wrong sources are selected",
+    ],
+    usedWhen: ["before context answers are generated"],
+  },
+  {
     affects: ["Which topics appear", "source-backed Health Focus context"],
     key: "health_topic_extraction",
     label: "Health topic extraction",
@@ -99,6 +130,17 @@ const healthFocusPromptInventory: PromptInventoryItem[] = [
 ];
 
 const healthFocusTextInventory: TextInventoryItem[] = [
+  {
+    copy: [
+      "Get more context",
+      "What would you like to understand better?",
+      "Anything to understand better",
+      "Get context on this story",
+    ],
+    label: "Home context panel",
+    refineWhen: ["users confuse this with Ask", "the panel purpose is unclear"],
+    surface: "Home",
+  },
   {
     copy: ["Past visit context", "Your Health Focus", "Story Open"],
     label: "Health Focus card surface",

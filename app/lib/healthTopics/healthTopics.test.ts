@@ -304,21 +304,42 @@ describe("healthTopics", () => {
         relatedDisplayNames: ["Blood Pressure"],
         relationshipState: "separate",
       }),
-      "You marked Blood Pressure as a separate topic."
+      "You noted Blood Pressure is separate."
     );
     assert.equal(
       relationshipContextSentence({
         relatedDisplayNames: ["Blood Pressure", "Cholesterol"],
         relationshipState: "separate",
       }),
-      "You marked Blood Pressure and Cholesterol as separate topics."
+      "You noted Blood Pressure and Cholesterol are separate."
     );
     assert.equal(
       relationshipContextSentence({
         relatedDisplayNames: ["Blood Pressure", "Cholesterol", "Sleep"],
         relationshipState: "separate",
       }),
-      "You marked several proposed Related Topics as separate."
+      "You marked several topics as separate."
+    );
+    assert.equal(
+      relationshipContextSentence({
+        relatedDisplayNames: ["Physical Therapy"],
+        relationshipState: "related",
+      }),
+      "You noted Physical Therapy is related."
+    );
+    assert.equal(
+      relationshipContextSentence({
+        relatedDisplayNames: ["Physical Therapy", "Knee Pain"],
+        relationshipState: "related",
+      }),
+      "You noted Physical Therapy and Knee Pain are related."
+    );
+    assert.equal(
+      relationshipContextSentence({
+        relatedDisplayNames: ["Physical Therapy", "Knee Pain", "Arthritis"],
+        relationshipState: "related",
+      }),
+      "You marked several topics as related."
     );
 
     const narrative = healthStoryNarrative({
@@ -329,10 +350,10 @@ describe("healthTopics", () => {
       relatedTopics: [],
       statuses: ["follow_up"],
       topicSlug: "asthma_breathing",
-      userContextTexts: ["You marked Cholesterol as a separate topic."],
+      userContextTexts: ["You noted Cholesterol is separate."],
     });
 
-    assert.match(narrative, /You marked Cholesterol as a separate topic/);
+    assert.match(narrative, /You noted Cholesterol is separate/);
     assert.doesNotMatch(narrative, /You've clarified: You marked/);
   });
 

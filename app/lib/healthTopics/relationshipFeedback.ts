@@ -28,11 +28,19 @@ export function relationshipStateFromFeedback(
 export function relationshipStateFromContextText(
   contextText: string
 ): HealthTopicRelationshipState | null {
-  if (/were marked related\.?$/i.test(contextText.trim())) {
+  if (
+    /(is|are) (a )?(related topic|related)\.?$/i.test(contextText.trim()) ||
+    /were marked related\.?$/i.test(contextText.trim()) ||
+    /topics as related\.?$/i.test(contextText.trim())
+  ) {
     return "related";
   }
 
-  if (/were marked (separate|unrelated)\.?$/i.test(contextText.trim())) {
+  if (
+    /(is|are) (a )?separate( topic| topics)?\.?$/i.test(contextText.trim()) ||
+    /were marked (separate|unrelated)\.?$/i.test(contextText.trim()) ||
+    /topics as separate\.?$/i.test(contextText.trim())
+  ) {
     return "separate";
   }
 
@@ -85,23 +93,23 @@ export function relationshipContextSentence({
 
   if (relationshipState === "related") {
     if (uniqueNames.length === 1) {
-      return `You noted ${uniqueNames[0]} is a Related Topic.`;
+      return `You noted ${uniqueNames[0]} is related.`;
     }
 
     if (uniqueNames.length === 2) {
-      return `You noted ${uniqueNames[0]} and ${uniqueNames[1]} are Related Topics.`;
+      return `You noted ${uniqueNames[0]} and ${uniqueNames[1]} are related.`;
     }
 
-    return "You confirmed several proposed Related Topics.";
+    return "You marked several topics as related.";
   }
 
   if (uniqueNames.length === 1) {
-    return `You marked ${uniqueNames[0]} as a separate topic.`;
+    return `You noted ${uniqueNames[0]} is separate.`;
   }
 
   if (uniqueNames.length === 2) {
-    return `You marked ${uniqueNames[0]} and ${uniqueNames[1]} as separate topics.`;
+    return `You noted ${uniqueNames[0]} and ${uniqueNames[1]} are separate.`;
   }
 
-  return "You marked several proposed Related Topics as separate.";
+  return "You marked several topics as separate.";
 }

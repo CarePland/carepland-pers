@@ -1,11 +1,14 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { TopicContextLabelOverrides } from "@/app/lib/healthTopics/contextSignatureLabels";
 import type { TopicContextSignature } from "@/app/lib/healthTopics/topicSummary";
 
 import { TopicContextPills } from "./TopicContextPills";
+
+const desktopVisibleTopicCount = 3;
+const mobileVisibleTopicCount = 2;
 
 export type HealthFocusTopicSummary = {
   category: string;
@@ -54,6 +57,23 @@ export function HealthFocusCard({
   selectedTopicStory = null,
   topics,
 }: HealthFocusCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 640px)");
+    const updateViewportState = () => {
+      setIsMobileViewport(mediaQuery.matches);
+    };
+
+    updateViewportState();
+    mediaQuery.addEventListener("change", updateViewportState);
+
+    return () => {
+      mediaQuery.removeEventListener("change", updateViewportState);
+    };
+  }, []);
+
   if (isLoading && topics.length === 0) {
     return (
       <section
@@ -82,6 +102,15 @@ export function HealthFocusCard({
     return null;
   }
 
+  const visibleTopicCount = isMobileViewport
+    ? mobileVisibleTopicCount
+    : desktopVisibleTopicCount;
+  const hasHiddenTopics = topics.length > visibleTopicCount;
+  const visibleTopics = isExpanded
+    ? topics
+    : topics.slice(0, visibleTopicCount);
+  const hiddenTopicCount = Math.max(0, topics.length - visibleTopicCount);
+
   return (
     <section
       aria-busy={isLoading}
@@ -106,7 +135,7 @@ export function HealthFocusCard({
       </div>
 
       <div className="mt-4 divide-y divide-slate-200">
-        {topics.map((topic) => {
+        {visibleTopics.map((topic) => {
           const topicKey = `${topic.careSubjectId}:${topic.topicSlug}`;
           const isSelected = selectedTopicKey === topicKey;
 
@@ -164,6 +193,24 @@ export function HealthFocusCard({
           );
         })}
       </div>
+
+      {hasHiddenTopics ? (
+        <div className="mt-4 flex justify-center">
+          <button
+            className="text-sm font-semibold text-blue-800 underline-offset-2 hover:text-blue-900 hover:underline"
+            onClick={() => {
+              if (isExpanded) {
+                onCloseTopic?.();
+              }
+
+              setIsExpanded((currentValue) => !currentValue);
+            }}
+            type="button"
+          >
+            {isExpanded ? "Show less" : `Show more (${hiddenTopicCount})`}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
