@@ -84,8 +84,17 @@ type HomeContextLevel =
   | "appointment"
   | "careprep"
   | "global"
+  | "home"
   | "health_focus"
   | "visit_note";
+
+type HomeContextVisibleItem = {
+  date?: string | null;
+  id?: string | null;
+  label: string;
+  metadata?: Record<string, string | null | undefined>;
+  type: "appointment" | "careprep" | "health_focus" | "provider" | "visit_note";
+};
 
 type HomeContextIntent = {
   category: HomeContextIntentCategory;
@@ -103,6 +112,25 @@ type HomeContextAskContext = {
   sourceIds: string[];
   topicId?: string | null;
   topicName?: string | null;
+  visibleItems: HomeContextVisibleItem[];
+};
+
+type HomeContextQueryShape =
+  | "appointment_count"
+  | "entity_only"
+  | "preparation"
+  | "recent_change"
+  | "relationship"
+  | "unknown";
+
+type HomeContextQueryInterpretation = {
+  isShortQuery: boolean;
+  normalizedQuery: string;
+  queryShape: HomeContextQueryShape;
+  termExpansions: Array<{
+    from: string;
+    to: string;
+  }>;
 };
 
 const homeContextRedirectAnswer =
@@ -129,6 +157,7 @@ const homeContextLevels = new Set<HomeContextLevel>([
   "appointment",
   "careprep",
   "global",
+  "home",
   "health_focus",
   "visit_note",
 ]);
@@ -255,9 +284,63 @@ function cleanOptionalId(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function parseVisibleItems(value: unknown): HomeContextVisibleItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item): HomeContextVisibleItem | null => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const rawItem = item as Record<string, unknown>;
+      const label = cleanText(
+        typeof rawItem.label === "string" ? rawItem.label : "",
+        120
+      );
+      const type =
+        typeof rawItem.type === "string" &&
+        ["appointment", "careprep", "health_focus", "provider", "visit_note"].includes(
+          rawItem.type
+        )
+          ? (rawItem.type as HomeContextVisibleItem["type"])
+          : null;
+
+      if (!label || !type) {
+        return null;
+      }
+
+      const metadata =
+        rawItem.metadata && typeof rawItem.metadata === "object"
+          ? Object.fromEntries(
+              Object.entries(rawItem.metadata as Record<string, unknown>)
+                .map(([key, metadataValue]) => [
+                  key,
+                  typeof metadataValue === "string"
+                    ? cleanText(metadataValue, 120)
+                    : null,
+                ])
+                .filter(([, metadataValue]) => Boolean(metadataValue))
+            )
+          : {};
+
+      return {
+        date: cleanOptionalId(rawItem.date),
+        id: cleanOptionalId(rawItem.id),
+        label,
+        metadata,
+        type,
+      };
+    })
+    .filter((item): item is HomeContextVisibleItem => Boolean(item))
+    .slice(0, 12);
+}
+
 function parseAskContext(value: unknown): HomeContextAskContext {
   if (!value || typeof value !== "object") {
-    return { level: "global", sourceIds: [] };
+    return { level: "global", sourceIds: [], visibleItems: [] };
   }
 
   const rawContext = value as Record<string, unknown>;
@@ -285,14 +368,210 @@ function parseAskContext(value: unknown): HomeContextAskContext {
       typeof rawContext.topicName === "string"
         ? cleanText(rawContext.topicName, 80)
         : null,
+    visibleItems: parseVisibleItems(rawContext.visibleItems),
   };
 }
 
-function fallbackIntentForQuestion(question: string): HomeContextIntent {
-  const normalizedQuestion = question.toLowerCase();
+const shorthandExpansions: Array<{
+  pattern: RegExp;
+  phrase: string;
+  replacement: string;
+}> = [
+  { pattern: /\bbp\b/gi, phrase: "bp", replacement: "blood pressure" },
+  {
+    pattern: /\bpt\b/gi,
+    phrase: "pt",
+    replacement: "physical therapy",
+  },
+  {
+    pattern: /\bpcp\b/gi,
+    phrase: "pcp",
+    replacement: "primary care",
+  },
+  {
+    pattern: /\bcardio\b/gi,
+    phrase: "cardio",
+    replacement: "cardiology",
+  },
+  { pattern: /\bneuro\b/gi, phrase: "neuro", replacement: "neurology" },
+  {
+    pattern: /\bortho\b/gi,
+    phrase: "ortho",
+    replacement: "orthopedics",
+  },
+  {
+    pattern: /\bderm\b/gi,
+    phrase: "derm",
+    replacement: "dermatology",
+  },
+  {
+    pattern: /\blabs\b/gi,
+    phrase: "labs",
+    replacement: "lab results blood work",
+  },
+  {
+    pattern: /\bblood\b/gi,
+    phrase: "blood",
+    replacement: "blood pressure blood work lab results",
+  },
+  {
+    pattern: /\brx\b/gi,
+    phrase: "rx",
+    replacement: "medication",
+  },
+  {
+    pattern: /\bmeds\b/gi,
+    phrase: "meds",
+    replacement: "medication",
+  },
+  {
+    pattern: /\bappt(s)?\b/gi,
+    phrase: "appt",
+    replacement: "appointment",
+  },
+  {
+    pattern: /\bdoc\b/gi,
+    phrase: "doc",
+    replacement: "doctor provider",
+  },
+  {
+    pattern: /\bdr\b/gi,
+    phrase: "dr",
+    replacement: "doctor provider",
+  },
+  {
+    pattern: /\bvet\b/gi,
+    phrase: "vet",
+    replacement: "veterinarian pet appointment",
+  },
+  {
+    pattern: /\bdental\b/gi,
+    phrase: "dental",
+    replacement: "dental dentist oral health",
+  },
+  {
+    pattern: /\btax\b/gi,
+    phrase: "tax",
+    replacement: "tax appointment tax provider",
+  },
+];
+
+function interpretQuestion(
+  question: string,
+  askContext: HomeContextAskContext
+): HomeContextQueryInterpretation {
+  const compactQuestion = question.replace(/[?!.]+/g, " ").trim();
+  const words = compactQuestion.split(/\s+/).filter(Boolean);
+  const termExpansions: HomeContextQueryInterpretation["termExpansions"] = [];
+  let normalizedQuery = ` ${question} `;
+
+  shorthandExpansions.forEach(({ pattern, phrase, replacement }) => {
+    pattern.lastIndex = 0;
+
+    if (!pattern.test(question)) {
+      return;
+    }
+
+    termExpansions.push({ from: phrase, to: replacement });
+    normalizedQuery = normalizedQuery.replace(pattern, replacement);
+  });
+
+  normalizedQuery = cleanText(normalizedQuery, 260);
+
+  const relationshipLike =
+    /\b(related|connected|linked|tied|associated|appears with|shows up with|goes with|what else|about|re:|regarding)\b/i.test(
+      normalizedQuery
+    ) ||
+    (words.length <= 3 &&
+      askContext.level === "health_focus" &&
+      Boolean(askContext.topicName));
+  const appointmentCountLike =
+    /\b(how many|count|any|upcoming|past)\b/i.test(normalizedQuery) &&
+    isAppointmentDataQuestion(normalizedQuery);
+  const preparationLike =
+    /\b(bring|prep|prepare|need|questions? for|ask (the )?(doctor|provider)|next appointment)\b/i.test(
+      normalizedQuery
+    );
+  const recentChangeLike =
+    /\b(changed|change|new|recent|recently|since last|last time)\b/i.test(
+      normalizedQuery
+    );
+  const entityOnlyLike =
+    words.length <= 3 &&
+    (termExpansions.length > 0 ||
+      isAppointmentDataQuestion(normalizedQuery) ||
+      /\b(pain|sleep|fatigue|dizziness|headache|cholesterol|nutrition|weight|therapy|asthma|breathing)\b/i.test(
+        normalizedQuery
+      ));
+  let queryShape: HomeContextQueryShape = "unknown";
+
+  if (appointmentCountLike) {
+    queryShape = "appointment_count";
+  } else if (relationshipLike) {
+    queryShape = "relationship";
+  } else if (preparationLike) {
+    queryShape = "preparation";
+  } else if (recentChangeLike) {
+    queryShape = "recent_change";
+  } else if (entityOnlyLike) {
+    queryShape = "entity_only";
+  }
+
+  return {
+    isShortQuery: words.length <= 4,
+    normalizedQuery,
+    queryShape,
+    termExpansions: Array.from(
+      new Map(
+        termExpansions.map((expansion) => [
+          `${expansion.from}:${expansion.to}`,
+          expansion,
+        ])
+      ).values()
+    ),
+  };
+}
+
+function fallbackIntentForQuestion(
+  question: string,
+  queryInterpretation: HomeContextQueryInterpretation
+): HomeContextIntent {
+  const normalizedQuestion = queryInterpretation.normalizedQuery.toLowerCase();
   const sourceTypes = new Set<HomeContextSourceType>(["appointments"]);
   let category: HomeContextIntentCategory = "out_of_scope";
   let confidence = 0.2;
+
+  if (
+    isAppointmentDataQuestion(queryInterpretation.normalizedQuery) ||
+    queryInterpretation.queryShape === "appointment_count"
+  ) {
+    category = "personal_care_history";
+    confidence = 0.8;
+    sourceTypes.add("providers");
+  }
+
+  if (queryInterpretation.queryShape === "relationship") {
+    category = "care_story";
+    confidence = 0.75;
+    sourceTypes.add("health_focus");
+    sourceTypes.add("notes");
+    sourceTypes.add("providers");
+  }
+
+  if (queryInterpretation.queryShape === "preparation") {
+    category = "care_planning";
+    confidence = 0.75;
+    sourceTypes.add("careprep");
+    sourceTypes.add("notes");
+    sourceTypes.add("providers");
+  }
+
+  if (queryInterpretation.queryShape === "recent_change") {
+    category = "personal_care_history";
+    confidence = 0.75;
+    sourceTypes.add("health_focus");
+    sourceTypes.add("notes");
+  }
 
   if (
     /\b(knee|pain|blood pressure|cholesterol|asthma|breathing|symptom|health focus|fatigue|sleep|dizziness|therapy|diagnosis|condition|topic|history|changed|recently|trend|timeline)\b/.test(
@@ -344,14 +623,95 @@ function hasAmbiguousGlobalReference(question: string) {
   );
 }
 
+function isAppointmentDataQuestion(question: string) {
+  return /\b(appt|appts|appointment|appointments|visit|visits|exam|exams|consult|consultation|follow[- ]?up|provider|doctor|practice|clinic|advisory|dentist|dental|vet|veterinary|tax|upcoming|past|scheduled)\b/i.test(
+    question
+  );
+}
+
 function applyAskContextToIntent(
   intent: HomeContextIntent,
   askContext: HomeContextAskContext,
-  question: string
+  question: string,
+  queryInterpretation: HomeContextQueryInterpretation
 ): HomeContextIntent {
   const sourceTypes = new Set(intent.sourceTypes);
   let category = intent.category;
   let confidence = intent.confidence;
+  const isAppointmentQuestion =
+    isAppointmentDataQuestion(question) ||
+    isAppointmentDataQuestion(queryInterpretation.normalizedQuery) ||
+    queryInterpretation.queryShape === "appointment_count";
+  const isLikelyCarePlandShortQuery =
+    queryInterpretation.isShortQuery &&
+    (queryInterpretation.termExpansions.length > 0 ||
+      queryInterpretation.queryShape !== "unknown");
+
+  if (isAppointmentQuestion) {
+    if (category === "out_of_scope" || confidence < 0.5) {
+      category = "personal_care_history";
+      confidence = 0.8;
+    }
+
+    sourceTypes.add("appointments");
+    sourceTypes.add("providers");
+  }
+
+  if (queryInterpretation.queryShape === "relationship") {
+    if (category === "out_of_scope" || confidence < 0.5) {
+      category = "care_story";
+      confidence = 0.75;
+    }
+
+    sourceTypes.add("appointments");
+    sourceTypes.add("health_focus");
+    sourceTypes.add("notes");
+    sourceTypes.add("providers");
+  }
+
+  if (queryInterpretation.queryShape === "entity_only") {
+    if (category === "out_of_scope" || confidence < 0.5) {
+      category = isAppointmentQuestion ? "personal_care_history" : "health_focus";
+      confidence = 0.7;
+    }
+
+    sourceTypes.add("appointments");
+    sourceTypes.add("health_focus");
+    sourceTypes.add("notes");
+    sourceTypes.add("providers");
+  }
+
+  if (queryInterpretation.queryShape === "preparation") {
+    if (category === "out_of_scope" || confidence < 0.5) {
+      category = "care_planning";
+      confidence = 0.75;
+    }
+
+    sourceTypes.add("appointments");
+    sourceTypes.add("careprep");
+    sourceTypes.add("notes");
+    sourceTypes.add("providers");
+  }
+
+  if (queryInterpretation.queryShape === "recent_change") {
+    if (category === "out_of_scope" || confidence < 0.5) {
+      category = "personal_care_history";
+      confidence = 0.75;
+    }
+
+    sourceTypes.add("appointments");
+    sourceTypes.add("careprep");
+    sourceTypes.add("health_focus");
+    sourceTypes.add("notes");
+  }
+
+  if (isLikelyCarePlandShortQuery && category === "out_of_scope") {
+    category = "personal_care_history";
+    confidence = 0.65;
+    sourceTypes.add("appointments");
+    sourceTypes.add("health_focus");
+    sourceTypes.add("providers");
+  }
 
   if (askContext.level === "health_focus") {
     if (category === "out_of_scope" || confidence < 0.5) {
@@ -368,6 +728,11 @@ function applyAskContextToIntent(
     }
   }
 
+  if (askContext.level === "home" && category !== "out_of_scope") {
+    sourceTypes.add("appointments");
+    sourceTypes.add("providers");
+  }
+
   if (askContext.level === "appointment") {
     if (category === "out_of_scope" || confidence < 0.5) {
       category = "personal_care_history";
@@ -375,6 +740,7 @@ function applyAskContextToIntent(
     }
 
     sourceTypes.add("appointments");
+    sourceTypes.add("providers");
     sourceTypes.add("notes");
     sourceTypes.add("careprep");
   }
@@ -451,6 +817,7 @@ export async function POST(request: NextRequest) {
     };
     const question = cleanText(body.question, 240);
     const askContext = parseAskContext(body.askContext);
+    const queryInterpretation = interpretQuestion(question, askContext);
     const careSubjectId =
       body.careSubjectId?.trim() || askContext.careSubjectId || "";
 
@@ -514,6 +881,11 @@ export async function POST(request: NextRequest) {
             content: [
               `Instruction template:\n${classifierPromptTemplate}`,
               `Ask context:\n${JSON.stringify(askContext, null, 2)}`,
+              `Query interpretation:\n${JSON.stringify(
+                queryInterpretation,
+                null,
+                2
+              )}`,
               `Question:\n${question}`,
             ].join("\n\n"),
             role: "user",
@@ -540,18 +912,32 @@ export async function POST(request: NextRequest) {
     const intent = applyAskContextToIntent(
       classifierResponse.ok
         ? parseIntent(parseOpenAiJson(classifierJson))
-        : fallbackIntentForQuestion(question),
+        : fallbackIntentForQuestion(question, queryInterpretation),
       askContext,
-      question
+      question,
+      queryInterpretation
     );
 
+    const isAppointmentQuestion =
+      isAppointmentDataQuestion(question) ||
+      isAppointmentDataQuestion(queryInterpretation.normalizedQuery) ||
+      queryInterpretation.queryShape === "appointment_count";
+
     if (
-      (askContext.level === "global" && hasAmbiguousGlobalReference(question)) ||
+      ((askContext.level === "global" || askContext.level === "home") &&
+        askContext.visibleItems.length === 0 &&
+        !isAppointmentQuestion &&
+        queryInterpretation.queryShape === "unknown" &&
+        hasAmbiguousGlobalReference(question)) ||
       intent.category === "out_of_scope" ||
       intent.confidence < 0.5
     ) {
       return NextResponse.json({
-        answer: homeContextRedirectAnswer,
+        answer:
+          queryInterpretation.isShortQuery ||
+          queryInterpretation.termExpansions.length > 0
+            ? `I couldn't find anything in your CarePland records related to "${question}". You can ask about appointments, providers, notes, follow-ups, or Health Focus topics.`
+            : homeContextRedirectAnswer,
         intent,
         ok: true,
         promptVersion: homeContextPromptVersionLabel(
@@ -579,7 +965,7 @@ export async function POST(request: NextRequest) {
       )
       .is("deleted_at", null)
       .order("starts_at", { ascending: false, nullsFirst: false })
-      .limit(40);
+      .limit(isAppointmentQuestion ? 80 : 40);
     let topicMentionsQuery = userClient
       .from("topic_mentions")
       .select(
@@ -803,6 +1189,7 @@ export async function POST(request: NextRequest) {
           visits: topic.visitCount,
         }));
     const selectedContextCount =
+      askContext.visibleItems.length +
       appointmentContext.length +
       (includeNotes ? notesByAppointmentId.size : 0) +
       (includeCarePrep ? carePrepByAppointmentId.size : 0) +
@@ -810,7 +1197,9 @@ export async function POST(request: NextRequest) {
 
     if (selectedContextCount === 0) {
       return NextResponse.json({
-        answer: homeContextRedirectAnswer,
+        answer: isAppointmentQuestion
+          ? "I couldn't find matching appointments in your CarePland records. You can also ask about providers, notes, follow-ups, or Health Focus topics."
+          : homeContextRedirectAnswer,
         intent,
         ok: true,
         promptVersion: homeContextPromptVersionLabel(
@@ -828,6 +1217,8 @@ export async function POST(request: NextRequest) {
       intent,
       notesAvailable: includeNotes,
       providerContextRequested: includeProviders,
+      queryInterpretation,
+      visibleItems: askContext.visibleItems,
     };
 
     const schema =
@@ -841,6 +1232,7 @@ export async function POST(request: NextRequest) {
     const userPrompt = [
       `Instruction template:\n${promptTemplate}`,
       `Question:\n${question}`,
+      `Query interpretation:\n${JSON.stringify(queryInterpretation, null, 2)}`,
       `CarePland context:\n${JSON.stringify(context, null, 2)}`,
     ].join("\n\n");
     const openAiResponse = await fetch("https://api.openai.com/v1/responses", {

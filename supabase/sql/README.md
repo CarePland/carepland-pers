@@ -168,6 +168,10 @@ Supabase SQL editor history.
   Admin utility: seeds the Home `Get more context` intent classifier and answer prompts into the existing Admin AI Prompts system. These prompts are independent from the existing Ask assistant.
 - `2026-06-09_home_context_hierarchical_context_prompt.sql`
   Admin utility: creates a new current version of the Home context prompts so `Get more context` can use the active context level, such as global Home or a selected Health Focus topic.
+- `2026-06-09_home_context_visible_context_prompt.sql`
+  Admin utility: creates a new current version of the Home context prompts so visible page items are considered first, appointment-shaped non-health questions are routed to appointments/providers, and unsupported responses are more specific.
+- `2026-06-09_home_context_short_query_prompt.sql`
+  Admin utility: creates a new current version of the Home context prompts so shorthand, fragments, entity-only queries, relationship queries, preparation queries, and recent-change queries are interpreted before unsupported fallback.
 
 - `2026-05-23_early_access_plan_tier.sql`
   Admin utility: adds the Early Access plan tier with current Group-level/full-access feature settings and updates editable plan/agent text.

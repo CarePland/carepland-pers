@@ -12813,6 +12813,30 @@ export default function Home() {
             />
             <HomeContextPanel
               answer={homeContextAnswer}
+              askContext={{
+                level: "home",
+                visibleItems: homeNextAppointment
+                  ? [
+                      {
+                        date: homeNextAppointment.starts_at,
+                        id: homeNextAppointment.id,
+                        label:
+                          homeNextAppointment.title ||
+                          homeNextAppointment.reason ||
+                          "Next appointment",
+                        metadata: {
+                          date: formatDate(homeNextAppointment.starts_at),
+                          location: homeNextAppointment.location_name,
+                          provider:
+                            homeNextAppointment.provider_organization ||
+                            homeNextAppointment.provider_name,
+                          status: homeNextAppointment.status,
+                        },
+                        type: "appointment",
+                      },
+                    ]
+                  : [],
+              }}
               error={homeContextError}
               isLoading={homeContextLoading}
               onAsk={handleHomeContextQuestion}

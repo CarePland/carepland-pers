@@ -37,6 +37,7 @@ User-facing impact:
 - whether topic-level questions name the active topic instead of saying “this issue”
 - whether answers feel like contextual understanding rather than database retrieval
 - how strongly the app handles uncertainty, approximate timing, and non-advice boundaries
+- how shorthand or fragment questions such as `bp?`, `PT?`, `vet?`, `related to bp?`, or `what bring?` are interpreted and explained
 
 Refine if users say:
 
@@ -66,12 +67,15 @@ User-facing impact:
 - whether a question receives an answer or a gentle out-of-scope redirect
 - which source buckets are gathered for the answer
 - whether short contextual questions like “Summarize this story” are understood when a topic is selected
+- whether appointment-shaped questions about non-health items, such as tax appointments, eye exams, or vet visits, search appointment data instead of being rejected
+- whether shorthand and relationship-style fragments route to the right source buckets before unsupported fallback
 - whether CarePland behaves like a care-context assistant rather than a general chatbot
 
 Refine if users say:
 
 - “why did it answer that unrelated question?”
 - “why did it refuse a care-history question?”
+- “why did it reject a question about an appointment I can see?”
 - “it searched too much unrelated data”
 - “it missed that this was about follow-up/provider/Health Focus context”
 

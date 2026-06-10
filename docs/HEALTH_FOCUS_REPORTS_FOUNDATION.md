@@ -286,7 +286,9 @@ These use the existing `ai_instruction_sets` / `ai_instruction_versions` Admin A
 
 `home_context_intent_classifier` and `home_context_answer` power the `Get more context` panel. They are intentionally distinct from the existing Ask assistant. The classifier should reject unrelated questions before the answer prompt runs, and the answer prompt should answer only from saved CarePland context.
 
-The context path now receives an explicit `askContext` object. Supported levels are `global`, `health_focus`, `appointment`, `visit_note`, and `careprep`. The Home panel currently uses `global`; expanded Health Focus stories use `health_focus` with the selected topic name and source appointment IDs. Future appointment and document surfaces should pass the same object shape instead of creating a parallel Ask flow.
+The context path now receives an explicit `askContext` object. Supported levels are `global`, `home`, `health_focus`, `appointment`, `visit_note`, and `careprep`. The Home panel uses `home` with visible page items such as the Next Appointment card; expanded Health Focus stories use `health_focus` with the selected topic name and source appointment IDs. Future appointment and document surfaces should pass the same object shape instead of creating a parallel Ask flow.
+
+Ask should search in this order: visible context, current page context, then broader CarePland records. Non-health appointment questions, such as tax appointments, eye exams, or vet visits, should be treated as valid CarePland questions when they match saved appointment data.
 
 ## Architecture Guardrails
 

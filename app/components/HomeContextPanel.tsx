@@ -6,8 +6,17 @@ export type HomeContextLevel =
   | "appointment"
   | "careprep"
   | "global"
+  | "home"
   | "health_focus"
   | "visit_note";
+
+export type HomeContextVisibleItem = {
+  date?: string | null;
+  id?: string | null;
+  label: string;
+  metadata?: Record<string, string | null | undefined>;
+  type: "appointment" | "careprep" | "health_focus" | "provider" | "visit_note";
+};
 
 export type HomeContextAskContext = {
   appointmentId?: string | null;
@@ -18,6 +27,7 @@ export type HomeContextAskContext = {
   sourceIds?: string[];
   topicId?: string | null;
   topicName?: string | null;
+  visibleItems?: HomeContextVisibleItem[];
 };
 
 const defaultAskContext: HomeContextAskContext = {
@@ -28,7 +38,7 @@ const globalExamplePrompts = [
   "What follow-ups might still need attention?",
   "What has changed recently?",
   "What seems most important right now?",
-  "What health topics appear most often?",
+  "What appointments are coming up?",
   "What should I prepare for next?",
   "Which providers have I seen most?",
   "What seems unresolved?",
@@ -179,7 +189,7 @@ function placeholderForContext(askContext: HomeContextAskContext) {
 }
 
 function mobilePlaceholderForContext(askContext: HomeContextAskContext) {
-  if (askContext.level === "global") {
+  if (askContext.level === "global" || askContext.level === "home") {
     return "Anything to understand better";
   }
 
