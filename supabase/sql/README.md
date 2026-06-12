@@ -172,6 +172,8 @@ Supabase SQL editor history.
   Admin utility: creates a new current version of the Home context prompts so visible page items are considered first, appointment-shaped non-health questions are routed to appointments/providers, and unsupported responses are more specific.
 - `2026-06-09_home_context_short_query_prompt.sql`
   Admin utility: creates a new current version of the Home context prompts so shorthand, fragments, entity-only queries, relationship queries, preparation queries, and recent-change queries are interpreted before unsupported fallback.
+- `2026-06-09_home_context_conversation_prompt.sql`
+  Admin utility: creates a new current version of the Home context prompts so lightweight session conversation turns and directional corrections can guide follow-up questions without creating a general chatbot.
 
 - `2026-05-23_early_access_plan_tier.sql`
   Admin utility: adds the Early Access plan tier with current Group-level/full-access feature settings and updates editable plan/agent text.

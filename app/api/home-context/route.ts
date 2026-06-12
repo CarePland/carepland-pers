@@ -96,6 +96,11 @@ type HomeContextVisibleItem = {
   type: "appointment" | "careprep" | "health_focus" | "provider" | "visit_note";
 };
 
+type HomeContextConversationTurn = {
+  answer: string;
+  question: string;
+};
+
 type HomeContextIntent = {
   category: HomeContextIntentCategory;
   confidence: number;
@@ -107,6 +112,8 @@ type HomeContextAskContext = {
   appointmentId?: string | null;
   careprepId?: string | null;
   careSubjectId?: string | null;
+  conversationMode?: "correction" | "follow_up" | null;
+  conversationTurns: HomeContextConversationTurn[];
   level: HomeContextLevel;
   noteId?: string | null;
   sourceIds: string[];
@@ -338,9 +345,46 @@ function parseVisibleItems(value: unknown): HomeContextVisibleItem[] {
     .slice(0, 12);
 }
 
+function parseConversationTurns(value: unknown): HomeContextConversationTurn[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((turn): HomeContextConversationTurn | null => {
+      if (!turn || typeof turn !== "object") {
+        return null;
+      }
+
+      const rawTurn = turn as Record<string, unknown>;
+      const question = cleanText(
+        typeof rawTurn.question === "string" ? rawTurn.question : "",
+        180
+      );
+      const answer = cleanText(
+        typeof rawTurn.answer === "string" ? rawTurn.answer : "",
+        500
+      );
+
+      if (!question || !answer) {
+        return null;
+      }
+
+      return { answer, question };
+    })
+    .filter((turn): turn is HomeContextConversationTurn => Boolean(turn))
+    .slice(-4);
+}
+
 function parseAskContext(value: unknown): HomeContextAskContext {
   if (!value || typeof value !== "object") {
-    return { level: "global", sourceIds: [], visibleItems: [] };
+    return {
+      conversationMode: null,
+      conversationTurns: [],
+      level: "global",
+      sourceIds: [],
+      visibleItems: [],
+    };
   }
 
   const rawContext = value as Record<string, unknown>;
@@ -360,6 +404,12 @@ function parseAskContext(value: unknown): HomeContextAskContext {
     appointmentId: cleanOptionalId(rawContext.appointmentId),
     careprepId: cleanOptionalId(rawContext.careprepId),
     careSubjectId: cleanOptionalId(rawContext.careSubjectId),
+    conversationMode:
+      rawContext.conversationMode === "correction" ||
+      rawContext.conversationMode === "follow_up"
+        ? rawContext.conversationMode
+        : null,
+    conversationTurns: parseConversationTurns(rawContext.conversationTurns),
     level,
     noteId: cleanOptionalId(rawContext.noteId),
     sourceIds,
@@ -646,6 +696,23 @@ function applyAskContextToIntent(
     queryInterpretation.isShortQuery &&
     (queryInterpretation.termExpansions.length > 0 ||
       queryInterpretation.queryShape !== "unknown");
+  const hasConversationContext = askContext.conversationTurns.length > 0;
+
+  if (hasConversationContext && queryInterpretation.isShortQuery) {
+    if (category === "out_of_scope" || confidence < 0.5) {
+      category =
+        askContext.conversationMode === "correction"
+          ? "care_story"
+          : "personal_care_history";
+      confidence = 0.75;
+    }
+
+    sourceTypes.add("appointments");
+    sourceTypes.add("careprep");
+    sourceTypes.add("health_focus");
+    sourceTypes.add("notes");
+    sourceTypes.add("providers");
+  }
 
   if (isAppointmentQuestion) {
     if (category === "out_of_scope" || confidence < 0.5) {
@@ -926,6 +993,7 @@ export async function POST(request: NextRequest) {
     if (
       ((askContext.level === "global" || askContext.level === "home") &&
         askContext.visibleItems.length === 0 &&
+        askContext.conversationTurns.length === 0 &&
         !isAppointmentQuestion &&
         queryInterpretation.queryShape === "unknown" &&
         hasAmbiguousGlobalReference(question)) ||

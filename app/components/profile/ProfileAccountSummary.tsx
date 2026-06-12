@@ -199,8 +199,8 @@ export function ProfileAccountSummary({
           </div>
           <div
             aria-hidden={!planHelpExpanded}
-            className={`mt-3 text-sm text-slate-700 ${
-              planHelpExpanded ? "" : "hidden"
+            className={`mt-3 min-h-[12rem] text-sm text-slate-700 ${
+              planHelpExpanded ? "" : "invisible"
             }`}
           >
             <p className="mb-3 leading-5 text-slate-800">

@@ -38,6 +38,8 @@ User-facing impact:
 - whether answers feel like contextual understanding rather than database retrieval
 - how strongly the app handles uncertainty, approximate timing, and non-advice boundaries
 - how shorthand or fragment questions such as `bp?`, `PT?`, `vet?`, `related to bp?`, or `what bring?` are interpreted and explained
+- how follow-up questions use prior session turns after the user selects `Continue`
+- how `Not quite` corrections are acknowledged and used within the current session without promising permanent memory
 
 Refine if users say:
 
@@ -69,6 +71,7 @@ User-facing impact:
 - whether short contextual questions like “Summarize this story” are understood when a topic is selected
 - whether appointment-shaped questions about non-health items, such as tax appointments, eye exams, or vet visits, search appointment data instead of being rejected
 - whether shorthand and relationship-style fragments route to the right source buckets before unsupported fallback
+- whether short follow-ups such as `Which doctor?` preserve the previous topic or appointment
 - whether CarePland behaves like a care-context assistant rather than a general chatbot
 
 Refine if users say:

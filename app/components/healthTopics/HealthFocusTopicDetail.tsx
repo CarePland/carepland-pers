@@ -11,6 +11,7 @@ import {
   type TopicContextSignature,
 } from "@/app/lib/healthTopics/topicSummary";
 
+import { HealthFocusIllustration } from "./HealthFocusCard";
 import { TopicContextPills } from "./TopicContextPills";
 
 export type HealthFocusTopicMention = {
@@ -105,54 +106,6 @@ function DemoPill() {
   );
 }
 
-function savedVisitPhrase(mentionCount: number) {
-  if (mentionCount <= 1) {
-    return "Seen once";
-  }
-
-  if (mentionCount <= 3) {
-    return "Seen a few times";
-  }
-
-  return "Seen several times";
-}
-
-function statusVisitPhrase(statuses: HealthFocusTopicMention["status"][]) {
-  const labels: Record<HealthFocusTopicMention["status"], string> = {
-    follow_up: "Follow-up",
-    new: "New",
-    ongoing: "Ongoing",
-    resolved: "Resolved",
-    unknown: "",
-  };
-  const uniqueStatuses = Array.from(
-    new Set(statuses.filter((status) => status !== "unknown"))
-  );
-  const statusLabels = uniqueStatuses
-    .map((status) => labels[status])
-    .filter(Boolean);
-
-  if (statusLabels.length === 0) {
-    return "";
-  }
-
-  if (statusLabels.length === 1) {
-    return `${statusLabels[0]} visits`;
-  }
-
-  if (statusLabels.length === 2) {
-    return `${statusLabels[0]} and ${statusLabels[1].toLowerCase()} visits`;
-  }
-
-  return `${statusLabels
-    .slice(0, -1)
-    .map((label) => label.toLowerCase())
-    .join(", ")}, and ${statusLabels.at(-1)?.toLowerCase()} visits`.replace(
-    /^./,
-    (letter) => letter.toUpperCase()
-  );
-}
-
 function storyTimelineItems(mentions: HealthFocusTopicMention[]) {
   return mentions
     .filter((mention) => mention.appointmentStartsAt)
@@ -173,6 +126,70 @@ function storyTimelineItems(mentions: HealthFocusTopicMention[]) {
       title: mention.appointmentTitle || mention.providerLabel || "Saved visit",
       value: mention.appointmentStartsAt,
     }));
+}
+
+function latestPastMentionDate(mentions: HealthFocusTopicMention[]) {
+  const now = Date.now();
+
+  return (
+    mentions
+      .map((mention) => mention.appointmentStartsAt)
+      .filter((value): value is string => {
+        if (!value) {
+          return false;
+        }
+
+        const mentionTime = new Date(value).getTime();
+        return Number.isFinite(mentionTime) && mentionTime <= now;
+      })
+      .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ??
+    null
+  );
+}
+
+function CalendarClockIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2.2"
+      viewBox="0 0 32 32"
+    >
+      <circle cx="14" cy="14" r="10" />
+      <path d="M14 8v7l-4 4" />
+      <path d="M14 4v2" />
+      <path d="M14 22v2" />
+      <path d="M4 14h2" />
+      <path d="M22 14h2" />
+      <rect height="9" rx="2" width="10" x="19" y="20" />
+      <path d="M21.5 18.5v3" />
+      <path d="M26.5 18.5v3" />
+      <path d="M21 24h6" />
+      <path d="M21 27h2.5" />
+      <path d="M25 27h2" />
+    </svg>
+  );
+}
+
+function DisclosureChevronIcon({ isOpen }: { isOpen: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2.4"
+      viewBox="0 0 24 24"
+    >
+      {isOpen ? <path d="m6 9 6 6 6-6" /> : <path d="m9 6 6 6-6 6" />}
+    </svg>
+  );
 }
 
 type TimelineItem = ReturnType<typeof storyTimelineItems>[number];
@@ -220,12 +237,14 @@ export function HealthFocusTopicDetail({
   const [selectedRelatedTopicSlug, setSelectedRelatedTopicSlug] = useState<
     string | null
   >(null);
+  const [relatedTopicsOpen, setRelatedTopicsOpen] = useState(false);
   const [separateTopicsOpen, setSeparateTopicsOpen] = useState(false);
   const [storyClarificationTopicSlug, setStoryClarificationTopicSlug] =
     useState<string | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
 
   const timelineItems = detail ? storyTimelineItems(detail.mentions) : [];
+  const footerMentionDate = detail ? latestPastMentionDate(detail.mentions) : null;
   const showTimeline = timelineItems.length >= 2;
   const groupedTimelineItems = timelineGroups(timelineItems);
   const relationshipTopics = detail
@@ -254,9 +273,6 @@ export function HealthFocusTopicDetail({
   const isInline = variant === "inline";
   const storyClarificationOpen =
     Boolean(detail?.topicSlug) && storyClarificationTopicSlug === detail?.topicSlug;
-  const statusNarrative = detail
-    ? statusVisitPhrase(detail.mentions.map((mention) => mention.status))
-    : "";
 
   useEffect(() => {
     if (!acknowledgement) {
@@ -412,67 +428,81 @@ export function HealthFocusTopicDetail({
     <section
       className={
         isInline
-          ? "mt-2 border-t border-blue-100 px-2 pt-2 sm:px-4"
+          ? "px-1 pt-1 sm:px-2"
           : "rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
       }
     >
-      {!isInline ? (
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="mt-1 text-xl font-semibold text-slate-950">
-            {detail?.displayName ?? "Loading topic"}
-          </h2>
+        <div className="min-w-0 flex-1">
           {detail ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <TopicContextPills
-                labelOverrides={contextLabelOverrides}
-                signature={detail.contextSignature}
-              />
+            <div className="flex min-w-0 items-center gap-3">
+              <HealthFocusIllustration topicName={detail.displayName} />
+              <h2 className="min-w-0 text-xl font-semibold text-slate-950">
+                {detail.displayName}
+              </h2>
               {detail.isSampleData ? <DemoPill /> : null}
             </div>
-          ) : null}
+          ) : (
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">
+              Loading topic
+            </h2>
+          )}
         </div>
-        <button
-          className="text-sm font-semibold text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-          onClick={onClose}
-          type="button"
-        >
-          Close
-        </button>
+        {!isInline ? (
+          <button
+            className="text-sm font-semibold text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+            onClick={onClose}
+            type="button"
+          >
+            Close
+          </button>
+        ) : null}
       </div>
-      ) : null}
 
-      {isLoading ? (
-        <p className="mt-2 text-sm text-slate-500">Loading...</p>
-      ) : detail && detail.mentions.length > 0 ? (
+      {isLoading && !detail ? (
+        <div className="mt-4 min-h-[24rem] animate-pulse space-y-4">
+          <div className="h-5 w-48 rounded-full bg-blue-100" />
+          <div className="flex flex-wrap gap-2">
+            <div className="h-7 w-24 rounded-full bg-blue-100" />
+            <div className="h-7 w-28 rounded-full bg-emerald-100" />
+            <div className="h-7 w-24 rounded-full bg-violet-100" />
+          </div>
+          <div className="space-y-2">
+            <div className="h-4 w-full max-w-3xl rounded-full bg-slate-200" />
+            <div className="h-4 w-2/3 rounded-full bg-slate-200" />
+          </div>
+          <div className="h-32 rounded-md border border-blue-100 bg-white/60" />
+        </div>
+      ) : detail &&
+        (detail.mentions.length > 0 || detail.narrativeSummary.trim()) ? (
         <>
           {detail.narrativeSummary.trim() ? (
             <div className="mt-2">
-              <p className="text-sm leading-6 text-slate-700">
+              <p className="text-base leading-7 text-slate-700">
                 {detail.narrativeSummary}
               </p>
             </div>
           ) : null}
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
-            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
-              {savedVisitPhrase(detail.mentionCount)}
-            </span>
-            {statusNarrative ? (
-              <span>{statusNarrative}</span>
-            ) : null}
-            {statusNarrative && detail.latestMentionAt ? (
-              <span aria-hidden="true">·</span>
-            ) : null}
-            {detail.latestMentionAt ? (
-              <span>{monthYear(detail.latestMentionAt)}</span>
-            ) : null}
-          </div>
           {detail.relatedTopics.length > 0 ||
           detail.separateRelatedTopics.length > 0 ? (
-            <div className="mt-3 rounded-md bg-blue-50 py-2">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="mt-3 py-2">
+              <button
+                aria-expanded={relatedTopicsOpen}
+                className="inline-flex items-center gap-2 rounded-sm text-sm font-semibold text-slate-900 underline-offset-4 hover:text-blue-900 hover:underline"
+                onClick={() => {
+                  setRelatedTopicsOpen((isOpen) => !isOpen);
+                  setSeparateTopicsOpen(false);
+                  setSelectedRelatedTopicSlug(null);
+                }}
+                type="button"
+              >
+                Related topics
+                <DisclosureChevronIcon isOpen={relatedTopicsOpen} />
+              </button>
+              {relatedTopicsOpen ? (
+                <>
+              <div className="mt-2 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-sm leading-6 text-blue-900">
-                  <span className="font-semibold">Related topics:</span>
                   {detail.relatedTopics.map((relatedTopic, index) => {
                     const isSelected =
                       selectedRelatedTopicSlug === relatedTopic.topicSlug;
@@ -571,6 +601,8 @@ export function HealthFocusTopicDetail({
                     );
                   })}
                 </div>
+              ) : null}
+                </>
               ) : null}
               {relationshipTopic ? (
                 <div className="mt-3 rounded-md bg-white/80 p-3">
@@ -731,19 +763,18 @@ export function HealthFocusTopicDetail({
           ) : null}
           {showTimeline ? (
             <div className="mt-3">
-              <div className="flex items-baseline gap-2">
-                <p className="text-sm font-semibold text-slate-900">Timeline</p>
-                <button
-                  className="text-xs font-semibold text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-                  onClick={() => {
-                    setTimelineOpen((isOpen) => !isOpen);
-                    setOpenTimelineItemId(null);
-                  }}
-                  type="button"
-                >
-                  {timelineOpen ? "Collapse" : "Expand"}
-                </button>
-              </div>
+              <button
+                aria-expanded={timelineOpen}
+                className="inline-flex items-center gap-2 rounded-sm text-sm font-semibold text-slate-900 underline-offset-4 hover:text-blue-900 hover:underline"
+                onClick={() => {
+                  setTimelineOpen((isOpen) => !isOpen);
+                  setOpenTimelineItemId(null);
+                }}
+                type="button"
+              >
+                Timeline
+                <DisclosureChevronIcon isOpen={timelineOpen} />
+              </button>
               {timelineOpen ? (
                 <div className="mt-3 space-y-4">
                   {groupedTimelineItems.map((group) => (
@@ -796,10 +827,32 @@ export function HealthFocusTopicDetail({
             </div>
           ) : null}
           {contextPanel ? <div className="mt-4">{contextPanel}</div> : null}
-          {canSubmitFeedback ? (
-            <div className="mt-4">
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 text-[0.72rem] leading-5 text-slate-500 sm:justify-start">
+              {footerMentionDate ? (
+                <span
+                  aria-label={`Last seen ${monthYear(footerMentionDate)}`}
+                  className="inline-flex items-center gap-1.5 font-medium text-slate-500"
+                  title={`Last seen ${monthYear(footerMentionDate)}`}
+                >
+                  <CalendarClockIcon />
+                  {monthYear(footerMentionDate)}
+                </span>
+              ) : null}
+              <TopicContextPills
+                labelOverrides={contextLabelOverrides}
+                signature={detail.contextSignature}
+                variant="compact"
+              />
+            </div>
+            {canSubmitFeedback ? (
+              <div className="flex flex-col items-center gap-3 sm:ml-auto sm:flex-row sm:items-center">
+              <div
+                aria-hidden="true"
+                className="h-px w-12 bg-blue-100 sm:hidden"
+              />
               {generalAcknowledgement ? (
-                <div className="flex justify-center text-center">
+                <div className="flex justify-start text-left sm:justify-end sm:text-right">
                   <FeedbackAcknowledgementMessage
                     acknowledgement={generalAcknowledgement}
                     isUndoing={pendingFeedbackKey === "undo"}
@@ -808,12 +861,12 @@ export function HealthFocusTopicDetail({
                 </div>
               ) : (
                 <>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <p className="text-sm font-semibold text-slate-900">
+                  <div className="flex flex-wrap items-center justify-center gap-1.5 sm:justify-end">
+                    <p className="mr-1 text-[0.72rem] font-medium text-slate-500">
                       This story
                     </p>
                     <button
-                      className="rounded-full border border-blue-100 bg-white px-3 py-1.5 text-sm font-semibold text-blue-800 hover:bg-blue-50 disabled:opacity-60"
+                      className="rounded-md border border-blue-100 bg-white px-2.5 py-1 text-xs font-semibold text-blue-800 hover:bg-blue-50 disabled:opacity-60"
                       disabled={Boolean(pendingFeedbackKey)}
                       onClick={() => {
                         setClarificationText("");
@@ -831,9 +884,9 @@ export function HealthFocusTopicDetail({
                         : "Looks right"}
                     </button>
                     <button
-                      className={`rounded-full border px-3 py-1.5 text-sm font-semibold disabled:opacity-60 ${
+                      className={`rounded-md border px-2.5 py-1 text-xs font-semibold disabled:opacity-60 ${
                         storyClarificationOpen
-                          ? "border-blue-200 bg-blue-50 text-blue-900 ring-2 ring-blue-200"
+                          ? "border-blue-200 bg-blue-50 text-blue-900 ring-1 ring-blue-200"
                           : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                       }`}
                       aria-pressed={storyClarificationOpen}
@@ -890,12 +943,13 @@ export function HealthFocusTopicDetail({
                 </>
               )}
               {feedbackError ? (
-                <p className="mt-2 text-sm font-semibold text-rose-700">
+                <p className="mt-2 text-sm font-semibold text-rose-700 sm:text-right">
                   {feedbackError}
                 </p>
               ) : null}
-            </div>
-          ) : null}
+              </div>
+            ) : null}
+          </div>
         </>
       ) : (
         <p className="mt-4 text-sm text-slate-500">

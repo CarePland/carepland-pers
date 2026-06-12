@@ -19,7 +19,7 @@ type ReviewAction =
   | "edit_current"
   | "generate"
   | "save_edit";
-type GenerationMode = "auto_after_notes" | "manual";
+type GenerationMode = "auto_after_notes" | "auto_home" | "manual";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -249,7 +249,11 @@ export async function POST(request: NextRequest) {
         ? body.action
         : "generate";
     const generationMode: GenerationMode =
-      body.generationMode === "auto_after_notes" ? "auto_after_notes" : "manual";
+      body.generationMode === "auto_after_notes"
+        ? "auto_after_notes"
+        : body.generationMode === "auto_home"
+          ? "auto_home"
+          : "manual";
 
     if (!appointmentId) {
       throw new Error("Missing appointment id.");
@@ -796,48 +800,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const meteredFeatureKey =
-      generationMode === "auto_after_notes" ? "careprep_auto" : "careprep_manual";
-    const { data: meteringResult, error: meteringError } = await supabase.rpc(
-      "consume_feature_usage",
-      {
-        p_care_circle_id: appointment.care_circle_id,
-        p_feature_key: meteredFeatureKey,
-        p_quantity: 1,
-      }
-    );
-
-    if (meteringError) {
-      throw meteringError;
-    }
-
-    const metering = (meteringResult ?? {}) as JsonObject;
-
-    if (!jsonBoolean(metering.allowed)) {
-      const dynamicLimitMessage =
-        generationMode === "manual"
-          ? await currentAppContentText(
-              supabase as unknown as AppContentReader,
-              "careprep_manual_limit_message"
-            )
-          : "";
-
-      throw new Error(
-        dynamicLimitMessage ||
-          jsonString(
-            metering.message,
-            generationMode === "auto_after_notes"
-              ? "Automatic appointment preparation is not available on your current plan."
-              : "This CarePrep generation is not available on your current plan."
-          )
+    if (generationMode !== "auto_home") {
+      const meteredFeatureKey =
+        generationMode === "auto_after_notes" ? "careprep_auto" : "careprep_manual";
+      const { data: meteringResult, error: meteringError } = await supabase.rpc(
+        "consume_feature_usage",
+        {
+          p_care_circle_id: appointment.care_circle_id,
+          p_feature_key: meteredFeatureKey,
+          p_quantity: 1,
+        }
       );
-    }
 
-    reservedMeteredFeature = {
-      careCircleId: appointment.care_circle_id,
-      featureKey: meteredFeatureKey,
-      quantity: 1,
-    };
+      if (meteringError) {
+        throw meteringError;
+      }
+
+      const metering = (meteringResult ?? {}) as JsonObject;
+
+      if (!jsonBoolean(metering.allowed)) {
+        const dynamicLimitMessage =
+          generationMode === "manual"
+            ? await currentAppContentText(
+                supabase as unknown as AppContentReader,
+                "careprep_manual_limit_message"
+              )
+            : "";
+
+        throw new Error(
+          dynamicLimitMessage ||
+            jsonString(
+              metering.message,
+              generationMode === "auto_after_notes"
+                ? "Automatic appointment preparation is not available on your current plan."
+                : "This CarePrep generation is not available on your current plan."
+            )
+        );
+      }
+
+      reservedMeteredFeature = {
+        careCircleId: appointment.care_circle_id,
+        featureKey: meteredFeatureKey,
+        quantity: 1,
+      };
+    }
 
     const schema =
       instructionVersion.output_schema &&
@@ -990,9 +996,13 @@ export async function POST(request: NextRequest) {
       message: existingDrafts.length > 0
         ? generationMode === "auto_after_notes"
           ? "CarePrep was refreshed for the next appointment."
+          : generationMode === "auto_home"
+            ? "CarePrep was refreshed for the next appointment."
           : "New AI CarePrep draft generated."
         : generationMode === "auto_after_notes"
           ? "CarePrep was prepared for the next appointment."
+          : generationMode === "auto_home"
+            ? "CarePrep was prepared for the next appointment."
           : "AI CarePrep draft generated.",
     });
   } catch (error) {

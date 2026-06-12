@@ -72,6 +72,11 @@ import {
 import { AdminWorkspaceShell } from "./components/admin/AdminWorkspaceShell";
 import { AIReviewBadge, aiReviewLevel } from "./components/AIReviewBadge";
 import { AppointmentViewToolbar } from "./components/AppointmentViewToolbar";
+import {
+  buildActiveAskContext,
+  buildHealthFocusAskContext,
+} from "./lib/ask/activeAskContext";
+import { shouldRouteTopAskToCareContext } from "./lib/ask/contextualAskRouting";
 import { parseTopicContextLabelOverrides } from "./lib/healthTopics/contextSignatureLabels";
 import {
   HealthFocusCard,
@@ -205,7 +210,7 @@ type NotesReminderAppointment = Appointment & {
   care_circle_id: string;
 };
 
-type CarePrepGenerationMode = "auto_after_notes" | "manual";
+type CarePrepGenerationMode = "auto_after_notes" | "auto_home" | "manual";
 
 type CareSubject = {
   id: string;
@@ -726,6 +731,8 @@ const ALL_SUBJECTS = "all";
 const appUiStateStorageKey = "carepland-ui-state:v1";
 const appDraftStateStorageKey = "carepland-draft-state:v1";
 const appLastActivityStorageKey = "carepland-last-activity-at:v1";
+const homeAutoCarePrepAttemptStoragePrefix =
+  "carepland-home-auto-careprep-attempted:v1";
 
 const defaultEntitlement: CareCircleEntitlement = {
   max_active_subjects: 1,
@@ -755,6 +762,47 @@ function authProviderFromUser(
   }
 
   return "email";
+}
+
+function homeAutoCarePrepAttemptStorageKey(appointmentId: string) {
+  return `${homeAutoCarePrepAttemptStoragePrefix}:${appointmentId}`;
+}
+
+function isEligibleForHomeAutoCarePrep(appointment: Appointment) {
+  const text = [
+    appointment.title,
+    appointment.reason,
+    appointment.provider_name,
+    appointment.provider_organization,
+    appointment.location_name,
+    appointment.location_address,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (!text.trim()) {
+    return false;
+  }
+
+  const ineligiblePattern =
+    /\b(tax|accountant|accounting|cpa|irs|legal|lawyer|attorney|financial|finance|bank|banking|investment|haircut|hair cut|salon|barber|car service|auto service|oil change|mechanic)\b/;
+  const genericOtherPattern = /^(other|generic other)$/;
+
+  if (ineligiblePattern.test(text)) {
+    return false;
+  }
+
+  if (
+    genericOtherPattern.test(String(appointment.title ?? "").trim().toLowerCase()) ||
+    genericOtherPattern.test(String(appointment.reason ?? "").trim().toLowerCase())
+  ) {
+    return false;
+  }
+
+  return /\b(primary care|pcp|family medicine|internal medicine|doctor|physician|medical|specialist|cardiology|cardiologist|orthopedic|orthopedics|ortho|physical therapy|physio|occupational therapy|speech therapy|therapy|therapist|pt|dental|dentist|orthodont|vision|optom|ophthalm|eye exam|hearing|audiology|audiologist|imaging|radiology|x-?ray|mri|ct scan|ultrasound|mammogram|lab|labs|blood work|bloodwork|veterinary|veterinarian|vet|animal hospital|hospital|clinic)\b/.test(
+    text
+  );
 }
 
 const defaultAgentKnowledgeAutomationSettings: AgentKnowledgeAutomationSettings = {
@@ -802,7 +850,8 @@ const appContentDefaults = {
   health_focus_context_span_labels:
     "One Visit = One Visit\nSeveral Weeks = Several Weeks;Weeks\nSeveral Months = Several Months;Months\nAbout a Year = About a Year;Year\nMultiple Years = Multiple Years;Years",
   ask_guidance_message:
-    "Questions, ideas, workflow feedback, or things that felt confusing — tell us what’s on your mind.",
+    "Questions, ideas, help, feedback, or general appointment info -- ask away.",
+  ask_input_placeholder: "What's on your mind?",
   ask_acknowledgement_message:
     "Thank you for taking the time to ask us. We do review every request!",
   ask_duplicate_message:
@@ -956,6 +1005,12 @@ const appContentOptions = [
     description:
       "Guidance text shown at the top of the Ask panel before a user sends a message.",
     label: "Ask guidance message",
+  },
+  {
+    category: "messages",
+    contentKey: "ask_input_placeholder",
+    description: "Placeholder text shown in the Ask panel message field.",
+    label: "Ask input placeholder",
   },
   {
     category: "messages",
@@ -3146,6 +3201,10 @@ export default function Home() {
     appContentDefaults.beta_notice_intro
   );
   const [appContentChangeNote, setAppContentChangeNote] = useState("");
+  const [appContentSaveMessage, setAppContentSaveMessage] = useState<{
+    tone: "error" | "success";
+    text: string;
+  } | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<
     Record<
       string,
@@ -3335,6 +3394,7 @@ export default function Home() {
   const sessionProfileLoadedRef = useRef(false);
   const appSessionSettingsRef = useRef(defaultAppSessionSettings);
   const idleSigningOutRef = useRef(false);
+  const homeAutoCarePrepInFlightRef = useRef<Set<string>>(new Set());
   const [toast, setToast] = useState<ToastState | null>(null);
   const [appointmentPool, setAppointmentPool] = useState<Appointment[]>([]);
   const appointmentPoolRef = useRef<Appointment[]>([]);
@@ -3353,9 +3413,8 @@ export default function Home() {
     useState<Appointment | null>(null);
   const [homeNextGuidance, setHomeNextGuidance] =
     useState<CarePrepGuidance | null>(null);
-  const [homeContextAnswer, setHomeContextAnswer] = useState("");
-  const [homeContextError, setHomeContextError] = useState<string | null>(null);
-  const [homeContextLoading, setHomeContextLoading] = useState(false);
+  const [appointmentDetailsHydrated, setAppointmentDetailsHydrated] =
+    useState(false);
   const [healthStoryContextAnswer, setHealthStoryContextAnswer] = useState("");
   const [healthStoryContextError, setHealthStoryContextError] = useState<
     string | null
@@ -3374,6 +3433,10 @@ export default function Home() {
     useState<HealthFocusTopicDetailData | null>(null);
   const [healthFocusDetailLoading, setHealthFocusDetailLoading] =
     useState(false);
+  const healthFocusDetailCacheRef = useRef<
+    Map<string, HealthFocusTopicDetailData>
+  >(new Map());
+  const healthFocusDetailPrefetchingRef = useRef<Set<string>>(new Set());
   const healthFocusBackfillAttemptedRef = useRef(new Set<string>());
   const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
   const [entitlement, setEntitlement] =
@@ -5057,7 +5120,7 @@ export default function Home() {
     const nextHomeAppointment =
       subjectAppointments
         .filter((appointment) => {
-          if (appointment.status === "archived" || appointment.current_note_id) {
+          if (appointment.status === "archived") {
             return false;
           }
 
@@ -5134,6 +5197,7 @@ export default function Home() {
       setNotes([]);
       setGuidance([]);
       applyAppointmentSelection([], appointmentViewRef.current, selectedSubjectIdRef.current, []);
+      setAppointmentDetailsHydrated(true);
       return;
     }
 
@@ -5179,8 +5243,10 @@ export default function Home() {
         selectedSubjectIdRef.current,
         loadedGuidanceRows
       );
+      setAppointmentDetailsHydrated(true);
     } catch (error) {
       console.warn("Unable to hydrate appointment details", error);
+      setAppointmentDetailsHydrated(false);
     }
   }
 
@@ -5328,31 +5394,20 @@ export default function Home() {
     const { data: sessionData, error: sessionError } =
       await supabase.auth.getSession();
 
-    const isHealthStoryContext = askContext.level === "health_focus";
-    const setContextError = isHealthStoryContext
-      ? setHealthStoryContextError
-      : setHomeContextError;
-    const setContextAnswer = isHealthStoryContext
-      ? setHealthStoryContextAnswer
-      : setHomeContextAnswer;
-    const setContextLoading = isHealthStoryContext
-      ? setHealthStoryContextLoading
-      : setHomeContextLoading;
-
     if (sessionError) {
-      setContextError(errorMessage(sessionError));
+      setHealthStoryContextError(getErrorMessage(sessionError));
       return;
     }
 
     const accessToken = sessionData.session?.access_token;
 
     if (!accessToken) {
-      setContextError("Please sign in before asking for more context.");
+      setHealthStoryContextError("Please sign in before asking for more context.");
       return;
     }
 
-    setContextLoading(true);
-    setContextError(null);
+    setHealthStoryContextLoading(true);
+    setHealthStoryContextError(null);
 
     try {
       const body: {
@@ -5388,15 +5443,86 @@ export default function Home() {
         throw new Error(result.error ?? "CarePland could not answer that yet.");
       }
 
-      setContextAnswer(result.answer ?? "");
+      const nextAnswer = result.answer ?? "";
+      setHealthStoryContextAnswer(nextAnswer);
+      return nextAnswer;
     } catch (error) {
-      setContextError(errorMessage(error));
+      setHealthStoryContextError(getErrorMessage(error));
     } finally {
-      setContextLoading(false);
+      setHealthStoryContextLoading(false);
     }
   }
 
-  async function loadHealthFocusTopicDetail(topic: HealthFocusTopicSummary) {
+  function currentActiveAskContext() {
+    return buildActiveAskContext({
+      allSubjectsValue: ALL_SUBJECTS,
+      formatDate,
+      homeNextAppointment,
+      mainTab,
+      selectedSubjectId,
+    });
+  }
+
+  function topAskConversationTurns(): HomeContextAskContext["conversationTurns"] {
+    const turns: NonNullable<HomeContextAskContext["conversationTurns"]> = [];
+    let pendingQuestion = "";
+
+    askMessages.forEach((message) => {
+      if (message.role === "user") {
+        pendingQuestion = message.body;
+        return;
+      }
+
+      if (pendingQuestion && message.role === "assistant") {
+        turns.push({
+          answer: message.body,
+          question: pendingQuestion,
+        });
+        pendingQuestion = "";
+      }
+    });
+
+    return turns.slice(-4);
+  }
+
+  function healthFocusTopicCacheKey(topic: HealthFocusTopicSummary) {
+    return `${topic.careSubjectId || ALL_SUBJECTS}:${topic.topicSlug}`;
+  }
+
+  function rememberHealthFocusTopicDetail(
+    topic: HealthFocusTopicSummary,
+    detail: HealthFocusTopicDetailData
+  ) {
+    const cache = healthFocusDetailCacheRef.current;
+    const key = healthFocusTopicCacheKey(topic);
+
+    if (cache.has(key)) {
+      cache.delete(key);
+    }
+
+    cache.set(key, detail);
+
+    while (cache.size > 12) {
+      const oldestKey = cache.keys().next().value;
+
+      if (!oldestKey) {
+        break;
+      }
+
+      cache.delete(oldestKey);
+    }
+  }
+
+  async function fetchHealthFocusTopicDetail(
+    topic: HealthFocusTopicSummary
+  ): Promise<HealthFocusTopicDetailData | null> {
+    const cacheKey = healthFocusTopicCacheKey(topic);
+    const cachedDetail = healthFocusDetailCacheRef.current.get(cacheKey);
+
+    if (cachedDetail) {
+      return cachedDetail;
+    }
+
     const { data: sessionData, error: sessionError } =
       await supabase.auth.getSession();
 
@@ -5407,64 +5533,80 @@ export default function Home() {
     const accessToken = sessionData.session?.access_token;
 
     if (!accessToken) {
-      setHealthFocusTopicDetail(null);
-      return;
+      return null;
     }
 
+    const params = new URLSearchParams({
+      topicSlug: topic.topicSlug,
+    });
+
+    if (topic.careSubjectId && topic.careSubjectId !== ALL_SUBJECTS) {
+      params.set("careSubjectId", topic.careSubjectId);
+    }
+
+    const response = await fetch(`/api/health-topics/detail?${params}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const result = (await response.json()) as {
+      contextSignature?: HealthFocusTopicDetailData["contextSignature"];
+      displayName?: string;
+      error?: string;
+      isSampleData?: boolean;
+      latestMentionAt?: string | null;
+      mentionCount?: number;
+      mentions?: HealthFocusTopicDetailData["mentions"];
+      narrativeSummary?: string;
+      ok?: boolean;
+      providerNames?: string[];
+      relatedTopics?: HealthFocusTopicDetailData["relatedTopics"];
+      separateRelatedTopics?: HealthFocusTopicDetailData["separateRelatedTopics"];
+      topicSlug?: string;
+    };
+
+    if (!response.ok || !result.ok) {
+      throw new Error(
+        result.error ?? "Health Focus topic detail could not be loaded."
+      );
+    }
+
+    const detail = {
+      contextSignature: result.contextSignature ?? topic.contextSignature,
+      displayName: result.displayName ?? topic.displayName,
+      isSampleData: result.isSampleData ?? topic.isSampleData,
+      latestMentionAt: result.latestMentionAt ?? topic.latestMentionAt,
+      mentionCount: result.mentionCount ?? topic.mentionCount,
+      mentions: result.mentions ?? [],
+      narrativeSummary: result.narrativeSummary ?? topic.narrativeSummary,
+      providerNames: result.providerNames ?? topic.providerNames,
+      relatedTopics: result.relatedTopics ?? [],
+      separateRelatedTopics: result.separateRelatedTopics ?? [],
+      topicSlug: result.topicSlug ?? topic.topicSlug,
+    };
+
+    rememberHealthFocusTopicDetail(topic, detail);
+    return detail;
+  }
+
+  async function loadHealthFocusTopicDetail(topic: HealthFocusTopicSummary) {
+    const cacheKey = healthFocusTopicCacheKey(topic);
+    const cachedDetail = healthFocusDetailCacheRef.current.get(cacheKey);
+
     setSelectedHealthFocusTopic(topic);
-    setHealthFocusDetailLoading(true);
+    setHealthFocusTopicDetail(cachedDetail ?? null);
+    setHealthFocusDetailLoading(!cachedDetail);
     setHealthStoryContextAnswer("");
     setHealthStoryContextError(null);
 
+    if (cachedDetail) {
+      return;
+    }
+
     try {
-      const params = new URLSearchParams({
-        topicSlug: topic.topicSlug,
-      });
+      const detail = await fetchHealthFocusTopicDetail(topic);
 
-      if (topic.careSubjectId && topic.careSubjectId !== ALL_SUBJECTS) {
-        params.set("careSubjectId", topic.careSubjectId);
-      }
-
-      const response = await fetch(`/api/health-topics/detail?${params}`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-      const result = (await response.json()) as {
-        contextSignature?: HealthFocusTopicDetailData["contextSignature"];
-        displayName?: string;
-        error?: string;
-        isSampleData?: boolean;
-        latestMentionAt?: string | null;
-        mentionCount?: number;
-        mentions?: HealthFocusTopicDetailData["mentions"];
-        narrativeSummary?: string;
-        ok?: boolean;
-        providerNames?: string[];
-        relatedTopics?: HealthFocusTopicDetailData["relatedTopics"];
-        separateRelatedTopics?: HealthFocusTopicDetailData["separateRelatedTopics"];
-        topicSlug?: string;
-      };
-
-      if (!response.ok || !result.ok) {
-        throw new Error(
-          result.error ?? "Health Focus topic detail could not be loaded."
-        );
-      }
-
-      setHealthFocusTopicDetail({
-        contextSignature: result.contextSignature ?? topic.contextSignature,
-        displayName: result.displayName ?? topic.displayName,
-        isSampleData: result.isSampleData ?? topic.isSampleData,
-        latestMentionAt: result.latestMentionAt ?? topic.latestMentionAt,
-        mentionCount: result.mentionCount ?? topic.mentionCount,
-        mentions: result.mentions ?? [],
-        narrativeSummary: result.narrativeSummary ?? topic.narrativeSummary,
-        providerNames: result.providerNames ?? topic.providerNames,
-        relatedTopics: result.relatedTopics ?? [],
-        separateRelatedTopics: result.separateRelatedTopics ?? [],
-        topicSlug: result.topicSlug ?? topic.topicSlug,
-      });
+      setHealthFocusTopicDetail(detail);
     } catch (error) {
       console.warn("Unable to load Health Focus topic detail", error);
       setHealthFocusTopicDetail(null);
@@ -5472,6 +5614,54 @@ export default function Home() {
       setHealthFocusDetailLoading(false);
     }
   }
+
+  async function prefetchHealthFocusTopicDetails(
+    topicsToPrefetch: HealthFocusTopicSummary[]
+  ) {
+    const uncachedTopics = topicsToPrefetch.filter((topic) => {
+      const key = healthFocusTopicCacheKey(topic);
+
+      return (
+        !healthFocusDetailCacheRef.current.has(key) &&
+        !healthFocusDetailPrefetchingRef.current.has(key)
+      );
+    });
+
+    for (let index = 0; index < uncachedTopics.length; index += 2) {
+      const batch = uncachedTopics.slice(index, index + 2);
+
+      batch.forEach((topic) => {
+        healthFocusDetailPrefetchingRef.current.add(
+          healthFocusTopicCacheKey(topic)
+        );
+      });
+
+      await Promise.all(
+        batch.map(async (topic) => {
+          const key = healthFocusTopicCacheKey(topic);
+
+          try {
+            await fetchHealthFocusTopicDetail(topic);
+          } catch (error) {
+            console.warn("Unable to prefetch Health Focus topic detail", error);
+          } finally {
+            healthFocusDetailPrefetchingRef.current.delete(key);
+          }
+        })
+      );
+    }
+  }
+
+  useEffect(() => {
+    if (healthFocusTopics.length === 0) {
+      return;
+    }
+
+    void prefetchHealthFocusTopicDetails(healthFocusTopics.slice(0, 3));
+    // Prefetch should run when the summary set changes; the helper uses refs
+    // for cache state and does not need to be a reactive dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [healthFocusTopics]);
 
   async function handleHealthStoryFeedback(
     feedback: HealthStoryFeedbackInput
@@ -5899,6 +6089,7 @@ export default function Home() {
         (item) =>
           !item.care_subject_id || activeSubjectIds.has(item.care_subject_id)
       ) ?? [];
+    setAppointmentDetailsHydrated(false);
     setAppointmentPool(activeAppointmentRows);
     applyAppointmentSelection(activeAppointmentRows, view, effectiveSubjectId);
     void loadHealthFocusSummary(effectiveSubjectId);
@@ -6391,10 +6582,13 @@ export default function Home() {
     }
   }
 
-  function resetAppContentEditor(version: AppContentVersion | null) {
+  function resetAppContentEditor(
+    version: AppContentVersion | null,
+    fallbackContentKey = selectedAppContentKey
+  ) {
     const option =
       appContentOptions.find(
-        (item) => item.contentKey === (version?.content_key ?? selectedAppContentKey)
+        (item) => item.contentKey === (version?.content_key ?? fallbackContentKey)
       ) ?? appContentOptions[0];
 
     setAppContentLabel(version?.label ?? option.label);
@@ -6460,7 +6654,7 @@ export default function Home() {
         versions.find(
           (version) => version.content_key === contentKey && version.is_current
         ) ?? null;
-      resetAppContentEditor(currentVersion);
+      resetAppContentEditor(currentVersion, contentKey);
     } catch (error) {
       if (isAdmin) {
         setMessage(getErrorMessage(error));
@@ -6471,6 +6665,7 @@ export default function Home() {
   }
 
   async function handleChangeAppContentKey(contentKey: string) {
+    setAppContentSaveMessage(null);
     setSelectedAppContentKey(contentKey);
     const optionForCategory = appContentOptions.find(
       (item) => item.contentKey === contentKey
@@ -6484,7 +6679,7 @@ export default function Home() {
       ) ?? null;
 
     if (currentVersion) {
-      resetAppContentEditor(currentVersion);
+      resetAppContentEditor(currentVersion, contentKey);
       return;
     }
 
@@ -6501,6 +6696,7 @@ export default function Home() {
   }
 
   async function handleChangeAppContentCategory(categoryKey: string) {
+    setAppContentSaveMessage(null);
     setSelectedAppContentCategory(categoryKey);
     const firstOption = appContentOptions.find(
       (item) => item.category === categoryKey
@@ -6515,6 +6711,7 @@ export default function Home() {
     event.preventDefault();
     setSavingAppContent(true);
     setMessage("");
+    setAppContentSaveMessage(null);
 
     try {
       const { data, error } = await supabase.rpc("save_app_content_version", {
@@ -6532,9 +6729,18 @@ export default function Home() {
       const newVersion = data as AppContentVersion;
       await loadAppContent(newVersion.content_key);
       resetAppContentEditor(newVersion);
+      setAppContentSaveMessage({
+        tone: "success",
+        text: "Content saved as a new version.",
+      });
       showToast("Content saved as a new version.", { type: "success" });
     } catch (error) {
-      setMessage(getErrorMessage(error));
+      const errorText = getErrorMessage(error);
+      setAppContentSaveMessage({
+        tone: "error",
+        text: errorText,
+      });
+      setMessage(errorText);
     } finally {
       setSavingAppContent(false);
     }
@@ -9051,8 +9257,16 @@ export default function Home() {
     const outgoingFingerprint = outgoingMessage
       .toLowerCase()
       .replace(/\s+/g, " ");
+    const activeAskContext = currentActiveAskContext();
+    const shouldUseCareContext = shouldRouteTopAskToCareContext({
+      askContext: activeAskContext,
+      message: outgoingMessage,
+    });
 
-    if (askSubmittedFingerprints.includes(outgoingFingerprint)) {
+    if (
+      !shouldUseCareContext &&
+      askSubmittedFingerprints.includes(outgoingFingerprint)
+    ) {
       setAskCompletionMessageKey("ask_duplicate_message");
       setAskConversationComplete(true);
       setAskInput("");
@@ -9084,11 +9298,62 @@ export default function Home() {
         throw new Error("Please sign in before using Ask.");
       }
 
+      if (shouldUseCareContext) {
+        const contextualAskContext: HomeContextAskContext = {
+          ...activeAskContext,
+          conversationTurns: topAskConversationTurns(),
+        };
+        const body: {
+          askContext: HomeContextAskContext;
+          careSubjectId?: string;
+          question: string;
+        } = {
+          askContext: contextualAskContext,
+          question: outgoingMessage,
+        };
+
+        if (contextualAskContext.careSubjectId) {
+          body.careSubjectId = contextualAskContext.careSubjectId;
+        } else if (selectedSubjectId && selectedSubjectId !== ALL_SUBJECTS) {
+          body.careSubjectId = selectedSubjectId;
+        }
+
+        const response = await fetch("/api/home-context", {
+          body: JSON.stringify(body),
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        });
+        const result = (await response.json()) as {
+          answer?: string;
+          error?: string;
+          ok?: boolean;
+        };
+
+        if (!response.ok || !result.ok) {
+          throw new Error(
+            result.error ?? "CarePland could not answer that yet."
+          );
+        }
+
+        setAskMessages((currentMessages) => [
+          ...currentMessages,
+          {
+            body: result.answer?.trim() || "I couldn't find an answer in your saved CarePland context yet.",
+            role: "assistant",
+          },
+        ]);
+        return;
+      }
+
       const response = await fetch("/api/ask", {
         body: JSON.stringify({
           context: {
             email: signedInEmail,
             has_open_support_ticket: Boolean(currentSupportTicket),
+            active_ask_context: activeAskContext,
             is_profile_setup: needsOnboarding,
             profile_label: savedProfileLabel,
             profile_setup: needsOnboarding
@@ -12241,6 +12506,85 @@ export default function Home() {
     }
   }
 
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !signedInEmail ||
+      !sessionProfileLoaded ||
+      mainTab !== "home" ||
+      showWelcomeGuide ||
+      !appointmentDetailsHydrated ||
+      !homeNextAppointment ||
+      homeNextGuidance ||
+      generatingCarePrepForId
+    ) {
+      return;
+    }
+
+    if (
+      !homeNextAppointment.care_subject_id ||
+      !isEligibleForHomeAutoCarePrep(homeNextAppointment)
+    ) {
+      return;
+    }
+
+    const appointmentId = homeNextAppointment.id;
+    const storageKey = homeAutoCarePrepAttemptStorageKey(appointmentId);
+
+    if (
+      homeAutoCarePrepInFlightRef.current.has(appointmentId) ||
+      window.sessionStorage.getItem(storageKey)
+    ) {
+      return;
+    }
+
+    homeAutoCarePrepInFlightRef.current.add(appointmentId);
+
+    try {
+      window.sessionStorage.setItem(storageKey, new Date().toISOString());
+    } catch {
+      // Continue without storage if the browser blocks session storage.
+    }
+
+    setGeneratingCarePrepForId(appointmentId);
+    setCarePrepGenerationErrors((currentErrors) => {
+      const nextErrors = { ...currentErrors };
+      delete nextErrors[appointmentId];
+      return nextErrors;
+    });
+
+    void (async () => {
+      try {
+        await requestCarePrepGeneration(appointmentId, "auto_home");
+        await loadAppointments();
+        setCarePrepGenerationErrors((currentErrors) => {
+          const nextErrors = { ...currentErrors };
+          delete nextErrors[appointmentId];
+          return nextErrors;
+        });
+      } catch (error) {
+        console.warn("Home automatic CarePrep did not run.", error);
+      } finally {
+        homeAutoCarePrepInFlightRef.current.delete(appointmentId);
+        setGeneratingCarePrepForId((currentId) =>
+          currentId === appointmentId ? null : currentId
+        );
+      }
+    })();
+    // requestCarePrepGeneration and loadAppointments intentionally use the
+    // current component state; this effect is keyed to the visible Home target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    generatingCarePrepForId,
+    appointmentDetailsHydrated,
+    homeNextAppointment,
+    homeNextGuidance,
+    mainTab,
+    sessionProfileLoaded,
+    showWelcomeGuide,
+    signedInEmail,
+  ]);
+
   function carePrepFormValues(appointmentId: string, draft: CarePrepGuidance) {
     return carePrepGuidanceFormValues(draft, carePrepDrafts[appointmentId]);
   }
@@ -12720,6 +13064,28 @@ export default function Home() {
     const homeCarePrepGenerationError = homeNextAppointment
       ? carePrepGenerationErrors[homeNextAppointment.id]
       : null;
+    const isHomeCarePrepEligible = homeNextAppointment
+      ? isEligibleForHomeAutoCarePrep(homeNextAppointment)
+      : false;
+    const notesEntryAppointment =
+      homeNextAppointment?.id === textIntakeTargetAppointmentId
+        ? homeNextAppointment
+        : notesReminderAppointment;
+    const showNotesReminderTrigger = Boolean(
+      notesReminderAppointment &&
+        notesReminderAppointment.id !== homeNextAppointment?.id
+    );
+    const showNotesEntrySection = Boolean(
+      notesEntryAppointment &&
+        (showNotesReminderTrigger ||
+          textIntakeTargetAppointmentId === notesEntryAppointment.id ||
+          pendingModifierSwitch?.appointmentId === notesEntryAppointment.id)
+    );
+    const healthFocusAskContext = buildHealthFocusAskContext({
+      allSubjectsValue: ALL_SUBJECTS,
+      selectedTopic: selectedHealthFocusTopic,
+      topicDetail: healthFocusTopicDetail,
+    });
     const hasExistingWelcomeAppointments =
       hasAnySavedAppointments ||
       Boolean(homeNextAppointment) ||
@@ -12789,6 +13155,10 @@ export default function Home() {
         ) : (
           <>
             <HomeNextAppointmentPanel
+              addNotesOpen={
+                Boolean(homeNextAppointment) &&
+                textIntakeTargetAppointmentId === homeNextAppointment?.id
+              }
               appointment={homeNextAppointment}
               formatDate={formatDate}
               generationError={homeCarePrepGenerationError}
@@ -12797,56 +13167,175 @@ export default function Home() {
               isGenerating={
                 generatingCarePrepForId === homeNextAppointment?.id
               }
+              isCarePrepEligible={isHomeCarePrepEligible}
               mapsLink={homeMapsLink}
               nextSubject={nextSubject ?? ""}
               onAddAppointment={() => startAppointmentPanel("add")}
-              onGenerateCarePrep={() => {
-                if (homeNextAppointment) {
-                  void handleGenerateCarePrep(homeNextAppointment);
-                }
-              }}
-              onOpenAppointment={() => {
-                void handleChangeMainTab("appointments");
-                void handleChangeAppointmentView("upcoming");
-              }}
+              onAddNotes={
+                homeNextAppointment
+                  ? () => {
+                      if (
+                        textIntakeTargetAppointmentId === homeNextAppointment.id
+                      ) {
+                        requestCloseTextIntake(homeNextAppointment);
+                        return;
+                      }
+
+                      startContextualTextIntake(homeNextAppointment);
+                    }
+                  : undefined
+              }
               practiceLabel={homePracticeLabel}
-            />
-            <HomeContextPanel
-              answer={homeContextAnswer}
-              askContext={{
-                level: "home",
-                visibleItems: homeNextAppointment
-                  ? [
-                      {
-                        date: homeNextAppointment.starts_at,
-                        id: homeNextAppointment.id,
-                        label:
-                          homeNextAppointment.title ||
-                          homeNextAppointment.reason ||
-                          "Next appointment",
-                        metadata: {
-                          date: formatDate(homeNextAppointment.starts_at),
-                          location: homeNextAppointment.location_name,
-                          provider:
-                            homeNextAppointment.provider_organization ||
-                            homeNextAppointment.provider_name,
-                          status: homeNextAppointment.status,
-                        },
-                        type: "appointment",
-                      },
-                    ]
-                  : [],
-              }}
-              error={homeContextError}
-              isLoading={homeContextLoading}
-              onAsk={handleHomeContextQuestion}
-            />
+            >
+
+            {showNotesEntrySection &&
+            notesEntryAppointment &&
+            notesEntryAppointment.id === homeNextAppointment?.id ? (
+              <section>
+                {pendingModifierSwitch?.appointmentId ===
+                notesEntryAppointment.id ? (
+                  <InlineConfirmation
+                    cancelLabel="Return to editing"
+                    className="mt-3"
+                    confirmLabel="Discard and close"
+                    message="Closing will discard your unsaved changes. Proceed?"
+                    onCancel={() => setPendingModifierSwitch(null)}
+                    onConfirm={() =>
+                      discardAndSwitchAppointmentModifier(notesEntryAppointment)
+                    }
+                  />
+                ) : null}
+                {textIntakeTargetAppointmentId === notesEntryAppointment.id ? (
+                  <form
+                    className="mt-2"
+                    onSubmit={
+                      textIntakeDraft
+                        ? handleSaveTextIntakeDraft
+                        : handleInterpretTextIntake
+                    }
+                  >
+	                    {!textIntakeDraft ? (
+	                      <>
+	                        <label className="mt-2 block text-sm font-medium text-slate-700">
+	                          <span className="flex flex-wrap items-center justify-between gap-3">
+	                            <span>Visit notes</span>
+	                            <span className="inline-flex cursor-pointer items-center rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50">
+                              Add screenshots (max 10)
+                              <input
+                                accept="image/gif,image/jpeg,image/png,image/webp"
+                                className="sr-only"
+                                disabled={extractingImageText}
+                                multiple
+                                onChange={(event) => {
+                                  void handleExtractImageText(
+                                    event.target.files,
+                                    "appointmentNotes"
+                                  );
+                                  event.target.value = "";
+                                }}
+                                type="file"
+                              />
+                            </span>
+                          </span>
+                          <textarea
+                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              setContextualTextIntakeValue(event.target.value)
+                            }
+                            placeholder="Type or paste portal notes, after-visit summaries, or anything you want to remember."
+                            value={contextualTextIntakeValue}
+                          />
+                        </label>
+                        <button
+                          className="mt-4 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
+                          disabled={processingTextIntake}
+                          type="submit"
+                        >
+                          {processingTextIntake
+                            ? "Interpreting..."
+                            : "Review notes"}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <AppointmentDetailUpdateOption
+                          checked={applyTextIntakeAppointmentDetails}
+                          changes={appointmentDetailChanges(
+                            notesEntryAppointment,
+                            textIntakeDraft
+                          )}
+                          onChange={setApplyTextIntakeAppointmentDetails}
+                        />
+                        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                          <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                            Visit summary
+                            <textarea
+                              className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateTextIntakeDraft(
+                                  "notesSummary",
+                                  event.target.value
+                                )
+                              }
+                              value={textIntakeDraft.notesSummary}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Takeaways
+                            <textarea
+                              className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateTextIntakeDraft(
+                                  "takeaways",
+                                  event.target.value
+                                )
+                              }
+                              value={textIntakeDraft.takeaways}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Follow-ups
+                            <textarea
+                              className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateTextIntakeDraft(
+                                  "followups",
+                                  event.target.value
+                                )
+                              }
+                              value={textIntakeDraft.followups}
+                            />
+                          </label>
+                          <div className="flex items-end">
+                            <button
+                              className={
+                                intakeDraftHasSaveableNotes(textIntakeDraft)
+                                  ? gentlePrimaryButtonClass
+                                  : gentleSecondaryButtonClass
+                              }
+                              disabled={
+                                savingTextIntake ||
+                                !intakeDraftHasSaveableNotes(textIntakeDraft)
+                              }
+                              type="submit"
+                            >
+                              {savingTextIntake ? "Saving..." : "Save notes"}
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </form>
+                ) : null}
+              </section>
+            ) : null}
+            </HomeNextAppointmentPanel>
+
             <HealthFocusCard
               contextLabelOverrides={healthFocusContextLabelOverrides}
               isLoading={healthFocusLoading}
-              onOpenAppointments={() => {
-                void handleChangeMainTab("appointments");
-                void handleChangeAppointmentView("logged");
+              onExpandTopics={(hiddenTopics) => {
+                void prefetchHealthFocusTopicDetails(hiddenTopics);
               }}
               onCloseTopic={() => {
                 setSelectedHealthFocusTopic(null);
@@ -12879,21 +13368,9 @@ export default function Home() {
                     selectedHealthFocusTopic ? (
                       <HomeContextPanel
                         answer={healthStoryContextAnswer}
-                        askContext={{
-                          careSubjectId:
-                            selectedHealthFocusTopic.careSubjectId ===
-                            ALL_SUBJECTS
-                              ? null
-                              : selectedHealthFocusTopic.careSubjectId,
-                          level: "health_focus",
-                          sourceIds:
-                            healthFocusTopicDetail?.mentions
-                              .map((mention) => mention.appointmentId)
-                              .filter((id): id is string => Boolean(id)) ??
-                            [],
-                          topicId: selectedHealthFocusTopic.topicSlug,
-                          topicName: selectedHealthFocusTopic.displayName,
-                        }}
+                        askContext={
+                          healthFocusAskContext ?? { level: "health_focus" }
+                        }
                         error={healthStoryContextError}
                         isLoading={healthStoryContextLoading}
                         onAsk={handleHomeContextQuestion}
@@ -12906,176 +13383,199 @@ export default function Home() {
               }
               topics={healthFocusTopics}
             />
-          </>
-        )}
 
-        {!showWelcomeGuide && notesReminderAppointment ? (
-          <section>
-            <button
-              className={`inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border px-4 py-2 text-left text-sm font-semibold text-blue-800 ${
-                textIntakeTargetAppointmentId === notesReminderAppointment.id
-                  ? "border-blue-300 bg-white shadow-sm"
-                  : "border-blue-200 bg-[#f4faff] hover:bg-[#eef7ff]"
-              }`}
-              onClick={() => {
-                if (textIntakeTargetAppointmentId === notesReminderAppointment.id) {
-                  requestCloseTextIntake(notesReminderAppointment);
-                  return;
-                }
+            {showNotesReminderTrigger && notesReminderAppointment ? (
+              <section>
+                <button
+                  className={`inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border px-4 py-2 text-left text-sm font-semibold text-blue-800 ${
+                    textIntakeTargetAppointmentId === notesReminderAppointment.id
+                      ? "border-blue-300 bg-white shadow-sm"
+                      : "border-blue-200 bg-[#f4faff] hover:bg-[#eef7ff]"
+                  }`}
+                  onClick={() => {
+                    if (
+                      textIntakeTargetAppointmentId === notesReminderAppointment.id
+                    ) {
+                      requestCloseTextIntake(notesReminderAppointment);
+                      return;
+                    }
 
-                startContextualTextIntake(notesReminderAppointment);
-              }}
-              type="button"
-            >
-              <span>Add notes to:</span>
-              <span className="truncate text-blue-950">
-                {notesReminderAppointment.title || "Untitled appointment"}
-              </span>
-              <span className="font-medium text-blue-700">
-                {formatDate(notesReminderAppointment.starts_at)}
-              </span>
-              {notesReminderAppointment.is_sample_data ? (
-                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
-                  Demo
-                </span>
-              ) : null}
-            </button>
-            {pendingModifierSwitch?.appointmentId ===
-            notesReminderAppointment.id ? (
-              <InlineConfirmation
-                cancelLabel="Return to editing"
-                className="mt-3"
-                confirmLabel="Discard and close"
-                message="Closing will discard your unsaved changes. Proceed?"
-                onCancel={() => setPendingModifierSwitch(null)}
-                onConfirm={() =>
-                  discardAndSwitchAppointmentModifier(notesReminderAppointment)
-                }
-              />
-            ) : null}
-            {textIntakeTargetAppointmentId === notesReminderAppointment.id ? (
-              <form
-                className="mt-3 rounded-lg border border-blue-100 bg-white p-4 shadow-sm"
-                onSubmit={
-                  textIntakeDraft
-                    ? handleSaveTextIntakeDraft
-                    : handleInterpretTextIntake
-                }
-              >
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                  <div className="min-w-0">
-                    <p className="mt-1 text-sm leading-6 text-slate-600">
-                      <span className="font-semibold">
-                        Type or paste what happened.
-                      </span>{" "}
-                      <span className="block sm:inline">
-                        CarePland will organize it before saving.
-                      </span>
-                    </p>
-                  </div>
-                  <button
-                    className="justify-self-end rounded-md px-2 py-1 text-xs font-normal text-[#767676] transition hover:bg-slate-100 hover:text-slate-700"
-                    onClick={() => requestCloseTextIntake(notesReminderAppointment)}
-                    type="button"
+                    startContextualTextIntake(notesReminderAppointment);
+                  }}
+                  type="button"
+                >
+                  <span>Add notes to:</span>
+                  <span className="truncate text-blue-950">
+                    {notesReminderAppointment.title || "Untitled appointment"}
+                  </span>
+                  <span className="font-medium text-blue-700">
+                    {formatDate(notesReminderAppointment.starts_at)}
+                  </span>
+                  {notesReminderAppointment.is_sample_data ? (
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
+                      Demo
+                    </span>
+                  ) : null}
+                </button>
+                {pendingModifierSwitch?.appointmentId ===
+                notesReminderAppointment.id ? (
+                  <InlineConfirmation
+                    cancelLabel="Return to editing"
+                    className="mt-3"
+                    confirmLabel="Discard and close"
+                    message="Closing will discard your unsaved changes. Proceed?"
+                    onCancel={() => setPendingModifierSwitch(null)}
+                    onConfirm={() =>
+                      discardAndSwitchAppointmentModifier(notesReminderAppointment)
+                    }
+                  />
+                ) : null}
+                {textIntakeTargetAppointmentId === notesReminderAppointment.id ? (
+                  <form
+                    className="mt-3 rounded-lg bg-white p-4 shadow-sm"
+                    onSubmit={
+                      textIntakeDraft
+                        ? handleSaveTextIntakeDraft
+                        : handleInterpretTextIntake
+                    }
                   >
-                    Close
-                  </button>
-                </div>
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                      <div className="min-w-0">
+                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                          <span className="font-semibold">
+                            Type or paste what happened.
+                          </span>{" "}
+                          <span className="block sm:inline">
+                            CarePland will organize it before saving.
+                          </span>
+                        </p>
+                      </div>
+                      <button
+                        className="justify-self-end rounded-md px-2 py-1 text-xs font-normal text-[#767676] transition hover:bg-slate-100 hover:text-slate-700"
+                        onClick={() => requestCloseTextIntake(notesReminderAppointment)}
+                        type="button"
+                      >
+                        Close
+                      </button>
+                    </div>
 
-                {!textIntakeDraft ? (
-                  <>
-                    <label className="mt-4 block text-sm font-medium text-slate-700">
-                      Visit notes
-                      <textarea
-                        className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        onChange={(event) =>
-                          setContextualTextIntakeValue(event.target.value)
-                        }
-                        placeholder="Type or paste portal notes, after-visit summaries, or anything you want to remember."
-                        value={contextualTextIntakeValue}
-                      />
-                    </label>
-                    <button
-                      className="mt-4 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
-                      disabled={processingTextIntake}
-                      type="submit"
-                    >
-                      {processingTextIntake ? "Interpreting..." : "Review notes"}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <AppointmentDetailUpdateOption
-                      checked={applyTextIntakeAppointmentDetails}
-                      changes={appointmentDetailChanges(
-                        notesReminderAppointment,
-                        textIntakeDraft
-                      )}
-                      onChange={setApplyTextIntakeAppointmentDetails}
-                    />
-                    <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                      <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
-                        Visit summary
-                        <textarea
-                          className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                          onChange={(event) =>
-                            updateTextIntakeDraft(
-                              "notesSummary",
-                              event.target.value
-                            )
-                          }
-                          value={textIntakeDraft.notesSummary}
-                        />
-                      </label>
-                      <label className="block text-sm font-medium text-slate-700">
-                        Takeaways
-                        <textarea
-                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                          onChange={(event) =>
-                            updateTextIntakeDraft(
-                              "takeaways",
-                              event.target.value
-                            )
-                          }
-                          value={textIntakeDraft.takeaways}
-                        />
-                      </label>
-                      <label className="block text-sm font-medium text-slate-700">
-                        Follow-ups
-                        <textarea
-                          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                          onChange={(event) =>
-                            updateTextIntakeDraft(
-                              "followups",
-                              event.target.value
-                            )
-                          }
-                          value={textIntakeDraft.followups}
-                        />
-                      </label>
-                      <div className="flex items-end">
-	                  <button
-	                    className={
-	                      intakeDraftHasSaveableNotes(textIntakeDraft)
-	                        ? gentlePrimaryButtonClass
-	                        : gentleSecondaryButtonClass
-	                    }
-                          disabled={
-                            savingTextIntake ||
-                            !intakeDraftHasSaveableNotes(textIntakeDraft)
-                          }
+                    {!textIntakeDraft ? (
+                      <>
+                        <label className="mt-4 block text-sm font-medium text-slate-700">
+                          <span className="flex flex-wrap items-center justify-between gap-3">
+                            <span>Add Notes</span>
+                            <span className="inline-flex cursor-pointer items-center rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-100">
+                              Add screenshots (max 10)
+                              <input
+                                accept="image/gif,image/jpeg,image/png,image/webp"
+                                className="sr-only"
+                                disabled={extractingImageText}
+                                multiple
+                                onChange={(event) => {
+                                  void handleExtractImageText(
+                                    event.target.files,
+                                    "appointmentNotes"
+                                  );
+                                  event.target.value = "";
+                                }}
+                                type="file"
+                              />
+                            </span>
+                          </span>
+                          <textarea
+                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              setContextualTextIntakeValue(event.target.value)
+                            }
+                            placeholder="Type or paste portal notes, after-visit summaries, or anything you want to remember."
+                            value={contextualTextIntakeValue}
+                          />
+                        </label>
+                        <button
+                          className="mt-4 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
+                          disabled={processingTextIntake}
                           type="submit"
                         >
-                          {savingTextIntake ? "Saving..." : "Save notes"}
+                          {processingTextIntake
+                            ? "Interpreting..."
+                            : "Review notes"}
                         </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </form>
+                      </>
+                    ) : (
+                      <>
+                        <AppointmentDetailUpdateOption
+                          checked={applyTextIntakeAppointmentDetails}
+                          changes={appointmentDetailChanges(
+                            notesReminderAppointment,
+                            textIntakeDraft
+                          )}
+                          onChange={setApplyTextIntakeAppointmentDetails}
+                        />
+                        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                          <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                            Visit summary
+                            <textarea
+                              className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateTextIntakeDraft(
+                                  "notesSummary",
+                                  event.target.value
+                                )
+                              }
+                              value={textIntakeDraft.notesSummary}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Takeaways
+                            <textarea
+                              className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateTextIntakeDraft(
+                                  "takeaways",
+                                  event.target.value
+                                )
+                              }
+                              value={textIntakeDraft.takeaways}
+                            />
+                          </label>
+                          <label className="block text-sm font-medium text-slate-700">
+                            Follow-ups
+                            <textarea
+                              className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              onChange={(event) =>
+                                updateTextIntakeDraft(
+                                  "followups",
+                                  event.target.value
+                                )
+                              }
+                              value={textIntakeDraft.followups}
+                            />
+                          </label>
+                          <div className="flex items-end">
+                            <button
+                              className={
+                                intakeDraftHasSaveableNotes(textIntakeDraft)
+                                  ? gentlePrimaryButtonClass
+                                  : gentleSecondaryButtonClass
+                              }
+                              disabled={
+                                savingTextIntake ||
+                                !intakeDraftHasSaveableNotes(textIntakeDraft)
+                              }
+                              type="submit"
+                            >
+                              {savingTextIntake ? "Saving..." : "Save notes"}
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </form>
+                ) : null}
+              </section>
             ) : null}
-          </section>
-        ) : null}
+          </>
+        )}
       </div>
     );
   }
@@ -13345,7 +13845,8 @@ export default function Home() {
                         : "bg-slate-50 text-slate-500"
                     }`}
                   >
-                    {adminNewTickets.length} New
+                    <span>{adminNewTickets.length}</span>
+                    <span className="hidden min-[520px]:inline"> New</span>
                   </span>
                   <span
                     className={`border-l border-slate-200 px-2.5 py-1 ${
@@ -13354,7 +13855,8 @@ export default function Home() {
                         : "bg-slate-50 text-slate-500"
                     }`}
                   >
-                    {adminTicketsNeedingFollowup.length} Followup
+                    <span>{adminTicketsNeedingFollowup.length}</span>
+                    <span className="hidden min-[520px]:inline"> Followup</span>
                   </span>
                 </button>
               ) : null}
@@ -16404,6 +16906,17 @@ export default function Home() {
                   >
                     {savingAppContent ? "Saving..." : "Save new version"}
                   </button>
+                  {appContentSaveMessage ? (
+                    <p
+                      className={`rounded-md border px-3 py-2 text-sm font-medium ${
+                        appContentSaveMessage.tone === "success"
+                          ? "border-blue-200 bg-[#f4faff] text-blue-950"
+                          : "border-rose-200 bg-rose-50 text-rose-900"
+                      }`}
+                    >
+                      {appContentSaveMessage.text}
+                    </p>
+                  ) : null}
                 </form>
 
                 <section className="mt-6 border-t border-slate-200 pt-5">
@@ -17706,13 +18219,24 @@ export default function Home() {
                 const takeaways = asTextList(note?.takeaways);
                 const followups = asTextList(note?.followups);
                 const bringList = asTextList(prep?.bring_list);
-                const questions = asTextList(prep?.key_questions);
-                const watchouts = asTextList(prep?.watchouts);
-                const medReview = asTextList(prep?.med_review);
-                const sinceLastVisit = asTextList(prep?.since_last_visit);
-                const draftValues = carePrepDraft
-                  ? carePrepFormValues(appointment.id, carePrepDraft)
-                  : emptyCarePrepDraft;
+	                const questions = asTextList(prep?.key_questions);
+	                const watchouts = asTextList(prep?.watchouts);
+	                const medReview = asTextList(prep?.med_review);
+	                const sinceLastVisit = asTextList(prep?.since_last_visit);
+	                const carePrepPrimarySections = [
+	                  { items: bringList, label: "Bring" },
+	                  { items: questions, label: "Ask" },
+	                  { items: watchouts, label: "Watch for" },
+	                ].filter((section) => section.items.length > 0);
+	                const carePrepPrimaryGridClassName =
+	                  carePrepPrimarySections.length === 1
+	                    ? "grid gap-4"
+	                    : carePrepPrimarySections.length === 2
+	                      ? "grid gap-4 md:grid-cols-2"
+	                      : "grid gap-4 lg:grid-cols-3";
+	                const draftValues = carePrepDraft
+	                  ? carePrepFormValues(appointment.id, carePrepDraft)
+	                  : emptyCarePrepDraft;
                 const hasReviewCarePrepEdits = carePrepDraft
                   ? hasCarePrepDraftChanges(appointment.id, carePrepDraft)
                   : false;
@@ -19047,35 +19571,24 @@ export default function Home() {
                                 </p>
                               </section>
 
-                              <div className="grid gap-4 lg:grid-cols-3">
-                              <section className="px-2 py-1 sm:px-3">
-                                <h4 className="font-semibold text-slate-900">
-                                  Bring
-                                </h4>
-                                <DetailList
-                                  emptyLabel="No bring-list items saved yet."
-                                  items={bringList}
-                                />
-                              </section>
-
-                              <section className="px-2 py-1 sm:px-3">
-                                <h4 className="font-semibold text-slate-900">Ask</h4>
-                                <DetailList
-                                  emptyLabel="No questions saved yet."
-                                  items={questions}
-                                />
-                              </section>
-
-                              <section className="px-2 py-1 sm:px-3">
-                                <h4 className="font-semibold text-slate-900">
-                                  Watch for
-                                </h4>
-                                <DetailList
-                                  emptyLabel="No watchouts saved yet."
-                                  items={watchouts}
-                                />
-                              </section>
-                            </div>
+	                              {carePrepPrimarySections.length > 0 ? (
+	                                <div className={carePrepPrimaryGridClassName}>
+	                                  {carePrepPrimarySections.map((section) => (
+	                                    <section
+	                                      className="px-2 py-1 sm:px-3"
+	                                      key={section.label}
+	                                    >
+	                                      <h4 className="font-semibold text-slate-900">
+	                                        {section.label}
+	                                      </h4>
+	                                      <DetailList
+	                                        emptyLabel=""
+	                                        items={section.items}
+	                                      />
+	                                    </section>
+	                                  ))}
+	                                </div>
+	                              ) : null}
 
                             {(medReview.length > 0 || sinceLastVisit.length > 0) && (
                               <div className="grid gap-4 md:grid-cols-2">
@@ -19170,7 +19683,7 @@ export default function Home() {
                 </p>
 	              </div>
 		              <button
-		                className={gentleSmallSecondaryButtonClass}
+		                className="rounded px-1 py-0.5 text-sm font-semibold text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-200"
 		                onClick={requestCloseAskPanel}
 		                type="button"
 		              >
@@ -19215,7 +19728,7 @@ export default function Home() {
             {!askConversationComplete ? (
               <form className="mt-8" onSubmit={handleSendAskMessage}>
                 <label className="sr-only" htmlFor="ask-message">
-                  Ask a question, share an idea, or describe a problem
+                  {appContentText("ask_input_placeholder")}
                 </label>
 	                <textarea
 	                  className="min-h-36 w-full rounded-xl border border-[#d8e0dc] bg-white px-4 py-4 text-base leading-relaxed text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
@@ -19225,7 +19738,7 @@ export default function Home() {
 	                    setAskInput(event.target.value);
 	                    setAskCloseConfirmOpen(false);
 	                  }}
-	                  placeholder="Ask a question, share an idea, or describe a problem"
+	                  placeholder={appContentText("ask_input_placeholder")}
 	                  value={askInput}
 	                />
 	                <div className="mt-3 flex items-center justify-end">

@@ -290,6 +290,8 @@ The context path now receives an explicit `askContext` object. Supported levels 
 
 Ask should search in this order: visible context, current page context, then broader CarePland records. Non-health appointment questions, such as tax appointments, eye exams, or vet visits, should be treated as valid CarePland questions when they match saved appointment data.
 
+The first conversation layer is session-only. After an answer, `Continue` allows short follow-up questions to inherit the prior question and answer. `Not quite` provides directional correction for the current session. These turns are passed into the same context route and prompts, but they are not yet persisted as long-term user context.
+
 ## Architecture Guardrails
 
 Do not build Health Focus inside `app/page.tsx`.

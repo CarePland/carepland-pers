@@ -9,6 +9,7 @@ import type { TopicContextSignature } from "@/app/lib/healthTopics/topicSummary"
 type TopicContextPillsProps = {
   labelOverrides?: TopicContextLabelOverrides;
   signature: TopicContextSignature;
+  variant?: "default" | "compact";
 };
 
 const pillStyles = {
@@ -21,6 +22,7 @@ const pillStyles = {
 export function TopicContextPills({
   labelOverrides,
   signature,
+  variant = "default",
 }: TopicContextPillsProps) {
   const displaySignature = applyTopicContextLabelOverrides(
     signature,
@@ -50,16 +52,28 @@ export function TopicContextPills({
   return (
     <div
       aria-label="Topic context signature"
-      className="flex max-w-full flex-nowrap gap-2"
+      className={`flex max-w-full flex-nowrap ${
+        variant === "compact" ? "gap-1" : "gap-2"
+      }`}
     >
       {pills.map((pill) => (
         <span
-          className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ring-1 ${pill.style}`}
+          className={
+            variant === "compact"
+              ? "whitespace-nowrap rounded px-1 py-0.5 text-[0.72rem] font-medium text-slate-500"
+              : `whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ring-1 ${pill.style}`
+          }
           key={pill.title}
           title={pill.title}
         >
-          <span className="sm:hidden">{pill.shortLabel}</span>
-          <span className="hidden sm:inline">{pill.label}</span>
+          {variant === "compact" ? (
+            pill.shortLabel
+          ) : (
+            <>
+              <span className="sm:hidden">{pill.shortLabel}</span>
+              <span className="hidden sm:inline">{pill.label}</span>
+            </>
+          )}
         </span>
       ))}
     </div>

@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, type ReactNode } from "react";
+
 type HomeAppointment = {
   id: string;
   is_sample_data?: boolean | null;
@@ -20,16 +22,18 @@ type HomeCarePrepHighlight = {
 
 type HomeNextAppointmentPanelProps = {
   appointment: HomeAppointment | null;
+  addNotesOpen?: boolean;
+  children?: ReactNode;
   formatDate: (value: string | null) => string;
   generationError: string | null | undefined;
   guidance: HomeCarePrepGuidance | null;
   highlights: HomeCarePrepHighlight[];
   isGenerating: boolean;
+  isCarePrepEligible: boolean;
   mapsLink: string | null;
   nextSubject: string;
   onAddAppointment: () => void;
-  onGenerateCarePrep: () => void;
-  onOpenAppointment: () => void;
+  onAddNotes?: () => void;
   practiceLabel: string;
 };
 
@@ -51,31 +55,31 @@ function MapPinMiniIcon({ className = "h-3.5 w-3.5" }: { className?: string }) {
   );
 }
 
-function RefreshCircleIcon({ className = "h-4 w-4" }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="M21 12a9 9 0 0 1-15.2 6.5" />
-      <path d="M3 12A9 9 0 0 1 18.2 5.5" />
-      <path d="M18 2v4h-4" />
-      <path d="M6 22v-4h4" />
-    </svg>
-  );
+function formatMobileAppointmentDate(value: string | null) {
+  if (!value) {
+    return { date: "Date TBD", time: "" };
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return { date: "Date TBD", time: "" };
+  }
+
+  return {
+    date: date.toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "long",
+    }),
+    time: date.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }),
+  };
 }
 
 const primaryButtonClass =
   "rounded-full bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:bg-slate-400";
-
-const openAreaButtonClass =
-  "block w-full rounded-md text-left transition hover:bg-blue-50/50 focus:outline-none focus:ring-2 focus:ring-blue-200";
 
 function DemoPill() {
   return (
@@ -85,32 +89,72 @@ function DemoPill() {
   );
 }
 
+function HomeCarePrepPreview({
+  guidance,
+  highlights,
+}: {
+  guidance: HomeCarePrepGuidance;
+  highlights: HomeCarePrepHighlight[];
+}) {
+  const highlightGridClassName =
+    highlights.length === 1
+      ? "mt-5 grid gap-5"
+      : highlights.length === 2
+        ? "mt-5 grid gap-5 md:grid-cols-2"
+        : "mt-5 grid gap-5 md:grid-cols-3";
+
+  return (
+    <div>
+      <p className="text-sm leading-6 text-slate-700">{guidance.summary}</p>
+      {highlights.length > 0 ? (
+        <div className={highlightGridClassName}>
+          {highlights.map((section) => (
+            <section key={section.label}>
+              <h4 className="font-semibold text-slate-900">{section.label}</h4>
+              <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                {section.items.map((item, index) => (
+                  <li key={`${section.label}-${index}`}>{item}</li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function HomeNextAppointmentPanel({
+  addNotesOpen = false,
   appointment,
+  children,
   formatDate,
   generationError,
   guidance,
   highlights,
   isGenerating,
+  isCarePrepEligible,
   mapsLink,
   nextSubject,
   onAddAppointment,
-  onGenerateCarePrep,
-  onOpenAppointment,
+  onAddNotes,
   practiceLabel,
 }: HomeNextAppointmentPanelProps) {
+  const [carePrepOpen, setCarePrepOpen] = useState(false);
+  const mobileDate = formatMobileAppointmentDate(appointment?.starts_at ?? null);
+  const canShowCarePrep = Boolean(
+    appointment && (guidance || isGenerating || isCarePrepEligible)
+  );
+  const canShowNotes = Boolean(appointment && onAddNotes);
+  const carePrepSelected = carePrepOpen && !addNotesOpen;
+  const actionPanelOpen = carePrepSelected || addNotesOpen;
+
   return (
     <section className="overflow-hidden rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4">
         <div className="min-w-0">
           {appointment ? (
-            <button
-              aria-label="Open appointment"
-              className={openAreaButtonClass}
-              onClick={onOpenAppointment}
-              title="Open appointment"
-              type="button"
-            >
+            <div>
               <span className="block text-sm font-semibold text-blue-700">
                 Next appointment
               </span>
@@ -120,7 +164,7 @@ export function HomeNextAppointmentPanel({
                 </span>
                 {appointment.is_sample_data ? <DemoPill /> : null}
               </span>
-            </button>
+            </div>
           ) : (
             <>
               <p className="text-sm font-semibold text-blue-700">
@@ -141,7 +185,13 @@ export function HomeNextAppointmentPanel({
           {appointment ? (
             <>
               <p className="text-lg font-medium text-slate-700">
-                {formatDate(appointment.starts_at)}
+                <span className="hidden md:inline">
+                  {formatDate(appointment.starts_at)}
+                </span>
+                <span className="block text-right leading-tight md:hidden">
+                  <span className="block">{mobileDate.date}</span>
+                  {mobileDate.time ? <span className="block">{mobileDate.time}</span> : null}
+                </span>
               </p>
               {practiceLabel ? (
                 <div className="mt-1 text-sm text-slate-600">
@@ -153,7 +203,8 @@ export function HomeNextAppointmentPanel({
                       target="_blank"
                     >
                       <MapPinMiniIcon />
-                      <span>{practiceLabel}</span>
+                      <span className="md:hidden">Show map</span>
+                      <span className="hidden md:inline">{practiceLabel}</span>
                     </a>
                   ) : (
                     <span>{practiceLabel}</span>
@@ -173,54 +224,79 @@ export function HomeNextAppointmentPanel({
         </div>
       </div>
 
-      {appointment ? (
-        <section className="mt-6">
-          <div className="flex items-start justify-between gap-3">
-            <button
-              aria-label="Open appointment"
-              className={`min-w-0 text-sm leading-6 text-slate-700 ${openAreaButtonClass}`}
-              onClick={onOpenAppointment}
-              title="Open appointment"
-              type="button"
-            >
-              {guidance?.summary ||
-                "Generate a short prep view for your next appointment."}
-            </button>
-            <button
-              aria-label={
-                guidance
-                  ? "Refresh appointment preparation"
-                  : "Prepare for this visit"
-              }
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-50 hover:text-blue-800 disabled:text-slate-400"
-              disabled={isGenerating}
-              onClick={onGenerateCarePrep}
-              title={guidance ? "Refresh" : "Prepare"}
-              type="button"
-            >
-              <RefreshCircleIcon />
-            </button>
+      {canShowCarePrep || canShowNotes ? (
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {canShowCarePrep ? (
+              <button
+                aria-expanded={carePrepSelected}
+                className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold transition ${
+                  carePrepSelected
+                    ? "border-blue-200 bg-blue-50 text-blue-950"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:text-blue-900"
+                }`}
+                onClick={() => {
+                  if (addNotesOpen) {
+                    onAddNotes?.();
+                  }
+                  setCarePrepOpen((isOpen) => !isOpen);
+                }}
+                type="button"
+              >
+                CarePrep
+              </button>
+            ) : null}
+            {canShowNotes ? (
+              <button
+                aria-expanded={addNotesOpen}
+                className={`inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-semibold transition ${
+                  addNotesOpen
+                    ? "border-blue-200 bg-blue-50 text-blue-950"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:text-blue-900"
+                }`}
+                onClick={() => {
+                  setCarePrepOpen(false);
+                  onAddNotes?.();
+                }}
+                title="Add notes"
+                type="button"
+              >
+                Add Notes
+              </button>
+            ) : null}
           </div>
-          {guidance ? (
-            <>
-              {highlights.length > 0 ? (
-                <div className="mt-7 grid gap-5 md:grid-cols-3">
-                  {highlights.map((section) => (
-                    <section key={section.label}>
-                      <h4 className="font-semibold text-slate-900">
-                        {section.label}
-                      </h4>
-                      <ul className="mt-2 space-y-1 text-sm text-slate-700">
-                        {section.items.map((item, index) => (
-                          <li key={`${section.label}-${index}`}>{item}</li>
-                        ))}
-                      </ul>
-                    </section>
-                  ))}
-                </div>
-              ) : null}
-            </>
+          {actionPanelOpen ? (
+            <button
+              className="shrink-0 rounded-md px-2 py-1 text-xs font-normal text-[#767676] transition hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => {
+                setCarePrepOpen(false);
+                if (addNotesOpen) {
+                  onAddNotes?.();
+                }
+              }}
+              type="button"
+            >
+              Close
+            </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {carePrepSelected ? (
+        <section className="mt-4">
+          {guidance ? (
+            <HomeCarePrepPreview
+              key={`${appointment?.id}:${guidance.summary ?? ""}`}
+              guidance={guidance}
+              highlights={highlights}
+            />
+          ) : (
+            <p className="min-w-0 text-sm leading-6 text-slate-700">
+              {isGenerating
+                ? "Preparing a short CarePrep view for this appointment..."
+                : "CarePrep will appear here when it is available for this appointment."}
+            </p>
+          )}
           {isGenerating ? (
             <span className="mt-4 inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-900">
               Generating...
@@ -231,14 +307,16 @@ export function HomeNextAppointmentPanel({
               {generationError}
             </p>
           ) : null}
-
-          {appointment.provider_name || nextSubject ? (
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs font-medium text-[#767676]">
-              <span>{appointment.provider_name || ""}</span>
-              {nextSubject ? <span>for {nextSubject}</span> : null}
-            </div>
-          ) : null}
         </section>
+      ) : null}
+
+      {addNotesOpen && children ? <div className="mt-4">{children}</div> : null}
+
+      {appointment && (appointment.provider_name || nextSubject) ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs font-medium text-[#767676]">
+          <span>{appointment.provider_name || ""}</span>
+          {nextSubject ? <span>for {nextSubject}</span> : null}
+        </div>
       ) : null}
     </section>
   );
