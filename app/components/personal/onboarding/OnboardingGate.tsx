@@ -1,7 +1,7 @@
 import { FormEvent } from "react";
 
-import { type ProfileDraft } from "../lib/profile/profileDraft";
-import { ProfileContactDetailsForm } from "./profile/ProfileContactDetailsForm";
+import { type ProfileDraft } from "../../../lib/personal/profile/profileDraft";
+import { ProfileContactDetailsForm } from "../profile/ProfileContactDetailsForm";
 
 type TimeZoneOption = {
   label: string;

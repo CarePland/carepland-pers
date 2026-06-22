@@ -1,6 +1,6 @@
 "use client";
 
-import { gentleTextButtonClass, gentleWarmButtonClass } from "../lib/uiStyles";
+import { gentleTextButtonClass, gentleWarmButtonClass } from "./uiStyles";
 
 type InlineConfirmationProps = {
   cancelLabel: string;

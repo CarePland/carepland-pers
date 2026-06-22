@@ -3,8 +3,8 @@
 import {
   applyTopicContextLabelOverrides,
   type TopicContextLabelOverrides,
-} from "@/app/lib/healthTopics/contextSignatureLabels";
-import type { TopicContextSignature } from "@/app/lib/healthTopics/topicSummary";
+} from "@/app/lib/personal/healthTopics/contextSignatureLabels";
+import type { TopicContextSignature } from "@/app/lib/personal/healthTopics/topicSummary";
 
 type TopicContextPillsProps = {
   labelOverrides?: TopicContextLabelOverrides;

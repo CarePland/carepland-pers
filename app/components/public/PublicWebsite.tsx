@@ -140,6 +140,9 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
           <a className="hover:text-[#256d85]" href="#trust">
             Trust
           </a>
+          <a className="hover:text-[#256d85]" href="/connect">
+            Connect
+          </a>
         </nav>
         <div className="flex items-center justify-end gap-2">
           <button
@@ -530,6 +533,9 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
           </a>
           <a className="hover:text-[#256d85]" href="#trust">
             Trust
+          </a>
+          <a className="hover:text-[#256d85]" href="/connect">
+            Connect
           </a>
           <button
             className="font-semibold hover:text-[#256d85]"

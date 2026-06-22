@@ -1,4 +1,4 @@
-import type { HomeContextAskContext } from "@/app/components/HomeContextPanel";
+import type { HomeContextAskContext } from "@/app/components/personal/home/HomeContextPanel";
 
 const careContextTerms =
   /\b(appointment|appointments|appt|appts|visit|visits|doctor|provider|clinic|careprep|notes?|follow-?up|prepare|bring|health focus|story|topic|timeline|source|sources|related|separate|changed|recent|recently|coming up|next|past|history|blood pressure|bp|physical therapy|pt|therapy|pain|dental|dentist|vision|eye|vet|veterinary|lab|labs|imaging|medication|medicine)\b/i;

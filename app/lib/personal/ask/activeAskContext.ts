@@ -1,4 +1,4 @@
-import type { HomeContextAskContext } from "@/app/components/HomeContextPanel";
+import type { HomeContextAskContext } from "@/app/components/personal/home/HomeContextPanel";
 
 type HomeAppointmentContext = {
   id: string;

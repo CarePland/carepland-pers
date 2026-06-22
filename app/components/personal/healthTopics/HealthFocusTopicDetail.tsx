@@ -2,14 +2,14 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
-import type { TopicContextLabelOverrides } from "@/app/lib/healthTopics/contextSignatureLabels";
+import type { TopicContextLabelOverrides } from "@/app/lib/personal/healthTopics/contextSignatureLabels";
 import {
   cleanDate,
   cleanSourceSnippet,
   monthYear,
   seasonYear,
   type TopicContextSignature,
-} from "@/app/lib/healthTopics/topicSummary";
+} from "@/app/lib/personal/healthTopics/topicSummary";
 
 import { HealthFocusIllustration } from "./HealthFocusCard";
 import { TopicContextPills } from "./TopicContextPills";

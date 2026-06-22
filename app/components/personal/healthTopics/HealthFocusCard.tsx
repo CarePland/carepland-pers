@@ -2,8 +2,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
-import type { TopicContextLabelOverrides } from "@/app/lib/healthTopics/contextSignatureLabels";
-import type { TopicContextSignature } from "@/app/lib/healthTopics/topicSummary";
+import type { TopicContextLabelOverrides } from "@/app/lib/personal/healthTopics/contextSignatureLabels";
+import type { TopicContextSignature } from "@/app/lib/personal/healthTopics/topicSummary";
 
 const desktopVisibleTopicCount = 3;
 const mobileVisibleTopicCount = 2;

@@ -6,9 +6,12 @@ import {
   gentleSecondaryButtonClass,
   gentleSmallSecondaryButtonClass,
   gentleSoftBlueButtonClass,
-} from "../../lib/uiStyles";
+} from "../../shared/uiStyles";
 
 type CareSubject = {
+  avatarAltText?: string | null;
+  avatarType?: string | null;
+  avatarUrl?: string | null;
   care_circle_id: string;
   id: string;
   display_name: string;
@@ -34,7 +37,6 @@ type PendingReactivateCareVip = {
 type ProfileAccountSummaryProps = {
   actualPricingTier: PricingTierOption;
   canAddCareVip: boolean;
-  canUseMultipleCareVips: boolean;
   careSubjects: CareSubject[];
   careVipFormMessage: string;
   careVipLimit: number;
@@ -57,7 +59,6 @@ type ProfileAccountSummaryProps = {
   onRemoveDemoData: () => void;
   onRequestDeactivateCareVip: (subjectId: string | null) => void;
   onSendPasswordReset: () => void;
-  onSignOut: () => void;
   pendingDeactivateCareVipId: string | null;
   pendingReactivateCareVip: PendingReactivateCareVip | null;
   planHelpExpanded: boolean;
@@ -72,7 +73,6 @@ type ProfileAccountSummaryProps = {
 export function ProfileAccountSummary({
   actualPricingTier,
   canAddCareVip,
-  canUseMultipleCareVips,
   careSubjects,
   careVipFormMessage,
   careVipLimit,
@@ -95,7 +95,6 @@ export function ProfileAccountSummary({
   onRemoveDemoData,
   onRequestDeactivateCareVip,
   onSendPasswordReset,
-  onSignOut,
   pendingDeactivateCareVipId,
   pendingReactivateCareVip,
   planHelpExpanded,
@@ -118,17 +117,10 @@ export function ProfileAccountSummary({
             Your CarePland Account
           </h2>
         </div>
-        <button
-          className={`${gentleSecondaryButtonClass} self-center text-sm`}
-          onClick={onSignOut}
-          type="button"
-        >
-          Sign out
-        </button>
       </div>
 
-      <div className="mt-3 grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 sm:grid-cols-[minmax(0,1fr)_18rem] lg:min-h-[14rem] lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
-        <section className="relative p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 sm:order-1 lg:after:hidden">
+      <div className="mt-3 grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 md:min-h-[14rem] md:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
+        <section className="relative p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 md:order-1 md:after:hidden">
           <div className="flex h-7 items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Plan
@@ -224,8 +216,7 @@ export function ProfileAccountSummary({
           </div>
         </section>
 
-        {canUseMultipleCareVips ? (
-          <section className="relative flex flex-col p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 lg:before:absolute lg:before:inset-y-4 lg:before:left-0 lg:before:w-px lg:before:bg-slate-200 lg:after:inset-y-4 lg:after:bottom-auto lg:after:left-auto lg:after:right-0 lg:after:h-auto lg:after:w-px sm:order-3 sm:col-span-2 lg:order-2 lg:col-span-1">
+        <section className="relative flex flex-col p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 md:order-2 md:col-span-1 md:before:absolute md:before:inset-y-4 md:before:left-0 md:before:w-px md:before:bg-slate-200 md:after:inset-y-4 md:after:bottom-auto md:after:left-auto md:after:right-0 md:after:h-auto md:after:w-px">
             <div className="flex h-7 items-center justify-between gap-3">
               <h3 className="min-w-0 truncate text-xs font-semibold tracking-wide text-slate-500">
                 CARE VIPs
@@ -241,19 +232,21 @@ export function ProfileAccountSummary({
               <div className="mt-3 flex flex-wrap gap-2">
                 {careSubjects.map((subject) => (
                   <span
-                    className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
+                    className="inline-flex max-w-full items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-sm text-slate-700"
                     key={subject.id}
                   >
-                    {subject.display_name}
+                    <span className="min-w-0 truncate">
+                      {subject.display_name}
+                    </span>
                     {!subject.is_default ? (
                       <button
                         aria-label={`Deactivate ${subject.display_name}`}
-                        className="-mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                        className="text-slate-400 transition hover:text-slate-700"
                         disabled={deactivatingCareVipId === subject.id}
                         onClick={() => onRequestDeactivateCareVip(subject.id)}
                         type="button"
                       >
-                        x
+                        ×
                       </button>
                     ) : null}
                   </span>
@@ -359,10 +352,9 @@ export function ProfileAccountSummary({
                 </p>
               ) : null}
             </form>
-          </section>
-        ) : null}
+        </section>
 
-        <section className="p-4 sm:order-2 lg:order-3">
+        <section className="p-4 md:order-3">
           <div className="flex h-7 items-center">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Account tools

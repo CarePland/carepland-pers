@@ -2,6 +2,9 @@
 
 import { useState, type ReactNode } from "react";
 
+import { PersonChip } from "../../shared/PersonAvatar";
+import type { AvatarPerson } from "../../../lib/platform/avatar";
+
 type HomeAppointment = {
   id: string;
   is_sample_data?: boolean | null;
@@ -32,6 +35,7 @@ type HomeNextAppointmentPanelProps = {
   isCarePrepEligible: boolean;
   mapsLink: string | null;
   nextSubject: string;
+  nextSubjectAvatar?: AvatarPerson | null;
   onAddAppointment: () => void;
   onAddNotes?: () => void;
   practiceLabel: string;
@@ -136,6 +140,7 @@ export function HomeNextAppointmentPanel({
   isCarePrepEligible,
   mapsLink,
   nextSubject,
+  nextSubjectAvatar,
   onAddAppointment,
   onAddNotes,
   practiceLabel,
@@ -315,7 +320,10 @@ export function HomeNextAppointmentPanel({
       {appointment && (appointment.provider_name || nextSubject) ? (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs font-medium text-[#767676]">
           <span>{appointment.provider_name || ""}</span>
-          {nextSubject ? <span>for {nextSubject}</span> : null}
+          <PersonChip
+            person={nextSubjectAvatar ?? { displayName: nextSubject }}
+            size="xs"
+          />
         </div>
       ) : null}
     </section>

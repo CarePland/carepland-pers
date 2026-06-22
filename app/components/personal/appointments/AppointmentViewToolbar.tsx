@@ -10,6 +10,7 @@ type AppointmentViewToolbarProps = {
   onChangeSubject: (subjectId: string) => void;
   onChangeView: (view: AppointmentView) => void;
   selectedSubjectId: string;
+  sticky?: boolean;
   stickyTop: number;
   view: AppointmentView;
 };
@@ -45,6 +46,7 @@ export function AppointmentViewToolbar({
   onChangeSubject,
   onChangeView,
   selectedSubjectId,
+  sticky = true,
   stickyTop,
   view,
 }: AppointmentViewToolbarProps) {
@@ -89,10 +91,14 @@ export function AppointmentViewToolbar({
 
   return (
     <div
-      className="sticky z-40 bg-slate-50 pb-0 pt-0.5 before:absolute before:-top-2 before:left-0 before:right-0 before:h-2 before:bg-slate-50 md:-mt-6"
-      style={{ top: stickyTop }}
+      className={
+        sticky
+          ? "sticky z-40 bg-slate-50 pb-0 before:absolute before:-top-2 before:left-0 before:right-0 before:h-2 before:bg-slate-50"
+          : "bg-slate-50 pb-0"
+      }
+      style={sticky ? { top: stickyTop } : undefined}
     >
-      <div className="relative px-3 pt-2">
+      <div className="relative">
         <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
           <div className="order-2 flex flex-wrap items-center gap-1.5 rounded-full border border-blue-100 bg-white/70 p-1 shadow-sm md:order-1">
             {viewOptions.map((option) => {
@@ -162,7 +168,7 @@ export function AppointmentViewToolbar({
           ) : null}
 
           {canFilterCareVips ? (
-            <div className="order-1 hidden w-full flex-wrap items-center gap-2 pb-2 text-sm text-slate-500 md:order-2 md:flex md:w-auto">
+            <div className="order-1 hidden w-full flex-wrap items-center gap-2 text-sm text-slate-500 md:order-2 md:flex md:w-auto">
               <label className="flex items-center gap-2">
                 <span>Showing:</span>
                 <select

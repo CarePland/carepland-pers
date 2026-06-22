@@ -1,7 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -13,6 +13,7 @@
 # testing
 /coverage
 /.tmp-tests
+/tmp/
 
 # next.js
 /.next/
@@ -27,10 +28,15 @@
 CP Family summry.docx
 
 # debug
+/.logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+
+# copied prototype runtime artifacts
+/docs/reference/connect-prototype/local-trigger-server/data/
+/docs/reference/connect-prototype/local-trigger-server/uploads/
 
 # env files (can opt-in for committing if needed)
 .env*
