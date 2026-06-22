@@ -1,6 +1,6 @@
 # CarePland Stable Project Context
 
-Last updated: 2026-06-07
+Last updated: 2026-06-22
 
 This document is the stable architectural and operational memory for CarePland Personal. It should be updated as assumptions change. Do not preserve obsolete decisions for historical completeness here; keep this document current, clear, and useful for future implementation chats.
 
@@ -118,6 +118,27 @@ Structural assumptions:
 - **Demo data**: clearly labeled sample appointments, notes, and CarePrep examples. Demo data must never be ambiguous.
 - **Support question / Ticket**: in-app support thread between user and CarePland/admin.
 
+Person/avatar assumptions:
+
+- The canonical CarePland Pers person model is currently `care_subjects`; Connect participants and focus targets must reference existing `care_subjects.id` values.
+- Lightweight person avatars live on `care_subjects` as `avatar_url`, `avatar_type`, and `avatar_alt_text`.
+- Avatar type values are `initials`, `uploaded`, and future `generated`; initials fallback is always available and avatars must never block app use.
+- Uploaded avatar files are stored in the private Supabase Storage bucket `carepland-avatars` and managed through authenticated server routes, not direct browser service-role access.
+- Care VIP pet classification is lightweight for now and uses existing `care_subjects.subject_type` values: `cat`, `dog`, `pet`, or `pet:<custom label>`. Non-pet/default people may remain `other`. There is no dedicated species field yet.
+- When no uploaded/generated avatar exists, cat/dog/generic pet Care VIPs use emoji avatar fallbacks as recognition anchors.
+- Future generated illustrated avatars should remain user-approved, friendly, dignified, and non-photorealistic. The original uploaded photo should be deleted after generation/selection when practical for privacy.
+- The logged-in account user is distinct from the current CarePland focus. The personal app focus can be `Everyone` (aggregate across available people) or one specific `care_subjects.id`.
+- The top-right header focus pill is the visible identity anchor for whose CarePland world is being viewed. `Everyone` is a first-class aggregate mode, not a fallback.
+- The current focus reuses the existing personal UI subject selection state and local UI-state persistence for now. TODO: decide whether to persist focus as an account/server setting.
+- Connect Home follows the global CarePland focus for active person context. `Everyone` shows aggregate Connect history and offers compact avatar/name shortcuts into a temporary Connect target for call/message without changing the global focus. That temporary Connect target is in-memory only and can be forgotten when navigating away.
+- Connect uses `Main Connect User` as the current stabilization term for the person whose Receiver world is active. The active person resolves from a specific global focus, then an in-memory Connect-local target when global focus is `Everyone`, then the durable `connect_settings.main_connect_user_person_id` setting, then a default/logged-in Pers person as last-resort display focus. Connect must not be personless when a signed-in Pers person is available. Connect participant rows control whether Receiver/call/message/audio actions are enabled; they are not the source of whether a person can be the visible Connect focus.
+- Connect Settings may expose the durable Main Connect User setting with compact person buttons. `Household` may appear as a transparent disabled/planned pill to signal the future multi-user Receiver direction, but it must not save configuration until Receiver has real household/multi-user runtime support.
+- Care VIPs classified as pets (`cat`, `dog`, `pet`, or `pet:<custom label>`) may appear in Connect household/person context but cannot be selected as the Receiver User. Show them de-emphasized and labeled by species/type.
+- Connect user-facing surfaces should not expose advanced provisioning, setup diagnostics, audio maintenance, or Connect People management. Care VIP/person management lives in Profile; provisioning and diagnostics belong in Admin/DEV-oriented surfaces. User-facing Connect Settings should stay limited to meaningful Receiver defaults such as Household and Receiver User.
+- Profile is the home for Care VIP avatar management. Connect should display and use avatars, but photo upload/remove controls belong in Profile so identity setup is not split across workflows. Within Profile, avatar controls belong with the selected person in Contact Details, not in the top Care VIP add/remove summary.
+- Profile Contact Details distinguishes the logged-in account user from Care VIPs. It uses a person selector without `Everyone`; selecting the account user shows saved account contact fields, while selecting another Care VIP shows that person's avatar/name context without inventing contact fields until scoped Care VIP contact data exists.
+- Future CP Pers import/interpreter work, including a possible single "import all" action, may create or update `care_subjects`, appointments, notes, and other Pers-owned records, but it should not automatically create `connect_participants` rows or change `connect_settings.main_connect_user_person_id`. Enabling a Pers person for Connect remains explicit provisioning/Admin behavior until participant management is intentionally designed.
+
 Naming preferences:
 
 - Use plain product language for users.
@@ -171,7 +192,7 @@ Current assumptions:
 
 - A user can have one or more Care VIPs depending on entitlement.
 - If only one Care VIP exists, patient-facing selectors should usually be hidden to reduce noise.
-- Profile Care VIP management controls should only appear for entitlements that support multiple active Care VIPs.
+- Profile should always show the current Care VIP section as an identity/account summary. Add/manage limits still respect entitlement, but the section should not disappear merely because the current plan has one active Care VIP.
 - If more than one Care VIP exists, filtering controls can appear as "Showing: [All appts]".
 - Appointment records may reference a `care_subject_id`.
 - Multi-user access, role-based family sharing, and permission management are future work.

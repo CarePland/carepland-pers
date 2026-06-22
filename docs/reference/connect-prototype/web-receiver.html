@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CarePland Connect Web Receiver</title>
+    <link rel="stylesheet" href="./web-receiver.css" />
+  </head>
+  <body>
+    <div class="activation-screen" id="activationScreen">
+      <div class="activation-panel">
+        <p>CarePland Connect</p>
+        <h1>Receiver</h1>
+        <form class="setup-code-form" id="setupCodeForm">
+          <label for="setupCodeInput">Setup code</label>
+          <div>
+            <input id="setupCodeInput" type="text" inputmode="text" autocomplete="one-time-code" maxlength="7" placeholder="ABC-123" />
+            <button id="submitSetupCodeButton" type="submit">Pair</button>
+          </div>
+        </form>
+        <button id="startReceiverButton" type="button">Start Receiver</button>
+      </div>
+    </div>
+
+    <div class="appliance-viewport" id="applianceViewport">
+      <div class="appliance-frame" id="applianceFrame">
+        <div class="appliance-canvas" id="applianceCanvas">
+        <main class="receiver-shell" aria-label="CarePland Connect Web Receiver">
+          <section class="status-zone" aria-label="Receiver status">
+            <div class="time-block">
+              <strong id="timeText">--:--</strong>
+              <span id="dateText">Loading</span>
+            </div>
+            <div class="greeting-block">
+              <strong id="greetingText">Good Morning, Mom</strong>
+              <span id="receiverLocation">Living Rm</span>
+            </div>
+
+            <div class="appointment-panel">
+              <div>
+                <span id="appointmentLabel">Next up:</span>
+                <strong id="appointmentTitle">Cardiology Follow-Up</strong>
+              </div>
+              <div>
+                <span id="appointmentDay">Tomorrow</span>
+                <strong id="appointmentTime">2 PM</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="contact-zone" aria-label="People">
+            <div class="people-strip" id="peopleStrip"></div>
+          </section>
+
+          <section class="action-zone" aria-label="Primary actions">
+            <button class="primary-action" id="callButton" type="button">Contact Andrew</button>
+            <div class="secondary-actions">
+              <button class="secondary-action green" id="moreButton" type="button">Ask a question</button>
+              <button class="icon-action mic-action" id="voiceAskButton" type="button" aria-label="Record a request">
+                <img src="./assets/images/mosrod-microphone-3404243.svg" alt="" />
+              </button>
+              <button class="icon-action" id="optionalSoundsButton" type="button" aria-label="Set optional sounds">
+                <img src="./assets/images/optional-sounds-icon-256.png" alt="" />
+              </button>
+            </div>
+            <button class="secondary-action blue wide-action" id="appointmentButton" type="button">When is my appointment?</button>
+            <p class="status-line hidden-status" id="statusLine">Ready. Andrew is selected.</p>
+          </section>
+
+          <section class="workspace-zone" aria-label="Messages">
+            <h1 id="workspaceTitle">Messages</h1>
+            <div class="workspace-pages" id="workspacePages"></div>
+          </section>
+        </main>
+
+        <div class="modal hidden" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+          <div class="modal-panel" id="modalPanel"></div>
+        </div>
+        <div class="receiver-guide-layer hidden" id="receiverGuideLayer" aria-hidden="true"></div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./web-receiver.js"></script>
+  </body>
+</html>

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Receiver Settings - CarePland Connect</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="settings-shell">
+      <header class="settings-header">
+        <div>
+          <p class="eyebrow">CarePland Connect</p>
+          <h1>Receiver Settings</h1>
+          <p>Manage how this CarePland Connect receiver behaves.</p>
+        </div>
+        <a class="secondary-button" href="./index.html">Back to Connect</a>
+      </header>
+
+      <section class="settings-grid">
+        <article class="panel admin-section">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Receiver Identity</p>
+              <h2 id="receiverSettingsTitle">Receiver</h2>
+            </div>
+            <span class="status-pill" id="receiverSettingsStatus">Loading</span>
+          </div>
+          <label>
+            Local server URL
+            <input id="settingsServerUrl" type="text" value="http://localhost:8790" />
+          </label>
+          <div class="admin-form-grid">
+            <label>
+              Receiver name
+              <input id="receiverNameInput" type="text" value="" />
+            </label>
+            <label>
+              Location label
+              <input id="receiverLocationInput" type="text" value="" />
+            </label>
+          </div>
+          <div class="button-row">
+            <button class="primary-button compact" type="button" id="saveIdentityButton">Save receiver identity</button>
+            <button class="secondary-button compact" type="button" id="refreshSettingsButton">Refresh settings</button>
+          </div>
+          <p class="server-status" id="identitySaveStatus">Loading receiver settings...</p>
+          <dl class="admin-facts">
+            <div><dt>Household</dt><dd id="assignedHousehold">-</dd></div>
+            <div><dt>Receiver people</dt><dd id="receiverPeopleFact">-</dd></div>
+            <div><dt>Device ID</dt><dd id="receiverDeviceIdFact">-</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel admin-section">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Approved Connect Contacts</p>
+              <h2>Who may reach this receiver</h2>
+            </div>
+          </div>
+          <p class="helper-copy">These permissions are operational and belong in the caregiver/admin app, not on the receiver appliance.</p>
+          <div class="permission-list" id="approvedContactsList">
+            <p class="server-status">Loading approved contacts...</p>
+          </div>
+          <p class="server-status" id="permissionsSaveStatus">Contact permissions load from the local server.</p>
+        </article>
+
+        <article class="panel admin-section">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Routing Behavior</p>
+              <h2>How Connect should route requests</h2>
+            </div>
+          </div>
+          <div class="admin-form-grid">
+            <label>
+              Preferred first contact
+              <select><option>Andrew</option><option>Susan</option><option>Family Group</option></select>
+            </label>
+            <label>
+              Fallback contact
+              <select><option>Susan</option><option>Andrew</option><option>Family Group</option></select>
+            </label>
+          </div>
+          <label class="check-row"><input type="checkbox" checked /> Family group enabled</label>
+          <label class="check-row"><input type="checkbox" checked /> Allow receiver user to initiate calls</label>
+        </article>
+
+        <article class="panel admin-section">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Attention / Ring Behavior</p>
+              <h2>How assertive the receiver may be</h2>
+            </div>
+          </div>
+          <div class="named-choice-row">
+            <button class="choice-button selected" type="button">NORMAL</button>
+            <button class="choice-button" type="button">Persistent</button>
+            <button class="choice-button" type="button">Urgent</button>
+          </div>
+          <p class="helper-copy">Emergency override is intentionally not implemented in this phase.</p>
+        </article>
+
+        <article class="panel admin-section">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Quiet Hours</p>
+              <h2>Reduce routine interruptions</h2>
+            </div>
+          </div>
+          <label class="check-row"><input type="checkbox" /> Quiet hours enabled</label>
+          <div class="admin-form-grid">
+            <label>
+              Start time
+              <input type="text" value="9:00 PM" />
+            </label>
+            <label>
+              End time
+              <input type="text" value="7:00 AM" />
+            </label>
+          </div>
+          <label class="check-row"><input type="checkbox" checked /> Allow urgent requests during quiet hours</label>
+        </article>
+
+        <article class="panel admin-section">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Receiver Lockdown</p>
+              <h2>Keep the receiver appliance-safe</h2>
+            </div>
+          </div>
+          <label class="check-row"><input type="checkbox" id="hideOperationalSettingsInput" checked /> Hide operational settings on receiver</label>
+          <label class="check-row"><input type="checkbox" id="allowComfortSettingsInput" checked /> Allow receiver user to adjust comfort settings</label>
+          <label class="check-row"><input type="checkbox" id="requireContactApprovalInput" checked /> Require caregiver/admin approval for contact changes</label>
+          <div class="button-row">
+            <button class="primary-button compact" type="button" id="saveLockdownButton">Save lockdown settings</button>
+          </div>
+          <p class="server-status" id="lockdownSaveStatus">Lockdown settings load from the local server.</p>
+          <p class="helper-copy">The receiver is where comfort and communication happen. Mission-critical operation belongs here.</p>
+        </article>
+      </section>
+    </main>
+    <script src="./receiver-settings.js"></script>
+  </body>
+</html>

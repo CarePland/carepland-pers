@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CarePland Connect</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header" aria-label="CarePland Connect">
+        <div class="brand-block">
+          <img class="brand-logo" src="./assets/brand/carepland-icon.png" alt="CarePland" />
+          <span class="brand-word">CarePland</span>
+          <nav class="top-tabs" aria-label="Primary">
+            <button class="top-tab connect-tab active" type="button" data-section-tab="call">Connect</button>
+            <button class="top-tab" type="button" data-section-tab="receiver" id="topReceiverButton">Receiver</button>
+          </nav>
+        </div>
+
+        <div class="user-menu">
+          <button class="personal-link" type="button">CarePland Personal</button>
+          <span class="user-name">Andrew</span>
+          <button class="settings-button" type="button" data-section-tab="people" aria-label="Settings">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path
+                d="M19.4 13.5c.1-.5.1-1 .1-1.5s0-1-.1-1.5l2-1.5-2-3.5-2.4 1a7.7 7.7 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.7 7.7 0 0 0 7 6.5l-2.4-1-2 3.5 2 1.5c-.1.5-.1 1-.1 1.5s0 1 .1 1.5l-2 1.5 2 3.5 2.4-1a7.7 7.7 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.7 7.7 0 0 0 2.6-1.5l2.4 1 2-3.5-2-1.5ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <aside class="rail" aria-label="Settings">
+        <div class="settings-heading">
+          <p class="eyebrow">Settings</p>
+          <h2>Connect Setup</h2>
+        </div>
+
+        <nav class="nav-list" aria-label="Settings sections">
+          <button class="nav-item" type="button" data-section-tab="people">
+            People
+          </button>
+          <button class="nav-item" type="button" data-section-tab="devices">
+            Receivers
+          </button>
+          <button class="nav-item" type="button" data-section-tab="settings">
+            Appearance
+          </button>
+        </nav>
+
+        <section class="rail-note" aria-label="Trust boundary">
+          <p class="note-title">Trust boundary</p>
+          <p>No hidden listening. No recording by default. Every request is named, authorized, and logged.</p>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Trusted conversation orchestration</p>
+            <h2 id="sectionTitle">Start a live conversation</h2>
+            <p class="section-summary" id="sectionSummary">Call, monitor, and recover a receiver connection.</p>
+          </div>
+          <div class="status-pill" id="connectionPill">Ready</div>
+        </header>
+
+        <section class="main-grid">
+          <article class="panel connect-panel section-surface" data-section="call people devices settings">
+            <div class="panel-heading section-surface call-heading-hidden" data-section="call">
+              <div>
+                <p class="eyebrow" data-term="connectRequestLabel">Connect request</p>
+                <h3 id="requestTitle">Talk to Mom</h3>
+              </div>
+              <span class="state-badge" id="conversationStatus">ready</span>
+            </div>
+
+            <form id="connectForm" class="connect-form">
+              <div class="call-control-grid section-surface" data-section="call">
+                <section class="call-control-column" aria-label="People">
+                  <h3>People</h3>
+                  <div class="person-strip" aria-label="Trusted connections">
+                    <button class="person-card selected" type="button" data-recipient="Mom" data-location="Home" data-caregiver="Andrew">
+                      <span class="avatar">M</span>
+                      <span>
+                        <strong>Mom</strong>
+                        <small>Home endpoints approved</small>
+                      </span>
+                    </button>
+                    <button class="person-card" type="button" data-recipient="Ann" data-location="Apartment" data-caregiver="Andrew">
+                      <span class="avatar teal">A</span>
+                      <span>
+                        <strong>Ann</strong>
+                        <small>Phone and tablet approved</small>
+                      </span>
+                    </button>
+                    <button class="person-card" type="button" data-recipient="Blaine" data-location="Condo" data-caregiver="Andrew">
+                      <span class="avatar gold">B</span>
+                      <span>
+                        <strong>Blaine</strong>
+                        <small>Smart display approved</small>
+                      </span>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="call-control-column voice-column" aria-label="Voice">
+                  <div class="voice-heading">
+                    <h3>Voice</h3>
+                  </div>
+                  <button class="primary-button" type="submit" id="startButton">
+                    <span class="call-phone-icon" aria-hidden="true">☎</span>
+                    <span data-term="startButton">Start Connect Request</span>
+                  </button>
+                  <div class="voice-secondary-row">
+                    <span class="call-status-pill" id="callStatusPill" aria-live="polite">
+                      <span class="call-status-dot" aria-hidden="true"></span>
+                      <span class="call-status-copy">
+                        <strong>Ready</strong>
+                        <small>Kitchen Receiver</small>
+                      </span>
+                    </span>
+                    <button class="secondary-button" type="button" id="resetButton">
+                      Reset
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              <div class="goal-box section-surface call-heading-hidden" data-section="call">
+                <span>Connection goal</span>
+                <strong id="goalText">Live conversation with Mom</strong>
+              </div>
+
+              <fieldset class="section-surface device-diagnostics-field" data-section="devices">
+                <legend>Diagnostics</legend>
+                <details class="setup-disclosure diagnostics-disclosure">
+                  <summary>Local receiver server</summary>
+                  <div class="disclosure-body">
+                    <label>
+                      Server URL
+                      <input id="localServerUrl" type="text" value="http://localhost:8790" />
+                    </label>
+                    <div class="button-row">
+                      <button class="secondary-button compact" type="button" id="refreshReceiversButton">
+                        <span aria-hidden="true">R</span>
+                        Refresh receiver server
+                      </button>
+                    </div>
+                    <div class="receiver-list" id="receiverList">
+                      <p class="server-status">No receivers loaded.</p>
+                    </div>
+                    <p class="server-status" id="localServerStatus">Local trigger ready.</p>
+                  </div>
+                </details>
+              </fieldset>
+
+              <fieldset class="section-surface" data-section="people">
+                <legend>Household and Receiver People</legend>
+                <div class="setup-summary-cards" aria-label="People setup summary">
+                  <article>
+                    <strong>Household</strong>
+                    <span>Who this receiver belongs to.</span>
+                  </article>
+                  <article>
+                    <strong>Receiver people</strong>
+                    <span>The people who may use this receiver.</span>
+                  </article>
+                  <article>
+                    <strong>Trusted circle</strong>
+                    <span>Approved callers are managed below.</span>
+                  </article>
+                </div>
+                <div class="setup-grid">
+                  <label>
+                    Household
+                    <select id="setupHouseholdSelect">
+                      <option value="receiver-household-elizabeth-robert">Elizabeth and Robert</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="provisioning-household-summary" id="provisioningHouseholdSummary">
+                  <p class="server-status">Household provisioning context will load from Connect.</p>
+                </div>
+                <div class="household-create-row">
+                  <label>
+                    New household
+                    <input id="newHouseholdName" type="text" placeholder="Bedroom suite, guest room, upstairs" />
+                  </label>
+                  <button class="secondary-button compact" type="button" id="createHouseholdButton">
+                    Add household
+                  </button>
+                </div>
+                <div class="household-create-row">
+                  <label>
+                    Receiver person
+                    <input id="newReceiverPersonName" type="text" placeholder="Elizabeth, Robert, guest" />
+                  </label>
+                  <button class="secondary-button compact" type="button" id="createReceiverPersonButton">
+                    Add person
+                  </button>
+                </div>
+                <label class="inline-toggle">
+                  <input type="checkbox" id="showInactiveHouseholds" />
+                  Show archived households
+                </label>
+              </fieldset>
+
+              <fieldset class="section-surface receiver-setup-field" data-section="devices">
+                <legend>Receivers</legend>
+                <div class="setup-summary-cards" aria-label="Receiver setup summary">
+                  <article>
+                    <strong>What exists</strong>
+                    <span>Receiver list, household assignment, and current status.</span>
+                  </article>
+                  <article>
+                    <strong>What is working</strong>
+                    <span>Online, last seen, and setup progress are shown here.</span>
+                  </article>
+                  <article>
+                    <strong>What needs attention</strong>
+                    <span>Create setup links, re-pair, or revoke receivers.</span>
+                  </article>
+                </div>
+                <div class="setup-grid">
+                  <label>
+                    Device name
+                    <input id="setupDeviceName" type="text" value="Kitchen Receiver" />
+                  </label>
+                  <label>
+                    Location
+                    <input id="setupLocationLabel" type="text" value="Kitchen" />
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button class="secondary-button compact" type="button" id="createSetupLinkButton">
+                    <span aria-hidden="true">Q</span>
+                    Create setup link
+                  </button>
+                  <button class="secondary-button compact" type="button" id="refreshProvisioningButton">
+                    <span aria-hidden="true">D</span>
+                    Refresh devices
+                  </button>
+                </div>
+                <div class="setup-link-card hidden" id="setupLinkCard">
+                  <div class="setup-card-heading">
+                    <span>
+                      <strong id="setupCardTitle">Receiver setup card</strong>
+                      <small id="setupCardMeta">Single-use local setup link</small>
+                    </span>
+                    <span class="setup-code" id="setupCode">---</span>
+                  </div>
+                  <div class="setup-card-body">
+                    <div class="setup-qr" id="setupQr" aria-hidden="true"></div>
+                    <div class="setup-link-details">
+                      <strong>Open this on the receiver device</strong>
+                      <a id="setupLink" href="#" target="_blank" rel="noreferrer"></a>
+                      <div class="button-row">
+                        <button class="secondary-button compact" type="button" id="copySetupLinkButton">Copy link</button>
+                        <a class="secondary-button compact setup-open-link" id="openSetupLinkButton" href="#" target="_blank" rel="noreferrer">Open</a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="receiver-list" id="receiverDeviceList">
+                  <p class="server-status">No provisioned devices loaded.</p>
+                </div>
+                <div class="setup-checklist" id="setupChecklist">
+                  <p class="server-status">No receiver setup progress yet.</p>
+                </div>
+                <details class="setup-disclosure diagnostics-disclosure">
+                  <summary>Provisioning diagnostics</summary>
+                  <div class="disclosure-body">
+                    <div class="provisioning-audit" id="provisioningAudit">
+                      <p class="server-status">No provisioning events yet.</p>
+                    </div>
+                  </div>
+                </details>
+                <p class="server-status" id="setupStatus">Setup links are single-use and expire after 30 minutes.</p>
+              </fieldset>
+
+              <fieldset class="section-surface messages-home-panel" data-section="call">
+                <legend id="messageComposerTitle">Send a Message to Mom</legend>
+                <div class="coordinator-message-composer">
+                  <textarea id="coordinatorMessageText" rows="3" placeholder="Type a message, or record one" aria-label="Message"></textarea>
+                  <div class="button-row">
+                    <button class="secondary-button compact" type="button" id="recordCoordinatorMessageButton">
+                      <span class="record-icon" aria-hidden="true"></span>
+                      Record
+                    </button>
+                    <button class="primary-button compact inactive" type="button" id="sendCoordinatorMessageButton">
+                      Send Message
+                    </button>
+                    <button class="secondary-button compact" type="button" id="clearCoordinatorMessageButton">
+                      Clear
+                    </button>
+                  </div>
+                  <p class="server-status" id="coordinatorMessageStatus">Recordings keep original audio and transcript.</p>
+                </div>
+                <div class="message-history-heading">
+                  <div class="message-history-title-row">
+                    <h3>Message History</h3>
+                    <div class="message-history-nav" aria-label="Message history navigation">
+                      <button class="nav-arrow-button" type="button" id="messageHistoryPrevButton" aria-label="Previous messages">&lt;</button>
+                      <button class="nav-arrow-button" type="button" id="messageHistoryNextButton" aria-label="Next messages">&gt;</button>
+                    </div>
+                  </div>
+                  <div class="message-history-actions">
+                    <button class="text-action-button" type="button" id="refreshMessagesButton">
+                      Refresh
+                    </button>
+                    <label class="inline-toggle compact-toggle">
+                      <input type="checkbox" id="messageDetailToggle" />
+                      Detail View
+                    </label>
+                  </div>
+                </div>
+                <div class="message-list" id="receiverMessagesList">
+                  <p class="server-status">No receiver messages loaded.</p>
+                </div>
+              </fieldset>
+
+              <fieldset class="section-surface audio-profile-field" data-section="people">
+                <legend>User Audio Profile Summary</legend>
+                <div class="audio-profile-panel" id="audioProfilePanel">
+                  <p class="server-status">No audio profile loaded.</p>
+                </div>
+                <details class="setup-disclosure diagnostics-disclosure">
+                  <summary>Audio profile diagnostics</summary>
+                  <div class="disclosure-body">
+                    <div class="button-row">
+                      <button class="secondary-button compact" type="button" id="refreshAudioProfileButton">
+                        <span aria-hidden="true">A</span>
+                        Refresh profile
+                      </button>
+                      <button class="secondary-button compact" type="button" id="refreshAudioReviewButton">
+                        <span aria-hidden="true">R</span>
+                        Refresh audio review
+                      </button>
+                    </div>
+                  </div>
+                </details>
+              </fieldset>
+
+              <fieldset class="section-surface audio-diagnostics-field" data-section="people">
+                <legend>Audio Diagnostics</legend>
+                <details class="setup-disclosure diagnostics-disclosure">
+                  <summary>Original audio artifacts, maintenance, and raw review tools</summary>
+                  <div class="disclosure-body">
+                    <div class="button-row">
+                      <button class="secondary-button compact" type="button" id="refreshAudioArtifactsButton">
+                        <span aria-hidden="true">O</span>
+                        Refresh artifacts
+                      </button>
+                      <button class="secondary-button compact" type="button" id="retryPendingTranscriptsButton">
+                        <span aria-hidden="true">T</span>
+                        Retry pending transcripts
+                      </button>
+                      <button class="secondary-button compact" type="button" id="recoverAudioIndexButton">
+                        <span aria-hidden="true">U</span>
+                        Recover upload index
+                      </button>
+                      <button class="secondary-button compact" type="button" id="backfillAudioIntegrityButton">
+                        <span aria-hidden="true">H</span>
+                        Backfill hashes
+                      </button>
+                      <button class="secondary-button compact" type="button" id="previewAudioMaintenanceButton">
+                        <span aria-hidden="true">P</span>
+                        Preview maintenance
+                      </button>
+                      <button class="secondary-button compact" type="button" id="backfillAudioTimelineButton">
+                        <span aria-hidden="true">B</span>
+                        Backfill timeline
+                      </button>
+                      <button class="secondary-button compact" type="button" id="backfillAudioEventLinksButton">
+                        <span aria-hidden="true">E</span>
+                        Backfill event links
+                      </button>
+                      <a class="secondary-button compact" id="openAudioManifestLink" href="http://localhost:8790/audio/manifest?receiverId=living-room-receiver" target="_blank" rel="noreferrer">
+                        <span aria-hidden="true">J</span>
+                        Open manifest
+                      </a>
+                      <a class="secondary-button compact" id="openAudioBundleLink" href="http://localhost:8790/audio/review-bundle?receiverId=living-room-receiver" target="_blank" rel="noreferrer">
+                        <span aria-hidden="true">R</span>
+                        Open bundle
+                      </a>
+                      <a class="secondary-button compact" id="downloadAudioBundleLink" href="http://localhost:8790/audio/review-bundle?receiverId=living-room-receiver&download=1" target="_blank" rel="noreferrer">
+                        <span aria-hidden="true">D</span>
+                        Download bundle
+                      </a>
+                      <a class="secondary-button compact" id="openAudioDomainModelLink" href="http://localhost:8790/audio/domain-model" target="_blank" rel="noreferrer">
+                        <span aria-hidden="true">M</span>
+                        Open model
+                      </a>
+                      <a class="secondary-button compact" id="openAudioTimelineLink" href="http://localhost:8790/audio/timeline?receiverId=living-room-receiver" target="_blank" rel="noreferrer">
+                        <span aria-hidden="true">L</span>
+                        Open timeline
+                      </a>
+                    </div>
+                    <div class="audio-maintenance-preview" id="audioMaintenancePreview"></div>
+                    <div class="audio-artifact-summary" id="audioArtifactSummary">
+                      <p class="server-status">Load artifacts to review originals, transcripts, and enhanced playback activity.</p>
+                    </div>
+                    <div class="audio-artifact-filters" id="audioArtifactFilters" aria-label="Audio artifact filters"></div>
+                    <div class="audio-artifact-list" id="audioArtifactsList">
+                      <p class="server-status">No audio artifacts loaded.</p>
+                    </div>
+                  </div>
+                </details>
+              </fieldset>
+
+              <fieldset class="section-surface care-context-field" data-section="people">
+                <legend>Care Circle Context</legend>
+                <div class="button-row">
+                  <button class="secondary-button compact" type="button" id="refreshCareCircleButton">
+                    <span aria-hidden="true">C</span>
+                    Refresh context
+                  </button>
+                </div>
+                <div class="care-context" id="careCircleContext">
+                  <p class="server-status">No care circle context loaded.</p>
+                </div>
+              </fieldset>
+
+              <fieldset class="section-surface" data-section="settings">
+                <legend>Connect Appearance</legend>
+                <section class="theme-panel" aria-label="Retro Mode settings">
+                  <div class="theme-heading">
+                    <p class="note-title">Theme preset</p>
+                    <p>Receiver appearance</p>
+                  </div>
+
+                  <label class="setting-label" for="visualTheme">
+                    Visual skin
+                    <select id="visualTheme">
+                      <option value="modern">Modern</option>
+                      <option value="retro">Retro</option>
+                      <option value="woodgrain">Retro + Woodgrain</option>
+                    </select>
+                  </label>
+
+                  <details class="setup-disclosure">
+                    <summary>Advanced presentation options</summary>
+                    <div class="disclosure-body">
+                      <label class="switch-row">
+                        <input type="checkbox" id="retroAudio" />
+                        <span>Retro audio pack</span>
+                      </label>
+                    </div>
+                  </details>
+                </section>
+                <div class="appearance-settings">
+                  <div class="theme-preview" id="connectThemePreview" aria-label="Current receiver theme preview">
+                    <div class="preview-frame">
+                      <div class="preview-status">
+                        <span>Receiver</span>
+                        <strong>Call Andrew</strong>
+                      </div>
+                      <button class="preview-primary" type="button">Ask a question</button>
+                      <div class="preview-actions" aria-hidden="true">
+                        <button class="preview-information" type="button">Message</button>
+                        <button class="preview-secondary" type="button">Back</button>
+                        <button class="preview-record" type="button">Mic</button>
+                      </div>
+                    </div>
+                  </div>
+                  <label>
+                    Preset theme
+                    <select id="connectThemePreset"></select>
+                  </label>
+                  <details class="advanced-theme">
+                    <summary>Advanced colors</summary>
+                    <div class="theme-color-grid" id="connectThemeColorGrid"></div>
+                  </details>
+                  <div class="button-row">
+                    <button class="primary-button compact" type="button" id="saveConnectThemeButton">Save appearance</button>
+                    <button class="secondary-button compact" type="button" id="resetConnectThemeButton">Reset to default</button>
+                  </div>
+                  <p class="server-status" id="connectThemeStatus">Receiver uses the default Classic Green appearance.</p>
+                </div>
+              </fieldset>
+
+              <fieldset class="section-surface receiver-routing-field" data-section="devices">
+                <legend>Advanced Receiver Routing</legend>
+                <details class="setup-disclosure diagnostics-disclosure">
+                  <summary>Prototype endpoint routing</summary>
+                  <div class="disclosure-body">
+                    <label class="check-row">
+                      <input type="checkbox" name="endpoint" value="Living Room Echo" checked />
+                      <span>Living Room Echo</span>
+                    </label>
+                    <label class="check-row">
+                      <input type="checkbox" name="endpoint" value="Kitchen Nest" checked />
+                      <span>Kitchen Nest</span>
+                    </label>
+                    <label class="check-row">
+                      <input type="checkbox" name="endpoint" value="Tablet" checked />
+                      <span>Tablet</span>
+                    </label>
+                    <label class="check-row">
+                      <input type="checkbox" name="endpoint" value="Phone bridge" />
+                      <span>Phone bridge</span>
+                    </label>
+                  </div>
+                </details>
+              </fieldset>
+
+            </form>
+          </article>
+
+          <article class="panel circle-panel section-surface" data-section="people">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Trusted Circle</p>
+                <h3>Approved Callers</h3>
+              </div>
+              <span class="muted-label">Phase 1 draft</span>
+            </div>
+
+            <div class="circle-copy">
+              <p>Choose the people who may eventually be invited to call this receiver.</p>
+              <p>No one can call until they are invited and accept. Contacts are added one at a time. There is no select-all import.</p>
+            </div>
+
+            <form id="contactForm" class="contact-form">
+              <label>
+                Name
+                <input id="contactName" type="text" required placeholder="Name" />
+              </label>
+              <label>
+                Mobile phone
+                <input id="contactPhone" type="text" placeholder="Optional" />
+              </label>
+              <label>
+                Email
+                <input id="contactEmail" type="email" placeholder="Optional" />
+              </label>
+              <label>
+                Relationship
+                <input id="contactRelationship" type="text" placeholder="Optional" />
+              </label>
+              <button class="primary-button" type="submit">Add Contact</button>
+            </form>
+
+            <div class="circle-tools">
+              <button class="secondary-button compact" type="button" id="importContactsButton">Import Contacts</button>
+              <button class="secondary-button compact" type="button" id="careVipsButton">Add From Care VIPs</button>
+            </div>
+
+            <div class="import-panel hidden" id="importPanel">
+              <div class="panel-subheading">
+                <strong id="importTitle">Import Contacts</strong>
+                <button class="secondary-button compact" type="button" id="closeImportButton">Close</button>
+              </div>
+              <p class="server-status" id="importHelp">Select individual contacts to add as drafts.</p>
+              <div class="selectable-list" id="importList"></div>
+            </div>
+
+            <div class="circle-section">
+              <div class="panel-subheading">
+                <strong>Draft Contacts</strong>
+                <span class="muted-label" id="draftCount">0 drafts</span>
+              </div>
+              <div class="contact-list" id="draftContactsList">
+                <p class="empty">No draft contacts yet.</p>
+              </div>
+            </div>
+
+            <div class="circle-section placeholders">
+              <div>
+                <strong>Active Callers</strong>
+                <p>No active callers yet.</p>
+              </div>
+              <div>
+                <strong>Pending Invitations</strong>
+                <p>No invitations have been sent.</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel recipient-panel section-surface" data-section="call">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Recipient side</p>
+                <h3 data-term="invitationTitle">Conversation invitation</h3>
+              </div>
+              <span class="muted-label" id="endpointLabel">No active endpoint</span>
+            </div>
+
+            <div class="incoming-call-modal hidden" id="incomingCallModal" role="dialog" aria-modal="true" aria-labelledby="incomingCallTitle">
+              <div class="incoming-call-card">
+                <div class="incoming-call-avatar" aria-hidden="true" id="incomingCallAvatar">A</div>
+                <div>
+                  <h3 id="incomingCallTitle">Andrew is calling</h3>
+                  <p id="incomingCallInstruction">Press Answer to talk.</p>
+                </div>
+                <div class="incoming-call-actions">
+                  <button class="accept-button" type="button" id="incomingAnswerButton">Answer</button>
+                  <button class="decline-button" type="button" id="incomingNotNowButton">Not Now</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="device-stage" id="deviceStage">
+              <div class="device-visual" aria-hidden="true">
+                <div class="speaker-ring"></div>
+                <div class="speaker-core"></div>
+                <div class="phone-base"></div>
+                <div class="phone-receiver"></div>
+              </div>
+              <div>
+                <p class="device-line" id="deviceLine">Waiting for a Connect Request.</p>
+                <p class="device-subline" id="deviceSubline">A live conversation starts only if the recipient accepts.</p>
+              </div>
+            </div>
+
+            <div class="recipient-actions">
+              <button class="accept-button" type="button" id="acceptButton" disabled data-term="acceptButton">Accept and connect</button>
+              <button class="end-button" type="button" id="endButton" disabled data-term="endButton">End conversation</button>
+              <button class="decline-button" type="button" id="declineButton" disabled>Decline</button>
+              <button class="quiet-button" type="button" id="ignoreButton" disabled data-term="noResponseButton">No response</button>
+            </div>
+          </article>
+
+          <article class="panel receiver-view-panel section-surface" data-section="receiver">
+            <div class="receiver-page-heading">
+              <h2 id="receiverPreviewTitle">Receiver</h2>
+              <button class="secondary-button" type="button" id="toggleReceiverGuideButton">
+                Guide mode
+              </button>
+              <fieldset class="receiver-radio-group">
+                <legend>Select Receiver</legend>
+                <div id="receiverPreviewSelect"></div>
+              </fieldset>
+            </div>
+
+            <div class="receiver-coach-line" id="receiverCoachLine">
+              Select a receiver to mirror what the receiver user sees.
+            </div>
+
+            <div class="receiver-preview-frame hidden" id="receiverPreviewFrame">
+              <iframe
+                id="receiverPreviewIframe"
+                title="Selected receiver view"
+                src="about:blank"
+                loading="lazy"
+                allow="autoplay; microphone"
+              ></iframe>
+              <div class="receiver-guide-overlay" id="receiverGuideOverlay" aria-hidden="true"></div>
+            </div>
+          </article>
+
+          <article class="panel tracking-panel section-surface" data-section="call-progress">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow" data-term="trackingLabel">Connection tracking</p>
+                <h3>Conversation status</h3>
+              </div>
+            </div>
+
+            <ol class="timeline" id="timeline" aria-live="polite">
+              <li class="pending">
+                <span></span>
+                <p>Ready to initiate a Connect Request.</p>
+              </li>
+            </ol>
+          </article>
+
+          <article class="panel audit-panel section-surface" data-section="diagnostics">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Audit log</p>
+                <h3>Attributable activity</h3>
+              </div>
+            </div>
+            <div class="audit-list" id="auditList">
+              <p class="empty">No requests yet.</p>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      window.addEventListener("error", (event) => {
+        document.body.dataset.moduleError = event.message || "module error";
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        document.body.dataset.moduleError = event.reason?.message || String(event.reason || "module rejection");
+      });
+    </script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
