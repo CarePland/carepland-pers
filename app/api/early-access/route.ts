@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { isMissingServerEnvError } from "@/app/lib/server/env";
-import { createSupabasePublicClient } from "@/app/lib/server/supabase";
+import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
+import { createSupabasePublicClient } from "@/app/lib/platform/server/supabase";
 
 function cleanText(value: unknown, maxLength: number) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";

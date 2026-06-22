@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
+import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+
 type JsonObject = Record<string, unknown>;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -338,6 +340,22 @@ export async function POST(request: NextRequest) {
     if (interactionError) {
       throw interactionError;
     }
+
+    await logOpenAiOperationCost({
+      metadata: { current_page: currentPage, support_category: category },
+      model,
+      openAiJson,
+      operationKey: "support_assistant",
+      operationLabel: "Support assistant",
+      promptVersion,
+      providerRequestId:
+        openAiResponse.headers.get("x-request-id") ??
+        openAiResponse.headers.get("openai-request-id"),
+      sourceId: interaction.id,
+      sourceTable: "support_assistant_interactions",
+      supabase,
+      userId,
+    });
 
     return NextResponse.json({
       answer,

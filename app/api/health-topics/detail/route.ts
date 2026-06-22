@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { normalizeTopicSlug } from "@/app/lib/healthTopics";
+import { normalizeTopicSlug } from "@/app/lib/personal/healthTopics";
 import {
   latestRelationshipStateMap,
   relationshipContextSentence,
   relationshipStateFromContextText,
   relationshipStateFromFeedback,
   type HealthTopicRelationshipState,
-} from "@/app/lib/healthTopics/relationshipFeedback";
+} from "@/app/lib/personal/healthTopics/relationshipFeedback";
 import {
   buildTopicContextSignature,
   healthStoryNarrative,
   meaningfulRelatedTopics,
   type HealthStoryStatus,
-} from "@/app/lib/healthTopics/topicSummary";
-import { createSupabaseUserClient } from "@/app/lib/server/supabase";
+} from "@/app/lib/personal/healthTopics/topicSummary";
+import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 type TopicMentionDetailRow = {
   appointment_id: string | null;

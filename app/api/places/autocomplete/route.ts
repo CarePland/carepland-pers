@@ -3,9 +3,9 @@ import {
   googlePlacesErrorKey,
   placesUnavailableMessage,
   PlaceAutocompleteSuggestion,
-} from "../../../lib/places";
-import { isMissingServerEnvError } from "@/app/lib/server/env";
-import { createSupabaseUserClient } from "@/app/lib/server/supabase";
+} from "../../../lib/platform/integrations/places";
+import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
+import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY ?? "";
 

@@ -9,8 +9,9 @@ import {
   homeContextDefaultUserPrompt,
   homeContextPromptVersionLabel,
   loadHomeContextInstructionVersion,
-} from "@/app/lib/homeContext/prompts";
-import { createSupabaseUserClient } from "@/app/lib/server/supabase";
+} from "@/app/lib/personal/homeContext/prompts";
+import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 type JsonObject = Record<string, unknown>;
 
@@ -976,6 +977,25 @@ export async function POST(request: NextRequest) {
       method: "POST",
     });
     const classifierJson = (await classifierResponse.json()) as JsonObject;
+    if (classifierResponse.ok) {
+      await logOpenAiOperationCost({
+        careCircleId,
+        metadata: { context_level: askContext.level },
+        model: classifierInstructionVersion?.model ?? "gpt-4.1-mini",
+        openAiJson: classifierJson,
+        operationKey: "home_context_intent_classifier",
+        operationLabel: "Home context intent classifier",
+        promptVersion: homeContextPromptVersionLabel(
+          "home_context_intent_classifier",
+          classifierInstructionVersion
+        ),
+        providerRequestId:
+          classifierResponse.headers.get("x-request-id") ??
+          classifierResponse.headers.get("openai-request-id"),
+        supabase: userClient,
+        userId: userData.user.id,
+      });
+    }
     const intent = applyAskContextToIntent(
       classifierResponse.ok
         ? parseIntent(parseOpenAiJson(classifierJson))
@@ -1348,6 +1368,27 @@ export async function POST(request: NextRequest) {
     if (!answer) {
       throw new Error("CarePland could not answer that yet.");
     }
+
+    await logOpenAiOperationCost({
+      careCircleId,
+      metadata: {
+        context_level: askContext.level,
+        intent_category: intent.category,
+      },
+      model: answerInstructionVersion?.model ?? "gpt-4.1-mini",
+      openAiJson,
+      operationKey: "home_context_answer",
+      operationLabel: "Home context answer",
+      promptVersion: homeContextPromptVersionLabel(
+        "home_context_answer",
+        answerInstructionVersion
+      ),
+      providerRequestId:
+        openAiResponse.headers.get("x-request-id") ??
+        openAiResponse.headers.get("openai-request-id"),
+      supabase: userClient,
+      userId: userData.user.id,
+    });
 
     return NextResponse.json({
       answer,

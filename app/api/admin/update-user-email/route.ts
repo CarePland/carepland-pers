@@ -1,11 +1,11 @@
 import { SupabaseClient, User } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
-import { isMissingServerEnvError } from "@/app/lib/server/env";
+import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
-} from "@/app/lib/server/supabase";
+} from "@/app/lib/platform/server/supabase";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {

@@ -1,5 +1,13 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
+import {
+  platformModuleVisibilityOverrideChangedEvent,
+  readShowAllPlatformModulesOverride,
+  writeShowAllPlatformModulesOverride,
+} from "../../lib/platform/moduleAccess";
+
 export type AiOperationCostSummaryRow = {
   cached_input_tokens: number | string | null;
   call_count: number | string | null;
@@ -11,15 +19,45 @@ export type AiOperationCostSummaryRow = {
   total_tokens: number | string | null;
 };
 
+export type AiOperationCostUserSummaryRow = {
+  call_count: number;
+  estimated_cost_usd: number;
+  total_tokens: number;
+  user_id: string | null;
+  user_label: string;
+};
+
+export type AiOperationCostViewMode = "user" | "workflow";
+
 type AdminDashboardPanelProps = {
   aiOperationCostRows: AiOperationCostSummaryRow[];
   aiOperationCostError: string;
+  aiOperationCostRangeDays: number;
+  aiOperationCostUserRows: AiOperationCostUserSummaryRow[];
+  aiOperationCostViewMode: AiOperationCostViewMode;
   followupCount: number;
   loadingAiOperationCosts: boolean;
   newCount: number;
+  onChangeAiOperationCostRange: (rangeDays: number) => void;
+  onChangeAiOperationCostViewMode: (viewMode: AiOperationCostViewMode) => void;
   onOpenPrioritizationPrompt: () => void;
   onRefreshSignals: () => void;
 };
+
+const aiOperationCostRangeOptions = [
+  { label: "7 days", value: 7 },
+  { label: "30 days", value: 30 },
+  { label: "90 days", value: 90 },
+  { label: "1 year", value: 365 },
+];
+
+const aiOperationCostViewOptions: Array<{
+  label: string;
+  value: AiOperationCostViewMode;
+}> = [
+  { label: "By workflow", value: "workflow" },
+  { label: "By user", value: "user" },
+];
 
 function formatCost(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -44,44 +82,58 @@ function readableOperationKey(value: string | null): string {
 
 export function AdminDashboardPanel({
   aiOperationCostError,
+  aiOperationCostRangeDays,
   aiOperationCostRows,
+  aiOperationCostUserRows,
+  aiOperationCostViewMode,
   followupCount,
   loadingAiOperationCosts,
   newCount,
+  onChangeAiOperationCostRange,
+  onChangeAiOperationCostViewMode,
   onOpenPrioritizationPrompt,
   onRefreshSignals,
 }: AdminDashboardPanelProps) {
-  const totalAiCalls = aiOperationCostRows.reduce(
+  const [showAllPlatformModules, setShowAllPlatformModules] = useState(false);
+  const visibleAiCostRows =
+    aiOperationCostViewMode === "user"
+      ? aiOperationCostUserRows
+      : aiOperationCostRows;
+  const totalAiCalls = visibleAiCostRows.reduce(
     (total, row) => total + Number(row.call_count ?? 0),
     0
   );
-  const totalAiCost = aiOperationCostRows.reduce(
+  const totalAiCost = visibleAiCostRows.reduce(
     (total, row) => total + Number(row.estimated_cost_usd ?? 0),
     0
   );
   const topAiCostRows = aiOperationCostRows.slice(0, 5);
+  const topAiCostUserRows = aiOperationCostUserRows.slice(0, 5);
+
+  useEffect(() => {
+    function syncShowAllPlatformModules() {
+      setShowAllPlatformModules(readShowAllPlatformModulesOverride());
+    }
+
+    syncShowAllPlatformModules();
+    window.addEventListener(
+      platformModuleVisibilityOverrideChangedEvent,
+      syncShowAllPlatformModules
+    );
+    window.addEventListener("storage", syncShowAllPlatformModules);
+
+    return () => {
+      window.removeEventListener(
+        platformModuleVisibilityOverrideChangedEvent,
+        syncShowAllPlatformModules
+      );
+      window.removeEventListener("storage", syncShowAllPlatformModules);
+    };
+  }, []);
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold">Admin dashboard</h2>
-          <p className="mt-1 text-slate-600">
-            Read-only home for prioritized Admin HQ signals. The first version
-            will summarize what deserves attention first and link back into the
-            existing Admin tabs.
-          </p>
-        </div>
-        <button
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
-          onClick={onRefreshSignals}
-          type="button"
-        >
-          Refresh signals
-        </button>
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
+      <div className="grid items-stretch gap-3 lg:grid-cols-[minmax(9rem,1fr)_minmax(9rem,1fr)_minmax(13rem,1fr)_auto]">
         <div className="rounded-md border border-red-200 bg-red-50 p-4">
           <p className="text-sm font-semibold text-red-950">New / unseen</p>
           <p className="mt-2 text-3xl font-semibold text-red-700">{newCount}</p>
@@ -104,6 +156,34 @@ export function AdminDashboardPanel({
             Open Admin HQ prioritization prompt
           </button>
         </div>
+        <div className="flex flex-wrap items-center justify-end gap-3 lg:flex-nowrap">
+          <button
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+            onClick={onRefreshSignals}
+            type="button"
+          >
+            Refresh signals
+          </button>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-slate-900">
+              Show All Top Nav
+            </p>
+            <button
+              aria-pressed={showAllPlatformModules}
+              className={`inline-flex min-w-14 items-center justify-center rounded-full border px-3 py-1 text-xs font-bold transition ${
+                showAllPlatformModules
+                  ? "border-blue-300 bg-blue-50 text-blue-800"
+                  : "border-slate-300 bg-white text-slate-700"
+              }`}
+              onClick={() =>
+                writeShowAllPlatformModulesOverride(!showAllPlatformModules)
+              }
+              type="button"
+            >
+              {showAllPlatformModules ? "ON" : "OFF"}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="mt-5 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
@@ -119,8 +199,7 @@ export function AdminDashboardPanel({
               AI operation cost
             </p>
             <p className="mt-1 text-sm text-slate-600">
-              Estimated OpenAI usage cost from the last 30 days, grouped by
-              workflow and model.
+              Estimated OpenAI usage cost by selected date range.
             </p>
           </div>
           <div className="text-right">
@@ -133,11 +212,80 @@ export function AdminDashboardPanel({
           </div>
         </div>
 
+        <fieldset className="mt-4 flex flex-wrap items-center gap-3">
+          <legend className="sr-only">AI operation cost date range</legend>
+          {aiOperationCostRangeOptions.map((option) => (
+            <label
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+              key={option.value}
+            >
+              <input
+                checked={aiOperationCostRangeDays === option.value}
+                className="h-4 w-4 border-slate-300 text-blue-700 focus:ring-blue-500"
+                name="ai-operation-cost-range"
+                onChange={() => onChangeAiOperationCostRange(option.value)}
+                type="radio"
+              />
+              {option.label}
+            </label>
+          ))}
+        </fieldset>
+
+        <fieldset className="mt-3 flex flex-wrap items-center gap-3">
+          <legend className="sr-only">AI operation cost grouping</legend>
+          {aiOperationCostViewOptions.map((option) => (
+            <label
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+              key={option.value}
+            >
+              <input
+                checked={aiOperationCostViewMode === option.value}
+                className="h-4 w-4 border-slate-300 text-blue-700 focus:ring-blue-500"
+                name="ai-operation-cost-view"
+                onChange={() => onChangeAiOperationCostViewMode(option.value)}
+                type="radio"
+              />
+              {option.label}
+            </label>
+          ))}
+        </fieldset>
+
         {aiOperationCostError ? (
           <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
             {aiOperationCostError}
           </p>
-        ) : topAiCostRows.length > 0 ? (
+        ) : aiOperationCostViewMode === "user" && topAiCostUserRows.length > 0 ? (
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="py-2 pr-4 font-semibold">User</th>
+                  <th className="py-2 pr-4 font-semibold">Calls</th>
+                  <th className="py-2 pr-4 font-semibold">Tokens</th>
+                  <th className="py-2 text-right font-semibold">Est. cost</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 text-slate-700">
+                {topAiCostUserRows.map((row) => (
+                  <tr key={row.user_id ?? "unknown-user"}>
+                    <td className="py-2 pr-4 font-medium text-slate-900">
+                      {row.user_label}
+                    </td>
+                    <td className="py-2 pr-4">
+                      {Number(row.call_count ?? 0).toLocaleString()}
+                    </td>
+                    <td className="py-2 pr-4">
+                      {Number(row.total_tokens ?? 0).toLocaleString()}
+                    </td>
+                    <td className="py-2 text-right">
+                      {formatCost(Number(row.estimated_cost_usd ?? 0))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : aiOperationCostViewMode === "workflow" && topAiCostRows.length > 0 ? (
           <div className="mt-4 overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="text-xs uppercase tracking-wide text-slate-500">

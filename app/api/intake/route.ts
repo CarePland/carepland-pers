@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
+import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+
 type JsonObject = Record<string, unknown>;
 type IntakeMode = "bulk_appointments" | "single";
 
@@ -418,6 +420,26 @@ export async function POST(request: NextRequest) {
         throw fallbackUpdateError;
       }
     }
+
+    await logOpenAiOperationCost({
+      careCircleId,
+      metadata: { intake_mode: mode },
+      model,
+      openAiJson,
+      operationKey: instructionKeyForMode(mode),
+      operationLabel:
+        mode === "bulk_appointments"
+          ? "Bulk appointment intake"
+          : "Text intake interpretation",
+      promptVersion,
+      providerRequestId:
+        openAiResponse.headers.get("x-request-id") ??
+        openAiResponse.headers.get("openai-request-id"),
+      sourceId: intakeItem.id,
+      sourceTable: "intake_items",
+      supabase,
+      userId,
+    });
 
     return NextResponse.json({
       careSubjectId: careSubject.id,

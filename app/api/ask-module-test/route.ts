@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
-import { estimateOpenAiResponseCost } from "@/app/lib/aiUsageCosts";
+import { estimateOpenAiResponseCost } from "@/app/lib/platform/ai/usageCosts";
 
 type JsonObject = Record<string, unknown>;
 

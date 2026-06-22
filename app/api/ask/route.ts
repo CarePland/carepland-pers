@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
-import { estimateOpenAiResponseCost } from "@/app/lib/aiUsageCosts";
+import { estimateOpenAiResponseCost } from "@/app/lib/platform/ai/usageCosts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -444,6 +444,42 @@ function normalizeAskMessage(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function isConnectAskContext({
+  context,
+  currentPage,
+}: {
+  context: JsonObject;
+  currentPage: string;
+}) {
+  const moduleName = String(
+    context.module ?? context.product_area ?? context.app_area ?? ""
+  ).toLowerCase();
+  return (
+    moduleName === "connect" || currentPage.toLowerCase().includes("connect")
+  );
+}
+
+function productContextForAsk({
+  context,
+  currentPage,
+}: {
+  context: JsonObject;
+  currentPage: string;
+}) {
+  if (isConnectAskContext({ context, currentPage })) {
+    return [
+      "Product context:",
+      "CarePland Connect is a trusted conversation orchestration layer for receiver households, approved receiver devices, receiver people, live calls, messages, Guide Mode, optional sounds, and setup/provisioning.",
+      "Connect receiver provisioning is device setup, not receiver-user login. A coordinator provisions receiver devices for a household; receiver people are the people who may use that receiver. In MVP, Connect keeps the active people list small and tied to the configured receiver household.",
+      "Guide Mode is a shared visual pointing loop: the coordinator clicks the actual receiver UI to highlight a control, the receiver sees the same highlighted control and darkened surrounding UI, and the receiver remains in control.",
+      "Connect's trust boundary: no hidden listening, no recording by default, and requests should be named, authorized, and logged.",
+      "Ask should use the provided Connect app context to answer or route questions about selected person, receiver status, active tab, recent call/message state, provisioning/setup state, audio/optional sounds, and confusing Connect workflows. Do not pretend to perform receiver-device actions unless the app context shows the action is wired.",
+    ].join("\n");
+  }
+
+  return "Product context:\nCarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Ask has a separate onboarding helper module for low-risk getting-started questions. Ask is intended for questions, ideas, workflow feedback, bugs, confusing moments, and things that may need review. Do not deny being AI or pretend to be human, but keep AI framing in the background unless the user asks or it matters for trust/review. If a user asks what you are, it is okay to say you are an AI assistant designed to help route questions, feedback, and ideas throughout CarePland, and that you are not a replacement for real people.";
+}
+
 function isLikelyOnboardingAsk({
   context,
   currentPage,
@@ -455,6 +491,10 @@ function isLikelyOnboardingAsk({
   message: string;
   transcript: string;
 }) {
+  if (isConnectAskContext({ context, currentPage })) {
+    return false;
+  }
+
   const haystack = normalizeAskMessage(
     [currentPage, message, transcript, JSON.stringify(context)].join(" ")
   );
@@ -733,6 +773,7 @@ export async function POST(request: NextRequest) {
     const currentPage =
       typeof body.currentPage === "string" ? body.currentPage.trim() : "";
     const context = safeObject(body.context);
+    const productContext = productContextForAsk({ context, currentPage });
 
     if (!message) {
       throw new Error("Add a question, idea, or detail before using Ask.");
@@ -917,7 +958,7 @@ export async function POST(request: NextRequest) {
         2
       )}`,
       `App context:\n${JSON.stringify(context, null, 2)}`,
-      "Product context:\nCarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Ask has a separate onboarding helper module for low-risk getting-started questions. Ask is intended for questions, ideas, workflow feedback, bugs, confusing moments, and things that may need review. Do not deny being AI or pretend to be human, but keep AI framing in the background unless the user asks or it matters for trust/review. If a user asks what you are, it is okay to say you are an AI assistant designed to help route questions, feedback, and ideas throughout CarePland, and that you are not a replacement for real people.",
+      productContext,
       `Response rubric:\n${responseRubric}`,
       `Ask transcript:\n${transcript}`,
     ]
@@ -998,7 +1039,7 @@ export async function POST(request: NextRequest) {
               2
             )}`,
             `App context:\n${JSON.stringify(context, null, 2)}`,
-            "Product context:\nCarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and then see a first-run welcome guide on Home. Ask should feel like open dialogue, not a ticketing system.",
+            productContext,
             `Response rubric:\n${responseRubric}`,
             `Ask transcript:\n${transcript}`,
           ].join("\n\n"),
@@ -1133,7 +1174,7 @@ export async function POST(request: NextRequest) {
               2
             )}`,
             `App context:\n${JSON.stringify(context, null, 2)}`,
-            "Product context:\nCarePland Ask is for questions, ideas, workflow feedback, bugs, confusing moments, and things that may need support/admin review.",
+            productContext,
             `Ask transcript:\n${transcript}`,
           ].join("\n\n"),
         });
@@ -1302,7 +1343,7 @@ export async function POST(request: NextRequest) {
               2
             )}`,
             `App context:\n${JSON.stringify(context, null, 2)}`,
-            "Product context:\nCarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Ask intake should preserve original user language while creating structured Admin review data.",
+            `${productContext}\nAsk intake should preserve original user language while creating structured Admin review data.`,
             `Ask transcript:\n${transcript}`,
           ].join("\n\n"),
         });

@@ -5,7 +5,7 @@ import { FormEvent } from "react";
 import {
   AppSessionSettings,
   normalizeIdleTimeoutHours,
-} from "../../lib/sessionSettings";
+} from "../../lib/platform/sessionSettings";
 
 type AdminSessionSettingsPanelProps = {
   onChange: (settings: AppSessionSettings) => void;

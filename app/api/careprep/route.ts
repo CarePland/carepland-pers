@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
+import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+
 type JsonObject = Record<string, unknown>;
 type AppContentFilter = {
   eq: (column: string, value: unknown) => AppContentFilter;
@@ -968,6 +970,23 @@ export async function POST(request: NextRequest) {
     if (guidanceError) {
       throw guidanceError;
     }
+
+    await logOpenAiOperationCost({
+      careCircleId: appointment.care_circle_id,
+      metadata: { generation_mode: generationMode },
+      model: instructionVersion.model ?? "gpt-4.1-mini",
+      openAiJson,
+      operationKey: "careprep_generation",
+      operationLabel: "CarePrep generation",
+      promptVersion,
+      providerRequestId:
+        openAiResponse.headers.get("x-request-id") ??
+        openAiResponse.headers.get("openai-request-id"),
+      sourceId: guidanceRow.id,
+      sourceTable: "careprep_guidance",
+      supabase,
+      userId,
+    });
 
     meteredFeatureFinalized = true;
 

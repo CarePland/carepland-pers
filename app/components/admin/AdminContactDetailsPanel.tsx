@@ -7,7 +7,7 @@ import {
   adminContactDetailFields,
   contactDetailsChangedFields,
   emptyAdminContactDetails,
-} from "../../lib/adminContactDetails";
+} from "../../lib/admin/contactDetails";
 
 type AdminContactDetailsPanelProps = {
   contactDetails: AdminContactDetails | null;

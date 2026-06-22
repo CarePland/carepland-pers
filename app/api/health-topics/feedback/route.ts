@@ -4,8 +4,8 @@ import {
   buildUserContextFromFeedback,
   normalizeFeedbackDraft,
   type HealthTopicFeedbackDraft,
-} from "@/app/lib/healthTopics/feedback";
-import { createSupabaseUserClient } from "@/app/lib/server/supabase";
+} from "@/app/lib/personal/healthTopics/feedback";
+import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 type FeedbackInsertResult = {
   id: string;

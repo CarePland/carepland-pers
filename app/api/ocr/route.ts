@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { isMissingServerEnvError } from "@/app/lib/server/env";
-import { createSupabaseUserClient } from "@/app/lib/server/supabase";
+import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
+import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 type JsonObject = Record<string, unknown>;
 
@@ -83,6 +84,10 @@ export async function POST(request: NextRequest) {
     }
 
     const formData = await request.formData();
+    const scope =
+      formData.get("scope") === "import_anything"
+        ? "import_anything"
+        : "appointments";
     const images = formData
       .getAll("images")
       .filter((item): item is File => item instanceof File);
@@ -105,9 +110,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const extractionInstruction =
+      scope === "import_anything"
+        ? "Extract all visible healthcare-related text from these images. Preserve line breaks, dates, times, provider names, locations, addresses, phone numbers, medication names, doses, instructions, questions, labels, and section headings. Process images in the order provided. Do not summarize, classify, infer, or add commentary. Return only the extracted text. Use page markers like --- Image 1 --- before each image's extracted text."
+        : "Extract all visible appointment-related text from these images. Preserve line breaks, dates, times, provider names, locations, addresses, phone numbers, and labels. Process images in the order provided. Do not summarize, classify, infer, or add commentary. Return only the extracted text. Use page markers like --- Image 1 --- before each image's extracted text.";
     const content: JsonObject[] = [
       {
-        text: "Extract all visible appointment-related text from these images. Preserve line breaks, dates, times, provider names, locations, addresses, phone numbers, and labels. Process images in the order provided. Do not summarize, classify, infer, or add commentary. Return only the extracted text. Use page markers like --- Image 1 --- before each image's extracted text.",
+        text: extractionInstruction,
         type: "input_text",
       },
     ];
@@ -159,6 +168,19 @@ export async function POST(request: NextRequest) {
     if (!extractedText) {
       throw new Error("No text was found in that image.");
     }
+
+    await logOpenAiOperationCost({
+      metadata: { image_count: images.length, scope },
+      model: "gpt-4.1-mini",
+      openAiJson,
+      operationKey: "image_text_extraction",
+      operationLabel: "Image text extraction",
+      providerRequestId:
+        openAiResponse.headers.get("x-request-id") ??
+        openAiResponse.headers.get("openai-request-id"),
+      supabase,
+      userId: userData.user.id,
+    });
 
     return NextResponse.json({ extractedText });
   } catch (error) {

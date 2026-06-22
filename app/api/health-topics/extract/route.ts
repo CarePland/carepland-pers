@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { extractTopicMentionsForNote } from "@/app/lib/healthTopics/server";
+import { extractTopicMentionsForNote } from "@/app/lib/personal/healthTopics/server";
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
-} from "@/app/lib/server/supabase";
+} from "@/app/lib/platform/server/supabase";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {

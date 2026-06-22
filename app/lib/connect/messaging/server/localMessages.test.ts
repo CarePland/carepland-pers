@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, it } from "node:test";
+
+import {
+  readLocalConnectMessages,
+  recordLocalConnectMessage,
+  updateLocalConnectMessageState,
+} from "./localMessages";
+
+describe("local Connect messages", () => {
+  it("records messages with audio artifact references and state updates", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "connect-messages-"));
+    const indexPath = path.join(dir, "messages.json");
+
+    try {
+      const message = await recordLocalConnectMessage(
+        {
+          audioArtifactId: "audio-artifact-1",
+          audioMimeType: "audio/webm",
+          audioUrl: "/api/connect/audio/media/receiver/audio.webm",
+          body: "Voice message",
+          from: "receiver_user",
+          mainConnectUserPersonId: "person-bob",
+          receiverId: "living-room-receiver",
+          to: "Andrew",
+          transcriptStatus: "completed",
+        },
+        { indexPath }
+      );
+      await updateLocalConnectMessageState(message.id, "heard", { indexPath });
+      const index = await readLocalConnectMessages({ indexPath });
+
+      assert.equal(index.messages.length, 1);
+      assert.equal(index.messages[0]?.audioArtifactId, "audio-artifact-1");
+      assert.equal(Boolean(index.messages[0]?.heardAt), true);
+    } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
+  });
+
+  it("does not update message state for another Main Connect User", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "connect-messages-"));
+    const indexPath = path.join(dir, "messages.json");
+
+    try {
+      const message = await recordLocalConnectMessage(
+        {
+          body: "For Bob",
+          from: "Andrew",
+          mainConnectUserPersonId: "person-bob",
+          to: "Bob",
+        },
+        { indexPath }
+      );
+      const updated = await updateLocalConnectMessageState(message.id, "read", {
+        indexPath,
+        mainConnectUserPersonId: "person-alice",
+      });
+      const index = await readLocalConnectMessages({ indexPath });
+
+      assert.equal(updated, null);
+      assert.equal(index.messages[0]?.readAt, "");
+    } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
+  });
+});

@@ -4,83 +4,16 @@ import { RefObject } from "react";
 import {
   AdminContactDetails,
   adminContactDetailsFromValue,
-} from "../../lib/adminContactDetails";
+} from "../../lib/admin/contactDetails";
 import { AdminContactDetailsPanel } from "./AdminContactDetailsPanel";
-
-type AdminSensitiveResourceType =
-  | "appointment_details"
-  | "appointment_note"
-  | "careprep_guidance"
-  | "profile_contact";
-
-type AdminRevealedSensitiveData = Record<string, unknown> & {
-  resource_type?: AdminSensitiveResourceType;
-};
-
-type AdminReadonlyCareSubject = {
-  display_name: string;
-  id: string;
-};
-
-type AdminReadonlyProfile = {
-  id: string;
-  display_name: string | null;
-  masked_email: string | null;
-  onboarding_completed_at: string | null;
-  beta_terms_acknowledged_at: string | null;
-  beta_privacy_acknowledged_at: string | null;
-  beta_disclaimer_acknowledged_at: string | null;
-  requires_email_update: boolean;
-  is_admin: boolean;
-  is_test_user: boolean;
-  has_contact_details: boolean;
-};
-
-type AdminReadonlyCounts = {
-  appointment_count: number;
-  note_count: number;
-  careprep_count: number;
-};
-
-type AdminReadonlyEntitlement = {
-  care_circle_id: string;
-  plan_id: string | null;
-  plan_name: string | null;
-};
-
-type AdminReadonlyAppointment = {
-  id: string;
-  care_subject_id: string | null;
-  current_note_id: string | null;
-  current_guidance_id: string | null;
-  current_guidance_review_status: string | null;
-  created_at: string | null;
-  title_preview: string | null;
-  starts_on: string | null;
-  status: string;
-  updated_at: string | null;
-  is_sample_data: boolean;
-  has_starts_at: boolean;
-  has_provider_name: boolean;
-  has_provider_organization: boolean;
-  has_location_name: boolean;
-  provider_name_preview: string | null;
-  provider_organization_preview: string | null;
-  location_name_preview: string | null;
-  has_reason: boolean;
-  has_location_address: boolean;
-  has_location_phone: boolean;
-  has_note: boolean;
-  has_careprep: boolean;
-};
-
-type AdminReadonlySnapshot = {
-  appointments: AdminReadonlyAppointment[];
-  care_subjects: AdminReadonlyCareSubject[];
-  counts: AdminReadonlyCounts;
-  entitlements: AdminReadonlyEntitlement[];
-  profile: AdminReadonlyProfile;
-};
+import {
+  adminSensitiveKey,
+  type AdminReadonlyAppointment,
+  type AdminReadonlyCareSubject,
+  type AdminReadonlySnapshot,
+  type AdminRevealedSensitiveData,
+  type AdminSensitiveResourceType,
+} from "./adminReadonlyUserTypes";
 
 type AdminReadonlyUserPanelProps = {
   formatAdminDate: (value: string | null) => string;
@@ -127,13 +60,6 @@ function asTextList(value: unknown): string[] {
 
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function adminSensitiveKey(
-  resourceType: AdminSensitiveResourceType,
-  resourceId: string | null = null
-) {
-  return `${resourceType}:${resourceId ?? "profile"}`;
 }
 
 function adminAppointmentPrivacyLabel(appointment: AdminReadonlyAppointment) {

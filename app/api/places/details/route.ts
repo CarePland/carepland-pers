@@ -4,7 +4,7 @@ import {
   googlePlacesErrorKey,
   placesUnavailableMessage,
   PlaceDetailsResult,
-} from "../../../lib/places";
+} from "../../../lib/platform/integrations/places";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";

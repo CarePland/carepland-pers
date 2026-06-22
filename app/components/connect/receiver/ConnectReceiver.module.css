@@ -1,0 +1,1508 @@
+.receiverPage,
+.activationScreen {
+  --button-highlight: rgba(255, 255, 255, 0.32);
+  --button-shadow: rgba(50, 37, 22, 0.34);
+  --selected-action-shadow: rgba(38, 102, 26, 0.28);
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: #202423;
+  color: #17231d;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+.activationScreen {
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.activationPanel {
+  display: grid;
+  gap: 14px;
+  width: min(420px, 100%);
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #f4f5f3;
+  padding: 22px;
+  text-align: center;
+}
+
+.activationPanel p,
+.activationPanel span {
+  margin: 0;
+  color: #5d675f;
+  font-weight: 900;
+}
+
+.activationPanel p {
+  text-transform: uppercase;
+}
+
+.activationPanel h1 {
+  margin: 0;
+  font-size: 2.5rem;
+  line-height: 1;
+}
+
+.activationPanel button,
+.primaryAction,
+.secondaryAction,
+.iconAction,
+.toolAction,
+.messageAction,
+.modalButton,
+.personButton {
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 900;
+  letter-spacing: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.activationPanel button:focus-visible,
+.primaryAction:focus-visible,
+.secondaryAction:focus-visible,
+.iconAction:focus-visible,
+.toolAction:focus-visible,
+.messageAction:focus-visible,
+.modalButton:focus-visible,
+.personButton:focus-visible {
+  outline: 4px solid #111;
+  outline-offset: 3px;
+}
+
+.activationPanel button {
+  min-height: 76px;
+  border: 3px solid #17440f;
+  background: #26661a;
+  color: white;
+  font-size: 1.5rem;
+  box-shadow:
+    inset 0 2px 0 var(--button-highlight),
+    0 5px 0 #17440f,
+    0 8px 13px var(--button-shadow);
+}
+
+.receiverPage {
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  overflow: hidden;
+  padding: 0;
+}
+
+.applianceFrame {
+  --receiver-canvas-width: 900px;
+  --receiver-canvas-height: 1047px;
+  --receiver-scale: 1;
+  position: relative;
+  width: calc(var(--receiver-canvas-width) * var(--receiver-scale));
+  height: calc(var(--receiver-canvas-height) * var(--receiver-scale));
+  min-height: 0;
+  background: #e4e7e5;
+}
+
+.receiverShell {
+  position: relative;
+  container-type: inline-size;
+  display: grid;
+  grid-template-rows: auto auto auto auto;
+  align-content: start;
+  gap: clamp(10px, 1.2cqw, 16px);
+  width: var(--receiver-canvas-width);
+  height: var(--receiver-canvas-height);
+  overflow: hidden;
+  border-right: 4px solid rgba(30, 36, 34, 0.28);
+  border-left: 4px solid rgba(30, 36, 34, 0.28);
+  background:
+    repeating-linear-gradient(90deg, rgba(57, 64, 61, 0.06) 0 2px, transparent 2px 22px),
+    #e4e7e5;
+  padding: clamp(14px, 1.45cqw, 22px);
+  transform: scale(var(--receiver-scale));
+  transform-origin: top left;
+}
+
+.statusZone,
+.contactZone,
+.actionZone,
+.workspaceZone {
+  min-height: 0;
+  overflow: hidden;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: rgba(248, 249, 247, 0.96);
+  padding: 12px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 2px 5px rgba(30, 36, 34, 0.12);
+}
+
+.statusZone {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  min-height: 154px;
+}
+
+.timeBlock,
+.greetingBlock {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.timeBlock strong {
+  font-size: clamp(2.35rem, 7.8cqw, 2.75rem);
+  line-height: 1;
+}
+
+.greetingBlock {
+  justify-items: end;
+  text-align: right;
+}
+
+.greetingBlock strong {
+  font-size: clamp(1.42rem, 5cqw, 1.82rem);
+  line-height: 1.05;
+}
+
+.timeBlock span,
+.greetingBlock span,
+.appointmentPanel span {
+  color: #5d675f;
+  font-size: 1.22rem;
+  font-weight: 850;
+}
+
+.appointmentPanel {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.appointmentPanel strong {
+  display: block;
+  font-size: clamp(1.45rem, 5cqw, 1.68rem);
+  line-height: 1.08;
+}
+
+.appointmentPanel div:last-child {
+  text-align: right;
+}
+
+.peopleStrip {
+  display: grid;
+  grid-template-columns: repeat(var(--receiver-user-count, 2), minmax(0, 1fr));
+  gap: 10px;
+}
+
+.personButton {
+  min-height: 82px;
+  border: 3px solid #78a36f;
+  background: #e7f1e3;
+  color: #17231d;
+  text-align: center;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.72),
+    0 4px 0 #9a8d70,
+    0 6px 10px rgba(60, 44, 28, 0.18);
+}
+
+.personButton strong {
+  display: block;
+  font-size: clamp(1.22rem, 4vw, 1.55rem);
+  line-height: 1.05;
+}
+
+.personButton span {
+  color: #5d675f;
+  font-size: 1.08rem;
+  font-weight: 850;
+}
+
+.personButton.selected {
+  border: 4px solid #17440f;
+  background: #26661a;
+  color: white;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    0 3px 0 #17440f,
+    0 7px 12px var(--selected-action-shadow);
+}
+
+.personButton.selected span {
+  color: #eef8e9;
+}
+
+.guideActive {
+  --guide-target-red: #d92323;
+}
+
+.guideActive .receiverShell::before {
+  position: absolute;
+  z-index: 35;
+  inset: 0;
+  background: rgba(13, 24, 19, 0.68);
+  content: "";
+  pointer-events: none;
+}
+
+.guideDim {
+  opacity: 0.28;
+}
+
+.guideTarget {
+  position: relative;
+  z-index: 42;
+  border-color: var(--guide-target-red) !important;
+  outline: 8px solid var(--guide-target-red);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 6px rgba(217, 35, 35, 0.18);
+}
+
+.guideRectTarget {
+  position: absolute;
+  z-index: 44;
+  top: var(--guide-y);
+  left: var(--guide-x);
+  width: var(--guide-width);
+  height: var(--guide-height);
+  border: 8px solid var(--guide-target-red);
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 8px rgba(217, 35, 35, 0.24),
+    0 0 22px rgba(217, 35, 35, 0.45);
+  pointer-events: none;
+}
+
+.actionZone,
+.workspaceZone,
+.modalPanel {
+  display: grid;
+  gap: 10px;
+}
+
+.workspaceZone {
+  grid-template-rows: auto auto auto;
+  align-content: start;
+  gap: 14px;
+}
+
+.workspaceZone .messageCard {
+  min-height: 0;
+  overflow: visible;
+}
+
+.primaryAction,
+.secondaryAction,
+.messageAction,
+.modalButton {
+  min-height: 70px;
+  border: 3px solid transparent;
+  color: white;
+  line-height: 1.05;
+  padding: 8px 12px;
+  box-shadow:
+    inset 0 2px 0 var(--button-highlight),
+    0 5px 0 rgba(42, 31, 21, 0.42),
+    0 8px 13px var(--button-shadow);
+  transition:
+    transform 70ms ease,
+    box-shadow 70ms ease,
+    filter 70ms ease;
+}
+
+.primaryAction,
+.modalButton {
+  border-color: #17440f;
+  background: #26661a;
+}
+
+.primaryAction {
+  min-height: 82px;
+  font-size: clamp(1.62rem, 7cqw, 2.08rem);
+}
+
+.secondaryActions,
+.receiverActionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 92px;
+  gap: 12px;
+}
+
+.secondaryAction {
+  min-height: 78px;
+  border-color: #454b46;
+  background: #5f665f;
+  font-size: clamp(1.2rem, 5cqw, 1.54rem);
+}
+
+.green {
+  border-color: #17440f;
+  background: #26661a;
+}
+
+.blue {
+  border-color: #1c4163;
+  background: #2d5c87;
+}
+
+.wideAction {
+  width: 100%;
+}
+
+.iconAction {
+  display: grid;
+  place-items: center;
+  min-height: 78px;
+  border: 3px solid #454b46;
+  color: white;
+  padding: 4px;
+  font-size: 0;
+  line-height: 1;
+  box-shadow:
+    inset 0 2px 0 var(--button-highlight),
+    0 5px 0 rgba(42, 31, 21, 0.42),
+    0 8px 13px var(--button-shadow);
+}
+
+.recordAction {
+  border-color: #050605;
+  background: #111111;
+}
+
+.recordingActive {
+  border-color: #6f241f;
+  background: #e33c45;
+  animation: recordingPulse 0.9s ease-in-out infinite alternate;
+}
+
+.soundAction,
+.gestureAction {
+  border-color: #454b46;
+  background: #5e655e;
+  color: white;
+}
+
+@keyframes recordingPulse {
+  from {
+    filter: brightness(1);
+  }
+  to {
+    filter: brightness(1.18);
+  }
+}
+
+.micIcon,
+.soundIcon {
+  position: relative;
+  display: block;
+  width: clamp(48px, 6cqw, 76px);
+  height: clamp(48px, 6cqw, 76px);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.micIcon {
+  background-image: url("/connect/receiver/microphone.svg");
+}
+
+.recordingActive .micIcon {
+  filter: saturate(0) brightness(2);
+}
+
+.soundIcon {
+  background-image: url("/connect/receiver/optional-sounds.png");
+  width: clamp(68px, 8.4cqw, 104px);
+  height: clamp(68px, 8.4cqw, 104px);
+}
+
+.receiverTools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.toolAction {
+  min-height: 48px;
+  border: 2px solid #b9beb8;
+  background: #fffdf7;
+  color: #5d675f;
+  padding: 8px 10px;
+  font-size: 0.98rem;
+  line-height: 1.05;
+  box-shadow: none;
+}
+
+.statusLine {
+  margin: 0;
+  min-height: 44px;
+  border: 1px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  padding: 10px 12px;
+  font-size: 1.08rem;
+  font-weight: 850;
+}
+
+.workspaceNav {
+  display: grid;
+  grid-template-columns: auto minmax(88px, 0.72fr) minmax(24px, 1fr) minmax(72px, 0.82fr) minmax(72px, 0.82fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.workspaceNavTitleOnly {
+  grid-template-columns: 1fr;
+}
+
+.workspaceNav strong {
+  font-size: clamp(1.6rem, 4.4cqw, 2.08rem);
+  text-align: left;
+}
+
+.workspaceNav .messageAction {
+  min-height: 54px;
+  font-size: 1.08rem;
+}
+
+.workspaceShowAllButton {
+  min-width: 92px;
+}
+
+.workspaceNavSpacer {
+  min-width: 0;
+}
+
+.messageCard {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  gap: 16px;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 0 0;
+  text-align: center;
+}
+
+.messageCard strong {
+  font-size: clamp(1.75rem, 4.8cqw, 2.1rem);
+  line-height: 1.08;
+  padding: 0 16px;
+}
+
+.messageCard p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-size: clamp(1.68rem, 4.6cqw, 2rem);
+  font-weight: 950;
+  line-height: 1.12;
+  padding: 0 16px;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.messageAction {
+  min-height: 68px;
+  border-color: #1c4163;
+  background: #2d5c87;
+  font-size: 1.55rem;
+}
+
+.messageNavButton {
+  border-color: #b9beb8;
+  background: #fffdf7;
+  color: #5d675f;
+}
+
+.messageNavButton:disabled {
+  border-color: #cbd0ca;
+  background: #fbfbf8;
+  color: #b2b9b3;
+}
+
+.messageButtonRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 6px;
+  margin-top: 10px;
+}
+
+.callBackAction {
+  border-color: #17440f;
+  background: #26661a;
+}
+
+.stopPlaybackAction {
+  border-color: #050605;
+  background: #111111;
+  color: white;
+}
+
+.primaryAction:active,
+.secondaryAction:active,
+.messageAction:active,
+.modalButton:active,
+.iconAction:active,
+.personButton:active,
+.activationPanel button:active {
+  transform: translateY(4px);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.22),
+    0 1px 0 rgba(42, 31, 21, 0.42),
+    0 3px 7px rgba(50, 37, 22, 0.22);
+}
+
+.messageAction:disabled,
+.inactive {
+  border-color: #a9b2ab;
+  background: #d0d6d2;
+  color: #17231d;
+  cursor: default;
+}
+
+.modal {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(20, 36, 28, 0.42);
+  padding: 18px;
+}
+
+.modalPanel {
+  width: min(820px, calc(100% - 36px));
+  max-height: calc(100% - 34px);
+  overflow-y: auto;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #f4f5f3;
+  padding: 20px;
+}
+
+.modalTitleRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+  gap: clamp(12px, 1.6cqw, 22px);
+  align-items: start;
+}
+
+.modalTitleRow h2 {
+  margin: 0;
+  font-size: clamp(2.15rem, 4.8vw, 3.25rem);
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+.modalTitleRow .modalButton {
+  min-height: clamp(48px, 6dvh, 64px);
+  font-size: clamp(1.05rem, 2.2vw, 1.45rem);
+  line-height: 1.08;
+  padding: 8px 14px;
+}
+
+.secondary {
+  border-color: #b9beb8;
+  background: #fffdf7;
+  color: #5d675f;
+}
+
+.gold {
+  border-color: #454b46;
+  background: #5f665f;
+}
+
+.danger {
+  border-color: #6f241f;
+  background: #9d3f35;
+}
+
+.contactPanel {
+  width: min(700px, 100%);
+}
+
+.availabilityNotice {
+  margin: 0;
+  border: 3px solid #c6b06c;
+  border-radius: 8px;
+  background: #fff7d8;
+  padding: 12px;
+  color: #17231d;
+  font-size: 1.3rem;
+  font-weight: 850;
+}
+
+.recordingNotice {
+  margin: 0;
+  border: 2px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  color: #5d675f;
+  padding: 10px 12px;
+  font-size: 1.05rem;
+  font-weight: 850;
+}
+
+.askPrompt {
+  margin: 0;
+  color: #5d675f;
+  font-size: clamp(1.55rem, 3vw, 2.25rem);
+  font-weight: 900;
+  line-height: 1.12;
+}
+
+.settingsCopy,
+.diagnosticText,
+.soundHelpPanel {
+  margin: 0;
+  border: 2px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  color: #17231d;
+  padding: 12px;
+  font-size: 1.12rem;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.diagnosticText {
+  border-color: #c6b06c;
+  background: #fff7d8;
+}
+
+.soundHelpPanel {
+  display: grid;
+  gap: 8px;
+}
+
+.soundHelpPanel p {
+  margin: 0;
+}
+
+.soundProblemGrid {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.soundProblemGrid p {
+  margin: 0;
+  color: #17231d;
+  padding-top: 14px;
+  font-size: 2rem;
+  font-weight: 950;
+}
+
+.soundProblemChoices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.soundProblemChoice {
+  border-color: #aeb6ae;
+  background: #fffdf7;
+  color: #5d675f;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.86),
+    0 5px 0 #b9aa8a,
+    0 10px 16px rgba(60, 44, 28, 0.18);
+}
+
+.soundHelpRecipe {
+  display: grid;
+  gap: 12px;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #fffdf7;
+  color: #17231d;
+  padding: 14px 16px;
+  font-weight: 850;
+}
+
+.soundHelpRecipe h3,
+.soundHelpRecipe p,
+.soundHelpRecipe ol {
+  margin: 0;
+}
+
+.soundHelpRecipe h3 {
+  font-size: clamp(1.45rem, 3vw, 2.15rem);
+  font-weight: 950;
+}
+
+.soundHelpRecipe p,
+.soundHelpRecipe li {
+  font-size: clamp(1.08rem, 2.1vw, 1.55rem);
+  line-height: 1.22;
+}
+
+.soundHelpRecipe ol {
+  padding-left: 1.35em;
+}
+
+.soundHelpActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.soundContext {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #fffdf7;
+  color: #17231d;
+  padding: 8px 18px;
+  box-shadow: 0 6px 0 rgba(141, 133, 119, 0.65);
+}
+
+.soundContext div {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.38fr) 1fr;
+  gap: 18px;
+  border-bottom: 2px solid #d7d0bf;
+  padding: 6px 0;
+}
+
+.soundContext div:last-child {
+  border-bottom: 0;
+}
+
+.soundContext dt,
+.soundContext dd {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.soundContext dt {
+  color: #5d675f;
+  font-weight: 900;
+}
+
+.soundContext dd {
+  font-weight: 950;
+}
+
+.soundSettingGroup {
+  display: grid;
+  gap: 8px;
+  border: 2px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  padding: 12px;
+}
+
+.soundSettingGroup strong {
+  font-size: 1.18rem;
+}
+
+.soundChoiceRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.soundChoice {
+  min-height: 58px;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #fffdf7;
+  color: #5d675f;
+  padding: 8px;
+  font: inherit;
+  font-weight: 900;
+}
+
+.soundChoiceSelected {
+  border-color: #17440f;
+  background: #26661a;
+  color: white;
+}
+
+.soundPanel {
+  gap: 14px;
+}
+
+.soundPanel .modalTitleRow h2 {
+  font-size: 2.65rem;
+  font-weight: 950;
+}
+
+.soundPanel .modalTitleRow .modalButton {
+  min-height: clamp(48px, 6dvh, 64px);
+  font-size: clamp(1.05rem, 2.2vw, 1.45rem);
+}
+
+.soundPanel .settingsCopy {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: clamp(1.45rem, 2.9vw, 2rem);
+  font-weight: 850;
+}
+
+.soundPanel .soundSettingGroup {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  gap: 12px;
+}
+
+.soundPanel .soundSettingGroup strong {
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  font-weight: 950;
+}
+
+.soundPanel .soundChoiceRow {
+  gap: 14px;
+}
+
+.soundPanel .soundChoice {
+  min-height: 64px;
+  font-size: 1.55rem;
+}
+
+.soundPanel .diagnosticText,
+.soundPanel .soundHelpPanel {
+  font-size: 1.58rem;
+  border-width: 3px;
+}
+
+.soundPanel .soundHelpPanel {
+  gap: 9px;
+  padding: 16px 18px;
+}
+
+.soundPanel .soundProblemGrid .soundChoice {
+  min-height: 62px;
+}
+
+.soundPanel .soundProblemChoiceSelected {
+  border-color: #947f50;
+  background: #efe3ce;
+  color: #17231d;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.74),
+    inset 0 -3px 0 rgba(148, 127, 80, 0.2),
+    0 4px 0 #947f50,
+    0 10px 16px rgba(60, 44, 28, 0.22);
+}
+
+.soundPanel .soundTestButton {
+  min-height: 88px;
+  border-color: #17440f;
+  background: #26661a;
+  font-size: 2.25rem;
+}
+
+.soundPanel .soundVolumeRow {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.soundPanel .gold {
+  min-height: clamp(82px, 9.5dvh, 110px);
+  font-size: clamp(1.65rem, 3.3vw, 2.35rem);
+}
+
+.requestInput {
+  width: 100%;
+  min-height: clamp(150px, 21dvh, 210px);
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  color: #17231d;
+  padding: clamp(16px, 2.2cqw, 26px);
+  font: inherit;
+  font-size: clamp(1.7rem, 3.8vw, 2.55rem);
+  font-weight: 900;
+  line-height: 1.2;
+  resize: vertical;
+}
+
+.requestExamples {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.requestExample {
+  min-height: clamp(68px, 8dvh, 92px);
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  color: #17231d;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: clamp(1.15rem, 2.4vw, 1.7rem);
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.recordRequestButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: clamp(78px, 10dvh, 106px);
+  font-size: clamp(1.35rem, 3vw, 2.1rem);
+}
+
+.recordReviewStopButton {
+  border-color: #050605;
+  background: #111111;
+  color: white;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.22),
+    0 5px 0 rgba(42, 31, 21, 0.42),
+    0 8px 13px var(--button-shadow);
+}
+
+.askSubmitButton {
+  min-height: clamp(82px, 10dvh, 106px);
+  font-size: clamp(1.75rem, 3.4vw, 2.35rem);
+}
+
+.recordReviewText {
+  margin: 0;
+  min-height: clamp(120px, 20dvh, 180px);
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  color: #17231d;
+  padding: clamp(16px, 2.2cqw, 26px);
+  font-size: clamp(1.9rem, 3.8vw, 2.6rem);
+  font-weight: 950;
+  line-height: 1.18;
+  box-shadow: inset 0 1px 8px rgba(30, 36, 34, 0.08);
+}
+
+.askedLabel {
+  display: block;
+  margin-bottom: 4px;
+  color: #5d675f;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.askedText {
+  margin: 0;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  color: #17231d;
+  padding: 14px 16px;
+  font-size: clamp(1.2rem, 5vw, 1.55rem);
+  font-weight: 850;
+  line-height: 1.22;
+}
+
+.askedText span {
+  color: #5d675f;
+  font-weight: 950;
+}
+
+.interpreterMessage,
+.readerText {
+  margin: 0;
+  color: #17231d;
+  font-size: clamp(1.55rem, 6vw, 2.1rem);
+  font-weight: 920;
+  line-height: 1.18;
+  white-space: pre-wrap;
+}
+
+.readerText {
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+  text-align: left;
+}
+
+.readerPanel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  gap: 12px;
+  max-height: calc(100dvh - 34px);
+  overflow: hidden;
+}
+
+.readerTitle {
+  align-self: center;
+  min-width: 0;
+  font-size: clamp(1.15rem, 3.1cqw, 2.25rem) !important;
+  font-weight: 950;
+  line-height: 1.04 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.readerPanel .modalTitleRow {
+  grid-template-columns: minmax(0, 1fr) clamp(168px, 31cqw, 244px);
+  align-items: center;
+}
+
+.readerTextStandard {
+  font-size: clamp(1.9rem, 3.6vw, 2.25rem);
+  font-weight: 780;
+  line-height: 1.38;
+}
+
+.readerTextLarge {
+  font-size: clamp(2.7rem, 5.4vw, 3.55rem);
+  line-height: 1.16;
+}
+
+.readerTextExtra {
+  font-size: clamp(3.8rem, 7.8vw, 5.25rem);
+  line-height: 1.12;
+}
+
+.readerSizeRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.readerSizeButton {
+  min-height: clamp(70px, 8dvh, 92px);
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  color: #17231d;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: clamp(1.22rem, 2.5vw, 1.8rem);
+  font-weight: 900;
+  line-height: 1;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.8),
+    0 3px 0 #b9aa8a,
+    0 5px 8px rgba(60, 44, 28, 0.12);
+}
+
+.readerSizeButtonSelected {
+  border: 4px solid #17440f;
+  background: #26661a;
+  color: white;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.2),
+    0 3px 0 #17440f,
+    0 6px 9px var(--selected-action-shadow);
+}
+
+.readerPageControls {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.8fr) auto minmax(92px, 0.8fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.readerPageControls .modalButton {
+  min-height: 70px;
+  font-size: 2rem;
+}
+
+.readerPageControls .modalButton:disabled {
+  border-color: #cbd0ca;
+  background: #fbfbf8;
+  color: #b2b9b3;
+}
+
+.readerPageControls span {
+  color: #5d675f;
+  font-size: 1.45rem;
+  font-weight: 950;
+  text-align: center;
+}
+
+.messageBodySlot {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.messageFeedbackOverlay {
+  position: absolute;
+  z-index: 2;
+  top: calc(clamp(70px, 8dvh, 92px) + 22px);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  align-items: start;
+  min-height: 0;
+  padding-top: 8px;
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(244, 245, 243, 0.12),
+      rgba(244, 245, 243, 0.95) 28px,
+      rgba(244, 245, 243, 0.98)
+    );
+}
+
+.messageDetailActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.messageDetailActions .modalButton {
+  font-size: clamp(1.35rem, 3.2vw, 2rem);
+}
+
+.messagePreferenceAction {
+  justify-self: center;
+  min-height: 46px;
+  border: 3px solid #b9beb8;
+  border-radius: 999px;
+  background: #fffdf7;
+  color: #1c4163;
+  padding: 8px 18px;
+  font: inherit;
+  font-size: clamp(0.98rem, 2.2vw, 1.25rem);
+  font-weight: 900;
+  text-align: center;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.75),
+    0 2px 0 #b9aa8a,
+    0 4px 8px rgba(60, 44, 28, 0.1);
+}
+
+.messageFeedbackPanel {
+  display: grid;
+  gap: 10px;
+  align-self: start;
+  max-height: 100%;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #fffdf7;
+  padding: 14px;
+  overflow: auto;
+}
+
+.messageFeedbackPanel p {
+  margin: 0;
+  color: #17231d;
+  font-size: clamp(1.2rem, 3vw, 1.55rem);
+  font-weight: 850;
+  line-height: 1.18;
+}
+
+.messageFeedbackChoices {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+
+.messageFeedbackChoices .modalButton {
+  width: min(680px, 100%);
+  min-height: clamp(74px, 8.5dvh, 96px);
+  font-size: clamp(1.35rem, 3.2vw, 2rem);
+}
+
+.messageFeedbackChoices .modalButton:disabled {
+  border-color: #cbd0ca;
+  background: #fbfbf8;
+  color: #9aa39d;
+  cursor: not-allowed;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.75),
+    0 3px 0 #c8c0ae,
+    0 5px 8px rgba(60, 44, 28, 0.1);
+}
+
+.messageFeedbackOkay {
+  min-height: clamp(74px, 8.5dvh, 96px);
+  font-size: clamp(1.55rem, 3.5vw, 2.2rem);
+}
+
+.messageVersionCompare {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.messageVersionColumn {
+  display: grid;
+  gap: 10px;
+}
+
+.messageVersionColumn .modalButton {
+  min-height: clamp(68px, 7.5dvh, 86px);
+  font-size: clamp(1.05rem, 2.35vw, 1.52rem);
+}
+
+.messageVersionColumn .modalButton:disabled {
+  border-color: #cbd0ca;
+  background: #fbfbf8;
+  color: #9aa39d;
+  cursor: not-allowed;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.75),
+    0 3px 0 #c8c0ae,
+    0 5px 8px rgba(60, 44, 28, 0.1);
+}
+
+.appointmentChooserPanel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  row-gap: 18px;
+  height: min(940px, calc(var(--receiver-canvas-height) - 96px));
+  overflow: hidden;
+}
+
+.appointmentList {
+  display: grid;
+  grid-auto-rows: auto;
+  gap: 18px;
+  align-content: start;
+  min-height: 0;
+  overflow: visible;
+  padding-bottom: 8px;
+}
+
+.appointmentListStretch {
+  grid-auto-rows: minmax(0, 1fr);
+  align-content: stretch;
+}
+
+.appointmentChoice {
+  border: 4px solid #1c4163;
+  border-radius: 8px;
+  background: white;
+  color: #17231d;
+  padding: clamp(18px, 2.4dvh, 28px) 22px;
+  font: inherit;
+  font-size: clamp(1.7rem, 4vw, 2.6rem);
+  font-weight: 950;
+  line-height: 1.08;
+  text-align: center;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.78),
+    0 4px 0 #b9aa8a,
+    0 8px 12px rgba(60, 44, 28, 0.16);
+}
+
+.appointmentChoice strong {
+  display: block;
+}
+
+.appointmentPager {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.appointmentDetail {
+  display: grid;
+  gap: 18px;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  padding: clamp(22px, 3cqw, 34px);
+  text-align: center;
+}
+
+.appointmentDetail h3,
+.appointmentDetail p,
+.appointmentPhone {
+  margin: 0;
+  color: #17231d;
+  font-weight: 950;
+  line-height: 1.18;
+}
+
+.appointmentDetail h3 {
+  font-size: clamp(2rem, 5vw, 3.25rem);
+}
+
+.appointmentDetail p {
+  font-size: clamp(1.45rem, 3.5vw, 2.35rem);
+}
+
+.appointmentDetail .appointmentTime {
+  color: #214766;
+  font-size: clamp(1.8rem, 4.5vw, 3rem);
+}
+
+.appointmentPhone {
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  padding: 14px 16px;
+  font-size: clamp(1.5rem, 4vw, 2.4rem);
+}
+
+.universalAskActions {
+  display: grid;
+  gap: 14px;
+}
+
+.universalAskActions .modalButton {
+  min-height: clamp(82px, 10dvh, 108px);
+  font-size: clamp(1.7rem, 3.5vw, 2.45rem);
+}
+
+.allMessagesPanel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  row-gap: 14px;
+  height: min(880px, calc(var(--receiver-canvas-height) - 96px));
+  overflow: hidden;
+}
+
+.allMessagesList {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.allMessageRow {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  padding: clamp(14px, 1.8cqw, 22px);
+  font: inherit;
+  text-align: left;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.78),
+    0 3px 0 #b9aa8a,
+    0 7px 12px rgba(60, 44, 28, 0.12);
+}
+
+.allMessageRow strong,
+.allMessageRow span {
+  display: block;
+  margin: 0;
+  color: #17231d;
+  font-size: clamp(1.3rem, 2.1vw, 1.8rem);
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.allMessageRow span {
+  margin-top: 8px;
+  color: #5d675f;
+  font-size: clamp(1.2rem, 2vw, 1.65rem);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.allMessagesStandard .allMessageRow strong {
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
+}
+
+.allMessagesStandard .allMessageRow span {
+  font-size: clamp(1.15rem, 1.8vw, 1.5rem);
+}
+
+.allMessagesLarge .allMessageRow strong {
+  font-size: clamp(1.65rem, 2.8vw, 2.25rem);
+}
+
+.allMessagesLarge .allMessageRow span {
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+}
+
+.allMessagesExtra .allMessageRow strong {
+  font-size: clamp(2rem, 3.4vw, 2.8rem);
+  line-height: 1.1;
+}
+
+.allMessagesExtra .allMessageRow span {
+  font-size: clamp(1.9rem, 3.1vw, 2.55rem);
+  line-height: 1.12;
+}
+
+.incomingCallModal {
+  border-color: #17440f;
+  background: #fbfcfa;
+}
+
+.incomingCallPanel {
+  display: grid;
+  gap: 8px;
+  min-height: 220px;
+  border: 4px solid #17440f;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(231, 241, 227, 0.98), rgba(255, 253, 247, 0.98));
+  padding: 24px;
+  text-align: center;
+  align-content: center;
+}
+
+.incomingCallPanel p {
+  margin: 0;
+  color: #17440f;
+  font-size: 1.25rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.incomingCallPanel h2 {
+  margin: 0;
+  font-size: clamp(3rem, 14vw, 4.25rem);
+  line-height: 0.98;
+  overflow-wrap: anywhere;
+}
+
+.incomingCallPanel span {
+  font-size: clamp(1.55rem, 7vw, 2rem);
+  font-weight: 900;
+  line-height: 1.12;
+}
+
+.ringing {
+  animation: incomingCallRing 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes incomingCallRing {
+  from {
+    box-shadow:
+      inset 0 0 0 0 rgba(38, 102, 26, 0.18),
+      0 0 0 0 rgba(38, 102, 26, 0.24);
+  }
+  to {
+    box-shadow:
+      inset 0 0 0 8px rgba(38, 102, 26, 0.18),
+      0 0 0 8px rgba(38, 102, 26, 0.18);
+  }
+}
+
+.incomingCallActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 14px;
+}
