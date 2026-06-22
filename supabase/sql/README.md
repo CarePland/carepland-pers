@@ -5,6 +5,18 @@ Supabase SQL editor history.
 
 ## Current Committed SQL
 
+- `2026-06-19_connect_main_user_context.sql`
+  Migration: adds Connect-local settings in `connect_settings`, Pers-backed Connect participant enablement in `connect_participants`, and RLS policies for the Main Connect User model. This migration intentionally does not backfill every active `care_subjects` row into Connect.
+
+- `2026-06-20_care_subject_avatars.sql`
+  Migration: adds lightweight avatar metadata to `care_subjects` and creates the private `carepland-avatars` Supabase Storage bucket for uploaded person/Care VIP avatars.
+
+- `2026-06-22_verify_connect_participants.sql`
+  Read-only verification utility: reviews Connect participant counts/details, flags participant/person care-circle mismatches, flags Main Connect User settings that do not point to an accessible active Connect participant, reports active pet Care VIPs enabled as Connect participants, and highlights care circles where every active Care VIP is enabled for Connect.
+
+- `2026-06-22_connect_settings_participant_policy.sql`
+  Migration patch: tightens `connect_settings` writes so the durable Main Connect User can only be set to an active non-pet Connect participant in one of the signed-in user's care circles.
+
 - `2026-05-19_beta_agreement_profile_fields.sql`  
   Migration: Early Access acknowledgement fields on `profiles` (legacy column names retain `beta_*`).
 
