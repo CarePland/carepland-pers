@@ -17,6 +17,12 @@ Supabase SQL editor history.
 - `2026-06-22_connect_settings_participant_policy.sql`
   Migration patch: tightens `connect_settings` writes so the durable Main Connect User can only be set to an active non-pet Connect participant in one of the signed-in user's care circles.
 
+- `2026-06-22_care_subject_pet_types_text.sql`
+  Migration patch: converts `care_subjects.subject_type` from the older enum to constrained text so Profile can save cat, dog, generic pet, and `pet:<label>` values.
+
+- `2026-06-22_care_providers.sql`
+  Migration: adds per-Care-VIP durable provider records for Personal, scoped by `care_subject_id` so provider nicknames and edits do not merge across patients.
+
 - `2026-05-19_beta_agreement_profile_fields.sql`  
   Migration: Early Access acknowledgement fields on `profiles` (legacy column names retain `beta_*`).
 
