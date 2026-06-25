@@ -26,6 +26,20 @@ function accessTokenFromRequest(request: Request) {
 }
 
 function errorMessage(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error
+        ? String(error.message)
+        : String(error || "Pet details could not be saved.");
+
+  if (
+    message.includes("care_subject_type") ||
+    message.includes("invalid input value for enum")
+  ) {
+    return "Pet type support needs the saved database patch before Cat, Dog, or Other can be saved.";
+  }
+
   if (error instanceof Error) {
     return error.message;
   }

@@ -1,11 +1,15 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   addTimeToDueIntent,
   parseNaturalDueInput,
 } from "../../../lib/family/errands/dueIntent";
+import {
+  restorePageViewState,
+  savePageViewState,
+} from "../../../lib/navigation/pageViewState";
 import {
   sampleErrandEvents,
   sampleErrands,
@@ -34,6 +38,11 @@ type ErrandDraft = {
   assignedMemberName: string;
 };
 
+type FamilyErrandsPageViewState = {
+  scrollY?: number;
+  selectedErrandId?: string;
+};
+
 const emptyDraft: ErrandDraft = {
   title: "",
   description: "",
@@ -53,6 +62,13 @@ function nowLabel() {
 }
 
 export function ErrandsWorkspace() {
+  const [initialPageViewState] = useState<FamilyErrandsPageViewState | null>(() => {
+    const restoredState =
+      restorePageViewState<FamilyErrandsPageViewState>("family:errands");
+
+    return restoredState?.engaged ? restoredState : null;
+  });
+  const restoredScrollRef = useRef(false);
   const [errands, setErrands] = useState<Errand[]>(sampleErrands);
   const [events, setEvents] = useState<ErrandEvent[]>(sampleErrandEvents);
   const [draft, setDraft] = useState<ErrandDraft>(emptyDraft);
@@ -69,7 +85,9 @@ export function ErrandsWorkspace() {
   );
   const [appointmentsLoading, setAppointmentsLoading] = useState(false);
   const [appointmentsError, setAppointmentsError] = useState("");
-  const [selectedErrandId, setSelectedErrandId] = useState(sampleErrands[0]?.id);
+  const [selectedErrandId, setSelectedErrandId] = useState(
+    initialPageViewState?.selectedErrandId ?? sampleErrands[0]?.id,
+  );
   const dueInputRef = useRef<HTMLInputElement>(null);
 
   const selectedErrand = errands.find((errand) => errand.id === selectedErrandId);
@@ -108,6 +126,63 @@ export function ErrandsWorkspace() {
     (errand) =>
       errand.status === "unable_to_complete" || errandIsPastDue(errand),
   );
+
+  const saveErrandsPageViewState = useCallback((
+    overrides: Partial<FamilyErrandsPageViewState> = {},
+  ) => {
+    savePageViewState<FamilyErrandsPageViewState>("family:errands", {
+      scrollY: typeof window === "undefined" ? 0 : window.scrollY,
+      selectedErrandId,
+      ...overrides,
+      engaged: true,
+    });
+  }, [selectedErrandId]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      restoredScrollRef.current ||
+      !initialPageViewState?.scrollY
+    ) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: initialPageViewState.scrollY });
+      restoredScrollRef.current = true;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [initialPageViewState]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    let frameId = 0;
+
+    const saveScrollPosition = () => {
+      const restoredState =
+        restorePageViewState<FamilyErrandsPageViewState>("family:errands");
+
+      if (!restoredState?.engaged) {
+        return;
+      }
+
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        saveErrandsPageViewState({ scrollY: window.scrollY });
+      });
+    };
+
+    window.addEventListener("scroll", saveScrollPosition, { passive: true });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("scroll", saveScrollPosition);
+    };
+  }, [saveErrandsPageViewState]);
 
   useEffect(() => {
     if (
@@ -577,7 +652,10 @@ export function ErrandsWorkspace() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <button
                   className="text-left"
-                  onClick={() => setSelectedErrandId(errand.id)}
+                  onClick={() => {
+                    setSelectedErrandId(errand.id);
+                    saveErrandsPageViewState({ selectedErrandId: errand.id });
+                  }}
                   type="button"
                 >
                   <p className="text-sm font-semibold text-blue-700">

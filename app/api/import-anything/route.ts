@@ -1,13 +1,41 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
+import { normalizeImportAnythingAppointmentCandidates } from "@/app/lib/personal/importAnything/appointments";
+import { normalizeImportAnythingDraft } from "@/app/lib/personal/importAnything/draft";
+import { normalizeImportAnythingProviderCandidates } from "@/app/lib/personal/importAnything/providers";
+import { normalizeImportAnythingRequest } from "@/app/lib/personal/importAnything/request";
 import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+import { openAiResponseText } from "@/app/lib/platform/ai/responses";
 
 type JsonObject = Record<string, unknown>;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const openAiApiKey = process.env.OPENAI_API_KEY ?? "";
+
+const importAnythingPersonAssignmentSchema = {
+  additionalProperties: false,
+  properties: {
+    cluster_id: { type: "string" },
+    confidence: { type: "number" },
+    detected_name: { type: "string" },
+    matched_care_subject_id: { type: "string" },
+    needs_review: { type: "boolean" },
+    rationale: { type: "string" },
+    suggested_new_person_name: { type: "string" },
+  },
+  required: [
+    "cluster_id",
+    "detected_name",
+    "matched_care_subject_id",
+    "suggested_new_person_name",
+    "confidence",
+    "needs_review",
+    "rationale",
+  ],
+  type: "object",
+};
 
 const importAnythingOutputSchema = {
   additionalProperties: false,
@@ -23,7 +51,10 @@ const importAnythingOutputSchema = {
           location_name: { type: "string" },
           location_phone: { type: "string" },
           matched_appointment_id: { type: "string" },
+          matched_provider_id: { type: "string" },
           needs_review: { type: "boolean" },
+          person_assignment: importAnythingPersonAssignmentSchema,
+          provider_match_note: { type: "string" },
           provider_name: { type: "string" },
           provider_organization: { type: "string" },
           source_excerpt: { type: "string" },
@@ -40,6 +71,9 @@ const importAnythingOutputSchema = {
           "location_address",
           "location_phone",
           "matched_appointment_id",
+          "matched_provider_id",
+          "person_assignment",
+          "provider_match_note",
           "suggested_action",
           "confidence",
           "needs_review",
@@ -59,11 +93,13 @@ const importAnythingOutputSchema = {
           detail: { type: "string" },
           matched_appointment_id: { type: "string" },
           needs_review: { type: "boolean" },
+          person_assignment: importAnythingPersonAssignmentSchema,
           source_excerpt: { type: "string" },
         },
         required: [
           "appointment_title",
           "matched_appointment_id",
+          "person_assignment",
           "detail",
           "confidence",
           "needs_review",
@@ -75,6 +111,32 @@ const importAnythingOutputSchema = {
       type: "array",
     },
     import_summary: { type: "string" },
+    ownership_clusters: {
+      items: {
+        additionalProperties: false,
+        properties: {
+          cluster_id: { type: "string" },
+          confidence: { type: "number" },
+          display_name: { type: "string" },
+          entity_type: { type: "string" },
+          matched_care_subject_id: { type: "string" },
+          rationale: { type: "string" },
+          suggested_new_person_name: { type: "string" },
+        },
+        required: [
+          "cluster_id",
+          "display_name",
+          "entity_type",
+          "matched_care_subject_id",
+          "suggested_new_person_name",
+          "confidence",
+          "rationale",
+        ],
+        type: "object",
+      },
+      maxItems: 12,
+      type: "array",
+    },
     medication_changes: {
       items: {
         additionalProperties: false,
@@ -82,14 +144,18 @@ const importAnythingOutputSchema = {
           change_summary: { type: "string" },
           confidence: { type: "number" },
           instructions: { type: "string" },
+          matched_appointment_id: { type: "string" },
           medication_name: { type: "string" },
           needs_review: { type: "boolean" },
+          person_assignment: importAnythingPersonAssignmentSchema,
           source_excerpt: { type: "string" },
         },
         required: [
           "medication_name",
           "change_summary",
           "instructions",
+          "matched_appointment_id",
+          "person_assignment",
           "confidence",
           "needs_review",
           "source_excerpt",
@@ -108,6 +174,7 @@ const importAnythingOutputSchema = {
           followups: { items: { type: "string" }, type: "array" },
           matched_appointment_id: { type: "string" },
           needs_review: { type: "boolean" },
+          person_assignment: importAnythingPersonAssignmentSchema,
           source_excerpt: { type: "string" },
           summary: { type: "string" },
           takeaways: { items: { type: "string" }, type: "array" },
@@ -115,6 +182,7 @@ const importAnythingOutputSchema = {
         required: [
           "appointment_title",
           "matched_appointment_id",
+          "person_assignment",
           "summary",
           "takeaways",
           "followups",
@@ -132,9 +200,13 @@ const importAnythingOutputSchema = {
         additionalProperties: false,
         properties: {
           confidence: { type: "number" },
+          location_address: { type: "string" },
           location_name: { type: "string" },
+          matched_provider_id: { type: "string" },
           needs_review: { type: "boolean" },
+          person_assignment: importAnythingPersonAssignmentSchema,
           phone: { type: "string" },
+          provider_match_note: { type: "string" },
           provider_name: { type: "string" },
           provider_organization: { type: "string" },
           source_excerpt: { type: "string" },
@@ -142,8 +214,12 @@ const importAnythingOutputSchema = {
         required: [
           "provider_name",
           "provider_organization",
+          "location_address",
           "location_name",
           "phone",
+          "matched_provider_id",
+          "person_assignment",
+          "provider_match_note",
           "confidence",
           "needs_review",
           "source_excerpt",
@@ -153,6 +229,7 @@ const importAnythingOutputSchema = {
       maxItems: 12,
       type: "array",
     },
+    person_assignment: importAnythingPersonAssignmentSchema,
     questions_to_ask: {
       items: {
         additionalProperties: false,
@@ -160,6 +237,7 @@ const importAnythingOutputSchema = {
           confidence: { type: "number" },
           matched_appointment_id: { type: "string" },
           needs_review: { type: "boolean" },
+          person_assignment: importAnythingPersonAssignmentSchema,
           question: { type: "string" },
           source_excerpt: { type: "string" },
           topic: { type: "string" },
@@ -168,6 +246,7 @@ const importAnythingOutputSchema = {
           "question",
           "topic",
           "matched_appointment_id",
+          "person_assignment",
           "confidence",
           "needs_review",
           "source_excerpt",
@@ -184,7 +263,9 @@ const importAnythingOutputSchema = {
           confidence: { type: "number" },
           details: { type: "string" },
           due_at_local: { type: "string" },
+          matched_appointment_id: { type: "string" },
           needs_review: { type: "boolean" },
+          person_assignment: importAnythingPersonAssignmentSchema,
           source_excerpt: { type: "string" },
           title: { type: "string" },
         },
@@ -192,6 +273,8 @@ const importAnythingOutputSchema = {
           "title",
           "details",
           "due_at_local",
+          "matched_appointment_id",
+          "person_assignment",
           "confidence",
           "needs_review",
           "source_excerpt",
@@ -204,8 +287,10 @@ const importAnythingOutputSchema = {
   },
   required: [
     "import_summary",
+    "ownership_clusters",
     "appointments",
     "providers",
+    "person_assignment",
     "notes",
     "tasks",
     "medication_changes",
@@ -216,7 +301,7 @@ const importAnythingOutputSchema = {
 };
 
 const importAnythingSystemPrompt =
-  "You analyze healthcare-related import content for CarePland Personal. The user may provide screenshots, OCR text, PDFs represented by source notes, copied portal text, reminders, instructions, or visit documents. Use only the supplied text. Identify appointments, providers, locations, medications or medication changes, visit notes, follow-up instructions, questions to ask, tasks/reminders, and CarePrep-relevant information. Do not invent facts. When existing appointment candidates are supplied, set matched_appointment_id only if the match is high confidence and directly supported by the text. If uncertain, leave matched_appointment_id empty and set needs_review true. Existing manually entered records must not be changed by this workflow. Every item should be safe for user review before commit.";
+  "You analyze healthcare-related import content for CarePland Personal. The user may provide screenshots, OCR text, PDFs represented by source notes, copied portal text, reminders, instructions, or visit documents. Use only the supplied text. Do not invent facts. Before assigning ownership to individual findings, first identify all distinct people/entities referenced in ownership_clusters. The source may contain multiple people or pets. Each cluster needs a stable cluster_id such as cluster_rob_robson, display_name, entity_type such as person or cat, and matching details if it maps to an existing Care VIP. Do not create ownership clusters from sender signatures, message authors, reminder senders, or sign-offs such as '-Emily' unless the text also says that person is the patient or visit owner. Then identify appointments, providers, locations, medications or medication changes, visit notes, follow-up instructions, questions to ask, tasks/reminders, and CarePrep-relevant information. A currently focused Care VIP may be supplied as context only; do not treat it as mandatory ownership. Set the top-level person_assignment to the best overall batch clue, but every extracted item must include its own person_assignment that refers to one ownership cluster by cluster_id. Do not use the highest-confidence overall person as a fallback owner for unrelated findings. For each item person_assignment, set matched_care_subject_id only when that specific item is supported by the text or strong local context. If an item names a person who is not an existing candidate, put that name in suggested_new_person_name. If an item's ownership confidence is below 0.85 or ambiguous, leave cluster_id and matched_care_subject_id empty, set needs_review true, and prefer Unassigned over assigning to the wrong person. For Practice and Location lines, put the clinic/practice/business name in location_name and put street/city/state text in location_address. If only Practice is named, use it as provider_organization and location_name; do not copy a street address into location_name. Import summary should be qualitative and must not include numeric counts; the UI calculates counts separately. When existing appointment candidates are supplied, set matched_appointment_id only if the match is high confidence and directly supported by the text. When saved provider candidates are supplied, set matched_provider_id only if the import text clearly appears to refer to that saved provider for the same inferred or matched Care VIP; add a short provider_match_note explaining the clue. If uncertain, leave matched ids empty and set needs_review true. Existing manually entered records must not be changed by this workflow. Every item should be safe for user review before commit.";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -230,34 +315,15 @@ function errorMessage(error: unknown): string {
   return String(error || "Something went wrong.");
 }
 
-function responseText(response: JsonObject): string {
-  if (typeof response.output_text === "string") {
-    return response.output_text;
-  }
+function isProviderStoreUnavailable(error: unknown): boolean {
+  const maybeError = error as { code?: string; message?: string } | null;
+  const message = maybeError?.message?.toLowerCase() ?? "";
 
-  const output = Array.isArray(response.output) ? response.output : [];
-
-  return output
-    .flatMap((item) => {
-      if (!item || typeof item !== "object" || !("content" in item)) {
-        return [];
-      }
-
-      const content = Array.isArray(item.content) ? item.content : [];
-      return content.map((contentItem: unknown) => {
-        if (
-          contentItem &&
-          typeof contentItem === "object" &&
-          "text" in contentItem
-        ) {
-          return String(contentItem.text);
-        }
-
-        return "";
-      });
-    })
-    .join("")
-    .trim();
+  return (
+    maybeError?.code === "42P01" ||
+    maybeError?.code === "42703" ||
+    message.includes("care_providers")
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -279,19 +345,8 @@ export async function POST(request: NextRequest) {
       throw new Error("Please sign in before using Import Anything.");
     }
 
-    const body = await request.json();
-    const rawText = typeof body.rawText === "string" ? body.rawText.trim() : "";
-    const requestedCareSubjectId =
-      typeof body.careSubjectId === "string" ? body.careSubjectId : "";
-    const sourceSummaries: string[] = Array.isArray(body.sourceSummaries)
-      ? body.sourceSummaries
-          .map((item: unknown) => (typeof item === "string" ? item.trim() : ""))
-          .filter(Boolean)
-      : [];
-
-    if (!rawText) {
-      throw new Error("Add text or extracted file content before reviewing.");
-    }
+    const { rawText, requestedCareSubjectId, sourceSummaries } =
+      normalizeImportAnythingRequest(await request.json());
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       auth: { persistSession: false },
@@ -329,44 +384,28 @@ export async function POST(request: NextRequest) {
       throw new Error("No care circle membership found for this user.");
     }
 
-    let subjectQuery = supabase
+    const { data: careSubjects, error: careSubjectsError } = await supabase
       .from("care_subjects")
       .select("id,display_name,is_default")
       .eq("care_circle_id", careCircleId)
       .eq("is_active", true)
       .order("is_default", { ascending: false })
-      .order("display_name", { ascending: true })
-      .limit(1);
+      .order("display_name", { ascending: true });
 
-    if (requestedCareSubjectId) {
-      subjectQuery = supabase
-        .from("care_subjects")
-        .select("id,display_name,is_default")
-        .eq("care_circle_id", careCircleId)
-        .eq("id", requestedCareSubjectId)
-        .eq("is_active", true)
-        .limit(1);
+    if (careSubjectsError) {
+      throw careSubjectsError;
     }
 
-    const { data: subjects, error: subjectsError } = await subjectQuery;
-
-    if (subjectsError) {
-      throw subjectsError;
-    }
-
-    const careSubject = subjects?.[0];
-
-    if (!careSubject) {
-      throw new Error("Choose an active Care VIP before using Import Anything.");
-    }
+    const requestedCareSubject =
+      careSubjects?.find((subject) => subject.id === requestedCareSubjectId) ??
+      null;
 
     const { data: appointments, error: appointmentsError } = await supabase
       .from("appointments")
       .select(
-        "id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,current_note_id"
+        "id,care_subject_id,title,reason,starts_at,status,provider_name,provider_organization,location_name,location_address,location_phone,current_note_id"
       )
       .eq("care_circle_id", careCircleId)
-      .eq("care_subject_id", careSubject.id)
       .is("deleted_at", null)
       .order("starts_at", { ascending: false, nullsFirst: false })
       .limit(60);
@@ -374,6 +413,25 @@ export async function POST(request: NextRequest) {
     if (appointmentsError) {
       throw appointmentsError;
     }
+
+    const appointmentCandidates =
+      normalizeImportAnythingAppointmentCandidates(appointments);
+    const { data: savedProviders, error: savedProvidersError } = await supabase
+      .from("care_providers")
+      .select(
+        "id,care_subject_id,provider_name,provider_organization,nickname,location_name,location_address,phone"
+      )
+      .eq("care_circle_id", careCircleId)
+      .order("updated_at", { ascending: false })
+      .limit(30);
+
+    if (savedProvidersError && !isProviderStoreUnavailable(savedProvidersError)) {
+      throw savedProvidersError;
+    }
+
+    const providerCandidates = savedProvidersError
+      ? []
+      : normalizeImportAnythingProviderCandidates(savedProviders);
 
     const rawTextWithSources = [
       sourceSummaries.length > 0
@@ -388,7 +446,7 @@ export async function POST(request: NextRequest) {
       .from("intake_items")
       .insert({
         care_circle_id: careCircleId,
-        care_subject_id: careSubject.id,
+        care_subject_id: requestedCareSubject?.id ?? null,
         created_by_user_id: userId,
         raw_text: rawTextWithSources,
         source_type: "paste_text",
@@ -404,15 +462,35 @@ export async function POST(request: NextRequest) {
     intakeItemId = intakeItem.id;
 
     const userPrompt = [
-      `Care VIP: ${careSubject.display_name}`,
+      careSubjects && careSubjects.length > 0
+        ? `Existing Care VIP candidates:\n${JSON.stringify(
+            careSubjects.map((subject) => ({
+              id: subject.id,
+              display_name: subject.display_name,
+              is_default: Boolean(subject.is_default),
+            })),
+            null,
+            2
+          )}`
+        : "Existing Care VIP candidates: none",
+      requestedCareSubject
+        ? `Current focus hint: ${requestedCareSubject.display_name} (${requestedCareSubject.id}). Use only as a hint, not as mandatory ownership.`
+        : "Current focus hint: Everyone or no person selected.",
       `Current date: ${new Date().toISOString()}`,
-      appointments && appointments.length > 0
+      appointmentCandidates.length > 0
         ? `Existing appointment candidates:\n${JSON.stringify(
-            appointments,
+            appointmentCandidates,
             null,
             2
           )}`
         : "Existing appointment candidates: none",
+      providerCandidates.length > 0
+        ? `Saved provider candidates across Care VIPs:\n${JSON.stringify(
+            providerCandidates,
+            null,
+            2
+          )}\nUse these only as matching/refinement context. Do not invent a saved provider match. Do not merge providers across Care VIPs.`
+        : "Saved provider candidates: none",
       `Import content:\n${rawTextWithSources}`,
     ].join("\n\n");
     const model = "gpt-4.1-mini";
@@ -457,13 +535,22 @@ export async function POST(request: NextRequest) {
       throw new Error(String(apiError ?? "Import Anything review failed."));
     }
 
-    const text = responseText(openAiJson);
+    const text = openAiResponseText(openAiJson);
 
     if (!text) {
       throw new Error("OpenAI returned an empty Import Anything response.");
     }
 
-    const draft = JSON.parse(text) as JsonObject;
+    const draft = normalizeImportAnythingDraft(JSON.parse(text), {
+      allowedMatchedAppointmentIds: appointmentCandidates.map(
+        (appointment) => appointment.id
+      ),
+      allowedMatchedCareSubjectIds:
+        careSubjects?.map((subject) => subject.id) ?? [],
+      allowedMatchedProviderIds: providerCandidates.map(
+        (provider) => provider.id
+      ),
+    });
     const processedPayload = {
       ai_interpretation: draft,
       interpretation: draft,
@@ -502,7 +589,7 @@ export async function POST(request: NextRequest) {
     await logOpenAiOperationCost({
       careCircleId,
       metadata: {
-        care_subject_id: careSubject.id,
+        care_subject_id: requestedCareSubject?.id ?? null,
         source_count: sourceSummaries.length,
       },
       model,
@@ -520,9 +607,15 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({
-      careSubjectId: careSubject.id,
+      careSubjectId: requestedCareSubject?.id ?? null,
       draft,
       intakeItemId: intakeItem.id,
+      personAssignment:
+        draft.person_assignment &&
+        typeof draft.person_assignment === "object" &&
+        !Array.isArray(draft.person_assignment)
+          ? draft.person_assignment
+          : null,
     });
   } catch (error) {
     if (intakeItemId && supabaseUrl && supabaseAnonKey) {

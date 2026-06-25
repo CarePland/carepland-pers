@@ -480,19 +480,17 @@ function SelectedPersonAvatarControls({
       return;
     }
 
-    const previousPetEnabled = petEnabled;
-    const previousPetKind = petKind;
     const previousEditingSpecies = editingSpecies;
 
     setPetPending(true);
-    setPetEnabled(nextSubjectType !== "other");
-    setPetKind(nextKind);
-    setEditingSpecies(Boolean(options.keepEditing));
 
     void onUpdatePetType(nextSubjectType)
+      .then(() => {
+        setPetEnabled(nextSubjectType !== "other");
+        setPetKind(nextKind);
+        setEditingSpecies(Boolean(options.keepEditing));
+      })
       .catch(() => {
-        setPetEnabled(previousPetEnabled);
-        setPetKind(previousPetKind);
         setEditingSpecies(previousEditingSpecies);
       })
       .finally(() => {

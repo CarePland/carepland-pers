@@ -3,6 +3,11 @@
 import { useState, type ReactNode } from "react";
 
 import { PersonChip } from "../../shared/PersonAvatar";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  PencilSquareIcon,
+} from "../../shared/icons";
 import type { AvatarPerson } from "../../../lib/platform/avatar";
 
 type HomeAppointment = {
@@ -109,7 +114,7 @@ function HomeCarePrepPreview({
 
   return (
     <div>
-      <p className="text-sm leading-6 text-slate-700">{guidance.summary}</p>
+      <p className="text-base leading-7 text-slate-700">{guidance.summary}</p>
       {highlights.length > 0 ? (
         <div className={highlightGridClassName}>
           {highlights.map((section) => (
@@ -152,10 +157,19 @@ export function HomeNextAppointmentPanel({
   );
   const canShowNotes = Boolean(appointment && onAddNotes);
   const carePrepSelected = carePrepOpen && !addNotesOpen;
-  const actionPanelOpen = carePrepSelected || addNotesOpen;
+  const toggleCarePrep = () => {
+    if (addNotesOpen) {
+      onAddNotes?.();
+    }
+    setCarePrepOpen((isOpen) => !isOpen);
+  };
+  const toggleAddNotes = () => {
+    setCarePrepOpen(false);
+    onAddNotes?.();
+  };
 
   return (
-    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="overflow-hidden px-1 pb-2 pt-1">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4">
         <div className="min-w-0">
           {appointment ? (
@@ -164,11 +178,37 @@ export function HomeNextAppointmentPanel({
                 Next appointment
               </span>
               <span className="mt-1 flex flex-wrap items-center gap-2">
-                <span className="min-w-0 truncate text-2xl font-semibold text-slate-950">
+                <span className="min-w-0 truncate text-4xl font-semibold text-slate-950">
                   {appointment.title || "Untitled appointment"}
                 </span>
+                {canShowCarePrep ? (
+                  <button
+                    aria-expanded={carePrepSelected}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-xl font-semibold leading-none text-blue-900 transition hover:text-blue-700 disabled:opacity-60"
+                    disabled={isGenerating}
+                    onClick={toggleCarePrep}
+                    title={
+                      carePrepSelected
+                        ? "Close What to Know"
+                        : "Open What to Know"
+                    }
+                    type="button"
+                  >
+                    <span>✓ What to Know</span>
+                    {carePrepSelected ? (
+                      <ChevronDownIcon className="h-5 w-5" />
+                    ) : (
+                      <ChevronRightIcon className="h-5 w-5" />
+                    )}
+                  </button>
+                ) : null}
                 {appointment.is_sample_data ? <DemoPill /> : null}
               </span>
+              {appointment.provider_name ? (
+                <p className="mt-3 text-xl text-[#767676]">
+                  {appointment.provider_name}
+                </p>
+              ) : null}
             </div>
           ) : (
             <>
@@ -189,7 +229,19 @@ export function HomeNextAppointmentPanel({
         <div className="text-left md:min-w-64 md:text-right">
           {appointment ? (
             <>
-              <p className="text-lg font-medium text-slate-700">
+              <div className="flex flex-wrap items-center gap-3 text-2xl font-medium text-slate-700 md:justify-end">
+                {canShowNotes ? (
+                  <button
+                    aria-expanded={addNotesOpen}
+                    className="inline-flex items-center gap-1.5 rounded-md px-1 py-1 text-sm font-semibold text-blue-800 transition hover:bg-blue-50 hover:text-blue-950"
+                    onClick={toggleAddNotes}
+                    title={addNotesOpen ? "Close notes" : "Add notes"}
+                    type="button"
+                  >
+                    <PencilSquareIcon className="h-4 w-4" />
+                    <span>Add Notes</span>
+                  </button>
+                ) : null}
                 <span className="hidden md:inline">
                   {formatDate(appointment.starts_at)}
                 </span>
@@ -197,12 +249,12 @@ export function HomeNextAppointmentPanel({
                   <span className="block">{mobileDate.date}</span>
                   {mobileDate.time ? <span className="block">{mobileDate.time}</span> : null}
                 </span>
-              </p>
+              </div>
               {practiceLabel ? (
-                <div className="mt-1 text-sm text-slate-600">
+                <div className="mt-3 text-base text-[#767676]">
                   {mapsLink ? (
                     <a
-                      className="inline-flex items-center gap-1 text-left font-medium text-slate-700 hover:text-blue-800 md:justify-end md:text-right"
+                      className="inline-flex items-center gap-1 text-left font-medium text-[#767676] hover:text-blue-800 md:justify-end md:text-right"
                       href={mapsLink}
                       rel="noreferrer"
                       target="_blank"
@@ -229,66 +281,8 @@ export function HomeNextAppointmentPanel({
         </div>
       </div>
 
-      {canShowCarePrep || canShowNotes ? (
-        <div className="mt-4 flex items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            {canShowCarePrep ? (
-              <button
-                aria-expanded={carePrepSelected}
-                className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold transition ${
-                  carePrepSelected
-                    ? "border-blue-200 bg-blue-50 text-blue-950"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:text-blue-900"
-                }`}
-                onClick={() => {
-                  if (addNotesOpen) {
-                    onAddNotes?.();
-                  }
-                  setCarePrepOpen((isOpen) => !isOpen);
-                }}
-                type="button"
-              >
-                CarePrep
-              </button>
-            ) : null}
-            {canShowNotes ? (
-              <button
-                aria-expanded={addNotesOpen}
-                className={`inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-semibold transition ${
-                  addNotesOpen
-                    ? "border-blue-200 bg-blue-50 text-blue-950"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:text-blue-900"
-                }`}
-                onClick={() => {
-                  setCarePrepOpen(false);
-                  onAddNotes?.();
-                }}
-                title="Add notes"
-                type="button"
-              >
-                Add Notes
-              </button>
-            ) : null}
-          </div>
-          {actionPanelOpen ? (
-            <button
-              className="shrink-0 rounded-md px-2 py-1 text-xs font-normal text-[#767676] transition hover:bg-slate-100 hover:text-slate-700"
-              onClick={() => {
-                setCarePrepOpen(false);
-                if (addNotesOpen) {
-                  onAddNotes?.();
-                }
-              }}
-              type="button"
-            >
-              Close
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
       {carePrepSelected ? (
-        <section className="mt-4">
+        <section className="mt-5">
           {guidance ? (
             <HomeCarePrepPreview
               key={`${appointment?.id}:${guidance.summary ?? ""}`}
@@ -318,8 +312,7 @@ export function HomeNextAppointmentPanel({
       {addNotesOpen && children ? <div className="mt-4">{children}</div> : null}
 
       {appointment && (appointment.provider_name || nextSubject) ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs font-medium text-[#767676]">
-          <span>{appointment.provider_name || ""}</span>
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs font-medium text-[#767676]">
           <PersonChip
             person={nextSubjectAvatar ?? { displayName: nextSubject }}
             size="xs"

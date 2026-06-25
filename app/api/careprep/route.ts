@@ -21,7 +21,11 @@ type ReviewAction =
   | "edit_current"
   | "generate"
   | "save_edit";
-type GenerationMode = "auto_after_notes" | "auto_home" | "manual";
+type GenerationMode =
+  | "auto_after_notes"
+  | "auto_appointments_page"
+  | "auto_home"
+  | "manual";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -253,6 +257,8 @@ export async function POST(request: NextRequest) {
     const generationMode: GenerationMode =
       body.generationMode === "auto_after_notes"
         ? "auto_after_notes"
+        : body.generationMode === "auto_appointments_page"
+          ? "auto_appointments_page"
         : body.generationMode === "auto_home"
           ? "auto_home"
           : "manual";
@@ -740,6 +746,15 @@ export async function POST(request: NextRequest) {
 
     const latestGuidance = latestGuidanceRows?.[0] ?? null;
 
+    if (generationMode === "auto_appointments_page" && latestGuidance) {
+      return NextResponse.json({
+        appointmentId: appointment.id,
+        generationMode,
+        guidanceId: latestGuidance.id,
+        message: "CarePrep already exists for this appointment.",
+      });
+    }
+
     const previousPastAppointmentCount = snapshotPastAppointmentCount(
       latestGuidance?.input_context_snapshot
     );
@@ -804,7 +819,10 @@ export async function POST(request: NextRequest) {
 
     if (generationMode !== "auto_home") {
       const meteredFeatureKey =
-        generationMode === "auto_after_notes" ? "careprep_auto" : "careprep_manual";
+        generationMode === "auto_after_notes" ||
+        generationMode === "auto_appointments_page"
+          ? "careprep_auto"
+          : "careprep_manual";
       const { data: meteringResult, error: meteringError } = await supabase.rpc(
         "consume_feature_usage",
         {
@@ -833,7 +851,8 @@ export async function POST(request: NextRequest) {
           dynamicLimitMessage ||
             jsonString(
               metering.message,
-              generationMode === "auto_after_notes"
+              generationMode === "auto_after_notes" ||
+                generationMode === "auto_appointments_page"
                 ? "Automatic appointment preparation is not available on your current plan."
                 : "This CarePrep generation is not available on your current plan."
             )
@@ -937,31 +956,46 @@ export async function POST(request: NextRequest) {
 
     const existingDrafts = existingDraftRows ?? [];
     const promptVersion = `careprep_generation:v${instructionVersion.version_number}`;
+    const preapproveGeneratedCarePrep =
+      generationMode === "auto_appointments_page";
+    const reviewedAt = new Date().toISOString();
 
     const { data: guidanceRow, error: guidanceError } = await supabase
       .from("careprep_guidance")
       .insert({
+        ...(preapproveGeneratedCarePrep
+          ? {
+              accepted_at: reviewedAt,
+              accepted_by_user_id: userId,
+            }
+          : {}),
         appointment_id: appointment.id,
         bring_list: guidance.bring_list,
         care_circle_id: appointment.care_circle_id,
-        generated_at: new Date().toISOString(),
+        generated_at: reviewedAt,
         input_context_snapshot: inputContextSnapshot,
         instruction_content_hash: instructionVersion.content_hash ?? null,
         instruction_set_id: instructionSet.id,
         instruction_version_id: instructionVersion.id,
-        is_current: false,
+        is_current: preapproveGeneratedCarePrep,
         key_questions: guidance.key_questions,
         med_review: guidance.med_review,
         model: instructionVersion.model ?? "gpt-4.1-mini",
         next_steps: guidance.next_steps,
         prompt_version: promptVersion,
-        review_status: "draft",
+        review_status: preapproveGeneratedCarePrep ? "accepted" : "draft",
+        ...(preapproveGeneratedCarePrep
+          ? {
+              reviewed_at: reviewedAt,
+              reviewed_by_user_id: userId,
+            }
+          : {}),
         since_last_visit: guidance.since_last_visit,
         source: "ai_generated",
         status: "succeeded",
         summary: guidance.summary,
         user_id: userId,
-        version_number: 0,
+        version_number: preapproveGeneratedCarePrep ? 1 : 0,
         watchouts: guidance.watchouts,
       })
       .select("id")
@@ -1013,12 +1047,14 @@ export async function POST(request: NextRequest) {
       guidanceId: guidanceRow.id,
       generationMode,
       message: existingDrafts.length > 0
-        ? generationMode === "auto_after_notes"
+        ? generationMode === "auto_after_notes" ||
+          generationMode === "auto_appointments_page"
           ? "CarePrep was refreshed for the next appointment."
           : generationMode === "auto_home"
             ? "CarePrep was refreshed for the next appointment."
           : "New AI CarePrep draft generated."
-        : generationMode === "auto_after_notes"
+        : generationMode === "auto_after_notes" ||
+          generationMode === "auto_appointments_page"
           ? "CarePrep was prepared for the next appointment."
           : generationMode === "auto_home"
             ? "CarePrep was prepared for the next appointment."

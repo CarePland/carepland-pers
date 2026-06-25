@@ -7,7 +7,7 @@
     "build": "node scripts/write-build-info.mjs && next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsc -p tsconfig.test.json && node --test .tmp-tests/app/lib/connect/appointments/*.test.js .tmp-tests/app/lib/connect/audio/*.test.js .tmp-tests/app/lib/connect/audio/server/*.test.js .tmp-tests/app/lib/connect/calls/*.test.js .tmp-tests/app/lib/connect/context/*.test.js .tmp-tests/app/lib/connect/messaging/server/*.test.js .tmp-tests/app/lib/personal/editor/*.test.js .tmp-tests/app/lib/personal/healthTopics/*.test.js .tmp-tests/app/lib/personal/profile/*.test.js .tmp-tests/app/lib/personal/reports/*.test.js .tmp-tests/app/lib/platform/audio/*.test.js .tmp-tests/app/lib/platform/server/*.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test .tmp-tests/app/lib/connect/appointments/*.test.js .tmp-tests/app/lib/connect/audio/*.test.js .tmp-tests/app/lib/connect/audio/server/*.test.js .tmp-tests/app/lib/connect/calls/*.test.js .tmp-tests/app/lib/connect/context/*.test.js .tmp-tests/app/lib/connect/messaging/server/*.test.js .tmp-tests/app/lib/personal/editor/*.test.js .tmp-tests/app/lib/personal/healthTopics/*.test.js .tmp-tests/app/lib/personal/importAnything/*.test.js .tmp-tests/app/lib/personal/profile/*.test.js .tmp-tests/app/lib/personal/reports/*.test.js .tmp-tests/app/lib/platform/ai/*.test.js .tmp-tests/app/lib/platform/audio/*.test.js .tmp-tests/app/lib/platform/server/*.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",

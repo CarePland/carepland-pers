@@ -321,7 +321,7 @@ export function HealthFocusCard({
       <section
         aria-busy="true"
         aria-live="polite"
-        className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+        className="px-1 pb-4 pt-1"
       >
         <div>
           <p className="text-sm font-semibold text-blue-700">
@@ -362,7 +362,7 @@ export function HealthFocusCard({
   return (
     <section
       aria-busy={isLoading}
-      className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+      className="px-1 pb-4 pt-1"
       style={{ overflowAnchor: "none" }}
     >
       <div className="flex items-center justify-between gap-3">

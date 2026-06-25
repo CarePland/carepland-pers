@@ -105,15 +105,10 @@ export function PersonalOverlays({
           />
           <section
             aria-label="Ask panel"
-            className="fixed inset-x-3 top-16 z-[70] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-2xl border border-blue-100 bg-blue-50 p-5 shadow-xl sm:left-auto sm:right-5 sm:top-20 sm:w-[min(32rem,calc(100vw-2.5rem))]"
+            className="fixed inset-x-3 top-16 z-[70] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-2xl border border-blue-100 bg-white p-5 shadow-xl sm:left-auto sm:right-5 sm:top-20 sm:w-[min(32rem,calc(100vw-2.5rem))]"
           >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-950">Ask</h2>
-                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-                  {askGuidanceText}
-                </p>
-              </div>
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="text-xl font-semibold text-slate-950">Ask</h2>
               <button
                 className="rounded px-1 py-0.5 text-sm font-semibold text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-200"
                 onClick={onCloseAskPanel}
@@ -122,6 +117,9 @@ export function PersonalOverlays({
                 Close
               </button>
             </div>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600">
+              {askGuidanceText}
+            </p>
 
             {askCloseConfirmOpen ? (
               <InlineConfirmation
@@ -158,7 +156,7 @@ export function PersonalOverlays({
             ) : null}
 
             {!askConversationComplete ? (
-              <form className="mt-8" onSubmit={onSubmitAskMessage}>
+              <form className="mt-4" onSubmit={onSubmitAskMessage}>
                 <label className="sr-only" htmlFor="ask-message">
                   {askInputPlaceholder}
                 </label>
@@ -255,10 +253,14 @@ export function PersonalOverlays({
           <section className="relative w-full max-w-lg rounded-xl border border-blue-200 bg-[#f4faff] p-5 text-blue-950 shadow-lg">
             <div>
               <h2 className="text-xl font-semibold text-slate-950">
-                You have unsaved changes
+                {unsavedSignOutChanges.length > 0
+                  ? "You have unsaved changes"
+                  : "Sign out of CarePland?"}
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-700">
-                Signing out will discard this work.
+                {unsavedSignOutChanges.length > 0
+                  ? "Signing out will discard this work."
+                  : "You can sign back in whenever you are ready."}
               </p>
             </div>
             {unsavedSignOutChanges.length > 0 ? (
@@ -293,7 +295,9 @@ export function PersonalOverlays({
                 onClick={onConfirmSignOut}
                 type="button"
               >
-                Discard and sign out
+                {unsavedSignOutChanges.length > 0
+                  ? "Discard and sign out"
+                  : "Sign out"}
               </button>
             </div>
           </section>

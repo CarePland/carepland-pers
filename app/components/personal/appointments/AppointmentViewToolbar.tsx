@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 export type AppointmentView = "archived" | "logged" | "upcoming";
 
 type AppointmentViewToolbarProps = {
   allSubjectsValue: string;
   canFilterCareVips: boolean;
-  careSubjects: Array<{ display_name: string; id: string }>;
+  careSubjects: Array<{
+    avatarEmoji?: string | null;
+    display_name: string;
+    id: string;
+  }>;
   disabled: boolean;
+  hideOlder?: boolean;
   onChangeSubject: (subjectId: string) => void;
   onChangeView: (view: AppointmentView) => void;
   selectedSubjectId: string;
@@ -15,27 +20,21 @@ type AppointmentViewToolbarProps = {
   view: AppointmentView;
 };
 
-function EllipsisVerticalIcon({
-  className = "h-5 w-5",
-}: {
-  className?: string;
-}) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="12" cy="5" r="1" />
-      <circle cx="12" cy="19" r="1" />
-    </svg>
-  );
+function subjectInitials(displayName: string) {
+  const parts = displayName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+  }
+
+  return displayName.trim().slice(0, 2).toUpperCase() || "?";
+}
+
+function compactSubjectName(displayName: string) {
+  return displayName.trim().split(/\s+/)[0] || displayName;
 }
 
 export function AppointmentViewToolbar({
@@ -43,6 +42,7 @@ export function AppointmentViewToolbar({
   canFilterCareVips,
   careSubjects,
   disabled,
+  hideOlder = false,
   onChangeSubject,
   onChangeView,
   selectedSubjectId,
@@ -50,44 +50,18 @@ export function AppointmentViewToolbar({
   stickyTop,
   view,
 }: AppointmentViewToolbarProps) {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [optimisticSubjectId, setOptimisticSubjectId] =
     useState(selectedSubjectId);
   const [optimisticView, setOptimisticView] = useState(view);
-  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const viewOptions: Array<{ label: string; value: AppointmentView }> = [
-    { label: "Upcoming", value: "upcoming" },
     { label: "Logged", value: "logged" },
     { label: "Archived", value: "archived" },
   ];
-
-  useEffect(() => {
-    if (!mobileMenuOpen) {
-      return;
-    }
-
-    function closeMobileMenuOnOutsideClick(event: PointerEvent) {
-      const target = event.target;
-
-      if (
-        target instanceof Node &&
-        mobileMenuRef.current?.contains(target)
-      ) {
-        return;
-      }
-
-      setMobileMenuOpen(false);
-    }
-
-    document.addEventListener("pointerdown", closeMobileMenuOnOutsideClick);
-
-    return () => {
-      document.removeEventListener(
-        "pointerdown",
-        closeMobileMenuOnOutsideClick
-      );
-    };
-  }, [mobileMenuOpen]);
+  const subjectOptions = [
+    { display_name: "All appts", id: allSubjectsValue },
+    ...careSubjects,
+  ];
+  const showingOlderAppointments = optimisticView !== "upcoming";
 
   return (
     <div
@@ -99,97 +73,124 @@ export function AppointmentViewToolbar({
       style={sticky ? { top: stickyTop } : undefined}
     >
       <div className="relative">
-        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
-          <div className="order-2 flex flex-wrap items-center gap-1.5 rounded-full border border-blue-100 bg-white/70 p-1 shadow-sm md:order-1">
-            {viewOptions.map((option) => {
-              const selected = optimisticView === option.value;
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          {canFilterCareVips ? (
+            <div className="order-1 flex max-w-full items-center gap-2 overflow-x-auto">
+              {subjectOptions.map((subject) => {
+                const selected = optimisticSubjectId === subject.id;
+                const avatarEmoji = subject.avatarEmoji?.trim() ?? "";
+                const isAllSubjects = subject.id === allSubjectsValue;
+                const avatarLabel =
+                  isAllSubjects
+                    ? "All"
+                    : avatarEmoji || subjectInitials(subject.display_name);
+                const shortName = compactSubjectName(subject.display_name);
 
-              return (
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={`inline-flex shrink-0 items-center gap-2 rounded-full py-1.5 pl-1.5 text-sm font-semibold transition-colors ${
+                      selected
+                        ? "bg-blue-50 text-blue-800 ring-1 ring-blue-100"
+                        : "text-slate-600 hover:bg-blue-50/70 hover:text-blue-800"
+                    } ${isAllSubjects ? "pr-1.5 min-[1280px]:pr-3" : "pr-3"}`}
+                    disabled={disabled || careSubjects.length === 0}
+                    key={subject.id}
+                    onClick={() => {
+                      setOptimisticSubjectId(subject.id);
+                      onChangeSubject(subject.id);
+                    }}
+                    type="button"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`grid h-7 w-7 place-items-center rounded-full font-black ${
+                        selected
+                          ? "bg-blue-100 text-blue-800"
+                          : "bg-slate-100 text-slate-500"
+                      } ${avatarEmoji ? "text-base" : "text-xs"}`}
+                    >
+                      {avatarLabel}
+                    </span>
+                    {isAllSubjects ? (
+                      <span className="hidden min-[1280px]:inline">
+                        {subject.display_name}
+                      </span>
+                    ) : (
+                      <span>
+                        <span>{shortName}</span>
+                        {shortName !== subject.display_name ? (
+                          <span className="hidden min-[1280px]:inline">
+                            {" "}
+                            {subject.display_name.slice(shortName.length).trim()}
+                          </span>
+                        ) : null}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <span aria-hidden="true" className="order-1" />
+          )}
+
+          {hideOlder && !showingOlderAppointments ? null : (
+          <div className="order-2 ml-auto flex flex-wrap items-center justify-end gap-2">
+            {showingOlderAppointments ? (
+              <>
+                <nav
+                  aria-label="Older appointment views"
+                  className="flex flex-wrap items-center gap-1 rounded-full border border-blue-100 bg-white/70 p-0.5 shadow-sm"
+                >
+                  {viewOptions.map((option) => {
+                    const selected = optimisticView === option.value;
+
+                    return (
+                      <button
+                        aria-pressed={selected}
+                        className={`relative rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
+                          selected
+                            ? "bg-blue-50 text-blue-800 ring-1 ring-blue-100"
+                            : "text-slate-600 hover:bg-blue-50/70 hover:text-blue-800"
+                        }`}
+                        key={option.value}
+                        onClick={() => {
+                          setOptimisticView(option.value);
+                          onChangeView(option.value);
+                        }}
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </nav>
                 <button
-                  aria-pressed={selected}
-                  className={`relative rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-                    selected
-                      ? "bg-blue-50 text-blue-800 ring-1 ring-blue-100"
-                      : "text-slate-600 hover:bg-blue-50/70 hover:text-blue-800"
-                  }`}
-                  key={option.value}
+                  className="min-h-9 rounded-md px-2 text-xs font-semibold text-slate-500 transition-colors hover:text-blue-800"
                   onClick={() => {
-                    setOptimisticView(option.value);
-                    onChangeView(option.value);
+                    setOptimisticView("upcoming");
+                    onChangeView("upcoming");
                   }}
                   type="button"
                 >
-                  {option.label}
+                  Exit
                 </button>
-              );
-            })}
-          </div>
-
-          {canFilterCareVips ? (
-            <div
-              className="absolute right-4 top-2 z-10 flex items-end pb-px md:hidden"
-              ref={mobileMenuRef}
-            >
+              </>
+            ) : (
               <button
-                aria-expanded={mobileMenuOpen}
-                aria-label="Appointment view options"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-blue-100 bg-white/80 text-slate-500 shadow-sm hover:bg-blue-50 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300"
-                disabled={disabled}
-                onClick={() => setMobileMenuOpen((isOpen) => !isOpen)}
+                className="min-h-9 rounded-md px-2 text-xs font-semibold text-slate-500 transition-colors hover:text-blue-800"
+                onClick={() => {
+                  setOptimisticView("logged");
+                  onChangeView("logged");
+                }}
                 type="button"
               >
-                <EllipsisVerticalIcon className="h-5 w-5" />
+                Older
               </button>
-              {mobileMenuOpen ? (
-                <div className="absolute right-0 top-11 z-20 w-56 rounded-md border border-slate-200 bg-white p-3 text-left shadow-lg">
-                  <label className="block text-sm font-medium text-slate-600">
-                    Showing
-                    <select
-                      className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                      disabled={careSubjects.length === 0}
-                      onChange={(event) => {
-                        setOptimisticSubjectId(event.target.value);
-                        onChangeSubject(event.target.value);
-                        setMobileMenuOpen(false);
-                      }}
-                      value={optimisticSubjectId}
-                    >
-                      <option value={allSubjectsValue}>All appts</option>
-                      {careSubjects.map((subject) => (
-                        <option key={subject.id} value={subject.id}>
-                          {subject.display_name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {canFilterCareVips ? (
-            <div className="order-1 hidden w-full flex-wrap items-center gap-2 text-sm text-slate-500 md:order-2 md:flex md:w-auto">
-              <label className="flex items-center gap-2">
-                <span>Showing:</span>
-                <select
-                  className="max-w-48 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                  disabled={careSubjects.length === 0}
-                  onChange={(event) => {
-                    setOptimisticSubjectId(event.target.value);
-                    onChangeSubject(event.target.value);
-                  }}
-                  value={optimisticSubjectId}
-                >
-                  <option value={allSubjectsValue}>All appts</option>
-                  {careSubjects.map((subject) => (
-                    <option key={subject.id} value={subject.id}>
-                      {subject.display_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          ) : null}
+            )}
+          </div>
+          )}
         </div>
       </div>
     </div>

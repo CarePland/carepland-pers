@@ -375,41 +375,39 @@ export function ProfileAccountSummary({
               {sendingPasswordReset ? "Sending..." : "Reset password"}
             </button>
           </div>
-          {!isAdmin ? (
-            <div className="mt-4">
-              {sampleDataSeededAt ? (
-                <p className="text-sm text-slate-600">
-                  Remove sample data only.
-                  <br />
-                  Your own appointments are safe.
-                </p>
-              ) : (
-                <p className="text-sm text-slate-600">
-                  Add sample appointments and data to quickly try out CarePland
-                  features.
-                </p>
-              )}
-              {sampleDataSeededAt ? (
-                <button
-                  className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
-                  disabled={removingSampleData}
-                  onClick={onRemoveDemoData}
-                  type="button"
-                >
-                  {removingSampleData ? "Removing..." : "Remove demo data"}
-                </button>
-              ) : (
-                <button
-                  className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
-                  disabled={seedingSampleData}
-                  onClick={onAddDemoData}
-                  type="button"
-                >
-                  {seedingSampleData ? "Adding..." : "Add demo data"}
-                </button>
-              )}
-            </div>
-          ) : null}
+          <div className="mt-4">
+            {sampleDataSeededAt ? (
+              <p className="text-sm text-slate-600">
+                Remove sample data only.
+                <br />
+                Your own appointments are safe.
+              </p>
+            ) : (
+              <p className="text-sm text-slate-600">
+                Add sample appointments and data to quickly try out CarePland
+                features.
+              </p>
+            )}
+            {sampleDataSeededAt ? (
+              <button
+                className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
+                disabled={removingSampleData}
+                onClick={onRemoveDemoData}
+                type="button"
+              >
+                {removingSampleData ? "Removing..." : "Remove demo data"}
+              </button>
+            ) : (
+              <button
+                className={`mt-3 w-full ${gentleSecondaryButtonClass} text-sm`}
+                disabled={seedingSampleData}
+                onClick={onAddDemoData}
+                type="button"
+              >
+                {seedingSampleData ? "Adding..." : "Add demo data"}
+              </button>
+            )}
+          </div>
         </section>
       </div>
     </section>

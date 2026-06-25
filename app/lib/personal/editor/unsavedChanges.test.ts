@@ -71,6 +71,8 @@ function buildEmptySignOutChanges(overrides = {}) {
     getSavedAppointmentDetails: () => savedAppointment,
     hasUnaddedCareVipName: false,
     hasUnsavedProfileChanges: false,
+    importAnythingItemsLength: 0,
+    importAnythingSourcesLength: 0,
     newAppointmentDraft: emptyAppointmentDraft,
     newCareVipName: "",
     noteDrafts: {},
@@ -111,6 +113,39 @@ describe("unsavedChanges", () => {
       }),
       true
     );
+  });
+
+  it("treats Import Anything review state as unsaved work", () => {
+    assert.equal(
+      textIntakePanelHasUnsavedChanges({
+        bulkAppointmentDraftsLength: 0,
+        importAnythingItemsLength: 1,
+        textIntakeDraft: null,
+        textIntakeValue: "",
+      }),
+      true
+    );
+    assert.equal(
+      textIntakePanelHasUnsavedChanges({
+        bulkAppointmentDraftsLength: 0,
+        importAnythingSourcesLength: 1,
+        textIntakeDraft: null,
+        textIntakeValue: "",
+      }),
+      true
+    );
+
+    const changes = buildEmptySignOutChanges({
+      importAnythingItemsLength: 2,
+    });
+
+    assert.deepEqual(changes, [
+      {
+        detail: "2 review items",
+        key: "import-anything",
+        label: "Import Anything review",
+      },
+    ]);
   });
 
   it("does not treat an empty generated intake draft as unsaved work", () => {

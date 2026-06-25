@@ -3,7 +3,9 @@
 import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
 import {
+  DragEvent,
   FormEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -123,11 +125,18 @@ import {
 import { InlineConfirmation } from "./components/shared/InlineConfirmation";
 import {
   CalendarIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   EllipsisVerticalIcon,
   MapPinIcon,
   PencilSquareIcon,
   RefreshCircleIcon,
 } from "./components/shared/icons";
+import {
+  clearAllPageViewState,
+  restorePageViewState,
+  savePageViewState,
+} from "./lib/navigation/pageViewState";
 import { OnboardingGate } from "./components/personal/onboarding/OnboardingGate";
 import { PersonalOverlays } from "./components/personal/PersonalOverlays";
 import { PasswordUpdatePanel } from "./components/shared/auth/PasswordUpdatePanel";
@@ -155,13 +164,11 @@ import {
   appointmentModifierHasUnsavedChanges,
   buildUnsavedSignOutChanges,
   hasAnyUnsavedWork,
+  newAppointmentDraftHasContent,
   textIntakePanelHasUnsavedChanges,
   type AppointmentModifier,
 } from "./lib/personal/editor/unsavedChanges";
 import {
-  appointmentSectionButtonClass,
-  appointmentSectionTitleButtonClass,
-  appointmentToolIconButtonClass,
   gentleCautionButtonClass,
   gentlePrimaryButtonClass,
   gentleSecondaryButtonClass,
@@ -188,9 +195,19 @@ import {
 } from "./lib/platform/content/appContentConfig";
 import {
   bulkAppointmentDraftsFromResult,
-  parseICalendarAppointments,
   type BulkAppointmentDraft,
 } from "./lib/personal/appointments/calendarImport";
+import { buildImportAnythingProviderUpserts } from "./lib/personal/importAnything/providers";
+import {
+  importAnythingOwnerMismatchNotice,
+} from "./lib/personal/importAnything/ownership";
+import { maxImportAnythingSourceSummaries } from "./lib/personal/importAnything/request";
+import { buildImportAnythingCarePrepDrafts } from "./lib/personal/importAnything/review";
+import {
+  formatImportAnythingPlaceholderSection,
+  formatImportAnythingSourceSummary,
+  formatImportAnythingTextSection,
+} from "./lib/personal/importAnything/sources";
 import {
   planProfilePanelContentKey,
   pricingTierForEntitlement,
@@ -244,7 +261,11 @@ type NotesReminderAppointment = Appointment & {
   care_circle_id: string;
 };
 
-type CarePrepGenerationMode = "auto_after_notes" | "auto_home" | "manual";
+type CarePrepGenerationMode =
+  | "auto_after_notes"
+  | "auto_appointments_page"
+  | "auto_home"
+  | "manual";
 
 type CareSubject = {
   avatarAltText?: string | null;
@@ -450,6 +471,10 @@ type StoredAdminTab = AdminTab | "messages";
 type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
 type MainTab = "admin" | "appointments" | "home" | "profile";
+type PendingImportLeaveAction =
+  | { kind: "appointmentPanel"; panel: AppointmentPanel }
+  | { kind: "appointmentView"; view: AppointmentView }
+  | { kind: "ask" };
 type SupportAssistantOutcome =
   | "answered"
   | "escalated"
@@ -470,7 +495,8 @@ type SupportAssistantAnalysisStatus =
   | "reviewed";
 type PendingModifierSwitch = {
   appointmentId: string;
-  target: AppointmentModifier | null;
+  target: AppointmentModifier | "careprep" | null;
+  targetAppointmentId?: string | null;
 };
 type ToastState = {
   actionLabel?: string;
@@ -501,13 +527,48 @@ type ImportAnythingReviewItem = {
   confidence: number;
   fields: Record<string, string>;
   id: string;
+  ownerClusterId: string;
+  ownerCareSubjectId: string;
+  ownerConfidence: number;
+  ownerDetectedName: string;
+  ownerNeedsReview: boolean;
+  ownerNewPersonName: string;
+  ownerRationale: string;
   kind: ImportAnythingItemKind;
   matchedAppointmentId: string;
+  matchedProviderId: string;
   needsReview: boolean;
+  providerMatchNote: string;
   sourceExcerpt: string;
   status: ImportAnythingReviewStatus;
   summary: string;
   title: string;
+  userReviewed?: boolean;
+};
+
+type ImportAnythingPersonAssignment = {
+  clusterId: string;
+  confidence: number;
+  detectedName: string;
+  matchedCareSubjectId: string;
+  needsReview: boolean;
+  rationale: string;
+  suggestedNewPersonName: string;
+};
+
+type ImportAnythingOwnershipCluster = {
+  clusterId: string;
+  confidence: number;
+  displayName: string;
+  entityType: string;
+  matchedCareSubjectId: string;
+  rationale: string;
+  suggestedNewPersonName: string;
+};
+
+type ImageTextExtractionResult = {
+  errorMessage?: string;
+  extractedCount: number;
 };
 
 type AppointmentDetailChange = {
@@ -533,16 +594,29 @@ type SampleDataStatus = {
 };
 
 type StoredUiState = {
-  activeAppointmentPanel?: AppointmentPanel | null;
   adminTab?: StoredAdminTab;
   aiAdminTab?: AiAdminTab;
-  appointmentView?: AppointmentView;
   mainTab?: MainTab;
   selectedAiWorkflow?: AiWorkflowKey;
   selectedAppContentCategory?: string;
   selectedAppContentKey?: string;
   selectedProductMgmtSection?: string;
+};
+
+type AppointmentsPageViewState = {
+  activeAppointmentPanel?: AppointmentPanel | null;
+  appointmentView?: AppointmentView;
+  expandedCarePrepIds?: Record<string, boolean>;
+  expandedVisitNotesAppointmentId?: string | null;
+  scrollY?: number;
   selectedSubjectId?: string;
+};
+
+type AppointmentsSessionSnapshot = {
+  appointmentPool: Appointment[];
+  careSubjects: CareSubject[];
+  entitlement: CareCircleEntitlement;
+  savedAt: string;
 };
 
 type StoredDraftState = {
@@ -554,6 +628,16 @@ type StoredDraftState = {
   editingAppointmentIds?: Record<string, boolean>;
   editingCarePrepIds?: Record<string, boolean>;
   editingNoteIds?: Record<string, boolean>;
+  importAnythingIntakeItemId?: string | null;
+  confirmingImportAnythingSaveAll?: boolean;
+  importAnythingReviewOpen?: boolean;
+  importAnythingItems?: ImportAnythingReviewItem[];
+  importAnythingOwnershipClusters?: ImportAnythingOwnershipCluster[];
+  importAnythingOwnerPersonId?: string;
+  importAnythingPersonAssignment?: ImportAnythingPersonAssignment | null;
+  importAnythingNewPersonName?: string;
+  importAnythingSources?: string[];
+  importAnythingSummary?: string;
   newAppointmentDraft?: {
     locationAddress: string;
     locationName: string;
@@ -580,6 +664,8 @@ const ALL_SUBJECTS = allCarePlandFocusValue;
 const ACCOUNT_PROFILE_PERSON_ID = "account";
 const appUiStateStorageKey = carePlandUiStateStorageKey;
 const appDraftStateStorageKey = "carepland-draft-state:v1";
+const appointmentsSessionSnapshotStorageKey =
+  "carepland-appointments-session-snapshot:v1";
 const appLastActivityStorageKey = "carepland-last-activity-at:v1";
 const homeAutoCarePrepAttemptStoragePrefix =
   "carepland-home-auto-careprep-attempted:v1";
@@ -667,6 +753,24 @@ function authProviderFromUser(
 
 function homeAutoCarePrepAttemptStorageKey(appointmentId: string) {
   return `${homeAutoCarePrepAttemptStoragePrefix}:${appointmentId}`;
+}
+
+function appointmentProviderHeaderLabel(appointment: Appointment) {
+  const structuredProvider =
+    appointment.provider_name?.trim() ||
+    appointment.provider_organization?.trim() ||
+    "";
+
+  if (structuredProvider) {
+    return structuredProvider;
+  }
+
+  const reason = appointment.reason?.trim() ?? "";
+  const providerMatch = reason.match(
+    /^provider:\s*(.+?)(?:\s+(?:bring|arrive|complete|call|check|upload|wear|fast|take)\b|[\n.]|$)/i
+  );
+
+  return providerMatch?.[1]?.trim() ?? "";
 }
 
 function isEligibleForHomeAutoCarePrep(appointment: Appointment) {
@@ -785,6 +889,27 @@ function getErrorMessage(error: unknown): string {
   return String(error || "Something went wrong.");
 }
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 function getAuthErrorMessage(error: unknown): string {
   const rawMessage = getErrorMessage(error).toLowerCase();
 
@@ -845,6 +970,23 @@ function logAuthError(action: string, error: unknown) {
     action,
     error,
   });
+}
+
+function isImportAnythingProviderStoreUnavailable(error: unknown): boolean {
+  const maybeError = error as { code?: string; message?: string } | null;
+  const message = maybeError?.message?.toLowerCase() ?? "";
+
+  return (
+    maybeError?.code === "42P01" ||
+    maybeError?.code === "42703" ||
+    message.includes("care_providers")
+  );
+}
+
+function hasImportAnythingProviderIdentity(item: ImportAnythingReviewItem) {
+  return Boolean(
+    item.fields.providerName?.trim() || item.fields.providerOrganization?.trim()
+  );
 }
 
 const matchStopWords = new Set([
@@ -1386,9 +1528,11 @@ function clearAuthRedirectUrl() {
 function DetailList({
   emptyLabel,
   items,
+  showBullets = true,
 }: {
   emptyLabel: string;
   items: string[];
+  showBullets?: boolean;
 }) {
   if (items.length === 0) {
     return <p className="mt-2 text-sm text-slate-500">{emptyLabel}</p>;
@@ -1398,7 +1542,11 @@ function DetailList({
     <ul className="mt-2 space-y-2 text-slate-700">
       {items.map((item) => (
         <li className="flex gap-2" key={item}>
-          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+          <span
+            className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${
+              showBullets ? "bg-blue-500" : "invisible"
+            }`}
+          />
           <span>{item}</span>
         </li>
       ))}
@@ -1614,6 +1762,14 @@ function importAnythingReviewItem(
   const summary =
     summaryParts.map((part) => part.trim()).filter(Boolean).join(" · ") ||
     title;
+  const itemPersonAssignment = importAnythingPersonAssignmentFromUnknown(
+    item.person_assignment
+  );
+  const hasConfidentOwner =
+    Boolean(itemPersonAssignment?.clusterId) &&
+    (itemPersonAssignment?.confidence ?? 0) >= 0.85 &&
+    itemPersonAssignment?.needsReview !== true;
+  const itemNeedsReview = needsReview || !hasConfidentOwner;
 
   return {
     confidence,
@@ -1621,9 +1777,29 @@ function importAnythingReviewItem(
     id: `${kind}-${index}-${title}`,
     kind,
     matchedAppointmentId: stringFromUnknown(item.matched_appointment_id),
-    needsReview,
+    matchedProviderId: stringFromUnknown(item.matched_provider_id),
+    needsReview: itemNeedsReview,
+    ownerClusterId: hasConfidentOwner
+      ? itemPersonAssignment?.clusterId ?? ""
+      : "",
+    ownerCareSubjectId:
+      hasConfidentOwner &&
+      itemPersonAssignment &&
+      itemPersonAssignment.matchedCareSubjectId
+        ? itemPersonAssignment.matchedCareSubjectId
+        : "",
+    ownerConfidence: itemPersonAssignment?.confidence ?? 0,
+    ownerDetectedName: itemPersonAssignment?.detectedName ?? "",
+    ownerNeedsReview: itemPersonAssignment?.needsReview ?? true,
+    ownerNewPersonName:
+      !itemPersonAssignment?.matchedCareSubjectId &&
+      itemPersonAssignment?.suggestedNewPersonName
+        ? itemPersonAssignment.suggestedNewPersonName
+        : "",
+    ownerRationale: itemPersonAssignment?.rationale ?? "",
+    providerMatchNote: stringFromUnknown(item.provider_match_note),
     sourceExcerpt: stringFromUnknown(item.source_excerpt),
-    status: needsReview ? "needs_review" : "approved",
+    status: itemNeedsReview ? "needs_review" : "approved",
     summary,
     title,
   };
@@ -1669,6 +1845,7 @@ function importAnythingItemsFromDraft(
 
   arrayFromUnknown(draft.providers).forEach((item, index) => {
     const fields = {
+      locationAddress: stringFromUnknown(item.location_address),
       locationName: stringFromUnknown(item.location_name),
       phone: stringFromUnknown(item.phone),
       providerName: stringFromUnknown(item.provider_name),
@@ -1788,6 +1965,208 @@ function importAnythingSummaryCounts(items: ImportAnythingReviewItem[]) {
   };
 }
 
+function normalizedImportAnythingText(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function importAnythingOwnerKey(item: ImportAnythingReviewItem) {
+  return (
+    item.ownerCareSubjectId ||
+    normalizedImportAnythingText(item.ownerNewPersonName) ||
+    normalizedImportAnythingText(item.ownerDetectedName)
+  );
+}
+
+function importAnythingFindSupportingNotes(
+  appointment: ImportAnythingReviewItem,
+  items: ImportAnythingReviewItem[]
+) {
+  if (appointment.kind !== "appointment") {
+    return [];
+  }
+
+  const appointmentTitle = normalizedImportAnythingText(
+    appointment.fields.appointmentTitle || appointment.title
+  );
+  const appointmentOwner = importAnythingOwnerKey(appointment);
+
+  if (!appointmentTitle) {
+    return [];
+  }
+
+  return items.filter((item) => {
+    if (item.kind !== "note" && item.kind !== "careprep") {
+      return false;
+    }
+
+    const itemTitle = normalizedImportAnythingText(
+      item.fields.appointmentTitle || item.title
+    );
+
+    return (
+      itemTitle === appointmentTitle &&
+      (!appointmentOwner || importAnythingOwnerKey(item) === appointmentOwner)
+    );
+  });
+}
+
+function importAnythingStagingItems(items: ImportAnythingReviewItem[]) {
+  const supportedItemIds = new Set(
+    items
+      .filter((item) => item.kind === "appointment")
+      .flatMap((item) =>
+        importAnythingFindSupportingNotes(item, items).map(
+          (supportItem) => supportItem.id
+        )
+      )
+  );
+
+  return items.filter(
+    (item) => item.kind !== "provider" && !supportedItemIds.has(item.id)
+  );
+}
+
+function importAnythingPracticeOfficeValue(item: ImportAnythingReviewItem) {
+  return (
+    item.fields.providerOrganization?.trim() ||
+    item.fields.locationName?.trim() ||
+    ""
+  );
+}
+
+function importAnythingSimpleFieldEntries(item: ImportAnythingReviewItem) {
+  return Object.entries(item.fields).filter(
+    ([field]) => field !== "providerOrganization" && field !== "locationName"
+  );
+}
+
+function pluralizeCount(count: number, singularLabel: string) {
+  return `${count} ${singularLabel}${count === 1 ? "" : "s"}`;
+}
+
+function importAnythingDeterministicSummary(
+  items: ImportAnythingReviewItem[],
+  clusters: ImportAnythingOwnershipCluster[]
+) {
+  const counts = importAnythingSummaryCounts(items);
+  const itemParts = [
+    counts.appointments
+      ? pluralizeCount(counts.appointments, "appointment")
+      : "",
+    counts.tasks ? pluralizeCount(counts.tasks, "task") : "",
+    counts.medicationChanges
+      ? pluralizeCount(counts.medicationChanges, "medication change")
+      : "",
+    counts.questions ? pluralizeCount(counts.questions, "question") : "",
+    counts.careprep ? pluralizeCount(counts.careprep, "CarePrep item") : "",
+  ].filter(Boolean);
+  const clusterRows = importAnythingOwnershipClusterCounts(items, clusters);
+  const clusterLabels = clusterRows
+    .filter((row) => row.count > 0)
+    .map((row) => row.label);
+
+  return `Found ${itemParts.join(", ") || "review items"}${
+    clusterLabels.length > 0
+      ? ` across ${clusterLabels.join(", ")}`
+      : ""
+  }.${counts.notes ? " Supporting notes were attached automatically." : ""}`;
+}
+
+function importAnythingPersonAssignmentFromUnknown(
+  value: unknown
+): ImportAnythingPersonAssignment | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const assignment = value as Record<string, unknown>;
+  const confidence =
+    typeof assignment.confidence === "number" &&
+    Number.isFinite(assignment.confidence)
+      ? Math.min(1, Math.max(0, assignment.confidence))
+      : 0;
+
+  return {
+    clusterId: stringFromUnknown(assignment.cluster_id),
+    confidence,
+    detectedName: stringFromUnknown(assignment.detected_name),
+    matchedCareSubjectId: stringFromUnknown(
+      assignment.matched_care_subject_id
+    ),
+    needsReview: assignment.needs_review === true,
+    rationale: stringFromUnknown(assignment.rationale),
+    suggestedNewPersonName: stringFromUnknown(
+      assignment.suggested_new_person_name
+    ),
+  };
+}
+
+function importAnythingOwnershipClustersFromDraft(
+  draftValue: unknown
+): ImportAnythingOwnershipCluster[] {
+  const draft =
+    draftValue && typeof draftValue === "object" && !Array.isArray(draftValue)
+      ? (draftValue as Record<string, unknown>)
+      : {};
+
+  return arrayFromUnknown(draft.ownership_clusters).map((cluster) => ({
+    clusterId: stringFromUnknown(cluster.cluster_id),
+    confidence: numberFromUnknown(cluster.confidence),
+    displayName: stringFromUnknown(cluster.display_name),
+    entityType: stringFromUnknown(cluster.entity_type),
+    matchedCareSubjectId: stringFromUnknown(cluster.matched_care_subject_id),
+    rationale: stringFromUnknown(cluster.rationale),
+    suggestedNewPersonName: stringFromUnknown(
+      cluster.suggested_new_person_name
+    ),
+  }));
+}
+
+function importAnythingOwnershipClusterCounts(
+  items: ImportAnythingReviewItem[],
+  clusters: ImportAnythingOwnershipCluster[]
+) {
+  const counts = new Map<string, number>();
+  const clusterLabelById = new Map(
+    clusters.map((cluster) => [
+      cluster.clusterId,
+      cluster.displayName || cluster.suggestedNewPersonName || "Unnamed",
+    ])
+  );
+
+  for (const item of items) {
+    const key =
+      item.ownerClusterId && item.ownerConfidence >= 0.85
+        ? item.ownerClusterId
+        : "unassigned";
+
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const clusterRows = clusters.map((cluster) => ({
+    count: counts.get(cluster.clusterId) ?? 0,
+    label:
+      cluster.displayName ||
+      cluster.suggestedNewPersonName ||
+      cluster.clusterId ||
+      "Unnamed",
+  }));
+  const assignedClusterIds = new Set(clusters.map((cluster) => cluster.clusterId));
+  const orphanRows = Array.from(counts.entries())
+    .filter(([clusterId]) => clusterId !== "unassigned" && !assignedClusterIds.has(clusterId))
+    .map(([clusterId, count]) => ({
+      count,
+      label: clusterLabelById.get(clusterId) ?? clusterId,
+    }));
+  const unassignedCount = counts.get("unassigned") ?? 0;
+
+  return [
+    ...clusterRows,
+    ...orphanRows,
+    ...(unassignedCount > 0 ? [{ count: unassignedCount, label: "Unassigned" }] : []),
+  ].filter((row) => row.count > 0 || row.label !== "Unassigned");
+}
+
 function importAnythingMatchedAppointmentLabel(
   appointmentId: string,
   appointments: Appointment[]
@@ -1805,31 +2184,6 @@ function importAnythingMatchedAppointmentLabel(
   ]
     .filter(Boolean)
     .join(" · ");
-}
-
-function importAnythingCarePrepSummary(
-  items: ImportAnythingReviewItem[],
-  appointment: Appointment | undefined
-): string {
-  const itemSummaries = items
-    .map((item) => {
-      if (item.kind === "question") {
-        return item.fields.question?.trim();
-      }
-
-      return item.fields.detail?.trim();
-    })
-    .filter(Boolean);
-  const appointmentName =
-    appointment?.title?.trim() || appointment?.reason?.trim() || "this visit";
-
-  if (itemSummaries.length === 0) {
-    return `Imported CarePrep draft for ${appointmentName}.`;
-  }
-
-  return `Imported CarePrep draft for ${appointmentName}: ${itemSummaries
-    .slice(0, 3)
-    .join("; ")}${itemSummaries.length > 3 ? "." : ""}`;
 }
 
 type CarePlandPersProps = {
@@ -1855,6 +2209,18 @@ function preferredTabFromRoute(): MainTab | null {
   if (params.get("profile") === "1") return "profile";
   if (params.get("appointments") === "1") return "appointments";
   return null;
+}
+
+function shouldShowAppointmentsMainFromRoute() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return (
+    params.get("appointments") === "1" &&
+    (params.get("view") === "upcoming" || params.get("main") === "1")
+  );
 }
 
 function shouldOpenAskFromRoute() {
@@ -1891,6 +2257,10 @@ export function CarePlandPers({
 }: CarePlandPersProps = {}) {
   const mainHeaderRef = useRef<HTMLElement | null>(null);
   const adminReadonlyPanelRef = useRef<HTMLElement | null>(null);
+  const restoredAppointmentsScrollRef = useRef(false);
+  const importAnythingDragDepthRef = useRef(0);
+  const appointmentNotesDragDepthRef = useRef(0);
+  const shouldShowAppointmentsMain = shouldShowAppointmentsMainFromRoute();
   const [stickySecondaryOffset, setStickySecondaryOffset] = useState(0);
   const [runtimeEnvironmentLabel, setRuntimeEnvironmentLabel] = useState("");
   const [showVersionInfo, setShowVersionInfo] = useState(false);
@@ -1919,13 +2289,32 @@ export function CarePlandPers({
       appDraftStateStorageKey
     );
   });
+  const [initialAppointmentsPageViewState] =
+    useState<AppointmentsPageViewState | null>(() => {
+      const restoredState =
+        restorePageViewState<AppointmentsPageViewState>("appointments");
+
+      if (!restoredState?.engaged) {
+        return null;
+      }
+
+      return shouldShowAppointmentsMain
+        ? {
+            ...restoredState,
+            activeAppointmentPanel: null,
+            appointmentView: "upcoming",
+          }
+        : restoredState;
+    });
   const [authMode, setAuthMode] = useState<AuthMode>("signIn");
   const [showAuthGateway, setShowAuthGateway] = useState(adminRoute);
   const [planHelpExpanded, setPlanHelpExpanded] = useState(false);
   const [adminPlanPreviewId, setAdminPlanPreviewId] = useState("");
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
     useState<AppointmentPanel | null>(
-      initialUiState?.activeAppointmentPanel ?? null
+      shouldShowAppointmentsMain
+        ? null
+        : initialAppointmentsPageViewState?.activeAppointmentPanel ?? null
     );
   const [mainTab, setMainTab] = useState<MainTab>(
     preferredInitialMainTab ??
@@ -2048,14 +2437,51 @@ export function CarePlandPers({
   );
   const [importAnythingIntakeItemId, setImportAnythingIntakeItemId] = useState<
     string | null
-  >(null);
+  >(initialDraftState?.importAnythingIntakeItemId ?? null);
+  const [importAnythingReviewOpen, setImportAnythingReviewOpen] = useState(
+    initialDraftState?.importAnythingReviewOpen ?? false
+  );
   const [importAnythingItems, setImportAnythingItems] = useState<
     ImportAnythingReviewItem[]
-  >([]);
-  const [importAnythingSummary, setImportAnythingSummary] = useState("");
-  const [importAnythingSources, setImportAnythingSources] = useState<string[]>(
-    []
+  >(initialDraftState?.importAnythingItems ?? []);
+  const [
+    importAnythingOwnershipClusters,
+    setImportAnythingOwnershipClusters,
+  ] = useState<ImportAnythingOwnershipCluster[]>(
+    initialDraftState?.importAnythingOwnershipClusters ?? []
   );
+  const [importAnythingOwnerPersonId, setImportAnythingOwnerPersonId] =
+    useState(initialDraftState?.importAnythingOwnerPersonId ?? "");
+  const [importAnythingPersonAssignment, setImportAnythingPersonAssignment] =
+    useState<ImportAnythingPersonAssignment | null>(
+      initialDraftState?.importAnythingPersonAssignment ?? null
+    );
+  const [importAnythingNewPersonName, setImportAnythingNewPersonName] =
+    useState(initialDraftState?.importAnythingNewPersonName ?? "");
+  const [importAnythingSummary, setImportAnythingSummary] = useState(
+    initialDraftState?.importAnythingSummary ?? ""
+  );
+  const [importAnythingSources, setImportAnythingSources] = useState<string[]>(
+    initialDraftState?.importAnythingSources ?? []
+  );
+  const [importAnythingDragActive, setImportAnythingDragActive] =
+    useState(false);
+  const [importAnythingExpertView, setImportAnythingExpertView] =
+    useState(false);
+  const [
+    confirmingImportAnythingSaveAll,
+    setConfirmingImportAnythingSaveAll,
+  ] = useState(initialDraftState?.confirmingImportAnythingSaveAll ?? false);
+  const [editingImportAnythingItemIds, setEditingImportAnythingItemIds] =
+    useState<Record<string, boolean>>({});
+  const [
+    expandedImportAnythingItemIds,
+    setExpandedImportAnythingItemIds,
+  ] = useState<Record<string, boolean>>({});
+  const [confirmingDiscardImportAnythingReview, setConfirmingDiscardImportAnythingReview] =
+    useState(false);
+  const [viewingImportAnythingSourceItemId, setViewingImportAnythingSourceItemId] =
+    useState<string | null>(null);
   const [processingImportAnything, setProcessingImportAnything] =
     useState(false);
   const [savingImportAnything, setSavingImportAnything] = useState(false);
@@ -2433,7 +2859,7 @@ export function CarePlandPers({
   >(null);
   const [expandedCarePrepIds, setExpandedCarePrepIds] = useState<
     Record<string, boolean>
-  >({});
+  >(initialAppointmentsPageViewState?.expandedCarePrepIds ?? {});
   const [editingAppointmentIds, setEditingAppointmentIds] = useState<
     Record<string, boolean>
   >(initialDraftState?.editingAppointmentIds ?? {});
@@ -2441,11 +2867,15 @@ export function CarePlandPers({
     initialDraftState?.editingNoteIds ?? {}
   );
   const [expandedVisitNotesAppointmentId, setExpandedVisitNotesAppointmentId] =
-    useState<string | null>(null);
+    useState<string | null>(
+      initialAppointmentsPageViewState?.expandedVisitNotesAppointmentId ?? null
+    );
 	  const [pendingModifierSwitch, setPendingModifierSwitch] =
 	    useState<PendingModifierSwitch | null>(null);
 	  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
   const [pendingMainTab, setPendingMainTab] = useState<MainTab | null>(null);
+  const [pendingImportLeaveAction, setPendingImportLeaveAction] =
+    useState<PendingImportLeaveAction | null>(null);
 	  const [loading, setLoading] = useState(false);
   const [sessionRestored, setSessionRestored] = useState(false);
   const [welcomePanelIndex, setWelcomePanelIndex] = useState(0);
@@ -2453,8 +2883,12 @@ export function CarePlandPers({
   const [processingTextIntake, setProcessingTextIntake] = useState(false);
   const [extractingImageText, setExtractingImageText] = useState(false);
   const [fileImportStatus, setFileImportStatus] = useState("");
+  const [appointmentNotesDragActive, setAppointmentNotesDragActive] =
+    useState(false);
   const [pendingTextIntakePanelAction, setPendingTextIntakePanelAction] =
     useState<AppointmentPanel | "close" | null>(null);
+  const [pendingAppointmentPanelView, setPendingAppointmentPanelView] =
+    useState<AppointmentView | null>(null);
   const [savingTextIntake, setSavingTextIntake] = useState(false);
   const [creatingCareVip, setCreatingCareVip] = useState(false);
   const [deactivatingCareVipId, setDeactivatingCareVipId] = useState<
@@ -2469,11 +2903,59 @@ export function CarePlandPers({
   } | null>(null);
   const [careVipFormMessage, setCareVipFormMessage] = useState("");
   const [appointmentView, setAppointmentView] = useState<AppointmentView>(
-    initialUiState?.appointmentView ?? "upcoming"
+    shouldShowAppointmentsMain
+      ? "upcoming"
+      : initialAppointmentsPageViewState?.appointmentView ?? "upcoming"
   );
   const [selectedSubjectId, setSelectedSubjectId] = useState(
-    initialUiState?.selectedSubjectId ?? ALL_SUBJECTS
+    initialAppointmentsPageViewState?.selectedSubjectId ?? ALL_SUBJECTS
   );
+  const newAppointmentTargetSubjectId =
+    newAppointmentSubjectId ||
+    (selectedSubjectId !== ALL_SUBJECTS ? selectedSubjectId : "");
+  const canCreateNewAppointment =
+    Boolean(newAppointmentTargetSubjectId) &&
+    Boolean(newAppointmentTitle.trim()) &&
+    Boolean(newAppointmentStartsAt.trim()) &&
+    Boolean(newAppointmentLocationAddress.trim()) &&
+    Boolean(newAppointmentProviderName.trim()) &&
+    Boolean(newAppointmentReason.trim());
+  const saveAppointmentsViewState = useCallback((
+    overrides: Partial<AppointmentsPageViewState> = {}
+  ) => {
+    savePageViewState<AppointmentsPageViewState>("appointments", {
+      activeAppointmentPanel,
+      appointmentView,
+      expandedCarePrepIds,
+      expandedVisitNotesAppointmentId,
+      scrollY: typeof window === "undefined" ? 0 : window.scrollY,
+      selectedSubjectId,
+      ...overrides,
+      engaged: true,
+    });
+  }, [
+    activeAppointmentPanel,
+    appointmentView,
+    expandedCarePrepIds,
+    expandedVisitNotesAppointmentId,
+    selectedSubjectId,
+  ]);
+  useEffect(() => {
+    if (!shouldShowAppointmentsMain || typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("appointments") !== "1") {
+      return;
+    }
+
+    if (!params.has("view") && !params.has("main")) {
+      return;
+    }
+
+    window.history.replaceState({}, "", "/?personal=1&appointments=1");
+  }, [shouldShowAppointmentsMain]);
   const [profileContactPersonId, setProfileContactPersonId] = useState(
     ACCOUNT_PROFILE_PERSON_ID
   );
@@ -2612,6 +3094,10 @@ export function CarePlandPers({
   const appSessionSettingsRef = useRef(defaultAppSessionSettings);
   const idleSigningOutRef = useRef(false);
   const homeAutoCarePrepInFlightRef = useRef<Set<string>>(new Set());
+  const appointmentsPageAutoCarePrepInFlightRef = useRef(false);
+  const appointmentsPageAutoCarePrepAttemptedRef = useRef<Set<string>>(
+    new Set()
+  );
   const [toast, setToast] = useState<ToastState | null>(null);
   const [appointmentPool, setAppointmentPool] = useState<Appointment[]>([]);
   const appointmentPoolRef = useRef<Appointment[]>([]);
@@ -3122,6 +3608,8 @@ export function CarePlandPers({
       }),
       hasUnaddedCareVipName,
       hasUnsavedProfileChanges,
+      importAnythingItemsLength: importAnythingItems.length,
+      importAnythingSourcesLength: importAnythingSources.length,
       newAppointmentDraft,
       newCareVipName,
       noteDrafts,
@@ -3145,6 +3633,8 @@ export function CarePlandPers({
 	    guidanceByAppointment,
 	    hasUnaddedCareVipName,
 	    hasUnsavedProfileChanges,
+	    importAnythingItems.length,
+	    importAnythingSources.length,
 	    newAppointmentDraft,
 	    newCareVipName,
 	    noteDrafts,
@@ -3154,6 +3644,15 @@ export function CarePlandPers({
 	    textIntakeValue,
 	  ]);
   const hasUnsavedWorkForLeave = hasAnyUnsavedWork(unsavedSignOutChanges);
+  const importAnythingPanelHasUnfinishedWork =
+    activeAppointmentPanel === "quickAdd" &&
+    textIntakePanelHasUnsavedChanges({
+      bulkAppointmentDraftsLength: bulkAppointmentDrafts.length,
+      importAnythingItemsLength: importAnythingItems.length,
+      importAnythingSourcesLength: importAnythingSources.length,
+      textIntakeDraft,
+      textIntakeValue,
+    });
 	  const hasAcceptedBetaAgreement =
 	    Boolean(betaDisclaimerAcknowledgedAt) &&
     Boolean(betaPrivacyAcknowledgedAt) &&
@@ -3200,6 +3699,7 @@ export function CarePlandPers({
     setPendingCarePrepCloseId(null);
     setBulkAppointmentDrafts([]);
     setBulkAppointmentSummary("");
+    setImportAnythingOwnerPersonId("");
     setTextIntakeSubjectId("");
     setTextIntakeValue("");
     setTextIntakeDraft(null);
@@ -3211,6 +3711,7 @@ export function CarePlandPers({
     setContextualTextIntakeValue("");
     setApplyTextIntakeAppointmentDetails(false);
     setPendingTextIntakePanelAction(null);
+    setPendingImportLeaveAction(null);
     setPendingModifierSwitch(null);
     setAskThreadId(null);
     setAskInput("");
@@ -3377,174 +3878,189 @@ export function CarePlandPers({
     }, 0);
 
     async function restoreSession() {
-      const isRecoveryRedirect = isPasswordRecoveryRedirect();
-      const isGoogleRedirect = isGoogleAuthRedirect();
-      const isConfirmationRedirect = isEmailConfirmationRedirect();
+      try {
+        const isRecoveryRedirect = isPasswordRecoveryRedirect();
+        const isGoogleRedirect = isGoogleAuthRedirect();
+        const isConfirmationRedirect = isEmailConfirmationRedirect();
 
-      if (isRecoveryRedirect) {
-        setLoading(true);
+        if (isRecoveryRedirect) {
+          setLoading(true);
 
-        try {
-          const recoveryEmail = await establishAuthRedirectSession();
+          try {
+            const recoveryEmail = await establishAuthRedirectSession();
 
-          if (recoveryEmail) {
-            setSignedInEmail(recoveryEmail);
-            setWelcomeGuideDismissed(false);
-            setEmail(recoveryEmail);
-          }
-
-          setAuthMode("updatePassword");
-          setPassword("");
-          setConfirmPassword("");
-          setMessage("Enter a new password to finish resetting your password.");
-        } catch (error) {
-          logAuthError("passwordRecoverySession", error);
-          setAuthMode("reset");
-          setMessage(
-            "This password reset link could not be opened. Please request a fresh reset email and use the newest link."
-          );
-        } finally {
-          setLoading(false);
-          setSessionRestored(true);
-        }
-
-        return;
-      }
-
-      if (isGoogleRedirect) {
-        setLoading(true);
-
-        try {
-          const redirectError =
-            new URLSearchParams(window.location.search).get(
-              "error_description"
-            ) ??
-            new URLSearchParams(window.location.hash.replace(/^#/, "")).get(
-              "error_description"
-            );
-
-          if (redirectError) {
-            throw new Error(redirectError);
-          }
-
-          const googleEmail = await establishAuthRedirectSession();
-
-          if (!googleEmail) {
-            throw new Error("Google sign-in did not return an active session.");
-          }
-
-          setSessionProfileLoaded(false);
-          setSignedInEmail(googleEmail);
-          setWelcomeGuideDismissed(false);
-          setEmail(googleEmail);
-          recordSessionActivity();
-          clearAuthRedirectUrl();
-          void loadAppContent();
-          void loadAppSessionSettings();
-          await loadAppointments();
-        } catch (error) {
-          logAuthError("googleOAuthSession", error);
-          setAuthMode("signIn");
-          setSignedInEmail(null);
-          setMessage(
-            "Google sign-in could not be completed. Please try again, or use email and password."
-          );
-          clearAuthRedirectUrl();
-        } finally {
-          setLoading(false);
-          setSessionRestored(true);
-        }
-
-        return;
-      }
-
-      if (isConfirmationRedirect) {
-        setLoading(true);
-
-        try {
-          const confirmationEmail = await establishAuthRedirectSession();
-          await supabase.auth.signOut();
-          setSignedInEmail(null);
-          setWelcomeGuideDismissed(false);
-          if (confirmationEmail) {
-            setEmail(confirmationEmail);
-          }
-          setAuthMode("signIn");
-          setPassword("");
-          setConfirmPassword("");
-          setMessage("Account verified. Sign in to continue.");
-          clearAuthRedirectUrl();
-        } catch (error) {
-          logAuthError("emailConfirmationSession", error);
-          setAuthMode("signIn");
-          setMessage("Account verified. Sign in to continue.");
-          clearAuthRedirectUrl();
-        } finally {
-          setLoading(false);
-          setSessionRestored(true);
-        }
-
-        return;
-      }
-
-      const { data } = await supabase.auth.getSession();
-      const sessionEmail = data.session?.user.email ?? null;
-
-      if (sessionEmail) {
-        setSessionProfileLoaded(false);
-        setSignedInEmail(sessionEmail);
-        setWelcomeGuideDismissed(false);
-        setEmail(sessionEmail);
-
-        setLoading(true);
-
-        try {
-          void loadAppContent();
-          void loadAppSessionSettings();
-          await loadAppointments(
-            initialUiState?.appointmentView,
-            initialUiState?.selectedSubjectId
-          );
-          void loadCurrentUserSupportTickets();
-
-          if (initialUiState?.mainTab === "admin") {
-            if (initialUiState.adminTab === "ai") {
-              void Promise.all([
-                loadAiInstructions(initialUiState.selectedAiWorkflow),
-                loadAppContent(),
-                loadAgentKnowledgeProposals(),
-              ]);
-            } else if (initialUiState.adminTab === "product") {
-              void loadProductMgmt();
-            } else if (initialUiState.adminTab === "tickets") {
-              void loadAdminSupportTickets();
-            } else if (initialUiState.adminTab === "assistantReview") {
-              void Promise.all([
-                loadAskReviewSubmissions(),
-                loadAssistantReviewInteractions(),
-              ]);
-            } else if (initialUiState.adminTab === "users") {
-              void loadAdminUserActivity();
-            } else if (initialUiState.adminTab === "intake") {
-              void loadEarlyAccessIntake();
-            } else if (initialUiState.adminTab === "userAudit") {
-              void loadAdminAccessEvents();
-            } else if (initialUiState.adminTab === "errors") {
-              void loadAdminIntegrationErrors();
-            } else if (initialUiState.adminTab === "content") {
-              void loadAppContent(initialUiState.selectedAppContentKey);
-            } else if (initialUiState.adminTab === "dashboard") {
-              void loadAdminAttentionOverview();
+            if (recoveryEmail) {
+              setSignedInEmail(recoveryEmail);
+              setWelcomeGuideDismissed(false);
+              setEmail(recoveryEmail);
             }
+
+            setAuthMode("updatePassword");
+            setPassword("");
+            setConfirmPassword("");
+            setMessage("Enter a new password to finish resetting your password.");
+          } catch (error) {
+            logAuthError("passwordRecoverySession", error);
+            setAuthMode("reset");
+            setMessage(
+              "This password reset link could not be opened. Please request a fresh reset email and use the newest link."
+            );
+          } finally {
+            setLoading(false);
+            setSessionRestored(true);
           }
-        } catch (error) {
-          setMessage(getErrorMessage(error));
-        } finally {
-          setLoading(false);
+
+          return;
+        }
+
+        if (isGoogleRedirect) {
+          setLoading(true);
+
+          try {
+            const redirectError =
+              new URLSearchParams(window.location.search).get(
+                "error_description"
+              ) ??
+              new URLSearchParams(window.location.hash.replace(/^#/, "")).get(
+                "error_description"
+              );
+
+            if (redirectError) {
+              throw new Error(redirectError);
+            }
+
+            const googleEmail = await establishAuthRedirectSession();
+
+            if (!googleEmail) {
+              throw new Error("Google sign-in did not return an active session.");
+            }
+
+            setSessionProfileLoaded(false);
+            setSignedInEmail(googleEmail);
+            setWelcomeGuideDismissed(false);
+            setEmail(googleEmail);
+            recordSessionActivity();
+            clearAuthRedirectUrl();
+            void loadAppContent();
+            void loadAppSessionSettings();
+            await loadAppointments();
+          } catch (error) {
+            logAuthError("googleOAuthSession", error);
+            setAuthMode("signIn");
+            setSignedInEmail(null);
+            setMessage(
+              "Google sign-in could not be completed. Please try again, or use email and password."
+            );
+            clearAuthRedirectUrl();
+          } finally {
+            setLoading(false);
+            setSessionRestored(true);
+          }
+
+          return;
+        }
+
+        if (isConfirmationRedirect) {
+          setLoading(true);
+
+          try {
+            const confirmationEmail = await establishAuthRedirectSession();
+            await supabase.auth.signOut();
+            setSignedInEmail(null);
+            setWelcomeGuideDismissed(false);
+            if (confirmationEmail) {
+              setEmail(confirmationEmail);
+            }
+            setAuthMode("signIn");
+            setPassword("");
+            setConfirmPassword("");
+            setMessage("Account verified. Sign in to continue.");
+            clearAuthRedirectUrl();
+          } catch (error) {
+            logAuthError("emailConfirmationSession", error);
+            setAuthMode("signIn");
+            setMessage("Account verified. Sign in to continue.");
+            clearAuthRedirectUrl();
+          } finally {
+            setLoading(false);
+            setSessionRestored(true);
+          }
+
+          return;
+        }
+
+        const { data } = await withTimeout(
+          supabase.auth.getSession(),
+          8000,
+          "CarePland could not restore your previous session."
+        );
+        const sessionEmail = data.session?.user.email ?? null;
+
+        if (sessionEmail) {
+          setSessionProfileLoaded(false);
+          setSignedInEmail(sessionEmail);
+          setWelcomeGuideDismissed(false);
+          setEmail(sessionEmail);
+
+          setLoading(true);
+
+          try {
+            void loadAppContent();
+            void loadAppSessionSettings();
+            await loadAppointments(
+              initialAppointmentsPageViewState?.appointmentView,
+              initialAppointmentsPageViewState?.selectedSubjectId
+            );
+            void loadCurrentUserSupportTickets();
+
+            if (initialUiState?.mainTab === "admin") {
+              if (initialUiState.adminTab === "ai") {
+                void Promise.all([
+                  loadAiInstructions(initialUiState.selectedAiWorkflow),
+                  loadAppContent(),
+                  loadAgentKnowledgeProposals(),
+                ]);
+              } else if (initialUiState.adminTab === "product") {
+                void loadProductMgmt();
+              } else if (initialUiState.adminTab === "tickets") {
+                void loadAdminSupportTickets();
+              } else if (initialUiState.adminTab === "assistantReview") {
+                void Promise.all([
+                  loadAskReviewSubmissions(),
+                  loadAssistantReviewInteractions(),
+                ]);
+              } else if (initialUiState.adminTab === "users") {
+                void loadAdminUserActivity();
+              } else if (initialUiState.adminTab === "intake") {
+                void loadEarlyAccessIntake();
+              } else if (initialUiState.adminTab === "userAudit") {
+                void loadAdminAccessEvents();
+              } else if (initialUiState.adminTab === "errors") {
+                void loadAdminIntegrationErrors();
+              } else if (initialUiState.adminTab === "content") {
+                void loadAppContent(initialUiState.selectedAppContentKey);
+              } else if (initialUiState.adminTab === "dashboard") {
+                void loadAdminAttentionOverview();
+              }
+            }
+          } catch (error) {
+            setMessage(getErrorMessage(error));
+          } finally {
+            setLoading(false);
+            setSessionRestored(true);
+          }
+        } else {
           setSessionRestored(true);
         }
-      } else {
+      } catch (error) {
+        logAuthError("restoreSession", error);
+        setLoading(false);
+        setSignedInEmail(null);
+        setSessionProfileLoaded(false);
         setSessionRestored(true);
+        setMessage(
+          "CarePland could not restore your previous session. Please sign in again."
+        );
       }
     }
 
@@ -3806,27 +4322,82 @@ export function CarePlandPers({
     }
 
     writeStoredJson(window.localStorage, appUiStateStorageKey, {
-      activeAppointmentPanel,
       adminTab,
       aiAdminTab,
-      appointmentView,
       mainTab,
       selectedAiWorkflow,
       selectedAppContentCategory,
       selectedAppContentKey,
       selectedProductMgmtSection,
-      selectedSubjectId,
     } satisfies StoredUiState);
   }, [
-    activeAppointmentPanel,
     adminTab,
     aiAdminTab,
-    appointmentView,
     mainTab,
     selectedAiWorkflow,
     selectedAppContentCategory,
     selectedAppContentKey,
     selectedProductMgmtSection,
+  ]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      mainTab !== "appointments" ||
+      restoredAppointmentsScrollRef.current
+    ) {
+      return;
+    }
+
+    const restoredState =
+      restorePageViewState<AppointmentsPageViewState>("appointments");
+
+    if (!restoredState?.engaged || !restoredState.scrollY) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: restoredState.scrollY });
+      restoredAppointmentsScrollRef.current = true;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [appointments.length, mainTab, sessionRestored]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || mainTab !== "appointments") {
+      return;
+    }
+
+    let frameId = 0;
+
+    const saveScrollPosition = () => {
+      const restoredState =
+        restorePageViewState<AppointmentsPageViewState>("appointments");
+
+      if (!restoredState?.engaged) {
+        return;
+      }
+
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        saveAppointmentsViewState({ scrollY: window.scrollY });
+      });
+    };
+
+    window.addEventListener("scroll", saveScrollPosition, { passive: true });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("scroll", saveScrollPosition);
+    };
+  }, [
+    activeAppointmentPanel,
+    appointmentView,
+    expandedCarePrepIds,
+    expandedVisitNotesAppointmentId,
+    mainTab,
+    saveAppointmentsViewState,
     selectedSubjectId,
   ]);
 
@@ -3844,6 +4415,16 @@ export function CarePlandPers({
       editingAppointmentIds,
       editingCarePrepIds,
       editingNoteIds,
+      confirmingImportAnythingSaveAll,
+      importAnythingIntakeItemId,
+      importAnythingItems,
+      importAnythingNewPersonName,
+      importAnythingOwnerPersonId,
+      importAnythingOwnershipClusters,
+      importAnythingPersonAssignment,
+      importAnythingReviewOpen,
+      importAnythingSources,
+      importAnythingSummary,
       newAppointmentDraft: {
         ...newAppointmentDraft,
         subjectId: newAppointmentSubjectId,
@@ -3867,6 +4448,16 @@ export function CarePlandPers({
     editingAppointmentIds,
     editingCarePrepIds,
     editingNoteIds,
+    confirmingImportAnythingSaveAll,
+    importAnythingIntakeItemId,
+    importAnythingItems,
+    importAnythingNewPersonName,
+    importAnythingOwnerPersonId,
+    importAnythingOwnershipClusters,
+    importAnythingPersonAssignment,
+    importAnythingReviewOpen,
+    importAnythingSources,
+    importAnythingSummary,
     newAppointmentDraft,
     newAppointmentSubjectId,
     noteDrafts,
@@ -3912,10 +4503,7 @@ export function CarePlandPers({
 
   function focusAppointmentCarePrep(appointmentId: string) {
     setAppointmentView("upcoming");
-    setExpandedCarePrepIds((currentIds) => ({
-      ...currentIds,
-      [appointmentId]: true,
-    }));
+    setCarePrepExpandedForAppointment(appointmentId, true);
     window.setTimeout(() => {
       document
         .getElementById(`appointment-${appointmentId}`)
@@ -4226,6 +4814,49 @@ export function CarePlandPers({
             null
         : null
     );
+  }
+
+  function hydrateAppointmentsFromSessionSnapshot(
+    view: AppointmentView,
+    subjectId: string
+  ) {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    const snapshot = readStoredJson<AppointmentsSessionSnapshot>(
+      window.sessionStorage,
+      appointmentsSessionSnapshotStorageKey
+    );
+
+    if (!snapshot?.appointmentPool || !snapshot.careSubjects) {
+      return false;
+    }
+
+    const snapshotAgeMs = Date.now() - new Date(snapshot.savedAt).getTime();
+
+    if (!Number.isFinite(snapshotAgeMs) || snapshotAgeMs > 10 * 60 * 1000) {
+      removeStoredValue(
+        window.sessionStorage,
+        appointmentsSessionSnapshotStorageKey
+      );
+      return false;
+    }
+
+    const effectiveSubjectId =
+      subjectId === ALL_SUBJECTS ||
+      snapshot.careSubjects.some((subject) => subject.id === subjectId)
+        ? subjectId
+        : ALL_SUBJECTS;
+
+    setEntitlement(snapshot.entitlement);
+    setCareSubjects(snapshot.careSubjects);
+    setSelectedSubjectId(effectiveSubjectId);
+    setAppointmentPool(snapshot.appointmentPool);
+    setAppointmentDetailsHydrated(false);
+    applyAppointmentSelection(snapshot.appointmentPool, view, effectiveSubjectId);
+
+    return true;
   }
 
   async function hydrateAppointmentDetails(
@@ -5057,6 +5688,8 @@ export function CarePlandPers({
     view: AppointmentView = appointmentView,
     subjectId: string = selectedSubjectId
   ) {
+    hydrateAppointmentsFromSessionSnapshot(view, subjectId);
+
     const { data: userData, error: userError } = await supabase.auth.getUser();
 
     if (userError) {
@@ -5384,6 +6017,16 @@ export function CarePlandPers({
         ? effectiveSubjectId
         : defaultSubjectId;
     });
+    setImportAnythingOwnerPersonId((currentOwnerPersonId) => {
+      if (
+        currentOwnerPersonId &&
+        subjects.some((subject) => subject.id === currentOwnerPersonId)
+      ) {
+        return currentOwnerPersonId;
+      }
+
+      return "";
+    });
 
     const activeSubjectIds = new Set(subjects.map((subject) => subject.id));
     const activeAppointmentRows =
@@ -5394,6 +6037,14 @@ export function CarePlandPers({
     setAppointmentDetailsHydrated(false);
     setAppointmentPool(activeAppointmentRows);
     applyAppointmentSelection(activeAppointmentRows, view, effectiveSubjectId);
+    if (typeof window !== "undefined") {
+      writeStoredJson(window.sessionStorage, appointmentsSessionSnapshotStorageKey, {
+        appointmentPool: activeAppointmentRows,
+        careSubjects: subjects,
+        entitlement: currentEntitlement,
+        savedAt: new Date().toISOString(),
+      } satisfies AppointmentsSessionSnapshot);
+    }
     void loadHealthFocusSummary(effectiveSubjectId);
 
     void hydrateAppointmentDetails(activeAppointmentRows);
@@ -5860,11 +6511,34 @@ export function CarePlandPers({
     }
   }
 
-	  function handleChangeAppointmentView(view: AppointmentView) {
-	    setAppointmentView(view);
-	    setPendingModifierSwitch(null);
-	    setMessage("");
+  function applyAppointmentViewChange(view: AppointmentView) {
+    setAppointmentView(view);
+    setPendingModifierSwitch(null);
+    setPendingAppointmentPanelView(null);
+    setActiveAppointmentPanel(null);
+    setMessage("");
+    saveAppointmentsViewState({
+      activeAppointmentPanel: null,
+      appointmentView: view,
+    });
     applyAppointmentSelection(appointmentPool, view, selectedSubjectId);
+  }
+
+	  function handleChangeAppointmentView(view: AppointmentView) {
+    if (importAnythingPanelHasUnfinishedWork) {
+      setPendingImportLeaveAction({ kind: "appointmentView", view });
+      return;
+    }
+
+    if (
+      activeAppointmentPanel === "add" &&
+      newAppointmentDraftHasContent(newAppointmentDraft)
+    ) {
+      setMessage("Save or cancel this appointment before changing views.");
+      return;
+    }
+
+    applyAppointmentViewChange(view);
   }
 
 	  function handleChangeSubject(subjectId: string) {
@@ -5876,6 +6550,7 @@ export function CarePlandPers({
     }
 
     setMessage("");
+    saveAppointmentsViewState({ selectedSubjectId: subjectId });
     applyAppointmentSelection(appointmentPool, appointmentView, subjectId);
   }
 
@@ -6854,42 +7529,73 @@ export function CarePlandPers({
 
   function cancelPendingMainTabChange() {
     setPendingMainTab(null);
+    setPendingImportLeaveAction(null);
   }
 
   function confirmPendingMainTabChange() {
     const tab = pendingMainTab;
+    const importLeaveAction = pendingImportLeaveAction;
 
     setPendingMainTab(null);
+    setPendingImportLeaveAction(null);
 
-    if (!tab) {
+    if (!tab && !importLeaveAction) {
       return;
     }
 
     discardUnsavedWorkState();
-    void applyMainTabChange(tab);
+
+    if (importLeaveAction?.kind === "appointmentView") {
+      setMainTab("appointments");
+      applyAppointmentViewChange(importLeaveAction.view);
+      return;
+    }
+
+    if (importLeaveAction?.kind === "appointmentPanel") {
+      applyAppointmentPanel(importLeaveAction.panel);
+      return;
+    }
+
+    if (importLeaveAction?.kind === "ask") {
+      updatePersonalRoute("ask");
+      setAskPanelOpen(true);
+      setAskCloseConfirmOpen(false);
+      return;
+    }
+
+    if (tab) {
+      void applyMainTabChange(tab);
+    }
+  }
+
+  function applyAppointmentPanel(panel: AppointmentPanel) {
+    setMessage("");
+    setAppointmentView("upcoming");
+    setSelectedSubjectId(ALL_SUBJECTS);
+    setPendingTextIntakePanelAction(null);
+    setPendingModifierSwitch(null);
+    setFileImportStatus("");
+    resetPlaceLookup();
+    setActiveAppointmentPanel(panel);
+    setMainTab("appointments");
+    saveAppointmentsViewState({
+      activeAppointmentPanel: panel,
+      appointmentView: "upcoming",
+      selectedSubjectId: ALL_SUBJECTS,
+    });
   }
 
   function startAppointmentPanel(panel: AppointmentPanel) {
     if (
       activeAppointmentPanel === "quickAdd" &&
       panel !== "quickAdd" &&
-      textIntakePanelHasUnsavedChanges({
-        bulkAppointmentDraftsLength: bulkAppointmentDrafts.length,
-        textIntakeDraft,
-        textIntakeValue,
-      })
+      importAnythingPanelHasUnfinishedWork
     ) {
-      setPendingTextIntakePanelAction(panel);
+      setPendingImportLeaveAction({ kind: "appointmentPanel", panel });
       return;
     }
 
-    setMessage("");
-    setAppointmentView("upcoming");
-    setSelectedSubjectId(ALL_SUBJECTS);
-    cancelTextIntake();
-    resetPlaceLookup();
-    setActiveAppointmentPanel(panel);
-    setMainTab("appointments");
+    applyAppointmentPanel(panel);
   }
 
   async function loadCurrentUserSupportTickets() {
@@ -9488,10 +10194,7 @@ export function CarePlandPers({
     bypassUnsavedChangesWarning?: boolean;
     message?: string;
 	  } = {}) {
-	    if (
-	      !bypassUnsavedChangesWarning &&
-	      hasUnsavedWorkForLeave
-	    ) {
+	    if (!bypassUnsavedChangesWarning) {
 	      setSignOutConfirmOpen(true);
 	      return;
 	    }
@@ -9502,6 +10205,11 @@ export function CarePlandPers({
     if (typeof window !== "undefined") {
       removeStoredValue(window.localStorage, appUiStateStorageKey);
       removeStoredValue(window.sessionStorage, appDraftStateStorageKey);
+      removeStoredValue(
+        window.sessionStorage,
+        appointmentsSessionSnapshotStorageKey
+      );
+      clearAllPageViewState();
     }
     setSignedInEmail(null);
     setAcceptBetaDisclaimer(false);
@@ -10155,11 +10863,11 @@ export function CarePlandPers({
     files: FileList | null,
     target: "appointmentNotes" | "quickAdd" = "quickAdd",
     scope: "appointments" | "importAnything" = "appointments"
-  ) {
+  ): Promise<ImageTextExtractionResult> {
     const images = files ? Array.from(files) : [];
 
     if (images.length === 0) {
-      return;
+      return { extractedCount: 0 };
     }
 
     setExtractingImageText(true);
@@ -10232,100 +10940,62 @@ export function CarePlandPers({
             : "reviewing appointments"
         }.`
       );
+      return { extractedCount: images.length };
     } catch (error) {
-      setMessage(getErrorMessage(error));
+      const errorMessage = getErrorMessage(error);
+      setMessage(errorMessage);
+      return { errorMessage, extractedCount: 0 };
     } finally {
       setExtractingImageText(false);
       setFileImportStatus("");
     }
   }
 
-  async function handleImportAppointmentFiles(files: FileList | null) {
-    const selectedFiles = files ? Array.from(files) : [];
-
-    if (selectedFiles.length === 0) {
-      return;
-    }
-
-    setFileImportStatus("");
-    setTextIntakeValue("");
-    setTextIntakeDraft(null);
-    setTextIntakeAiDraft(null);
-    setTextIntakeItemId(null);
-    setTextIntakeMatches([]);
-    setBulkAppointmentDrafts([]);
-    setBulkAppointmentSummary("");
-    setSelectedTextIntakeMatchId("new");
-    setTextIntakeTargetAppointmentId(null);
-    setApplyTextIntakeAppointmentDetails(false);
-    resetImportAnythingReview();
-
-    const calendarFiles = selectedFiles.filter((file) =>
-      file.name.toLowerCase().endsWith(".ics")
-    );
-    const imageFiles = selectedFiles.filter((file) =>
-      file.type.startsWith("image/")
-    );
-
-    if (calendarFiles.length > 1) {
-      setMessage("Choose only one .iCal calendar file at a time.");
-      return;
-    }
-
-    if (calendarFiles.length > 0 && imageFiles.length > 0) {
-      setMessage("Choose either one .iCal file or up to 10 images, not both.");
-      return;
-    }
-
-    if (calendarFiles.length === 1) {
-      setExtractingImageText(true);
-      setFileImportStatus("Uploading and importing, please wait...");
-      setMessage("");
-
-      try {
-        const calendarFile = calendarFiles[0];
-        const calendarText = await calendarFile.text();
-        const { drafts, foundCount } = parseICalendarAppointments(
-          calendarText,
-          calendarFile.name
-        );
-
-        if (drafts.length === 0) {
-          throw new Error("No future calendar events were found in that file.");
-        }
-
-        setTextIntakeValue("");
-        setTextIntakeDraft(null);
-        setTextIntakeAiDraft(null);
-        setTextIntakeItemId(null);
-        setTextIntakeMatches([]);
-        setBulkAppointmentDrafts(drafts);
-        setBulkAppointmentSummary(
-          `Found ${foundCount} future calendar event${
-            foundCount === 1 ? "" : "s"
-          }. Showing ${drafts.length}; select up to 10 to import.`
-        );
-        setSelectedTextIntakeMatchId("new");
-        setTextIntakeTargetAppointmentId(null);
-        setApplyTextIntakeAppointmentDetails(false);
-        setMessage("Calendar file imported. Review and select appointments to save.");
-      } catch (error) {
-        setMessage(getErrorMessage(error));
-      } finally {
-        setExtractingImageText(false);
-        setFileImportStatus("");
-      }
-      return;
-    }
-
-    await handleExtractImageText(files, "quickAdd");
-  }
-
   function resetImportAnythingReview() {
     setImportAnythingIntakeItemId(null);
     setImportAnythingItems([]);
+    setImportAnythingNewPersonName("");
+    setImportAnythingOwnershipClusters([]);
+    setImportAnythingPersonAssignment(null);
+    setImportAnythingReviewOpen(false);
     setImportAnythingSummary("");
     setImportAnythingSources([]);
+    setConfirmingImportAnythingSaveAll(false);
+    setEditingImportAnythingItemIds({});
+    setViewingImportAnythingSourceItemId(null);
+  }
+
+  function changeImportAnythingOwnerToCurrentFocus() {
+    if (!selectedSubjectId || selectedSubjectId === ALL_SUBJECTS) {
+      return;
+    }
+
+    const nextOwner = subjectsById.get(selectedSubjectId);
+
+    if (!nextOwner) {
+      return;
+    }
+
+    setImportAnythingOwnerPersonId(nextOwner.id);
+    setTextIntakeSubjectId(nextOwner.id);
+
+    if (importAnythingItems.length > 0) {
+      setImportAnythingIntakeItemId(null);
+      setImportAnythingItems((currentItems) =>
+        currentItems.map((item) => ({
+          ...item,
+          matchedAppointmentId: "",
+          matchedProviderId: "",
+          needsReview: true,
+          providerMatchNote: "",
+          status: "needs_review",
+        }))
+      );
+      setMessage("");
+      return;
+    }
+
+    setMessage("");
   }
 
   async function handleImportAnythingFiles(files: FileList | null) {
@@ -10337,7 +11007,11 @@ export function CarePlandPers({
 
     setFileImportStatus("Reviewing files, please wait...");
     setMessage("");
-    resetImportAnythingReview();
+    setImportAnythingIntakeItemId(null);
+    setImportAnythingItems([]);
+    setConfirmingImportAnythingSaveAll(false);
+    setImportAnythingReviewOpen(false);
+    setImportAnythingSummary("");
 
     try {
       const imageFiles = selectedFiles.filter((file) =>
@@ -10353,16 +11027,67 @@ export function CarePlandPers({
           file.type === "application/pdf" || /\.pdf$/i.test(file.name)
       );
       const extractedSections: string[] = [];
+      const importedSourceFiles = [...textFiles, ...pdfFiles];
+      let imageExtractionError = "";
 
       for (const file of textFiles) {
         extractedSections.push(
-          `--- ${file.name} ---\n${(await file.text()).trim()}`
+          formatImportAnythingTextSection({
+            name: file.name,
+            text: await file.text(),
+          })
         );
       }
 
-      for (const file of pdfFiles) {
+      if (pdfFiles.length > 0) {
+        const { data: sessionData, error: sessionError } =
+          await supabase.auth.getSession();
+
+        if (sessionError) {
+          throw sessionError;
+        }
+
+        const accessToken = sessionData.session?.access_token;
+
+        if (!accessToken) {
+          throw new Error("Please sign in before extracting PDF text.");
+        }
+
+        const formData = new FormData();
+        pdfFiles.forEach((file) => {
+          formData.append("pdfs", file);
+        });
+
+        const response = await fetch("/api/import-anything/pdf", {
+          body: formData,
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          method: "POST",
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error ?? "PDF text extraction failed.");
+        }
+
+        const extractedText =
+          typeof result.extractedText === "string"
+            ? result.extractedText.trim()
+            : "";
+
+        if (!extractedText) {
+          throw new Error("No text was found in that PDF.");
+        }
+
         extractedSections.push(
-          `--- ${file.name} ---\n[PDF attached for Import Anything review. Text extraction is not available in this local build yet.]`
+          formatImportAnythingTextSection({
+            name:
+              pdfFiles.length === 1
+                ? pdfFiles[0]?.name ?? "Extracted PDF text"
+                : "Extracted PDF text",
+            text: extractedText,
+          })
         );
       }
 
@@ -10375,7 +11100,11 @@ export function CarePlandPers({
 
       for (const file of unsupportedFiles) {
         extractedSections.push(
-          `--- ${file.name} ---\n[Source attached but not extracted in this local build.]`
+          formatImportAnythingPlaceholderSection({
+            message:
+              "Source selected but not extracted in this local build. Original file is not retained.",
+            name: file.name,
+          })
         );
       }
 
@@ -10390,20 +11119,273 @@ export function CarePlandPers({
       if (imageFiles.length > 0) {
         const transfer = new DataTransfer();
         imageFiles.forEach((file) => transfer.items.add(file));
-        await handleExtractImageText(
+        const imageResult = await handleExtractImageText(
           transfer.files,
           "quickAdd",
           "importAnything"
         );
+
+        if (imageResult.extractedCount > 0) {
+          importedSourceFiles.push(...imageFiles);
+        } else {
+          imageExtractionError = imageResult.errorMessage ?? "";
+        }
       }
 
-      setImportAnythingSources(
-        selectedFiles.map((file) => `${file.name} (${file.type || "file"})`)
+      importedSourceFiles.push(...unsupportedFiles);
+
+      if (importedSourceFiles.length > 0) {
+        setImportAnythingSources((currentSources) =>
+          Array.from(
+            new Set([
+              ...currentSources,
+              ...importedSourceFiles.map((file) =>
+                formatImportAnythingSourceSummary(file)
+              ),
+            ])
+          ).slice(0, maxImportAnythingSourceSummaries)
+        );
+      }
+
+      if (imageExtractionError) {
+        setMessage(
+          importedSourceFiles.length > 0
+            ? `Added ${importedSourceFiles.length} source${
+                importedSourceFiles.length === 1 ? "" : "s"
+              }. ${imageExtractionError}`
+            : imageExtractionError
+        );
+      } else {
+        setMessage(
+          `Added ${importedSourceFiles.length} source${
+            importedSourceFiles.length === 1 ? "" : "s"
+          }. Review the text before running Import Anything.`
+        );
+      }
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setFileImportStatus("");
+    }
+  }
+
+  function handleImportAnythingDrag(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (extractingImageText) {
+      importAnythingDragDepthRef.current = 0;
+      setImportAnythingDragActive(false);
+      return;
+    }
+
+    if (event.type === "dragenter") {
+      importAnythingDragDepthRef.current += 1;
+    }
+
+    if (event.type === "dragleave") {
+      importAnythingDragDepthRef.current = Math.max(
+        0,
+        importAnythingDragDepthRef.current - 1
       );
+    }
+
+    setImportAnythingDragActive(importAnythingDragDepthRef.current > 0);
+  }
+
+  function handleImportAnythingDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    importAnythingDragDepthRef.current = 0;
+    setImportAnythingDragActive(false);
+
+    if (extractingImageText) {
+      return;
+    }
+
+    void handleImportAnythingFiles(event.dataTransfer.files);
+  }
+
+  function handleAppointmentNotesDrag(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (extractingImageText) {
+      appointmentNotesDragDepthRef.current = 0;
+      setAppointmentNotesDragActive(false);
+      return;
+    }
+
+    if (event.type === "dragenter") {
+      appointmentNotesDragDepthRef.current += 1;
+    }
+
+    if (event.type === "dragleave") {
+      appointmentNotesDragDepthRef.current = Math.max(
+        0,
+        appointmentNotesDragDepthRef.current - 1
+      );
+    }
+
+    setAppointmentNotesDragActive(appointmentNotesDragDepthRef.current > 0);
+  }
+
+  function handleAppointmentNotesDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    appointmentNotesDragDepthRef.current = 0;
+    setAppointmentNotesDragActive(false);
+
+    if (extractingImageText) {
+      return;
+    }
+
+    void handleAppointmentNotesFiles(event.dataTransfer.files);
+  }
+
+  async function handleAppointmentNotesFiles(files: FileList | null) {
+    const selectedFiles = files ? Array.from(files) : [];
+
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
+    setFileImportStatus("Importing files...");
+    setMessage("");
+
+    try {
+      const imageFiles = selectedFiles.filter((file) =>
+        file.type.startsWith("image/")
+      );
+      const textFiles = selectedFiles.filter(
+        (file) =>
+          file.type.startsWith("text/") ||
+          /\.(txt|md|csv|log)$/i.test(file.name)
+      );
+      const pdfFiles = selectedFiles.filter(
+        (file) =>
+          file.type === "application/pdf" || /\.pdf$/i.test(file.name)
+      );
+      const extractedSections: string[] = [];
+      let importedCount = textFiles.length + pdfFiles.length;
+      let imageExtractionError = "";
+
+      for (const file of textFiles) {
+        extractedSections.push(
+          formatImportAnythingTextSection({
+            name: file.name,
+            text: await file.text(),
+          })
+        );
+      }
+
+      if (pdfFiles.length > 0) {
+        const { data: sessionData, error: sessionError } =
+          await supabase.auth.getSession();
+
+        if (sessionError) {
+          throw sessionError;
+        }
+
+        const accessToken = sessionData.session?.access_token;
+
+        if (!accessToken) {
+          throw new Error("Please sign in before extracting PDF text.");
+        }
+
+        const formData = new FormData();
+        pdfFiles.forEach((file) => {
+          formData.append("pdfs", file);
+        });
+
+        const response = await fetch("/api/import-anything/pdf", {
+          body: formData,
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          method: "POST",
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error ?? "PDF text extraction failed.");
+        }
+
+        const extractedText =
+          typeof result.extractedText === "string"
+            ? result.extractedText.trim()
+            : "";
+
+        if (!extractedText) {
+          throw new Error("No text was found in that PDF.");
+        }
+
+        extractedSections.push(
+          formatImportAnythingTextSection({
+            name:
+              pdfFiles.length === 1
+                ? pdfFiles[0]?.name ?? "Extracted PDF text"
+                : "Extracted PDF text",
+            text: extractedText,
+          })
+        );
+      }
+
+      if (extractedSections.length > 0) {
+        setContextualTextIntakeValue((currentValue) =>
+          [currentValue.trim(), extractedSections.join("\n\n")]
+            .filter(Boolean)
+            .join("\n\n")
+        );
+      }
+
+      if (imageFiles.length > 0) {
+        const transfer = new DataTransfer();
+        imageFiles.forEach((file) => transfer.items.add(file));
+        const imageResult = await handleExtractImageText(
+          transfer.files,
+          "appointmentNotes"
+        );
+
+        if (imageResult.extractedCount > 0) {
+          importedCount += imageResult.extractedCount;
+        } else {
+          imageExtractionError = imageResult.errorMessage ?? "";
+        }
+      }
+
+      const unsupportedFiles = selectedFiles.filter(
+        (file) =>
+          !imageFiles.includes(file) &&
+          !textFiles.includes(file) &&
+          !pdfFiles.includes(file)
+      );
+
+      if (unsupportedFiles.length > 0) {
+        setContextualTextIntakeValue((currentValue) =>
+          [
+            currentValue.trim(),
+            unsupportedFiles
+              .map((file) =>
+                formatImportAnythingPlaceholderSection({
+                  message:
+                    "Source selected but not extracted in this local build. Original file is not retained.",
+                  name: file.name,
+                })
+              )
+              .join("\n\n"),
+          ]
+            .filter(Boolean)
+            .join("\n\n")
+        );
+        importedCount += unsupportedFiles.length;
+      }
+
       setMessage(
-        `Added ${selectedFiles.length} source${
-          selectedFiles.length === 1 ? "" : "s"
-        }. Review the text before running Import Anything.`
+        imageExtractionError ||
+          `Added ${importedCount} source${
+            importedCount === 1 ? "" : "s"
+          }. Review the text before creating the summary.`
       );
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -10438,8 +11420,9 @@ export function CarePlandPers({
       const response = await fetch("/api/import-anything", {
         body: JSON.stringify({
           careSubjectId:
-            textIntakeSubjectId ||
-            (selectedSubjectId !== ALL_SUBJECTS ? selectedSubjectId : ""),
+            selectedSubjectId && selectedSubjectId !== ALL_SUBJECTS
+              ? selectedSubjectId
+              : "",
           rawText: textIntakeValue,
           sourceSummaries: importAnythingSources,
         }),
@@ -10454,6 +11437,7 @@ export function CarePlandPers({
         draft?: unknown;
         error?: string;
         intakeItemId?: string;
+        personAssignment?: unknown;
       };
 
       if (!response.ok) {
@@ -10461,30 +11445,51 @@ export function CarePlandPers({
       }
 
       const reviewItems = importAnythingItemsFromDraft(result.draft);
+      const ownershipClusters =
+        importAnythingOwnershipClustersFromDraft(result.draft);
+      const personAssignment =
+        importAnythingPersonAssignmentFromUnknown(result.personAssignment) ??
+        importAnythingPersonAssignmentFromUnknown(
+          result.draft &&
+            typeof result.draft === "object" &&
+            !Array.isArray(result.draft)
+            ? (result.draft as Record<string, unknown>).person_assignment
+            : null
+        );
+      const highConfidencePersonId =
+        personAssignment &&
+        personAssignment.matchedCareSubjectId &&
+        personAssignment.confidence >= 0.85 &&
+        !personAssignment.needsReview
+          ? personAssignment.matchedCareSubjectId
+          : "";
 
       if (reviewItems.length === 0) {
         throw new Error("No importable healthcare items were found.");
       }
 
       setImportAnythingItems(reviewItems);
+      setConfirmingImportAnythingSaveAll(false);
+      setEditingImportAnythingItemIds({});
+      setViewingImportAnythingSourceItemId(null);
+      setImportAnythingOwnershipClusters(ownershipClusters);
+      setImportAnythingReviewOpen(false);
       setImportAnythingSummary(
-        stringFromUnknown(
-          result.draft &&
-            typeof result.draft === "object" &&
-            !Array.isArray(result.draft)
-            ? (result.draft as Record<string, unknown>).import_summary
-            : ""
-        )
+        importAnythingDeterministicSummary(reviewItems, ownershipClusters)
       );
       setImportAnythingIntakeItemId(result.intakeItemId ?? null);
-      setTextIntakeSubjectId(result.careSubjectId ?? textIntakeSubjectId);
+      setImportAnythingPersonAssignment(personAssignment);
+      setImportAnythingOwnerPersonId(highConfidencePersonId);
+      setImportAnythingNewPersonName(
+        personAssignment?.suggestedNewPersonName ?? ""
+      );
+      setTextIntakeSubjectId(highConfidencePersonId);
       setTextIntakeDraft(null);
       setTextIntakeAiDraft(null);
       setTextIntakeItemId(null);
       setTextIntakeMatches([]);
       setBulkAppointmentDrafts([]);
       setBulkAppointmentSummary("");
-      setMessage("Import Anything review is ready. Approve items before saving.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -10497,8 +11502,59 @@ export function CarePlandPers({
     status: ImportAnythingReviewStatus
   ) {
     setImportAnythingItems((currentItems) =>
+      currentItems.map((item) => {
+        if (item.id !== itemId) {
+          return item;
+        }
+
+        if (
+          status === "approved" &&
+          !item.ownerCareSubjectId &&
+          !item.ownerNewPersonName &&
+          item.ownerDetectedName
+        ) {
+          const detectedOwnerKey = normalizedImportAnythingText(
+            item.ownerDetectedName
+          );
+          const matchedSubject = careSubjects.find(
+            (subject) =>
+              normalizedImportAnythingText(subject.display_name) ===
+              detectedOwnerKey
+          );
+
+          if (matchedSubject) {
+            return {
+              ...item,
+              ownerCareSubjectId: matchedSubject.id,
+              status,
+              userReviewed: true,
+            };
+          }
+        }
+
+        return {
+          ...item,
+          status,
+          userReviewed: status === "approved" ? true : item.userReviewed,
+        };
+      })
+    );
+  }
+
+  function undoImportAnythingItemApproval(itemId: string) {
+    setExpandedImportAnythingItemIds((currentIds) => ({
+      ...currentIds,
+      [itemId]: false,
+    }));
+    setImportAnythingItems((currentItems) =>
       currentItems.map((item) =>
-        item.id === itemId ? { ...item, status } : item
+        item.id === itemId
+          ? {
+              ...item,
+              status: item.needsReview ? "needs_review" : "approved",
+              userReviewed: false,
+            }
+          : item
       )
     );
   }
@@ -10525,14 +11581,71 @@ export function CarePlandPers({
                 field === "question"
                   ? value
                   : item.title,
+              userReviewed: true,
             }
           : item
       )
     );
   }
 
-  async function handleCommitImportAnythingReview() {
-    const approvedItems = importAnythingItems.filter(
+  function updateImportAnythingItemOwner(
+    itemId: string,
+    updates: Partial<
+      Pick<ImportAnythingReviewItem, "ownerCareSubjectId" | "ownerNewPersonName">
+    >
+  ) {
+    setImportAnythingItems((currentItems) =>
+      currentItems.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              ...updates,
+              ownerCareSubjectId:
+                updates.ownerNewPersonName?.trim()
+                  ? ""
+                  : updates.ownerCareSubjectId ?? item.ownerCareSubjectId,
+              ownerNewPersonName:
+                updates.ownerCareSubjectId
+                  ? ""
+                  : updates.ownerNewPersonName ?? item.ownerNewPersonName,
+              userReviewed: true,
+            }
+          : item
+      )
+    );
+  }
+
+  function importAnythingItemWithLikelyOwnerConfirmed(
+    item: ImportAnythingReviewItem
+  ): ImportAnythingReviewItem {
+    if (
+      item.ownerCareSubjectId ||
+      item.ownerNewPersonName ||
+      !item.ownerDetectedName
+    ) {
+      return item;
+    }
+
+    const detectedOwnerKey = normalizedImportAnythingText(item.ownerDetectedName);
+    const matchedSubject = careSubjects.find(
+      (subject) =>
+        normalizedImportAnythingText(subject.display_name) === detectedOwnerKey
+    );
+
+    if (!matchedSubject) {
+      return item;
+    }
+
+    return {
+      ...item,
+      ownerCareSubjectId: matchedSubject.id,
+    };
+  }
+
+  async function handleCommitImportAnythingReview(
+    reviewItems = importAnythingItems
+  ) {
+    const approvedItems = reviewItems.filter(
       (item) => item.status === "approved"
     );
 
@@ -10545,11 +11658,46 @@ export function CarePlandPers({
     setMessage("");
 
     try {
-      const { careCircleId, careSubjectId, userId } =
-        await getPrimaryCareContext(textIntakeSubjectId);
+      const { careCircleId, userId } = await getPrimaryCareContext();
+      const newPersonNames = Array.from(
+        new Map(
+          approvedItems
+            .map((item) => item.ownerNewPersonName.trim())
+            .filter(Boolean)
+            .map((name) => [name.toLowerCase(), name])
+        ).values()
+      );
 
-      if (!careSubjectId) {
-        throw new Error("Please choose who this import is for.");
+      if (
+        newPersonNames.length > 0 &&
+        careSubjects.length + newPersonNames.length > entitlement.max_active_subjects
+      ) {
+        throw new Error(
+          `${entitlement.plan_name} allows ${entitlement.max_active_subjects} active Care VIP.`
+        );
+      }
+
+      const createdSubjectIdsByName = new Map<string, string>();
+
+      for (const newPersonName of newPersonNames) {
+        const { data: newSubject, error } = await supabase
+          .from("care_subjects")
+          .insert({
+            care_circle_id: careCircleId,
+            display_name: newPersonName,
+            is_active: true,
+            is_default:
+              careSubjects.length + createdSubjectIdsByName.size === 0,
+            subject_type: "other",
+          })
+          .select("id")
+          .single();
+
+        if (error) {
+          throw error;
+        }
+
+        createdSubjectIdsByName.set(newPersonName.toLowerCase(), newSubject.id);
       }
 
       const { data: sessionData, error: sessionError } =
@@ -10568,24 +11716,98 @@ export function CarePlandPers({
       let createdAppointments = 0;
       let createdCarePrepDrafts = 0;
       let savedNotes = 0;
+      let trackedProviders = 0;
       let reviewedOnly = 0;
-      const approvedCarePrepItemsByAppointment = new Map<
-        string,
-        ImportAnythingReviewItem[]
-      >();
+      const generatedAt = new Date().toISOString();
+      const careSubjectIdForItem = (item: ImportAnythingReviewItem) =>
+        item.ownerCareSubjectId.trim() ||
+        createdSubjectIdsByName.get(item.ownerNewPersonName.trim().toLowerCase()) ||
+        "";
+      const approvedItemsWithOwners = approvedItems.map((item) => ({
+        careSubjectId: careSubjectIdForItem(item),
+        item,
+      }));
+      const itemsByCareSubjectId = new Map<string, ImportAnythingReviewItem[]>();
 
-      for (const item of approvedItems) {
+      for (const { careSubjectId, item } of approvedItemsWithOwners) {
+        if (!careSubjectId) {
+          continue;
+        }
+
+        itemsByCareSubjectId.set(careSubjectId, [
+          ...(itemsByCareSubjectId.get(careSubjectId) ?? []),
+          item,
+        ]);
+      }
+
+      const carePrepDrafts = Array.from(itemsByCareSubjectId.entries()).flatMap(
+        ([, items]) =>
+          buildImportAnythingCarePrepDrafts({
+            appointmentsById,
+            careCircleId,
+            generatedAt,
+            intakeItemId: importAnythingIntakeItemId,
+            items,
+            userId,
+          })
+      );
+      const providerUpserts = Array.from(itemsByCareSubjectId.entries()).flatMap(
+        ([careSubjectId, items]) =>
+          buildImportAnythingProviderUpserts({
+            careCircleId,
+            careSubjectId,
+            generatedAt,
+            intakeItemId: importAnythingIntakeItemId,
+            items,
+            userId,
+          })
+      );
+      let providerStoreAvailable = true;
+      const isCarePrepDraftCandidate = (item: ImportAnythingReviewItem) =>
+        (item.kind === "careprep" ||
+          item.kind === "medication_change" ||
+          item.kind === "question" ||
+          item.kind === "task") &&
+        Boolean(item.matchedAppointmentId);
+
+      if (providerUpserts.length > 0) {
+        const { error } = await supabase
+          .from("care_providers")
+          .upsert(providerUpserts, {
+            ignoreDuplicates: true,
+            onConflict:
+              "care_subject_id,normalized_provider_name,normalized_provider_organization",
+          });
+
+        if (error) {
+          if (isImportAnythingProviderStoreUnavailable(error)) {
+            providerStoreAvailable = false;
+          } else {
+            throw error;
+          }
+        } else {
+          trackedProviders = providerUpserts.length;
+        }
+      }
+
+      for (const { careSubjectId, item } of approvedItemsWithOwners) {
+        if (!careSubjectId) {
+          reviewedOnly += 1;
+          continue;
+        }
+
+        if (isCarePrepDraftCandidate(item)) {
+          continue;
+        }
+
         if (
-          (item.kind === "careprep" || item.kind === "question") &&
-          item.matchedAppointmentId
+          item.kind === "provider" &&
+          providerStoreAvailable &&
+          hasImportAnythingProviderIdentity(item)
         ) {
-          const currentItems =
-            approvedCarePrepItemsByAppointment.get(item.matchedAppointmentId) ??
-            [];
-          approvedCarePrepItemsByAppointment.set(item.matchedAppointmentId, [
-            ...currentItems,
-            item,
-          ]);
+          if (item.matchedProviderId) {
+            reviewedOnly += 1;
+          }
           continue;
         }
 
@@ -10664,51 +11886,19 @@ export function CarePlandPers({
         reviewedOnly += 1;
       }
 
-      for (const [
-        appointmentId,
-        carePrepItems,
-      ] of approvedCarePrepItemsByAppointment) {
-        const appointment = appointmentsById.get(appointmentId);
-        const keyQuestions = carePrepItems
-          .filter((item) => item.kind === "question")
-          .map((item) => item.fields.question?.trim())
-          .filter(Boolean);
-        const nextSteps = carePrepItems
-          .filter((item) => item.kind === "careprep")
-          .map((item) => item.fields.detail?.trim())
-          .filter(Boolean);
+      const carePrepDraftItemCount = carePrepDrafts.reduce(
+        (count, draft) => count + draft.itemCount,
+        0
+      );
+      const approvedCarePrepItemCount = approvedItems.filter(
+        (item) => isCarePrepDraftCandidate(item)
+      ).length;
+      reviewedOnly += approvedCarePrepItemCount - carePrepDraftItemCount;
 
-        if (keyQuestions.length === 0 && nextSteps.length === 0) {
-          reviewedOnly += carePrepItems.length;
-          continue;
-        }
-
-        const { error } = await supabase.from("careprep_guidance").insert({
-          appointment_id: appointmentId,
-          bring_list: [],
-          care_circle_id: careCircleId,
-          generated_at: new Date().toISOString(),
-          input_context_snapshot: {
-            import_anything_intake_item_id: importAnythingIntakeItemId,
-            source_excerpt: carePrepItems
-              .map((item) => item.sourceExcerpt)
-              .filter(Boolean)
-              .join("\n\n"),
-            source_type: "import_anything",
-          },
-          is_current: false,
-          key_questions: keyQuestions,
-          med_review: [],
-          next_steps: nextSteps,
-          review_status: "draft",
-          since_last_visit: [],
-          source: "import_anything",
-          status: "succeeded",
-          summary: importAnythingCarePrepSummary(carePrepItems, appointment),
-          user_id: userId,
-          version_number: 0,
-          watchouts: [],
-        });
+      for (const draft of carePrepDrafts) {
+        const { error } = await supabase
+          .from("careprep_guidance")
+          .insert(draft.payload);
 
         if (error) {
           throw error;
@@ -10726,10 +11916,22 @@ export function CarePlandPers({
             accepted_interpretation: {
               import_summary: importAnythingSummary,
               items: importAnythingItems,
+              person_assignment: {
+                created_care_subject_ids_by_name: Object.fromEntries(
+                  createdSubjectIdsByName
+                ),
+                source_assignment: importAnythingPersonAssignment,
+              },
             },
             interpretation: {
               import_summary: importAnythingSummary,
               items: importAnythingItems,
+              person_assignment: {
+                created_care_subject_ids_by_name: Object.fromEntries(
+                  createdSubjectIdsByName
+                ),
+                source_assignment: importAnythingPersonAssignment,
+              },
             },
             status: "accepted",
           })
@@ -10749,6 +11951,7 @@ export function CarePlandPers({
       setBulkAppointmentSummary("");
       setSelectedTextIntakeMatchId("new");
       setTextIntakeTargetAppointmentId(null);
+      setImportAnythingOwnerPersonId("");
       setContextualTextIntakeValue("");
       setApplyTextIntakeAppointmentDetails(false);
       resetImportAnythingReview();
@@ -10761,7 +11964,9 @@ export function CarePlandPers({
           createdCarePrepDrafts
         } CarePrep draft${
           createdCarePrepDrafts === 1 ? "" : "s"
-        } created, ${
+        } created, ${trackedProviders} provider${
+          trackedProviders === 1 ? "" : "s"
+        } tracked, ${
           reviewedOnly
         } item${reviewedOnly === 1 ? "" : "s"} kept for review/audit.`
       );
@@ -10770,6 +11975,18 @@ export function CarePlandPers({
     } finally {
       setSavingImportAnything(false);
     }
+  }
+
+  function handleConfirmAllImportAnything() {
+    const confirmedItems = importAnythingItems.map((item) => ({
+      ...importAnythingItemWithLikelyOwnerConfirmed(item),
+      status: "approved" as const,
+      userReviewed: true,
+    }));
+
+    setImportAnythingItems(confirmedItems);
+    void handleCommitImportAnythingReview(confirmedItems);
+    setConfirmingImportAnythingSaveAll(false);
   }
 
   function updateTextIntakeDraft(
@@ -10798,6 +12015,16 @@ export function CarePlandPers({
     }
 
     return null;
+  }
+
+  function activeModifierAppointment(excludeAppointmentId?: string) {
+    return (
+      appointments.find(
+        (appointment) =>
+          appointment.id !== excludeAppointmentId &&
+          currentAppointmentModifier(appointment.id)
+      ) ?? null
+    );
   }
 
 	  function hasUnsavedAppointmentModifierChanges(
@@ -10857,6 +12084,30 @@ export function CarePlandPers({
     target: AppointmentModifier
   ) {
     const currentModifier = currentAppointmentModifier(appointment.id);
+    const otherModifierAppointment = activeModifierAppointment(appointment.id);
+    const otherModifier = otherModifierAppointment
+      ? currentAppointmentModifier(otherModifierAppointment.id)
+      : null;
+
+    if (
+      otherModifierAppointment &&
+      otherModifier &&
+      hasUnsavedAppointmentModifierChanges(
+        otherModifierAppointment,
+        otherModifier
+      )
+    ) {
+      setPendingModifierSwitch({
+        appointmentId: otherModifierAppointment.id,
+        target,
+        targetAppointmentId: appointment.id,
+      });
+      return;
+    }
+
+    if (otherModifierAppointment && otherModifier) {
+      discardAppointmentModifier(otherModifierAppointment.id, otherModifier);
+    }
 
     if (currentModifier === target) {
       if (hasUnsavedAppointmentModifierChanges(appointment, currentModifier)) {
@@ -10912,26 +12163,18 @@ export function CarePlandPers({
     cancelEditingNote(appointment.id);
   }
 
-  function requestCloseTextIntakePanel() {
-    if (
-      textIntakePanelHasUnsavedChanges({
-        bulkAppointmentDraftsLength: bulkAppointmentDrafts.length,
-        textIntakeDraft,
-        textIntakeValue,
-      })
-    ) {
-      setPendingTextIntakePanelAction("close");
-      return;
-    }
-
-    cancelTextIntake();
-    setActiveAppointmentPanel(null);
-  }
-
   function discardAndApplyTextIntakePanelAction() {
     const action = pendingTextIntakePanelAction;
+    const pendingView = pendingAppointmentPanelView;
 
     cancelTextIntake();
+    setPendingAppointmentPanelView(null);
+
+    if (pendingView) {
+      setActiveAppointmentPanel(null);
+      applyAppointmentViewChange(pendingView);
+      return;
+    }
 
     if (action === "close" || !action) {
       setActiveAppointmentPanel(null);
@@ -10948,16 +12191,101 @@ export function CarePlandPers({
     }
 
     const currentModifier = currentAppointmentModifier(appointment.id);
+    const targetAppointment =
+      pendingModifierSwitch.targetAppointmentId &&
+      pendingModifierSwitch.targetAppointmentId !== appointment.id
+        ? appointments.find(
+            (candidate) =>
+              candidate.id === pendingModifierSwitch.targetAppointmentId
+          ) ?? appointment
+        : appointment;
 
     discardAppointmentModifier(appointment.id, currentModifier);
-    if (pendingModifierSwitch.target) {
-      openAppointmentModifier(appointment, pendingModifierSwitch.target);
+    if (pendingModifierSwitch.target === "careprep") {
+      openCarePrepPanel(targetAppointment);
+    } else if (pendingModifierSwitch.target) {
+      openAppointmentModifier(targetAppointment, pendingModifierSwitch.target);
     }
     setPendingModifierSwitch(null);
   }
 
+  function collapseCarePrepPanels() {
+    setExpandedCarePrepIds({});
+    saveAppointmentsViewState({
+      expandedCarePrepIds: {},
+    });
+  }
+
+  function setCarePrepExpandedForAppointment(
+    appointmentId: string,
+    expanded: boolean
+  ) {
+    setExpandedCarePrepIds((currentIds) => {
+      const nextIds = expanded
+        ? { [appointmentId]: true }
+        : {
+            ...currentIds,
+            [appointmentId]: false,
+          };
+      saveAppointmentsViewState({
+        expandedCarePrepIds: nextIds,
+      });
+      return nextIds;
+    });
+  }
+
+  function appointmentHasCarePrepAvailable(appointmentId: string) {
+    const prep = guidanceByAppointment.get(appointmentId);
+    const draft = draftGuidanceByAppointment.get(appointmentId);
+
+    return Boolean(prep?.summary || draft?.summary);
+  }
+
+  function openCarePrepPanel(appointment: Appointment) {
+    if (appointmentHasCarePrepAvailable(appointment.id)) {
+      setCarePrepExpandedForAppointment(appointment.id, true);
+      return;
+    }
+
+    handleGenerateCarePrep(appointment);
+  }
+
+  function requestCarePrepPanel(appointment: Appointment) {
+    if (expandedCarePrepIds[appointment.id]) {
+      setCarePrepExpandedForAppointment(appointment.id, false);
+      return;
+    }
+
+    const modifierAppointment =
+      activeModifierAppointment() ??
+      (currentAppointmentModifier(appointment.id) ? appointment : null);
+    const currentModifier = modifierAppointment
+      ? currentAppointmentModifier(modifierAppointment.id)
+      : null;
+
+    if (
+      modifierAppointment &&
+      currentModifier &&
+      hasUnsavedAppointmentModifierChanges(modifierAppointment, currentModifier)
+    ) {
+      setPendingModifierSwitch({
+        appointmentId: modifierAppointment.id,
+        target: "careprep",
+        targetAppointmentId: appointment.id,
+      });
+      return;
+    }
+
+    if (modifierAppointment) {
+      discardAppointmentModifier(modifierAppointment.id, currentModifier);
+    }
+    setPendingModifierSwitch(null);
+    openCarePrepPanel(appointment);
+  }
+
   function startContextualTextIntake(appointment: Appointment) {
     setPendingModifierSwitch(null);
+    collapseCarePrepPanels();
     setEditingNoteIds((currentIds) => ({
       ...currentIds,
       [appointment.id]: false,
@@ -11011,6 +12339,7 @@ export function CarePlandPers({
     setBulkAppointmentSummary("");
     setSelectedTextIntakeMatchId("new");
     setTextIntakeTargetAppointmentId(null);
+    setImportAnythingOwnerPersonId("");
     setContextualTextIntakeValue("");
     setApplyTextIntakeAppointmentDetails(false);
     setFileImportStatus("");
@@ -11667,12 +12996,28 @@ export function CarePlandPers({
         throw new Error("Please enter an appointment title.");
       }
 
-      const targetSubjectId =
-        newAppointmentSubjectId ||
-        (selectedSubjectId !== ALL_SUBJECTS ? selectedSubjectId : "");
+      if (!newAppointmentTargetSubjectId) {
+        throw new Error("Please choose who this appointment is for.");
+      }
+
+      if (!newAppointmentStartsAt.trim()) {
+        throw new Error("Please enter a date and time.");
+      }
+
+      if (!newAppointmentLocationAddress.trim()) {
+        throw new Error("Please enter a location.");
+      }
+
+      if (!newAppointmentProviderName.trim()) {
+        throw new Error("Please enter a provider.");
+      }
+
+      if (!newAppointmentReason.trim()) {
+        throw new Error("Please enter a reason.");
+      }
 
       const { careCircleId, careSubjectId, userId } =
-        await getPrimaryCareContext(targetSubjectId);
+        await getPrimaryCareContext(newAppointmentTargetSubjectId);
 
       if (!careSubjectId) {
         throw new Error("Please choose who this appointment is for.");
@@ -12150,10 +13495,7 @@ export function CarePlandPers({
 
       setAppointmentView("upcoming");
       await loadAppointments("upcoming");
-      setExpandedCarePrepIds((currentIds) => ({
-        ...currentIds,
-        [nextAppointment.id]: true,
-      }));
+      setCarePrepExpandedForAppointment(nextAppointment.id, true);
       setCarePrepGenerationErrors((currentErrors) => {
         const nextErrors = { ...currentErrors };
         delete nextErrors[nextAppointment.id];
@@ -12189,10 +13531,7 @@ export function CarePlandPers({
       const result = await requestCarePrepGeneration(appointment.id, "manual");
 
       await loadAppointments();
-      setExpandedCarePrepIds((currentIds) => ({
-        ...currentIds,
-        [appointment.id]: true,
-      }));
+      setCarePrepExpandedForAppointment(appointment.id, true);
       setCarePrepGenerationErrors((currentErrors) => {
         const nextErrors = { ...currentErrors };
         delete nextErrors[appointment.id];
@@ -12287,6 +13626,103 @@ export function CarePlandPers({
     mainTab,
     sessionProfileLoaded,
     showWelcomeGuide,
+    signedInEmail,
+  ]);
+
+  useEffect(() => {
+    if (
+      !signedInEmail ||
+      !sessionProfileLoaded ||
+      mainTab !== "appointments" ||
+      appointmentView !== "upcoming" ||
+      !appointmentDetailsHydrated ||
+      appointmentsPageAutoCarePrepInFlightRef.current ||
+      appointments.length === 0
+    ) {
+      return;
+    }
+
+    const missingCarePrepAppointments = appointments.filter((appointment) => {
+      if (
+        appointmentsPageAutoCarePrepAttemptedRef.current.has(appointment.id) ||
+        !appointment.care_subject_id ||
+        appointment.status === "archived" ||
+        appointment.current_note_id ||
+        guidanceByAppointment.has(appointment.id) ||
+        draftGuidanceByAppointment.has(appointment.id) ||
+        !isEligibleForHomeAutoCarePrep(appointment)
+      ) {
+        return false;
+      }
+
+      if (!appointment.starts_at) {
+        return true;
+      }
+
+      return new Date(appointment.starts_at) >= startOfToday();
+    });
+
+    if (missingCarePrepAppointments.length === 0) {
+      return;
+    }
+
+    appointmentsPageAutoCarePrepInFlightRef.current = true;
+
+    void (async () => {
+      try {
+        for (const appointment of missingCarePrepAppointments) {
+          if (
+            appointmentsPageAutoCarePrepAttemptedRef.current.has(
+              appointment.id
+            ) ||
+            guidanceByAppointment.has(appointment.id) ||
+            draftGuidanceByAppointment.has(appointment.id)
+          ) {
+            continue;
+          }
+
+          appointmentsPageAutoCarePrepAttemptedRef.current.add(appointment.id);
+          setGeneratingCarePrepForId(appointment.id);
+          setCarePrepGenerationErrors((currentErrors) => {
+            const nextErrors = { ...currentErrors };
+            delete nextErrors[appointment.id];
+            return nextErrors;
+          });
+
+          try {
+            await requestCarePrepGeneration(
+              appointment.id,
+              "auto_appointments_page"
+            );
+          } catch (error) {
+            console.warn(
+              "Appointments page automatic CarePrep did not run.",
+              error
+            );
+          } finally {
+            setGeneratingCarePrepForId((currentId) =>
+              currentId === appointment.id ? null : currentId
+            );
+          }
+        }
+
+        await loadAppointments(appointmentView, selectedSubjectId);
+      } finally {
+        appointmentsPageAutoCarePrepInFlightRef.current = false;
+      }
+    })();
+    // requestCarePrepGeneration and loadAppointments intentionally use the
+    // current component state; this effect is keyed to the visible page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    appointmentDetailsHydrated,
+    appointmentView,
+    appointments,
+    draftGuidanceByAppointment,
+    guidanceByAppointment,
+    mainTab,
+    selectedSubjectId,
+    sessionProfileLoaded,
     signedInEmail,
   ]);
 
@@ -12476,10 +13912,7 @@ export function CarePlandPers({
         return nextDrafts;
       });
       await loadAppointments();
-      setExpandedCarePrepIds((currentIds) => ({
-        ...currentIds,
-        [appointmentId]: true,
-      }));
+      setCarePrepExpandedForAppointment(appointmentId, true);
       setMessage(result.message ?? "CarePrep reviewed.");
     } catch (error) {
       setMessage(getErrorMessage(error));
@@ -12617,24 +14050,46 @@ export function CarePlandPers({
     }
   }
 
-  function renderPlaceLookup(className = "") {
+  function renderPlaceLookup(
+    className = "",
+    options: {
+      helperText?: string;
+      label?: string;
+      placeholder?: string;
+      plain?: boolean;
+    } = {}
+  ) {
     const canFavorite =
       Boolean(newAppointmentLocationName.trim()) ||
       Boolean(newAppointmentProviderOrganization.trim()) ||
       Boolean(newAppointmentLocationAddress.trim());
+    const label = options.label ?? "Location lookup";
+    const helperText =
+      options.helperText ??
+      "Search favorite locations first, or look up a place with Google.";
+    const placeholder =
+      options.placeholder ?? "Search by clinic, business, or address";
 
     return (
       <section
-        className={`rounded-md border border-blue-100 bg-white p-3 ${className}`}
+        className={`${
+          options.plain
+            ? ""
+            : "rounded-md border border-blue-100 bg-white p-3"
+        } ${className}`}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900">
-              Location lookup
+            <h3
+              className={`text-slate-900 ${
+                options.plain ? "font-medium" : "font-semibold"
+              } ${options.plain ? "text-base" : "text-sm"}`}
+            >
+              {label}
             </h3>
-            <p className="mt-1 text-xs text-slate-500">
-              Search favorite locations first, or look up a place with Google.
-            </p>
+            {helperText ? (
+              <p className="mt-1 text-xs text-slate-500">{helperText}</p>
+            ) : null}
           </div>
           {loadingFavoriteLocations ? (
             <span className="text-xs font-semibold text-slate-500">
@@ -12648,13 +14103,16 @@ export function CarePlandPers({
           onChange={(event) => {
             const nextQuery = event.target.value;
             setPlaceLookupQuery(nextQuery);
+            if (options.plain) {
+              setNewAppointmentLocationAddress(nextQuery);
+            }
             setSelectedGooglePlace(null);
             setPlacesStatusMessage("");
             if (nextQuery.trim().length < 3) {
               setPlaceLookupSuggestions([]);
             }
           }}
-          placeholder="Search by clinic, business, or address"
+          placeholder={placeholder}
           type="text"
           value={placeLookupQuery}
         />
@@ -12813,7 +14271,7 @@ export function CarePlandPers({
       );
 
     return (
-      <div className="mt-6 space-y-5">
+      <div className="mt-1 space-y-2">
         {showWelcomeGuide ? (
           <WelcomeGuide
             actionsMode={welcomeActionsMode}
@@ -12925,20 +14383,30 @@ export function CarePlandPers({
                   >
 	                    {!textIntakeDraft ? (
 	                      <>
-	                        <label className="mt-2 block text-sm font-medium text-slate-700">
+                          <div
+                            className={`mt-2 rounded-lg border transition ${
+                              appointmentNotesDragActive
+                                ? "border-blue-300 bg-blue-50"
+                                : "border-slate-300 bg-white"
+                            }`}
+                            onDragEnter={handleAppointmentNotesDrag}
+                            onDragLeave={handleAppointmentNotesDrag}
+                            onDragOver={handleAppointmentNotesDrag}
+                            onDrop={handleAppointmentNotesDrop}
+                          >
+	                        <label className="block text-sm font-medium text-slate-700">
 	                          <span className="flex flex-wrap items-center justify-between gap-3">
 	                            <span>Visit notes</span>
 	                            <span className="inline-flex cursor-pointer items-center rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50">
-                              Add screenshots (max 10)
+                              Add Files
                               <input
-                                accept="image/gif,image/jpeg,image/png,image/webp"
+                                accept=".pdf,.txt,.md,.csv,.log,text/plain,text/csv,text/markdown,application/pdf,image/gif,image/jpeg,image/png,image/webp"
                                 className="sr-only"
                                 disabled={extractingImageText}
                                 multiple
                                 onChange={(event) => {
-                                  void handleExtractImageText(
-                                    event.target.files,
-                                    "appointmentNotes"
+                                  void handleAppointmentNotesFiles(
+                                    event.target.files
                                   );
                                   event.target.value = "";
                                 }}
@@ -12947,14 +14415,20 @@ export function CarePlandPers({
                             </span>
                           </span>
                           <textarea
-                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            className="mt-2 min-h-32 w-full rounded-lg bg-transparent px-3 py-2 text-base outline-none"
                             onChange={(event) =>
                               setContextualTextIntakeValue(event.target.value)
                             }
-                            placeholder="Type or paste portal notes, after-visit summaries, or anything you want to remember."
+                            placeholder="Type, paste, add or drag anything related to this visit"
                             value={contextualTextIntakeValue}
                           />
                         </label>
+                          </div>
+                          {fileImportStatus ? (
+                            <p className="mt-2 text-xs text-slate-500">
+                              {fileImportStatus}
+                            </p>
+                          ) : null}
                         <button
                           className="mt-4 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
                           disabled={processingTextIntake}
@@ -13094,7 +14568,7 @@ export function CarePlandPers({
             />
 
             {showNotesReminderTrigger && notesReminderAppointment ? (
-              <section>
+              <section className="mb-24">
                 <button
                   className={`inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border px-4 py-2 text-left text-sm font-semibold text-blue-800 ${
                     textIntakeTargetAppointmentId === notesReminderAppointment.id
@@ -13141,7 +14615,15 @@ export function CarePlandPers({
                 ) : null}
                 {textIntakeTargetAppointmentId === notesReminderAppointment.id ? (
                   <form
-                    className="mt-3 rounded-lg bg-white p-4 shadow-sm"
+                    className={`mt-3 transition-colors ${
+                      appointmentNotesDragActive
+                        ? "rounded-md bg-blue-50/70 p-4"
+                        : ""
+                    }`}
+                    onDragEnter={handleAppointmentNotesDrag}
+                    onDragLeave={handleAppointmentNotesDrag}
+                    onDragOver={handleAppointmentNotesDrag}
+                    onDrop={handleAppointmentNotesDrop}
                     onSubmit={
                       textIntakeDraft
                         ? handleSaveTextIntakeDraft
@@ -13150,13 +14632,13 @@ export function CarePlandPers({
                   >
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
                       <div className="min-w-0">
-                        <p className="mt-1 text-sm leading-6 text-slate-600">
-                          <span className="font-semibold">
-                            Type or paste what happened.
-                          </span>{" "}
-                          <span className="block sm:inline">
-                            CarePland will organize it before saving.
-                          </span>
+                        <h2 className="text-xl font-semibold text-slate-950">
+                          Import Anything for{" "}
+                          {notesReminderAppointment.title ||
+                            "this appointment"}
+                        </h2>
+                        <p className="mt-1 text-sm font-medium text-slate-500">
+                          CarePland will figure it out.
                         </p>
                       </div>
                       <button
@@ -13170,33 +14652,58 @@ export function CarePlandPers({
 
                     {!textIntakeDraft ? (
                       <>
-                        <label className="mt-4 block text-sm font-medium text-slate-700">
-                          <span className="flex flex-wrap items-center justify-between gap-3">
-                            <span>Add Notes</span>
-                            <span className="inline-flex cursor-pointer items-center rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-100">
-                              Add screenshots (max 10)
+                        <div className="mt-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div
+                              className={`inline-flex rounded-md border border-dashed px-4 py-3 text-base font-semibold transition-colors ${
+                                appointmentNotesDragActive
+                                  ? "border-blue-300 bg-white text-blue-900"
+                                  : "border-blue-100 bg-blue-50/40 text-blue-800"
+                              }`}
+                            >
+                              {extractingImageText
+                                ? "Reviewing files..."
+                                : appointmentNotesDragActive
+                                  ? "Drop files here."
+                                  : "Drag files here"}
+                            </div>
+                            <label
+                              className={`rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100 ${
+                                extractingImageText
+                                  ? "cursor-not-allowed opacity-60"
+                                  : "cursor-pointer"
+                              }`}
+                            >
+                              Add Files
                               <input
-                                accept="image/gif,image/jpeg,image/png,image/webp"
+                                accept=".pdf,.txt,.md,.csv,.log,text/plain,text/csv,text/markdown,application/pdf,image/gif,image/jpeg,image/png,image/webp"
                                 className="sr-only"
                                 disabled={extractingImageText}
                                 multiple
                                 onChange={(event) => {
-                                  void handleExtractImageText(
-                                    event.target.files,
-                                    "appointmentNotes"
+                                  void handleAppointmentNotesFiles(
+                                    event.target.files
                                   );
                                   event.target.value = "";
                                 }}
                                 type="file"
                               />
-                            </span>
-                          </span>
+                            </label>
+                          </div>
+                          {fileImportStatus ? (
+                            <p className="mt-3 text-sm font-medium text-slate-600">
+                              {fileImportStatus}
+                            </p>
+                          ) : null}
+                        </div>
+                        <label className="mt-5 block text-sm font-medium text-slate-700">
+                          Add any text you have
                           <textarea
-                            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            className="mt-2 min-h-36 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                             onChange={(event) =>
                               setContextualTextIntakeValue(event.target.value)
                             }
-                            placeholder="Type or paste portal notes, after-visit summaries, or anything you want to remember."
+                            placeholder="Type, paste, insert appointment text here"
                             value={contextualTextIntakeValue}
                           />
                         </label>
@@ -13206,8 +14713,8 @@ export function CarePlandPers({
                           type="submit"
                         >
                           {processingTextIntake
-                            ? "Interpreting..."
-                            : "Review notes"}
+                            ? "Reviewing..."
+                            : "Review before Saving"}
                         </button>
                       </>
                     ) : (
@@ -13303,6 +14810,36 @@ export function CarePlandPers({
       needsOnboarding);
   const canShowAskEntry = canUseAskPanel && !showWelcomeGuide && !needsOnboarding;
   const isEveryoneFocus = selectedSubjectId === ALL_SUBJECTS;
+  const importAnythingOwnerPerson =
+    importAnythingOwnerPersonId && importAnythingOwnerPersonId !== ALL_SUBJECTS
+      ? subjectsById.get(importAnythingOwnerPersonId) ?? null
+      : null;
+  const importAnythingFocusPerson =
+    selectedSubjectId && selectedSubjectId !== ALL_SUBJECTS
+      ? subjectsById.get(selectedSubjectId) ?? null
+      : null;
+  const importAnythingOwnerNotice = importAnythingOwnerMismatchNotice({
+    allSubjectsValue: ALL_SUBJECTS,
+    focusPerson: importAnythingFocusPerson
+      ? {
+          displayName: importAnythingFocusPerson.display_name,
+          id: importAnythingFocusPerson.id,
+        }
+      : null,
+    focusPersonId: selectedSubjectId,
+    ownerPerson: importAnythingOwnerPerson
+      ? {
+          displayName: importAnythingOwnerPerson.display_name,
+          id: importAnythingOwnerPerson.id,
+        }
+      : null,
+    ownerPersonId: importAnythingOwnerPersonId,
+  });
+  const importAnythingReviewerFirstName =
+    profileDraft.givenName.trim() ||
+    profileDraft.displayName.trim().split(/\s+/)[0] ||
+    savedProfileLabel.trim().split(/\s+/)[0] ||
+    "You";
   const selectedProfileContactPersonId =
     profileContactPersonId ||
     (selectedSubjectId && selectedSubjectId !== ALL_SUBJECTS
@@ -13329,7 +14866,9 @@ export function CarePlandPers({
     ? `tel:${locationSheetAppointment.location_phone.replace(/[^\d+]/g, "")}`
     : null;
   const isUserFacingTab =
-    mainTab === "home" || mainTab === "appointments" || mainTab === "profile";
+    mainTab === "home" ||
+    mainTab === "appointments" ||
+    mainTab === "profile";
   const showUserFacingFooter =
     isSignedInAppShell &&
     isUserFacingTab &&
@@ -13460,7 +14999,11 @@ export function CarePlandPers({
   return (
     <main
       className={`min-h-screen overflow-x-clip bg-slate-50 px-3 text-slate-900 sm:px-4 lg:px-6 lg:py-8 ${
-        isSignedInAppShell ? "pb-6 pt-2 sm:pt-4" : "py-6"
+        isSignedInAppShell
+          ? showUserFacingFooter
+            ? "pb-20 pt-2 sm:pt-4"
+            : "pb-6 pt-2 sm:pt-4"
+          : "py-6"
       }`}
     >
       <section
@@ -13507,16 +15050,32 @@ export function CarePlandPers({
               }}
               onAppointmentsClick={async () => {
                 if (adminRoute) {
-                  window.location.assign("/?personal=1&appointments=1");
+                  window.location.assign("/?personal=1&appointments=1&view=upcoming");
                   return;
                 }
 
                 updatePersonalRoute("appointments");
+                if (mainTab === "appointments") {
+                  handleChangeAppointmentView("upcoming");
+                  return;
+                }
+
+                if (hasUnsavedWorkForLeave) {
+                  await handleChangeMainTab("appointments");
+                  return;
+                }
+
                 await handleChangeMainTab("appointments");
+                applyAppointmentViewChange("upcoming");
               }}
               onAskClick={() => {
                 if (askPanelOpen) {
                   requestCloseAskPanel();
+                  return;
+                }
+
+                if (importAnythingPanelHasUnfinishedWork) {
+                  setPendingImportLeaveAction({ kind: "ask" });
                   return;
                 }
 
@@ -13545,6 +15104,18 @@ export function CarePlandPers({
               onChangeFocus={handleChangeCarePlandFocus}
               onSignOut={() => void handleSignOut()}
               planTierId={currentPricingTier.id}
+              primaryAction={
+                mainTab === "appointments" || mainTab === "home" ? (
+                  <button
+                    className="inline-flex h-10 shrink-0 items-center justify-center rounded-full border border-blue-100 bg-blue-50/80 px-3 text-sm font-semibold leading-none text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100 disabled:opacity-60 sm:h-11 sm:px-4"
+                    disabled={loading}
+                    onClick={() => startAppointmentPanel("quickAdd")}
+                    type="button"
+                  >
+                    + Add
+                  </button>
+                ) : null
+              }
               supportMetrics={
                 isAdmin
                   ? [
@@ -13600,8 +15171,13 @@ export function CarePlandPers({
             <AppointmentViewToolbar
               allSubjectsValue={ALL_SUBJECTS}
               canFilterCareVips={canFilterCareVips}
-              careSubjects={careSubjects}
+              careSubjects={careSubjects.map((subject) => ({
+                ...subject,
+                avatarEmoji:
+                  subject.avatarEmoji ?? defaultPetAvatarEmoji(subject),
+              }))}
               disabled={loading}
+              hideOlder={Boolean(activeAppointmentPanel)}
               key={`${appointmentView}-${selectedSubjectId}`}
               onChangeSubject={handleChangeSubject}
               onChangeView={handleChangeAppointmentView}
@@ -14719,15 +16295,34 @@ export function CarePlandPers({
             {signedInEmail &&
             mainTab === "appointments" &&
             activeAppointmentPanel ? (
-              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <section
+                className={
+                  activeAppointmentPanel === "add" ||
+                  activeAppointmentPanel === "quickAdd"
+                    ? "-mt-4"
+                    : "rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                }
+              >
                 {activeAppointmentPanel === "add" ? (
                   <form
-                    className="mt-4 grid gap-4 rounded-md border border-blue-100 bg-blue-50 p-4 md:grid-cols-2"
+                    className="grid gap-4 md:grid-cols-2"
                     onSubmit={handleCreateAppointment}
                   >
+                    <div className="flex flex-wrap items-center justify-between gap-3 md:col-span-2">
+                      <h2 className="text-xl font-semibold text-slate-950">
+                        Add Appointment
+                      </h2>
+                      <button
+                        className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 hover:text-blue-900"
+                        onClick={() => startAppointmentPanel("quickAdd")}
+                        type="button"
+                      >
+                        Import
+                      </button>
+                    </div>
                     {canUseMultipleCareVips ? (
-                      <label className="block text-sm font-medium text-slate-700">
-                        For this appointment
+                      <label className="block text-base font-medium text-slate-700">
+                        Who is this for?
                         <select
                           className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                           disabled={careSubjects.length === 0}
@@ -14747,9 +16342,8 @@ export function CarePlandPers({
                         </select>
                       </label>
                     ) : null}
-                    {renderPlaceLookup("md:col-span-2")}
-                    <label className="block text-sm font-medium text-slate-700">
-                      Title
+                    <label className="block text-base font-medium text-slate-700">
+                      Appointment Title
                       <input
                         className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
@@ -14760,8 +16354,8 @@ export function CarePlandPers({
                         value={newAppointmentTitle}
                       />
                     </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Date & time
+                    <label className="block text-base font-medium text-slate-700">
+                      Date & Time
                       <input
                         className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
@@ -14771,7 +16365,13 @@ export function CarePlandPers({
                         value={newAppointmentStartsAt}
                       />
                     </label>
-                    <label className="block text-sm font-medium text-slate-700">
+                    {renderPlaceLookup("", {
+                      helperText: "",
+                      label: "Location",
+                      placeholder: "Type your address here",
+                      plain: true,
+                    })}
+                    <label className="block text-base font-medium text-slate-700">
                       Provider
                       <input
                         className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
@@ -14783,7 +16383,7 @@ export function CarePlandPers({
                         value={newAppointmentProviderName}
                       />
                     </label>
-                    <label className="block text-sm font-medium text-slate-700">
+                    <label className="block text-base font-medium text-slate-700">
                       Practice
                       <input
                         className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
@@ -14797,19 +16397,7 @@ export function CarePlandPers({
                         value={newAppointmentProviderOrganization}
                       />
                     </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Address
-                      <input
-                        className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                        onChange={(event) =>
-                          setNewAppointmentLocationAddress(event.target.value)
-                        }
-                        placeholder="Street, city, state"
-                        type="text"
-                        value={newAppointmentLocationAddress}
-                      />
-                    </label>
-                    <label className="block text-sm font-medium text-slate-700 md:col-span-2">
+                    <label className="block text-base font-medium text-slate-700 md:col-span-2">
                       Reason
                       <textarea
                         className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
@@ -14823,7 +16411,7 @@ export function CarePlandPers({
                     <div className="flex flex-wrap gap-3 md:col-span-2">
                       <button
                         className={gentlePrimaryButtonClass}
-                        disabled={creatingAppointment}
+                        disabled={creatingAppointment || !canCreateNewAppointment}
                         type="submit"
                       >
                         {creatingAppointment ? "Adding..." : "Add appointment"}
@@ -14843,166 +16431,252 @@ export function CarePlandPers({
                 ) : null}
 
                 {activeAppointmentPanel === "quickAdd" ? (
-                  <section className="mt-4 rounded-md border border-blue-100 bg-blue-50 p-4">
-                    <form onSubmit={handleInterpretTextIntake}>
-                      {canUseMultipleCareVips ? (
-                        <label className="block text-sm font-medium text-slate-700">
-                          For this import
-                          <select
-                            className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                            disabled={careSubjects.length === 0}
-                            onChange={(event) =>
-                              setTextIntakeSubjectId(event.target.value)
-                            }
-                            value={textIntakeSubjectId}
-                          >
-                            {careSubjects.length === 0 ? (
-                              <option value="">No Care VIPs found</option>
-                            ) : null}
-                            {careSubjects.map((subject) => (
-                              <option key={subject.id} value={subject.id}>
-                                {subject.display_name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : null}
-                      <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
-                        <label
-                          className="block text-sm font-medium text-slate-700"
-                          htmlFor="appointment-import-files"
-                        >
-                          Choose files
-                        </label>
-                        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-700">
-                          <label
-                            className={`rounded-full border border-blue-100 bg-white/85 px-3 py-2 font-semibold text-slate-600 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800 ${
-                              extractingImageText
-                                ? "cursor-not-allowed opacity-60"
-                                : "cursor-pointer"
-                            }`}
-                            htmlFor="appointment-import-files"
-                          >
-                            Choose Files
-                          </label>
-                          <input
-                            accept=".ics,text/calendar,image/gif,image/jpeg,image/png,image/webp"
-                            className="sr-only"
-                            disabled={extractingImageText}
-                            id="appointment-import-files"
-                            multiple
-                            onChange={(event) => {
-                              void handleImportAppointmentFiles(event.target.files);
-                              event.target.value = "";
-                            }}
-                            type="file"
-                          />
-                          <span>No file chosen</span>
-                          {fileImportStatus ? (
-                            <span className="font-semibold text-amber-700">
-                              {fileImportStatus}
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="mt-2 text-xs text-slate-500">
-                          Choose one .iCal calendar file or up to 10 images.
-                          Imported items must be reviewed before saving.
-                        </p>
-                      </div>
-                      <label className="mt-3 block text-sm font-medium text-slate-700">
-                        Text
-                        <textarea
-                          className="mt-2 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-                          onChange={(event) =>
-                            setTextIntakeValue(event.target.value)
-                          }
-                          placeholder="Paste appointment details, portal text, or visit notes."
-                          value={textIntakeValue}
-                        />
-                      </label>
-                      <div className="mt-4 flex flex-wrap gap-3">
-                        <button
-                          className={gentlePrimaryButtonClass}
-                          disabled={processingTextIntake}
-                          type="submit"
-                        >
-                          {processingTextIntake
-                            ? "Interpreting..."
-                            : "Review appointments"}
-                        </button>
-                        <button
-                          className={gentleSecondaryButtonClass}
-                          onClick={requestCloseTextIntakePanel}
-                          type="button"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-
-                    <div className="mt-5 rounded-md border border-emerald-100 bg-white p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="max-w-3xl">
-                          <h3 className="text-base font-semibold text-slate-900">
-                            Import Anything
-                          </h3>
-                          <p className="mt-1 text-sm text-slate-600">
-                            Add screenshots, PDFs, portal messages, appointment
-                            reminders, discharge instructions, or pasted
-                            healthcare text. CarePland will sort what it finds
-                            before anything is saved.
-                          </p>
-                        </div>
-                        <label
-                          className={`rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-100 ${
-                            extractingImageText
-                              ? "cursor-not-allowed opacity-60"
-                              : "cursor-pointer"
-                          }`}
-                          htmlFor="import-anything-files"
-                        >
-                          Add files
-                        </label>
-                        <input
-                          accept=".pdf,.txt,.md,text/plain,application/pdf,image/gif,image/jpeg,image/png,image/webp"
-                          className="sr-only"
-                          disabled={extractingImageText}
-                          id="import-anything-files"
-                          multiple
-                          onChange={(event) => {
-                            void handleImportAnythingFiles(event.target.files);
-                            event.target.value = "";
-                          }}
-                          type="file"
-                        />
-                      </div>
-                      <div className="mt-4 flex flex-wrap items-center gap-3">
-                        <button
-                          className={gentlePrimaryButtonClass}
-                          disabled={
-                            processingImportAnything || !textIntakeValue.trim()
-                          }
-                          onClick={handleInterpretImportAnything}
-                          type="button"
-                        >
-                          {processingImportAnything
-                            ? "Reviewing..."
-                            : "Review everything found"}
-                        </button>
-                        {importAnythingSources.length > 0 ? (
-                          <span className="text-sm font-medium text-slate-600">
-                            {importAnythingSources.length} source
-                            {importAnythingSources.length === 1 ? "" : "s"} added
+                  <section
+                    className={`transition-colors ${
+                      importAnythingDragActive
+                        ? "rounded-md bg-blue-50/70 p-4"
+                        : ""
+                    }`}
+                    onDragEnter={handleImportAnythingDrag}
+                    onDragLeave={handleImportAnythingDrag}
+                    onDragOver={handleImportAnythingDrag}
+                    onDrop={handleImportAnythingDrop}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <h2 className="text-xl font-semibold text-slate-950">
+                          {importAnythingItems.length > 0
+                            ? "Import complete."
+                            : "Import Anything"}
+                        </h2>
+                        {importAnythingItems.length === 0 ? (
+                          <span className="text-sm font-medium text-slate-500">
+                            CarePland will figure it out.
                           </span>
                         ) : null}
                       </div>
-                      <p className="mt-3 text-xs text-slate-500">
-                        This is additive and review-first. Existing manual
-                        records are not changed by this workflow.
-                      </p>
+                      {importAnythingItems.length === 0 ? (
+                        <button
+                          className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 hover:text-blue-900"
+                          onClick={() => startAppointmentPanel("add")}
+                          type="button"
+                        >
+                          Manual entry
+                        </button>
+                      ) : null}
                     </div>
 
+                    {importAnythingOwnerNotice ? (
+                      <div className="mt-3 rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                        <p>{importAnythingOwnerNotice.message}</p>
+                        <button
+                          className="mt-2 rounded-md px-2 py-1 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 hover:text-amber-950"
+                          onClick={changeImportAnythingOwnerToCurrentFocus}
+                          type="button"
+                        >
+                          {importAnythingOwnerNotice.actionLabel}
+                        </button>
+                      </div>
+                    ) : null}
+
                     {importAnythingItems.length > 0 ? (
+                      <section className="mt-5 text-sm text-slate-700">
+                        <p className="font-semibold text-slate-800">
+                          Source:
+                        </p>
+                        <ul className="mt-1 space-y-1">
+                          <li>
+                            • {textIntakeValue.trim() ? 1 : 0} pasted note
+                            {textIntakeValue.trim() ? "" : "s"}
+                          </li>
+                          <li>
+                            • {importAnythingSources.length} file
+                            {importAnythingSources.length === 1 ? "" : "s"}
+                          </li>
+                        </ul>
+                      </section>
+                    ) : (
+                      <>
+                        <div className="mt-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div
+                              className={`inline-flex rounded-md border border-dashed px-4 py-3 text-base font-semibold transition-colors ${
+                                importAnythingDragActive
+                                  ? "border-blue-300 bg-white text-blue-900"
+                                  : "border-blue-100 bg-blue-50/40 text-blue-800"
+                              }`}
+                            >
+                              {extractingImageText
+                                ? "Reviewing files..."
+                                : importAnythingDragActive
+                                  ? "Drop files here."
+                                  : "Drag files here"}
+                            </div>
+                            <div className="flex flex-col items-end gap-2">
+                              <label
+                                className={`rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100 ${
+                                  extractingImageText
+                                    ? "cursor-not-allowed opacity-60"
+                                    : "cursor-pointer"
+                                }`}
+                                htmlFor="import-anything-files"
+                              >
+                                Add Files
+                              </label>
+                            </div>
+                            <input
+                              accept=".pdf,.txt,.md,.csv,.log,text/plain,text/csv,text/markdown,application/pdf,image/gif,image/jpeg,image/png,image/webp"
+                              className="sr-only"
+                              disabled={extractingImageText}
+                              id="import-anything-files"
+                              multiple
+                              onChange={(event) => {
+                                void handleImportAnythingFiles(event.target.files);
+                                event.target.value = "";
+                              }}
+                              type="file"
+                            />
+                          </div>
+                          {extractingImageText || processingImportAnything ? (
+                            <div
+                              aria-live="polite"
+                              className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900"
+                              role="status"
+                            >
+                              {extractingImageText
+                                ? "Importing files..."
+                                : "Reviewing everything found..."}
+                            </div>
+                          ) : null}
+                          {importAnythingSources.length > 0 ? (
+                            <p className="mt-3 text-sm font-medium text-slate-600">
+                              {importAnythingSources.length} source
+                              {importAnythingSources.length === 1 ? "" : "s"} added
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <label className="mt-5 block text-sm font-medium text-slate-700">
+                          Add any text you have
+                          <textarea
+                            className="mt-2 min-h-36 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                            onChange={(event) =>
+                              setTextIntakeValue(event.target.value)
+                            }
+                            placeholder="Type, paste, insert appointment text here"
+                            value={textIntakeValue}
+                          />
+                        </label>
+                      </>
+                    )}
+
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      <button
+                        className={gentlePrimaryButtonClass}
+                        disabled={
+                          processingImportAnything ||
+                          (importAnythingItems.length === 0 &&
+                            !textIntakeValue.trim())
+                        }
+                        onClick={() => {
+                          if (importAnythingItems.length > 0) {
+                            setImportAnythingReviewOpen(true);
+                            return;
+                          }
+
+                          void handleInterpretImportAnything();
+                        }}
+                        type="button"
+                      >
+                        {processingImportAnything
+                          ? "Reviewing..."
+                          : "Review before Saving"}
+                      </button>
+                      {importAnythingItems.length > 0 ? (
+                        <button
+                          className={gentleSecondaryButtonClass}
+                          disabled={
+                            processingImportAnything || savingImportAnything
+                          }
+                          onClick={() =>
+                            setConfirmingImportAnythingSaveAll(true)
+                          }
+                          type="button"
+                        >
+                          Save All
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {confirmingImportAnythingSaveAll ? (
+                      <section className="mt-4 rounded-md border border-blue-100 bg-white p-4 shadow-sm">
+                        <h3 className="text-base font-semibold text-slate-950">
+                          Confirm Import
+                        </h3>
+                        <p className="mt-3 text-sm text-slate-700">
+                          CarePland will create:
+                        </p>
+                        <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                          {importAnythingSummaryCounts(importAnythingItems)
+                            .appointments > 0 ? (
+                            <li>
+                              •{" "}
+                              {
+                                importAnythingSummaryCounts(importAnythingItems)
+                                  .appointments
+                              }{" "}
+                              appointment
+                              {importAnythingSummaryCounts(importAnythingItems)
+                                .appointments === 1
+                                ? ""
+                                : "s"}
+                            </li>
+                          ) : null}
+                          {importAnythingSummaryCounts(importAnythingItems)
+                            .tasks > 0 ? (
+                            <li>
+                              •{" "}
+                              {
+                                importAnythingSummaryCounts(importAnythingItems)
+                                  .tasks
+                              }{" "}
+                              task
+                              {importAnythingSummaryCounts(importAnythingItems)
+                                .tasks === 1
+                                ? ""
+                                : "s"}
+                            </li>
+                          ) : null}
+                        </ul>
+                        <p className="mt-3 text-sm text-slate-600">
+                          Supporting notes will be attached automatically.
+                        </p>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            className={gentlePrimaryButtonClass}
+                            disabled={savingImportAnything}
+                            onClick={handleConfirmAllImportAnything}
+                            type="button"
+                          >
+                            {savingImportAnything
+                              ? "Saving..."
+                              : "Confirm Import"}
+                          </button>
+                          <button
+                            className={gentleSecondaryButtonClass}
+                            disabled={savingImportAnything}
+                            onClick={() =>
+                              setConfirmingImportAnythingSaveAll(false)
+                            }
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {importAnythingItems.length > 0 && importAnythingReviewOpen ? (
                       <section className="mt-5 rounded-md border border-emerald-100 bg-white p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
@@ -15016,22 +16690,759 @@ export function CarePlandPers({
                                 : ""}
                             </p>
                           </div>
-                          <button
-                            className={gentlePrimaryButtonClass}
-                            disabled={
-                              savingImportAnything ||
-                              !importAnythingItems.some(
-                                (item) => item.status === "approved"
-                              )
-                            }
-                            onClick={handleCommitImportAnythingReview}
-                            type="button"
-                          >
-                            {savingImportAnything
-                              ? "Saving..."
-                              : "Save approved items"}
-                          </button>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600">
+                              <input
+                                checked={importAnythingExpertView}
+                                className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-200"
+                                onChange={(event) =>
+                                  setImportAnythingExpertView(
+                                    event.target.checked
+                                  )
+                                }
+                                type="checkbox"
+                              />
+                              Expert view
+                            </label>
+                            <button
+                              className="rounded-md px-2 py-1 text-sm font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                              onClick={() =>
+                                setConfirmingDiscardImportAnythingReview(true)
+                              }
+                              type="button"
+                            >
+                              Discard review
+                            </button>
+                            {confirmingDiscardImportAnythingReview ? (
+                              <span className="inline-flex items-center gap-2 text-sm text-slate-600">
+                                <span>Are you sure?</span>
+                                <button
+                                  className="font-semibold text-rose-700 transition hover:text-rose-900"
+                                  onClick={() => {
+                                    resetImportAnythingReview();
+                                    setConfirmingDiscardImportAnythingReview(
+                                      false
+                                    );
+                                    setMessage(
+                                      "Import Anything review discarded."
+                                    );
+                                  }}
+                                  type="button"
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  className="font-semibold text-blue-700 transition hover:text-blue-900"
+                                  onClick={() =>
+                                    setConfirmingDiscardImportAnythingReview(
+                                      false
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  No
+                                </button>
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
+                        {importAnythingExpertView ? (
+                        <section className="mt-4 rounded-md border border-blue-100 bg-blue-50/40 p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h4 className="text-sm font-semibold text-slate-900">
+                                Overall person clue
+                              </h4>
+                              {importAnythingPersonAssignment ? (
+                                <p className="mt-1 text-sm text-slate-600">
+                                  {importAnythingPersonAssignment.detectedName
+                                    ? `Detected: ${importAnythingPersonAssignment.detectedName}. `
+                                    : ""}
+                                  {importAnythingPersonAssignment.matchedCareSubjectId
+                                    ? `Suggested match: ${
+                                        subjectsById.get(
+                                          importAnythingPersonAssignment.matchedCareSubjectId
+                                        )?.display_name ?? "existing Care VIP"
+                                      }. `
+                                    : importAnythingPersonAssignment.suggestedNewPersonName
+                                      ? `Possible new person: ${importAnythingPersonAssignment.suggestedNewPersonName}. `
+                                      : "CarePland could not confidently assign this to a person. "}
+                                  Confidence:{" "}
+                                  {Math.round(
+                                    importAnythingPersonAssignment.confidence * 100
+                                  )}
+                                  %.
+                                </p>
+                              ) : (
+                                <p className="mt-1 text-sm text-slate-600">
+                                  CarePland could not confidently assign this to
+                                  a person.
+                                </p>
+                              )}
+                              {importAnythingPersonAssignment?.rationale ? (
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {importAnythingPersonAssignment.rationale}
+                                </p>
+                              ) : null}
+                            </div>
+                            <button
+                              className="rounded-md px-2 py-1 text-sm font-semibold text-slate-500 transition hover:bg-white hover:text-slate-700"
+                              onClick={() =>
+                                setConfirmingDiscardImportAnythingReview(true)
+                              }
+                              type="button"
+                            >
+                              Discard review
+                            </button>
+                            {confirmingDiscardImportAnythingReview ? (
+                              <span className="inline-flex items-center gap-2 text-sm text-slate-600">
+                                <span>Are you sure?</span>
+                                <button
+                                  className="font-semibold text-rose-700 transition hover:text-rose-900"
+                                  onClick={() => {
+                                    resetImportAnythingReview();
+                                    setConfirmingDiscardImportAnythingReview(
+                                      false
+                                    );
+                                    setMessage(
+                                      "Import Anything review discarded."
+                                    );
+                                  }}
+                                  type="button"
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  className="font-semibold text-blue-700 transition hover:text-blue-900"
+                                  onClick={() =>
+                                    setConfirmingDiscardImportAnythingReview(
+                                      false
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  No
+                                </button>
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-2 text-xs text-slate-500">
+                            Each finding below can be assigned separately.
+                            Unassigned findings stay in the import audit only.
+                          </p>
+                        </section>
+                        ) : null}
+                        {importAnythingOwnershipClusters.length > 0 ||
+                        importAnythingItems.length > 0 ? (
+                          importAnythingExpertView ? (
+                          <section className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                            <h4 className="text-sm font-semibold text-slate-900">
+                              Ownership Clusters Detected
+                            </h4>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                              {importAnythingOwnershipClusterCounts(
+                                importAnythingItems,
+                                importAnythingOwnershipClusters
+                              ).map((row) => (
+                                <div
+                                  className="rounded-md bg-white px-3 py-2 text-sm"
+                                  key={row.label}
+                                >
+                                  <div className="font-semibold text-slate-900">
+                                    {row.label}
+                                  </div>
+                                  <div className="text-xs text-slate-500">
+                                    Findings: {row.count}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+                          ) : null
+                        ) : null}
+                        {savingImportAnything ? (
+                          <div
+                            aria-live="polite"
+                            className="mt-3 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900"
+                            role="status"
+                          >
+                            Saving approved items...
+                          </div>
+                        ) : null}
+                        {!importAnythingExpertView ? (
+                          <div className="mt-6">
+                            {importAnythingStagingItems(importAnythingItems).map((item) => {
+                              const isEditingImportItem =
+                                editingImportAnythingItemIds[item.id] ?? false;
+                              const needsOwnerChoice =
+                                !item.ownerCareSubjectId &&
+                                !item.ownerNewPersonName;
+                              const likelyOwnerLabel =
+                                item.ownerDetectedName ||
+                                item.ownerNewPersonName ||
+                                "Unknown";
+                              const needsOwnerConfirmation =
+                                needsOwnerChoice && item.ownerDetectedName;
+                              const likelyOwnerCareSubjectId =
+                                needsOwnerConfirmation
+                                  ? careSubjects.find(
+                                      (subject) =>
+                                        normalizedImportAnythingText(
+                                          subject.display_name
+                                        ) ===
+                                        normalizedImportAnythingText(
+                                          item.ownerDetectedName
+                                        )
+                                    )?.id ?? ""
+                                  : "";
+                              const itemOwnerLabel = item.ownerCareSubjectId
+                                ? subjectsById.get(item.ownerCareSubjectId)
+                                    ?.display_name ?? "Existing Care VIP"
+                                : item.ownerNewPersonName ||
+                                  item.ownerDetectedName ||
+                                  "Unassigned";
+                              const providerLabel =
+                                item.fields.providerName ||
+                                (item.kind === "provider" ? item.title : "");
+                              const practiceOfficeLabel =
+                                importAnythingPracticeOfficeValue(item);
+                              const dateLabel = item.fields.startsAt
+                                ? formatDate(item.fields.startsAt)
+                                : item.fields.dueAt || "";
+                              const supportingNotes =
+                                importAnythingFindSupportingNotes(
+                                  item,
+                                  importAnythingItems
+                                );
+                              const sourceItems = [item, ...supportingNotes].filter(
+                                (sourceItem) => sourceItem.sourceExcerpt
+                              );
+                              const isViewingSource =
+                                viewingImportAnythingSourceItemId === item.id;
+                              const shouldShowItemSummary =
+                                item.kind !== "appointment" && item.summary;
+                              const isHumanApproved =
+                                item.status === "approved" &&
+                                item.userReviewed === true;
+                              const isAiApprovedUntouched =
+                                item.status === "approved" &&
+                                item.userReviewed !== true;
+                              const isAiApprovedCollapsed =
+                                isAiApprovedUntouched &&
+                                !expandedImportAnythingItemIds[item.id];
+                              const isLikelyOwnerReviewCollapsed =
+                                item.status === "needs_review" &&
+                                needsOwnerConfirmation &&
+                                !expandedImportAnythingItemIds[item.id] &&
+                                !isEditingImportItem;
+                              const isCollapsedImportItem =
+                                (isHumanApproved && !isEditingImportItem) ||
+                                isAiApprovedCollapsed ||
+                                isLikelyOwnerReviewCollapsed;
+                              const showImportItemDetails =
+                                !isCollapsedImportItem;
+
+                              return (
+                                <article
+                                  className="relative flex flex-col px-5 py-8 before:absolute before:left-5 before:right-5 before:top-0 before:h-px before:bg-slate-200 first:pt-0 first:before:hidden sm:px-6 sm:before:left-6 sm:before:right-6"
+                                  key={item.id}
+                                >
+                                  {isCollapsedImportItem ? (
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                        <h4 className="text-2xl font-semibold text-slate-950">
+                                          {item.title}
+                                        </h4>
+                                        {isLikelyOwnerReviewCollapsed ? (
+                                          <>
+                                            <button
+                                              className="rounded-md px-2 py-1 text-sm font-semibold text-amber-800 transition hover:bg-amber-50 hover:text-amber-950"
+                                              onClick={() =>
+                                                setExpandedImportAnythingItemIds(
+                                                  (currentIds) => ({
+                                                    ...currentIds,
+                                                    [item.id]: true,
+                                                  })
+                                                )
+                                              }
+                                              type="button"
+                                            >
+                                              Confirm: this belongs to
+                                            </button>
+                                            <label className="inline-flex max-w-full items-center gap-2 rounded-md border border-amber-100 bg-amber-50/70 px-3 py-2 text-sm font-semibold text-amber-950">
+                                              <select
+                                                className="max-w-48 rounded-md border border-amber-200 bg-white/85 px-2 py-1 text-sm font-semibold text-amber-950 shadow-sm"
+                                                onChange={(event) =>
+                                                  updateImportAnythingItemOwner(
+                                                    item.id,
+                                                    {
+                                                      ownerCareSubjectId:
+                                                        event.target.value,
+                                                      ownerNewPersonName: "",
+                                                    }
+                                                  )
+                                                }
+                                                value={
+                                                  item.ownerCareSubjectId ||
+                                                  likelyOwnerCareSubjectId
+                                                }
+                                              >
+                                                <option value="">
+                                                  {likelyOwnerLabel}
+                                                </option>
+                                                {careSubjects.map((subject) => (
+                                                  <option
+                                                    key={subject.id}
+                                                    value={subject.id}
+                                                  >
+                                                    {subject.display_name}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </label>
+                                            <button
+                                              className={gentleSecondaryButtonClass}
+                                              onClick={() =>
+                                                setImportAnythingItemStatus(
+                                                  item.id,
+                                                  "approved"
+                                                )
+                                              }
+                                              type="button"
+                                            >
+                                              Confirm
+                                            </button>
+                                          </>
+                                        ) : isHumanApproved ? (
+                                          <>
+                                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                                              Approved
+                                            </span>
+                                            <button
+                                              className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 hover:text-blue-900"
+                                              onClick={() =>
+                                                undoImportAnythingItemApproval(
+                                                  item.id
+                                                )
+                                              }
+                                              type="button"
+                                            >
+                                              Undo
+                                            </button>
+                                          </>
+                                        ) : (
+                                          <button
+                                            className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 hover:text-blue-900"
+                                            onClick={() =>
+                                              setExpandedImportAnythingItemIds(
+                                                (currentIds) => ({
+                                                  ...currentIds,
+                                                  [item.id]: true,
+                                                })
+                                              )
+                                            }
+                                            type="button"
+                                          >
+                                            Open
+                                          </button>
+                                        )}
+                                      </div>
+                                      {dateLabel ? (
+                                        <p className="text-lg font-medium text-slate-700">
+                                          {dateLabel}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  ) : (
+                                  <>
+                                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <h4 className="text-2xl font-semibold text-slate-950">
+                                          {item.title}
+                                        </h4>
+                                        {item.status === "needs_review" ? (
+                                          <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                            Needs review
+                                          </span>
+                                        ) : null}
+                                        {isAiApprovedUntouched ? (
+                                          <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                            {importAnythingReviewerFirstName} Reviewing
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      {providerLabel ? (
+                                        <p className="mt-2 text-base font-medium text-[#767676]">
+                                          {providerLabel}
+                                        </p>
+                                      ) : null}
+                                      {practiceOfficeLabel ? (
+                                        <p className="mt-1 text-base font-medium text-[#767676]">
+                                          {practiceOfficeLabel}
+                                        </p>
+                                      ) : null}
+                                      {item.kind !== "appointment" ? (
+                                        <p className="mt-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                                          {importAnythingKindLabel(item.kind)}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                    <div className="text-left md:min-w-64 md:text-right">
+                                      {dateLabel ? (
+                                        <p className="text-lg font-medium text-slate-700">
+                                          {dateLabel}
+                                        </p>
+                                      ) : null}
+                                      {!needsOwnerChoice ? (
+                                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[#767676] md:justify-end">
+                                          <span>for {itemOwnerLabel}</span>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  </>
+                                  )}
+
+                                  {showImportItemDetails &&
+                                  shouldShowItemSummary ? (
+                                    <p className="mt-5 text-base text-slate-700">
+                                      {item.summary}
+                                    </p>
+                                  ) : null}
+
+                                  {showImportItemDetails &&
+                                  supportingNotes.length > 0 ? (
+                                    <section className="mt-5">
+                                      <h5 className="text-sm font-semibold text-slate-900">
+                                        What to Know
+                                      </h5>
+                                      <div className="mt-2 space-y-3 text-base text-slate-700">
+                                        {supportingNotes.map((supportItem) => (
+                                          <div key={supportItem.id}>
+                                            {(() => {
+                                              const takeaways = asTextList(
+                                                supportItem.fields.takeaways
+                                              );
+                                              const followups = asTextList(
+                                                supportItem.fields.followups
+                                              );
+
+                                              return (
+                                                <>
+                                            {supportItem.fields.summary ? (
+                                              <p>{supportItem.fields.summary}</p>
+                                            ) : null}
+                                            {takeaways.length > 0 ? (
+                                              <div className="mt-2">
+                                                <p className="font-semibold text-slate-900">
+                                                  Takeaways
+                                                </p>
+                                                <DetailList
+                                                  emptyLabel=""
+                                                  items={takeaways}
+                                                  showBullets={false}
+                                                />
+                                              </div>
+                                            ) : null}
+                                            {followups.length > 0 ? (
+                                              <div className="mt-2">
+                                                <p className="font-semibold text-slate-900">
+                                                  Follow-ups
+                                                </p>
+                                                <DetailList
+                                                  emptyLabel=""
+                                                  items={followups}
+                                                  showBullets={false}
+                                                />
+                                              </div>
+                                            ) : null}
+                                            {supportItem.fields.detail ? (
+                                              <p>{supportItem.fields.detail}</p>
+                                            ) : null}
+                                                </>
+                                              );
+                                            })()}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </section>
+                                  ) : null}
+
+                                  {showImportItemDetails &&
+                                  sourceItems.length > 0 &&
+                                  isViewingSource ? (
+                                    <section className="mt-5 rounded-md border border-blue-100 bg-blue-50/30 p-4">
+                                      <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div>
+                                          <h5 className="text-base font-semibold text-slate-900">
+                                            Source
+                                          </h5>
+                                          <p className="mt-1 text-sm text-slate-600">
+                                            CarePland used this text. This helps
+                                            you verify what was found.
+                                          </p>
+                                        </div>
+                                        <button
+                                          className="rounded-md px-2 py-1 text-sm font-semibold text-slate-500 transition hover:bg-white hover:text-slate-700"
+                                          onClick={() =>
+                                            setViewingImportAnythingSourceItemId(
+                                              null
+                                            )
+                                          }
+                                          type="button"
+                                        >
+                                          Close
+                                        </button>
+                                      </div>
+                                      <div className="mt-3 space-y-3">
+                                        {sourceItems.map((sourceItem) => (
+                                          <div
+                                            className="whitespace-pre-wrap rounded-md bg-white p-3 text-sm text-slate-700"
+                                            key={sourceItem.id}
+                                          >
+                                            {sourceItem.sourceExcerpt}
+                                          </div>
+                                        ))}
+                                      </div>
+                                      {/* TODO: When OCR bounding boxes or document coordinates are available, replace this text-only source view with a richer PDF/image region preview. */}
+                                    </section>
+                                  ) : null}
+
+                                  {showImportItemDetails &&
+                                  needsOwnerChoice &&
+                                  !isEditingImportItem ? (
+                                    <section className="mt-5 inline-flex max-w-full flex-wrap items-center gap-2 rounded-md border border-amber-100 bg-amber-50/70 px-3 py-2 text-sm font-semibold text-amber-950">
+                                      <span>
+                                        {needsOwnerConfirmation
+                                          ? "Likely owner:"
+                                          : "Owner:"}
+                                      </span>
+                                      <select
+                                        className="max-w-full rounded-md border border-amber-200 bg-white/85 px-2 py-1 text-sm font-semibold text-amber-950 shadow-sm"
+                                        onChange={(event) =>
+                                          updateImportAnythingItemOwner(
+                                            item.id,
+                                            {
+                                              ownerCareSubjectId:
+                                                event.target.value,
+                                              ownerNewPersonName: "",
+                                            }
+                                          )
+                                        }
+                                        value={
+                                          item.ownerCareSubjectId ||
+                                          likelyOwnerCareSubjectId
+                                        }
+                                      >
+                                        <option value="">
+                                          {needsOwnerConfirmation
+                                            ? likelyOwnerLabel
+                                            : "Unassigned"}
+                                        </option>
+                                        {careSubjects.map((subject) => (
+                                          <option
+                                            key={subject.id}
+                                            value={subject.id}
+                                          >
+                                            {subject.display_name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </section>
+                                  ) : null}
+
+                                  {showImportItemDetails &&
+                                  isEditingImportItem ? (
+                                    <section className="mt-5 rounded-md border border-blue-100 bg-blue-50/30 p-4">
+                                      <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <h5 className="text-base font-semibold text-slate-900">
+                                          Edit {importAnythingKindLabel(item.kind)}
+                                        </h5>
+                                        <button
+                                          className="rounded-md px-2 py-1 text-sm font-semibold text-slate-500 transition hover:bg-white hover:text-slate-700"
+                                          onClick={() =>
+                                            setEditingImportAnythingItemIds(
+                                              (currentIds) => ({
+                                                ...currentIds,
+                                                [item.id]: false,
+                                              })
+                                            )
+                                          }
+                                          type="button"
+                                        >
+                                          Done
+                                        </button>
+                                      </div>
+                                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                                        <label className="block text-sm font-medium text-slate-700">
+                                          Assign to existing person
+                                          <select
+                                            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                                            onChange={(event) =>
+                                              updateImportAnythingItemOwner(
+                                                item.id,
+                                                {
+                                                  ownerCareSubjectId:
+                                                    event.target.value,
+                                                  ownerNewPersonName: "",
+                                                }
+                                              )
+                                            }
+                                            value={item.ownerCareSubjectId}
+                                          >
+                                            <option value="">
+                                              Save as unassigned
+                                            </option>
+                                            {careSubjects.map((subject) => (
+                                              <option
+                                                key={subject.id}
+                                                value={subject.id}
+                                              >
+                                                {subject.display_name}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                        <label className="block text-sm font-medium text-slate-700">
+                                          Or create new person
+                                          <input
+                                            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                                            onChange={(event) =>
+                                              updateImportAnythingItemOwner(
+                                                item.id,
+                                                {
+                                                  ownerNewPersonName:
+                                                    event.target.value,
+                                                }
+                                              )
+                                            }
+                                            placeholder="New Care VIP name"
+                                            type="text"
+                                            value={item.ownerNewPersonName}
+                                          />
+                                        </label>
+                                      </div>
+
+                                      {(item.fields.providerOrganization !== undefined ||
+                                        item.fields.locationName !== undefined) ? (
+                                        <label className="mt-4 block text-sm font-medium text-slate-700">
+                                          Practice / Office
+                                          <input
+                                            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                                            onChange={(event) => {
+                                              updateImportAnythingItemField(
+                                                item.id,
+                                                "providerOrganization",
+                                                event.target.value
+                                              );
+                                              updateImportAnythingItemField(
+                                                item.id,
+                                                "locationName",
+                                                event.target.value
+                                              );
+                                            }}
+                                            value={practiceOfficeLabel}
+                                          />
+                                        </label>
+                                      ) : null}
+
+                                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                                        {importAnythingSimpleFieldEntries(item).map(
+                                          ([field, value]) => (
+                                            <label
+                                              className="block text-sm font-medium text-slate-700"
+                                              key={field}
+                                            >
+                                              {importAnythingFieldLabel(field)}
+                                              <textarea
+                                                className="mt-1 min-h-16 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                                onChange={(event) =>
+                                                  updateImportAnythingItemField(
+                                                    item.id,
+                                                    field,
+                                                    event.target.value
+                                                  )
+                                                }
+                                                value={value}
+                                              />
+                                            </label>
+                                          )
+                                        )}
+                                      </div>
+                                    </section>
+                                  ) : null}
+
+                                  {showImportItemDetails ? (
+                                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        className={gentleSecondaryButtonClass}
+                                        onClick={() =>
+                                          setImportAnythingItemStatus(
+                                            item.id,
+                                            "approved"
+                                          )
+                                        }
+                                        type="button"
+                                      >
+                                        ✓ Looks good
+                                      </button>
+                                      <button
+                                        className={
+                                          item.status === "rejected"
+                                            ? "rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-800 shadow-sm"
+                                            : gentleSecondaryButtonClass
+                                        }
+                                        onClick={() =>
+                                          setImportAnythingItemStatus(
+                                            item.id,
+                                            "rejected"
+                                          )
+                                        }
+                                        type="button"
+                                      >
+                                        Reject
+                                      </button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        className={gentleSecondaryButtonClass}
+                                        onClick={() =>
+                                          setEditingImportAnythingItemIds(
+                                            (currentIds) => ({
+                                              ...currentIds,
+                                              [item.id]: !isEditingImportItem,
+                                            })
+                                          )
+                                        }
+                                        type="button"
+                                      >
+                                        {isEditingImportItem ? "Close edit" : "Edit"}
+                                      </button>
+                                      {sourceItems.length > 0 ? (
+                                        <button
+                                          className={gentleSecondaryButtonClass}
+                                          onClick={() =>
+                                            setViewingImportAnythingSourceItemId(
+                                              isViewingSource ? null : item.id
+                                            )
+                                          }
+                                          type="button"
+                                        >
+                                          View source
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  ) : null}
+                                </article>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                        {importAnythingExpertView ? (
+                        <>
                         <div className="mt-4 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-7">
                           {[
                             [
@@ -15137,6 +17548,77 @@ export function CarePlandPers({
                                   </button>
                                 </div>
                               </div>
+                              <div className="mt-3 rounded-md border border-blue-100 bg-blue-50/30 p-3">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                      Belongs to
+                                    </div>
+                                    <p className="mt-1 text-sm text-slate-600">
+                                      {item.ownerDetectedName
+                                        ? `Detected: ${item.ownerDetectedName}. `
+                                        : "No clear person detected. "}
+                                      {item.ownerCareSubjectId
+                                        ? `Suggested: ${
+                                            subjectsById.get(
+                                              item.ownerCareSubjectId
+                                            )?.display_name ?? "existing Care VIP"
+                                          }. `
+                                        : item.ownerNewPersonName
+                                          ? `Possible new Care VIP: ${item.ownerNewPersonName}. `
+                                          : "Save as unassigned unless you choose someone. "}
+                                      Confidence:{" "}
+                                      {Math.round(item.ownerConfidence * 100)}%.
+                                    </p>
+                                    {item.ownerRationale ? (
+                                      <p className="mt-1 text-xs text-slate-500">
+                                        {item.ownerRationale}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                  <label className="block text-sm font-medium text-slate-700">
+                                    Assign to existing person
+                                    <select
+                                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                                      onChange={(event) =>
+                                        updateImportAnythingItemOwner(item.id, {
+                                          ownerCareSubjectId:
+                                            event.target.value,
+                                          ownerNewPersonName: "",
+                                        })
+                                      }
+                                      value={item.ownerCareSubjectId}
+                                    >
+                                      <option value="">Save as unassigned</option>
+                                      {careSubjects.map((subject) => (
+                                        <option
+                                          key={subject.id}
+                                          value={subject.id}
+                                        >
+                                          {subject.display_name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="block text-sm font-medium text-slate-700">
+                                    Or create new person
+                                    <input
+                                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                                      onChange={(event) =>
+                                        updateImportAnythingItemOwner(item.id, {
+                                          ownerNewPersonName:
+                                            event.target.value,
+                                        })
+                                      }
+                                      placeholder="New Care VIP name"
+                                      type="text"
+                                      value={item.ownerNewPersonName}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
                               <div className="mt-3 grid gap-3 md:grid-cols-2">
                                 {Object.entries(item.fields).map(
                                   ([field, value]) => (
@@ -15188,6 +17670,8 @@ export function CarePlandPers({
                             </article>
                           ))}
                         </div>
+                        </>
+                        ) : null}
                       </section>
                     ) : null}
 
@@ -15205,7 +17689,10 @@ export function CarePlandPers({
                             ? "Closing will discard your unsaved changes. Proceed?"
                             : "Switching will discard your unsaved changes. Proceed?"
                         }
-                        onCancel={() => setPendingTextIntakePanelAction(null)}
+                        onCancel={() => {
+                          setPendingTextIntakePanelAction(null);
+                          setPendingAppointmentPanelView(null);
+                        }}
                         onConfirm={discardAndApplyTextIntakePanelAction}
                       />
                     ) : null}
@@ -15214,7 +17701,9 @@ export function CarePlandPers({
               </section>
             ) : null}
 
-            {signedInEmail && mainTab === "appointments" ? (
+            {signedInEmail &&
+            mainTab === "appointments" &&
+            !activeAppointmentPanel ? (
               appointments.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600">
                 {appointmentView === "archived"
@@ -15224,7 +17713,7 @@ export function CarePlandPers({
                     : "No upcoming appointments found yet."}
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-slate-200/80 bg-white shadow-sm">
+              <div className="-mt-4">
               {appointments.map((appointment) => {
                 const note = notesByAppointment.get(appointment.id);
                 const prep = guidanceByAppointment.get(appointment.id);
@@ -15255,17 +17744,18 @@ export function CarePlandPers({
 	                const watchouts = asTextList(prep?.watchouts);
 	                const medReview = asTextList(prep?.med_review);
 	                const sinceLastVisit = asTextList(prep?.since_last_visit);
-	                const carePrepPrimarySections = [
-	                  { items: bringList, label: "Bring" },
-	                  { items: questions, label: "Ask" },
-	                  { items: watchouts, label: "Watch for" },
+	                const carePrepTopSections = [
+	                  { icon: "👜", items: bringList, label: "Bring" },
+	                  { icon: "❓", items: questions, label: "Ask" },
 	                ].filter((section) => section.items.length > 0);
-	                const carePrepPrimaryGridClassName =
-	                  carePrepPrimarySections.length === 1
-	                    ? "grid gap-4"
-	                    : carePrepPrimarySections.length === 2
-	                      ? "grid gap-4 md:grid-cols-2"
-	                      : "grid gap-4 lg:grid-cols-3";
+	                const carePrepWatchForSection =
+	                  watchouts.length > 0
+	                    ? { icon: "👁", items: watchouts, label: "Watch for" }
+	                    : null;
+	                const carePrepTopGridClassName =
+	                  carePrepTopSections.length === 1
+	                    ? "flex flex-col gap-4"
+	                    : "grid gap-4 md:grid-cols-[max-content_minmax(0,1fr)] md:gap-x-12";
 	                const draftValues = carePrepDraft
 	                  ? carePrepFormValues(appointment.id, carePrepDraft)
 	                  : emptyCarePrepDraft;
@@ -15285,6 +17775,22 @@ export function CarePlandPers({
                   appointmentView === "logged" || appointmentView === "archived";
                 const isVisitNotesExpanded =
                   expandedVisitNotesAppointmentId === appointment.id;
+                const shouldShowVisitNotesHeaderControl =
+                  Boolean(note) &&
+                  isVisitNotesExpandableView &&
+                  !isArchived &&
+                  !isEditingNote;
+                const toggleVisitNotesExpansion = () => {
+                  const nextExpanded = !isVisitNotesExpanded;
+                  setExpandedVisitNotesAppointmentId(
+                    nextExpanded ? appointment.id : null
+                  );
+                  saveAppointmentsViewState({
+                    expandedVisitNotesAppointmentId: nextExpanded
+                      ? appointment.id
+                      : null,
+                  });
+                };
                 const shouldShowCarePrep = appointmentView === "upcoming";
                 const shouldShowPostVisitSections =
                   appointmentView !== "upcoming" && !isVisitNotesExpandableView;
@@ -15303,7 +17809,22 @@ export function CarePlandPers({
                     : isEditingNote
                       ? "add"
                       : null;
+                const shouldShowCarePrepControl =
+                  shouldShowCarePrep &&
+                  (hasCarePrepAvailable ||
+                    canGenerateCarePrep ||
+                    generatingCarePrepForId === appointment.id ||
+                    carePrepGenerationError);
+                const shouldShowAddNotesControl =
+                  !isArchived && canPasteContextualNotes;
+                const shouldShowAppointmentFocusControls =
+                  shouldShowCarePrepControl &&
+                  (isCarePrepExpanded ||
+                    generatingCarePrepForId === appointment.id ||
+                    carePrepGenerationError);
                 const calendarLink = agicalUrl(appointment);
+                const providerHeaderLabel =
+                  appointmentProviderHeaderLabel(appointment);
 	                const practiceLabel =
 	                  appointment.provider_organization ||
 	                  appointment.location_name ||
@@ -15343,7 +17864,11 @@ export function CarePlandPers({
 		                return (
                   <article
                     id={`appointment-${appointment.id}`}
-                    className="relative flex flex-col px-5 py-8 before:absolute before:left-5 before:right-5 before:top-0 before:h-px before:bg-slate-200 first:before:hidden sm:px-6"
+                    className={`relative flex flex-col py-8 before:absolute before:top-0 before:h-px before:bg-slate-200 first:pt-0 first:before:hidden ${
+                      isVisitNotesExpandableView
+                        ? "px-3 pb-4 before:left-3 before:right-3 sm:px-4 sm:before:left-4 sm:before:right-4"
+                        : "px-5 before:left-5 before:right-5 sm:px-6"
+                    }`}
                     key={appointment.id}
                   >
                     <div
@@ -15438,6 +17963,98 @@ export function CarePlandPers({
                           >
                             {appointment.title || "Untitled appointment"}
                           </h2>
+                          {shouldShowCarePrepControl ? (
+                            <button
+                              className="inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-lg font-semibold leading-none text-blue-900 transition hover:text-blue-700 disabled:opacity-60"
+                              disabled={
+                                generatingCarePrepForId === appointment.id
+                              }
+                              onClick={() => requestCarePrepPanel(appointment)}
+                              title={
+                                isCarePrepExpanded
+                                  ? "Close What to Know"
+                                  : "Open What to Know"
+                              }
+                              type="button"
+                            >
+                              <span>
+                                {hasCarePrepAvailable
+                                  ? "✓ What to Know"
+                                  : "What to Know"}
+                              </span>
+                              {isCarePrepExpanded ? (
+                                <ChevronDownIcon className="h-5 w-5" />
+                              ) : (
+                                <ChevronRightIcon className="h-5 w-5" />
+                              )}
+                            </button>
+                          ) : null}
+                          {shouldShowVisitNotesHeaderControl ? (
+                            <button
+                              className="inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-lg font-semibold leading-none text-blue-900 transition hover:text-blue-700 disabled:opacity-60"
+                              onClick={toggleVisitNotesExpansion}
+                              title={
+                                isVisitNotesExpanded
+                                  ? "Close notes"
+                                  : "Open notes"
+                              }
+                              type="button"
+                            >
+                              <span>Notes</span>
+                              {isVisitNotesExpanded ? (
+                                <ChevronDownIcon className="h-5 w-5" />
+                              ) : (
+                                <ChevronRightIcon className="h-5 w-5" />
+                              )}
+                            </button>
+                          ) : null}
+                          {isCarePrepExpanded &&
+                          prep?.summary &&
+                          !isArchived &&
+                          !isEditingCarePrep ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                aria-label="Edit CarePrep"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400"
+                                onClick={() =>
+                                  startEditingCarePrep(appointment.id, prep)
+                                }
+                                title="Edit CarePrep"
+                                type="button"
+                              >
+                                <PencilSquareIcon className="h-4 w-4" />
+                              </button>
+                              <button
+                                aria-label="Refresh CarePrep"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400"
+                                disabled={
+                                  generatingCarePrepForId === appointment.id
+                                }
+                                onClick={() =>
+                                  handleGenerateCarePrep(appointment)
+                                }
+                                title="Refresh CarePrep"
+                                type="button"
+                              >
+                                <RefreshCircleIcon className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ) : null}
+                          {note &&
+                          shouldShowVisitNotesHeaderControl &&
+                          isVisitNotesExpanded ? (
+                            <button
+                              aria-label="Edit visit notes"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400"
+                              onClick={() =>
+                                startEditingNote(appointment.id, note)
+                              }
+                              title="Edit visit notes"
+                              type="button"
+                            >
+                              <PencilSquareIcon className="h-4 w-4" />
+                            </button>
+                          ) : null}
                           {appointment.is_sample_data ? (
                             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500 ring-1 ring-slate-200">
                               Demo
@@ -15454,9 +18071,35 @@ export function CarePlandPers({
                             Note: This is not an actual appointment.
                           </p>
                         ) : null}
+                        {providerHeaderLabel ? (
+                          <p className="mt-2 text-base font-medium text-[#767676]">
+                            {providerHeaderLabel}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="text-left md:min-w-64 md:text-right">
-                        <p className="flex items-center gap-2 text-lg font-medium text-slate-700 md:justify-end md:pr-12">
+                        <div className="flex flex-wrap items-center gap-3 text-lg font-medium text-slate-700 md:justify-end md:pr-12">
+                          {shouldShowAddNotesControl ? (
+                            <button
+                              className="inline-flex items-center gap-1.5 rounded-md px-1 py-1 text-sm font-semibold text-blue-800 transition hover:bg-blue-50 hover:text-blue-950"
+                              onClick={() =>
+                                requestAppointmentModifier(
+                                  appointment,
+                                  "import"
+                                )
+                              }
+                              title={
+                                isContextualTextIntake
+                                  ? "Close notes"
+                                  : "Add notes"
+                              }
+                              type="button"
+                            >
+                              <PencilSquareIcon className="h-4 w-4" />
+                              <span>Add Notes</span>
+                            </button>
+                          ) : null}
+                          <span className="inline-flex items-center gap-2">
                           {formatDate(appointment.starts_at)}
                           {calendarLink && !isArchived ? (
                             <a
@@ -15470,11 +18113,13 @@ export function CarePlandPers({
                               <CalendarIcon className="h-5 w-5" />
                             </a>
                           ) : null}
-                        </p>
+                          </span>
+                        </div>
                         {practiceLabel ||
                         appointment.location_address ||
-                        appointment.location_phone ? (
-                          <div className="mt-2 text-sm text-[#767676] md:pr-12">
+                        appointment.location_phone ||
+                        (isEveryoneFocus && appointmentSubject) ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[#767676] md:justify-end md:pr-12">
                             {practiceLabel ? (
                               <button
                                 className="inline-flex items-center gap-1 text-left font-medium text-[#767676] hover:text-blue-800 md:justify-end md:text-right"
@@ -15490,6 +18135,16 @@ export function CarePlandPers({
                             {!practiceLabel &&
                             appointment.location_address ? (
                               <p>{appointment.location_address}</p>
+                            ) : null}
+                            {isEveryoneFocus && appointmentSubject ? (
+                              <PersonChip
+                                person={
+                                  careSubjectAvatarPerson(
+                                    appointmentSubjectRecord
+                                  ) ?? { displayName: appointmentSubject }
+                                }
+                                size="xs"
+                              />
                             ) : null}
                           </div>
                         ) : null}
@@ -15532,34 +18187,9 @@ export function CarePlandPers({
                       </section>
                     ) : null}
 
-                    {!isArchived &&
-                    canPasteContextualNotes &&
-                    activeModifier !== "import" ? (
-                      <div className="order-30 mt-4 flex flex-wrap gap-3">
-                        <button
-                          className={`${appointmentSectionButtonClass} gap-1.5`}
-                          onClick={() =>
-                            requestAppointmentModifier(appointment, "import")
-                          }
-                          title="Add visit notes"
-                          type="button"
-                        >
-                          Visit notes
-                          {note ? (
-                            <span
-                              aria-hidden="true"
-                              className="text-sm leading-none text-blue-950"
-                            >
-                              ✓
-                            </span>
-                          ) : null}
-                        </button>
-                      </div>
-                    ) : null}
-
                     {isContextualTextIntake && canPasteContextualNotes ? (
                       <form
-                        className="order-30 mt-5 border border-blue-100 bg-[#f4faff] p-4"
+                        className="order-30 mt-4"
                         onSubmit={
                           textIntakeDraft
                             ? handleSaveTextIntakeDraft
@@ -15568,28 +18198,55 @@ export function CarePlandPers({
                       >
                         {!textIntakeDraft ? (
                           <>
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <button
-                                className={`${appointmentSectionTitleButtonClass} gap-1.5`}
-                                onClick={() =>
-                                  requestAppointmentModifier(
-                                    appointment,
-                                    "import"
+                            {pendingModifierWarning}
+                            <div
+                              className={`mt-4 rounded-lg border transition ${
+                                appointmentNotesDragActive
+                                  ? "border-blue-300 bg-blue-50"
+                                  : "border-slate-300 bg-white"
+                              }`}
+                              onDragEnter={handleAppointmentNotesDrag}
+                              onDragLeave={handleAppointmentNotesDrag}
+                              onDragOver={handleAppointmentNotesDrag}
+                              onDrop={handleAppointmentNotesDrop}
+                            >
+                              <textarea
+                                className="min-h-56 w-full rounded-lg bg-transparent px-4 py-3 text-base leading-7 outline-none"
+                                onChange={(event) =>
+                                  setContextualTextIntakeValue(
+                                    event.target.value
                                   )
                                 }
-                                title="Close visit notes"
-                                type="button"
-                              >
-                                Visit notes
-                                {note ? (
-                                  <span
-                                    aria-hidden="true"
-                                    className="text-sm leading-none text-blue-950"
-                                  >
-                                    ✓
-                                  </span>
-                                ) : null}
-                              </button>
+                                placeholder="Type, paste, add or drag anything related to this visit"
+                                value={contextualTextIntakeValue}
+                              />
+                            </div>
+                            {fileImportStatus ? (
+                              <p className="mt-2 text-xs text-slate-500">
+                                {fileImportStatus}
+                              </p>
+                            ) : null}
+                            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                              <div className="flex flex-wrap items-center gap-4">
+                                <button
+                                  className="rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
+                                  disabled={processingTextIntake}
+                                  type="submit"
+                                >
+                                  {processingTextIntake
+                                    ? "Creating..."
+                                    : "Create summary"}
+                                </button>
+                                <button
+                                  className="rounded-md px-2 py-1 text-sm font-normal text-[#767676] transition hover:bg-blue-50 hover:text-slate-700"
+                                  onClick={() =>
+                                    requestCloseTextIntake(appointment)
+                                  }
+                                  type="button"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
                               <label className="inline-flex cursor-pointer items-center rounded-full border border-blue-100 bg-white/85 px-3 py-1.5 text-sm font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50">
                                 Add screenshots (max 10)
                                 <input
@@ -15606,39 +18263,7 @@ export function CarePlandPers({
                                   }}
                                   type="file"
                                 />
-	                              </label>
-	                            </div>
-	                            {pendingModifierWarning}
-	                            <textarea
-                              className="mt-3 min-h-56 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-base leading-7"
-                              onChange={(event) =>
-                                setContextualTextIntakeValue(event.target.value)
-                              }
-                              placeholder="Type or paste what happened, portal notes, after-visit summaries, or follow-up details."
-                              value={contextualTextIntakeValue}
-                            />
-                            {fileImportStatus ? (
-                              <p className="mt-2 text-xs text-slate-500">
-                                {fileImportStatus}
-                              </p>
-                            ) : null}
-                            <div className="mt-4 flex flex-wrap items-center gap-4">
-                              <button
-                                className="rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
-                                disabled={processingTextIntake}
-                                type="submit"
-                              >
-                                {processingTextIntake
-                                  ? "Creating..."
-                                  : "Create summary"}
-                              </button>
-                              <button
-                                className="rounded-md px-2 py-1 text-sm font-normal text-[#767676] transition hover:bg-blue-50 hover:text-slate-700"
-                                onClick={() => requestCloseTextIntake(appointment)}
-                                type="button"
-                              >
-                                Cancel
-                              </button>
+                              </label>
                             </div>
                           </>
                         ) : (
@@ -15986,17 +18611,6 @@ export function CarePlandPers({
                       </form>
                     ) : null}
 
-                    {appointment.reason ? (
-                      <section
-                        className={`order-10 ${
-                          appointment.is_sample_data ? "mt-5" : "mt-3"
-                        }`}
-                      >
-                        <h3 className="font-semibold text-slate-900">Reason</h3>
-                        <p className="mt-1 text-slate-700">{appointment.reason}</p>
-                      </section>
-                    ) : null}
-
                     {shouldShowCarePrep && carePrepDraft && !isArchived ? (
                       <section className="order-20 mt-6 border border-blue-100 bg-[#f4faff] p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -16190,65 +18804,14 @@ export function CarePlandPers({
                       </section>
                     ) : null}
 
-                    {note && isVisitNotesExpandableView && !isEditingNote ? (
-                      !isVisitNotesExpanded ? (
-                        <div className="order-30 mt-5 flex flex-wrap gap-3">
-                          <button
-                            className={appointmentSectionButtonClass}
-                            onClick={() =>
-                              setExpandedVisitNotesAppointmentId(appointment.id)
-                            }
-                            title="Open Visit notes"
-                            type="button"
-                          >
-                            Visit notes
-                            <span
-                              aria-hidden="true"
-                              className="text-sm leading-none text-blue-950"
-                            >
-                              ✓
-                            </span>
-                          </button>
-                        </div>
-                      ) : (
-	                        <section className="order-30 mt-6 overflow-hidden border border-blue-100 bg-[#f4faff]">
-	                          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-	                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-	                              <button
-	                                className={appointmentSectionTitleButtonClass}
-	                                onClick={() =>
-	                                  setExpandedVisitNotesAppointmentId(null)
-	                                }
-	                                title="Close Visit notes"
-	                                type="button"
-	                              >
-	                                Visit notes
-	                                <span
-	                                  aria-hidden="true"
-	                                  className="text-sm leading-none text-blue-950"
-	                                >
-	                                  ✓
-	                                </span>
-	                              </button>
-	                            </div>
-	                            {!isEditingNote && !isArchived ? (
-	                              <button
-	                                aria-label="Edit visit notes"
-	                                className={appointmentToolIconButtonClass}
-	                                onClick={() =>
-	                                  startEditingNote(appointment.id, note)
-	                                }
-	                                title="Edit visit notes"
-	                                type="button"
-	                              >
-	                                <PencilSquareIcon className="h-5 w-5" />
-	                              </button>
-	                            ) : null}
-	                          </div>
-	                          <div className="border-t border-blue-100/70 p-4">
+                    {note &&
+                    shouldShowVisitNotesHeaderControl &&
+                    isVisitNotesExpanded ? (
+	                        <section className="order-30 mt-3 overflow-hidden">
+	                          <div className="pb-4 pt-2">
 	                            <div className="grid gap-4">
 	                              {note.summary_short ? (
-	                                <section className="px-2 py-1 sm:px-3">
+	                                <section className="py-1">
 	                                  <h4 className="font-semibold text-slate-900">
 	                                    Visit summary
                                   </h4>
@@ -16258,7 +18821,7 @@ export function CarePlandPers({
                                 </section>
                               ) : null}
 	                              <div className="grid gap-4 md:grid-cols-2">
-	                                <section className="px-2 py-1 sm:px-3">
+	                                <section className="py-1">
 	                                  <h4 className="font-semibold text-slate-900">
 	                                    Takeaways
                                   </h4>
@@ -16267,7 +18830,7 @@ export function CarePlandPers({
                                     items={takeaways}
                                   />
                                 </section>
-	                                <section className="px-2 py-1 sm:px-3">
+	                                <section className="py-1">
 	                                  <h4 className="font-semibold text-slate-900">
 	                                    Follow-ups
                                   </h4>
@@ -16280,7 +18843,6 @@ export function CarePlandPers({
                             </div>
                           </div>
                         </section>
-                      )
                     ) : null}
 
                     {note && !isVisitNotesExpandableView ? (
@@ -16336,117 +18898,31 @@ export function CarePlandPers({
                       </div>
                     ) : null}
 
-                    {shouldShowCarePrep &&
-                    (hasCarePrepAvailable ||
-                      canGenerateCarePrep ||
-                      generatingCarePrepForId === appointment.id ||
-                      carePrepGenerationError) ? (
-                      <>
-                        {!isCarePrepExpanded ? (
-                          <div className="order-20 mt-5 flex flex-wrap items-center gap-3">
-                            <button
-                              className={`${appointmentSectionButtonClass} gap-1.5`}
-                              disabled={generatingCarePrepForId === appointment.id}
-                              onClick={() => {
-                                if (hasCarePrepAvailable) {
-                                  setExpandedCarePrepIds((currentIds) => ({
-                                    ...currentIds,
-                                    [appointment.id]: true,
-                                  }));
-                                  return;
-                                }
-
-                                handleGenerateCarePrep(appointment);
-                              }}
-                              title="Open CarePrep"
-                              type="button"
-                            >
-                              CarePrep
-                              {hasCarePrepAvailable ? (
-                                <span
-                                  aria-hidden="true"
-                                  className="text-sm leading-none text-blue-950"
-                                >
-                                  ✓
-                                </span>
-                              ) : null}
-                            </button>
-                            {generatingCarePrepForId === appointment.id ? (
-                              <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-900">
-                                Generating...
-                              </span>
+                    {shouldShowAppointmentFocusControls ? (
+                      <section className="order-20 mt-5">
+                        <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+                          <div className="flex flex-wrap items-center gap-3">
+                            {shouldShowCarePrepControl &&
+                            isCarePrepExpanded ? (
+                              <>
+                                {generatingCarePrepForId === appointment.id ? (
+                                  <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-900">
+                                    Generating...
+                                  </span>
+                                ) : null}
+                              </>
                             ) : null}
                           </div>
-                        ) : null}
-                        {carePrepGenerationError && !isCarePrepExpanded ? (
-                          <p className="order-20 mt-3 rounded-md border border-blue-200 bg-[#f4faff] px-3 py-2 text-sm font-medium text-blue-950">
+                        </div>
+                        {shouldShowCarePrepControl && carePrepGenerationError ? (
+                          <p className="mt-3 rounded-md border border-blue-200 bg-[#f4faff] px-3 py-2 text-sm font-medium text-blue-950">
                             {carePrepGenerationError}
                           </p>
                         ) : null}
-                        {isCarePrepExpanded && prep?.summary ? (
-                          <section className="order-20 mt-6 overflow-hidden border border-blue-100 bg-[#f4faff]">
-                            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-	                              <div className="flex flex-wrap items-center gap-2">
-	                                <button
-	                                  className={`${appointmentSectionTitleButtonClass} gap-1.5`}
-                                  onClick={() =>
-                                    setExpandedCarePrepIds((currentIds) => ({
-                                      ...currentIds,
-                                      [appointment.id]: false,
-                                    }))
-                                  }
-                                  title="Close CarePrep"
-                                  type="button"
-                                >
-                                  CarePrep
-                                  <span
-                                    aria-hidden="true"
-                                    className="text-sm leading-none text-blue-950"
-                                  >
-                                    ✓
-	                                  </span>
-	                                </button>
-	                              </div>
-	                              {!isArchived && !isEditingCarePrep ? (
-	                                <div className="flex items-center gap-2">
-	                                  <button
-	                                    aria-label="Edit CarePrep"
-	                                    className={appointmentToolIconButtonClass}
-	                                    onClick={() =>
-	                                      startEditingCarePrep(appointment.id, prep)
-	                                    }
-	                                    title="Edit CarePrep"
-	                                    type="button"
-	                                  >
-	                                    <PencilSquareIcon className="h-5 w-5" />
-	                                  </button>
-	                                  <button
-	                                    aria-label="Refresh CarePrep"
-	                                    className={appointmentToolIconButtonClass}
-	                                    disabled={
-	                                      generatingCarePrepForId === appointment.id
-	                                    }
-	                                    onClick={() =>
-	                                      handleGenerateCarePrep(appointment)
-	                                    }
-	                                    title="Refresh CarePrep"
-	                                    type="button"
-	                                  >
-	                                    <RefreshCircleIcon className="h-5 w-5" />
-	                                  </button>
-	                                </div>
-	                              ) : null}
-	                            </div>
-                            {generatingCarePrepForId === appointment.id ? (
-                              <span className="mx-4 mb-3 inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-900">
-                                Generating...
-                              </span>
-                            ) : null}
-                            {carePrepGenerationError ? (
-                              <p className="mx-4 mb-3 rounded-md border border-blue-200 bg-[#f4faff] px-3 py-2 text-sm font-medium text-blue-950">
-                                {carePrepGenerationError}
-                              </p>
-                            ) : null}
+                        {shouldShowCarePrepControl &&
+                        isCarePrepExpanded &&
+                        prep?.summary ? (
+                          <div className="mt-3 overflow-hidden">
                             {isEditingCarePrep ? (
                               <div className="grid gap-4 border-t border-blue-100/70 p-4">
                             {shouldWarnBeforeClosingCarePrepEdit && prep ? (
@@ -16594,55 +19070,75 @@ export function CarePlandPers({
                             </div>
                           </div>
                         ) : (
-                          <div className="border-t border-blue-100/70 p-4">
+                          <div className="pb-4 pt-0">
                             <div className="grid gap-4">
-                              <section className="px-2 py-1 sm:px-3">
-                                <h4 className="font-semibold text-slate-900">
-                                  Summary
-                                </h4>
-                                <p className="mt-1 text-slate-700">
+                              <section className="py-1">
+                                <p className="text-slate-700">
                                   {prep.summary}
                                 </p>
                               </section>
 
-	                              {carePrepPrimarySections.length > 0 ? (
-	                                <div className={carePrepPrimaryGridClassName}>
-	                                  {carePrepPrimarySections.map((section) => (
+	                              {carePrepTopSections.length > 0 ? (
+	                                <div className={carePrepTopGridClassName}>
+	                                  {carePrepTopSections.map((section) => (
 	                                    <section
-	                                      className="px-2 py-1 sm:px-3"
+	                                      className="min-w-0 px-2 py-1 sm:px-3"
 	                                      key={section.label}
 	                                    >
 	                                      <h4 className="font-semibold text-slate-900">
+	                                        <span aria-hidden="true">
+	                                          {section.icon}
+	                                        </span>{" "}
 	                                        {section.label}
 	                                      </h4>
 	                                      <DetailList
 	                                        emptyLabel=""
 	                                        items={section.items}
+	                                        showBullets={false}
 	                                      />
 	                                    </section>
 	                                  ))}
 	                                </div>
+	                              ) : null}
+	                              {carePrepWatchForSection ? (
+	                                <section className="min-w-0 px-2 py-1 sm:px-3">
+	                                  <h4 className="font-semibold text-slate-900">
+	                                    <span aria-hidden="true">
+	                                      {carePrepWatchForSection.icon}
+	                                    </span>{" "}
+	                                    {carePrepWatchForSection.label}
+	                                  </h4>
+	                                  <DetailList
+	                                    emptyLabel=""
+	                                    items={carePrepWatchForSection.items}
+	                                    showBullets={false}
+	                                  />
+	                                </section>
 	                              ) : null}
 
                             {(medReview.length > 0 || sinceLastVisit.length > 0) && (
                               <div className="grid gap-4 md:grid-cols-2">
                                 <section className="px-2 py-1 sm:px-3">
                                   <h4 className="font-semibold text-slate-900">
-                                    Medication review
+                                    <span aria-hidden="true">💊</span>{" "}
+                                    Medications
                                   </h4>
                                   <DetailList
                                     emptyLabel="No medication review items saved yet."
                                     items={medReview}
+                                    showBullets={false}
                                   />
                                 </section>
 
                                 <section className="px-2 py-1 sm:px-3">
                                   <h4 className="font-semibold text-slate-900">
-                                    Since last visit
+                                    <span aria-hidden="true">💡</span>{" "}
+                                    Last visit highlights
                                   </h4>
                                   <DetailList
                                     emptyLabel="No prior-visit context saved yet."
                                     items={sinceLastVisit}
+                                    showBullets={false}
                                   />
                                 </section>
                               </div>
@@ -16650,25 +19146,11 @@ export function CarePlandPers({
                             </div>
                           </div>
                         )}
-                      </section>
+                      </div>
                         ) : null}
-                      </>
+                      </section>
                     ) : null}
 
-	                    {appointment.provider_name || (isEveryoneFocus && appointmentSubject) ? (
-	                      <div className="order-40 mt-7 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs font-medium text-[#767676]">
-	                        <span>{appointment.provider_name || ""}</span>
-	                        {isEveryoneFocus ? (
-	                          <PersonChip
-	                            person={
-	                              careSubjectAvatarPerson(appointmentSubjectRecord) ??
-	                              { displayName: appointmentSubject }
-	                            }
-	                            size="xs"
-	                          />
-	                        ) : null}
-	                      </div>
-	                    ) : null}
 	                  </article>
 	                );
 	              })
@@ -16738,7 +19220,9 @@ export function CarePlandPers({
         onSubmitAskMessage={handleSendAskMessage}
         runtimeEnvironmentLabel={runtimeEnvironmentLabel}
         sendingAskMessage={sendingAskMessage}
-        showPendingMainTabConfirm={Boolean(pendingMainTab)}
+        showPendingMainTabConfirm={Boolean(
+          pendingMainTab || pendingImportLeaveAction
+        )}
         showVersionInfo={showVersionInfo}
         signOutConfirmOpen={signOutConfirmOpen}
         unsavedSignOutChanges={unsavedSignOutChanges}

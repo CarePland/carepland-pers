@@ -52,6 +52,8 @@ type BuildUnsavedSignOutChangesInput = {
   ) => SavedAppointmentDetails;
   hasUnaddedCareVipName: boolean;
   hasUnsavedProfileChanges: boolean;
+  importAnythingItemsLength: number;
+  importAnythingSourcesLength: number;
   newAppointmentDraft: AppointmentDetailsDraft;
   newCareVipName: string;
   noteDrafts: Record<string, SectionNoteDraft>;
@@ -78,6 +80,8 @@ export function buildUnsavedSignOutChanges({
   getSavedAppointmentDetails,
   hasUnaddedCareVipName,
   hasUnsavedProfileChanges,
+  importAnythingItemsLength,
+  importAnythingSourcesLength,
   newAppointmentDraft,
   newCareVipName,
   noteDrafts,
@@ -147,13 +151,22 @@ export function buildUnsavedSignOutChanges({
   } else if (
     textIntakePanelHasUnsavedChanges({
       bulkAppointmentDraftsLength: 0,
+      importAnythingItemsLength,
+      importAnythingSourcesLength,
       textIntakeDraft,
       textIntakeValue,
     })
   ) {
     addChange({
-      key: "text-intake",
-      label: "Appointment or notes intake",
+      detail: importAnythingItemsLength
+        ? `${importAnythingItemsLength} review item${
+            importAnythingItemsLength === 1 ? "" : "s"
+          }`
+        : undefined,
+      key: importAnythingItemsLength ? "import-anything" : "text-intake",
+      label: importAnythingItemsLength
+        ? "Import Anything review"
+        : "Appointment or notes intake",
     });
   }
 
@@ -252,16 +265,22 @@ export function newAppointmentDraftHasContent(
 
 export function textIntakePanelHasUnsavedChanges({
   bulkAppointmentDraftsLength,
+  importAnythingItemsLength = 0,
+  importAnythingSourcesLength = 0,
   textIntakeDraft,
   textIntakeValue,
 }: {
   bulkAppointmentDraftsLength: number;
+  importAnythingItemsLength?: number;
+  importAnythingSourcesLength?: number;
   textIntakeDraft: IntakeDraftContent | null;
   textIntakeValue: string;
 }): boolean {
   // Match candidates are process state; warnings require visible/saveable work.
   return Boolean(
     bulkAppointmentDraftsLength > 0 ||
+      importAnythingItemsLength > 0 ||
+      importAnythingSourcesLength > 0 ||
       (textIntakeDraft
         ? intakeDraftHasMeaningfulContent(textIntakeDraft)
         : textIntakeValue.trim())

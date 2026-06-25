@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type ReactNode,
 } from "react";
 
 import {
@@ -60,7 +61,7 @@ type CarePlandTopNavProps = {
   onProfileClick?: () => void | Promise<void>;
   onSignOut?: () => void;
   planTierId?: string;
-  profileHref?: string;
+  primaryAction?: ReactNode;
   supportMetrics?: SupportMetric[];
 };
 
@@ -75,7 +76,13 @@ function navPillClass(active: boolean) {
   }`;
 }
 
-function askPillClass(active: boolean) {
+function askPillClass(active: boolean, speechBubble = false) {
+  if (speechBubble) {
+    return `inline-flex h-10 w-20 shrink-0 items-center justify-center rounded-none transition sm:h-11 sm:w-24 ${
+      active ? "opacity-100" : "opacity-95 hover:opacity-100"
+    }`;
+  }
+
   return `${basePillClass} ${
     active
       ? "border-blue-200 bg-blue-100 text-[#2B6198]"
@@ -87,6 +94,35 @@ function metricClass(tone: SupportMetric["tone"] = "neutral") {
   if (tone === "urgent") return "bg-red-50 text-red-700";
   if (tone === "attention") return "bg-amber-50 text-amber-800";
   return "bg-slate-50 text-slate-500";
+}
+
+function AskSpeechBubbleIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-full w-full drop-shadow-sm"
+      fill="none"
+      viewBox="0 0 140 92"
+    >
+      <path
+        d="M27 5h76c18 0 32 14 32 32s-14 32-32 32H56L34 86V69h-7C14.3 69 4 58.7 4 46V28C4 15.3 14.3 5 27 5Z"
+        fill="white"
+        stroke="#2B6198"
+        strokeLinejoin="round"
+        strokeWidth="4"
+      />
+      <text
+        fill="#2B6198"
+        fontFamily="Arial, Helvetica, sans-serif"
+        fontSize="34"
+        fontWeight="700"
+        x="36"
+        y="48"
+      >
+        Ask
+      </text>
+    </svg>
+  );
 }
 
 function firstNameLabel(value?: string | null) {
@@ -177,7 +213,7 @@ function UtilityActionLink({
 }: {
   ariaExpanded?: boolean;
   ariaLabel: string;
-  children: string;
+  children: ReactNode;
   className: string;
   href: string;
   onClick: () => void;
@@ -226,7 +262,7 @@ export function CarePlandTopNav({
   onProfileClick,
   onSignOut,
   planTierId,
-  profileHref = "/?personal=1&profile=1",
+  primaryAction,
   supportMetrics = [],
 }: CarePlandTopNavProps) {
   const [showAllPlatformModules, setShowAllPlatformModules] = useState(false);
@@ -240,6 +276,8 @@ export function CarePlandTopNav({
       }),
     [planTierId, showAllPlatformModules]
   );
+  const useAskSpeechBubble =
+    activeModule === "appointments" || activeModule === "connect";
 
   useEffect(() => {
     function syncShowAllPlatformModules() {
@@ -340,6 +378,11 @@ export function CarePlandTopNav({
             {environmentLabel}
           </span>
         ) : null}
+        {earlyAccessLabel ? (
+          <span className="inline-flex h-5 items-center rounded-full border border-blue-100 bg-blue-50/70 px-2 text-[9px] font-bold uppercase tracking-wide text-blue-500">
+            {earlyAccessLabel}
+          </span>
+        ) : null}
       </div>
 
       <nav
@@ -349,13 +392,16 @@ export function CarePlandTopNav({
         {onAppointmentsClick ? (
           <NavActionLink
             active={activeModule === "appointments"}
-            href="/?personal=1&appointments=1"
+            href="/?personal=1&appointments=1&view=upcoming"
             onClick={onAppointmentsClick}
           >
             Appointments
           </NavActionLink>
         ) : (
-          <NavLink active={activeModule === "appointments"} href="/?personal=1&appointments=1">
+          <NavLink
+            active={activeModule === "appointments"}
+            href="/?personal=1&appointments=1&view=upcoming"
+          >
             Appointments
           </NavLink>
         )}
@@ -364,43 +410,11 @@ export function CarePlandTopNav({
             Connect
           </NavLink>
         ) : null}
+        {primaryAction}
         {moduleVisibility.family ? (
           <NavLink active={activeModule === "family"} href="/family">
             Family
           </NavLink>
-        ) : null}
-        {onProfileClick ? (
-          <NavActionLink
-            active={activeModule === "profile"}
-            href={profileHref}
-            onClick={onProfileClick}
-          >
-            Profile
-          </NavActionLink>
-        ) : (
-          <NavLink active={activeModule === "profile"} href={profileHref}>
-            Profile
-          </NavLink>
-        )}
-        {canShowAdmin ? (
-          onAdminClick ? (
-            <NavActionLink
-              active={activeModule === "admin"}
-              href={adminHref}
-              onClick={onAdminClick}
-            >
-              Admin
-            </NavActionLink>
-          ) : (
-            <NavLink active={activeModule === "admin"} href={adminHref}>
-              Admin
-            </NavLink>
-          )
-        ) : null}
-        {earlyAccessLabel ? (
-          <span className="inline-flex h-7 items-center rounded-full bg-blue-50 px-3 text-[11px] font-bold uppercase tracking-wide text-blue-700">
-            {earlyAccessLabel}
-          </span>
         ) : null}
       </nav>
 
@@ -410,7 +424,7 @@ export function CarePlandTopNav({
             <button
               aria-expanded={focusMenuOpen}
               aria-haspopup="menu"
-              className="inline-flex min-w-0 max-w-44 items-center gap-2 rounded-full border border-slate-100 bg-white/75 py-1 pl-1 pr-2 text-slate-900 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 md:max-w-52"
+              className="inline-flex min-w-0 max-w-44 items-center gap-2 rounded-full py-1 pl-1 pr-2 text-slate-900 transition hover:bg-blue-50/60 md:max-w-52"
               onClick={() => setFocusMenuOpen((isOpen) => !isOpen)}
               type="button"
             >
@@ -499,14 +513,6 @@ export function CarePlandTopNav({
                     <button
                       className="flex w-full rounded-md px-2 py-2 text-left text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                       onClick={() => {
-                        const confirmed = window.confirm(
-                          "Are you sure you want to sign out?"
-                        );
-
-                        if (!confirmed) {
-                          return;
-                        }
-
                         setFocusMenuOpen(false);
                         onSignOut();
                       }}
@@ -524,35 +530,89 @@ export function CarePlandTopNav({
           </div>
         ) : null}
         {supportMetrics.length ? (
-          <span className="hidden items-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm min-[430px]:inline-flex">
-            {supportMetrics.map((metric, index) => (
-              <span
-                className={`px-2.5 py-1 ${metricClass(metric.tone)} ${
-                  index > 0 ? "border-l border-slate-200" : ""
-                }`}
-                key={metric.label}
+          canShowAdmin ? (
+            onAdminClick ? (
+              <UtilityActionLink
+                ariaLabel="Open Admin"
+                className="hidden min-w-[3.75rem] items-center justify-center whitespace-nowrap rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm transition hover:border-blue-200 hover:bg-blue-50 min-[430px]:inline-flex"
+                href={adminHref}
+                onClick={onAdminClick}
+                title="Open Admin"
               >
-                {metric.count} <span className="hidden min-[520px]:inline">{metric.label}</span>
-              </span>
-            ))}
-          </span>
+                {supportMetrics.map((metric, index) => (
+                  <span className="inline-flex items-center" key={metric.label}>
+                    {index > 0 ? (
+                      <span aria-hidden="true" className="px-1 text-slate-300">
+                        /
+                      </span>
+                    ) : null}
+                    <span className={`px-2.5 py-1 ${metricClass(metric.tone)}`}>
+                      {metric.count}
+                      <span className="sr-only"> {metric.label}</span>
+                    </span>
+                  </span>
+                ))}
+              </UtilityActionLink>
+            ) : (
+              <Link
+                aria-label="Open Admin"
+                className="hidden min-w-[3.75rem] items-center justify-center whitespace-nowrap rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm transition hover:border-blue-200 hover:bg-blue-50 min-[430px]:inline-flex"
+                href={adminHref}
+                title="Open Admin"
+              >
+                {supportMetrics.map((metric, index) => (
+                  <span className="inline-flex items-center" key={metric.label}>
+                    {index > 0 ? (
+                      <span aria-hidden="true" className="px-1 text-slate-300">
+                        /
+                      </span>
+                    ) : null}
+                    <span className={`px-2.5 py-1 ${metricClass(metric.tone)}`}>
+                      {metric.count}
+                      <span className="sr-only"> {metric.label}</span>
+                    </span>
+                  </span>
+                ))}
+              </Link>
+            )
+          ) : (
+            <span className="hidden min-w-[3.75rem] items-center justify-center whitespace-nowrap rounded-full border border-slate-200 bg-white text-xs font-semibold shadow-sm min-[430px]:inline-flex">
+              {supportMetrics.map((metric, index) => (
+                <span className="inline-flex items-center" key={metric.label}>
+                  {index > 0 ? (
+                    <span aria-hidden="true" className="px-1 text-slate-300">
+                      /
+                    </span>
+                  ) : null}
+                  <span className={`px-2.5 py-1 ${metricClass(metric.tone)}`}>
+                    {metric.count}
+                    <span className="sr-only"> {metric.label}</span>
+                  </span>
+                </span>
+              ))}
+            </span>
+          )
         ) : null}
         {canShowAsk ? (
           onAskClick ? (
             <UtilityActionLink
               ariaExpanded={askActive}
               ariaLabel="Ask CarePland"
-              className={askPillClass(askActive)}
+              className={askPillClass(askActive, useAskSpeechBubble)}
               href={askHref}
               onClick={onAskClick}
               testId="ask-entry"
               title="Ask CarePland"
             >
-              Ask
+              {useAskSpeechBubble ? <AskSpeechBubbleIcon /> : "Ask"}
             </UtilityActionLink>
           ) : (
-            <Link aria-label="Ask CarePland" className={askPillClass(false)} href={askHref}>
-              Ask
+            <Link
+              aria-label="Ask CarePland"
+              className={askPillClass(false, useAskSpeechBubble)}
+              href={askHref}
+            >
+              {useAskSpeechBubble ? <AskSpeechBubbleIcon /> : "Ask"}
             </Link>
           )
         ) : null}

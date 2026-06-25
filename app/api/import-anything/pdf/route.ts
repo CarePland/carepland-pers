@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { normalizeImportAnythingSourceName } from "@/app/lib/personal/importAnything/sources";
 import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
 import { openAiResponseText } from "@/app/lib/platform/ai/responses";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
@@ -8,14 +9,9 @@ import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 type JsonObject = Record<string, unknown>;
 
 const openAiApiKey = process.env.OPENAI_API_KEY ?? "";
-const maxImageCount = 10;
-const maxImageSizeBytes = 8 * 1024 * 1024;
-const supportedImageTypes = new Set([
-  "image/gif",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-]);
+const maxPdfCount = 4;
+const maxPdfSizeBytes = 12 * 1024 * 1024;
+const model = "gpt-4.1-mini";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -39,11 +35,10 @@ export async function POST(request: NextRequest) {
     const accessToken = authorization.replace(/^Bearer\s+/i, "").trim();
 
     if (!accessToken) {
-      throw new Error("Please sign in before extracting text.");
+      throw new Error("Please sign in before extracting PDF text.");
     }
 
     const supabase = createSupabaseUserClient(accessToken);
-
     const { data: userData, error: userError } = await supabase.auth.getUser();
 
     if (userError) {
@@ -51,58 +46,62 @@ export async function POST(request: NextRequest) {
     }
 
     if (!userData.user?.id) {
-      throw new Error("Please sign in before extracting text.");
+      throw new Error("Please sign in before extracting PDF text.");
     }
 
     const formData = await request.formData();
-    const scope =
-      formData.get("scope") === "import_anything"
-        ? "import_anything"
-        : "appointments";
-    const images = formData
-      .getAll("images")
+    const pdfs = formData
+      .getAll("pdfs")
       .filter((item): item is File => item instanceof File);
 
-    if (images.length === 0) {
-      throw new Error("Choose one or more images before extracting text.");
+    if (pdfs.length === 0) {
+      throw new Error("Choose one or more PDFs before extracting text.");
     }
 
-    if (images.length > maxImageCount) {
-      throw new Error(`Use up to ${maxImageCount} images at a time.`);
+    if (pdfs.length > maxPdfCount) {
+      throw new Error(`Use up to ${maxPdfCount} PDFs at a time.`);
     }
 
-    for (const image of images) {
-      if (!supportedImageTypes.has(image.type)) {
-        throw new Error("Use PNG, JPG, GIF, or WebP images.");
+    for (const pdf of pdfs) {
+      const isPdf =
+        pdf.type === "application/pdf" || /\.pdf$/i.test(pdf.name);
+
+      if (!isPdf) {
+        throw new Error("Use PDF files for PDF text extraction.");
       }
 
-      if (image.size > maxImageSizeBytes) {
-        throw new Error("Each image must be smaller than 8 MB.");
+      if (pdf.size > maxPdfSizeBytes) {
+        throw new Error("Each PDF must be smaller than 12 MB.");
       }
     }
 
-    const extractionInstruction =
-      scope === "import_anything"
-        ? "Extract all visible healthcare-related text from these images. Preserve line breaks, dates, times, provider names, locations, addresses, phone numbers, medication names, doses, instructions, questions, labels, and section headings. Process images in the order provided. Do not summarize, classify, infer, or add commentary. Return only the extracted text. Use page markers like --- Image 1 --- before each image's extracted text."
-        : "Extract all visible appointment-related text from these images. Preserve line breaks, dates, times, provider names, locations, addresses, phone numbers, and labels. Process images in the order provided. Do not summarize, classify, infer, or add commentary. Return only the extracted text. Use page markers like --- Image 1 --- before each image's extracted text.";
     const content: JsonObject[] = [
       {
-        text: extractionInstruction,
+        text: [
+          "Extract readable healthcare-related text from these PDFs for CarePland Import Anything.",
+          "Preserve dates, times, provider names, locations, addresses, phone numbers, medication names, doses, instructions, questions, section headings, and follow-up details.",
+          "Process PDFs in the order provided.",
+          "Do not summarize, classify, infer, or add commentary.",
+          "Return only extracted text, with a source marker like --- filename.pdf --- before each PDF's text.",
+        ].join(" "),
         type: "input_text",
       },
     ];
 
-    for (const [index, image] of images.entries()) {
-      const bytes = Buffer.from(await image.arrayBuffer());
-      const dataUrl = `data:${image.type};base64,${bytes.toString("base64")}`;
+    for (const pdf of pdfs) {
+      const bytes = Buffer.from(await pdf.arrayBuffer());
+      const filename = normalizeImportAnythingSourceName(
+        pdf.name || "source.pdf"
+      );
 
       content.push({
-        text: `Image ${index + 1}`,
+        text: `PDF source: ${filename}`,
         type: "input_text",
       });
       content.push({
-        image_url: dataUrl,
-        type: "input_image",
+        file_data: `data:application/pdf;base64,${bytes.toString("base64")}`,
+        filename,
+        type: "input_file",
       });
     }
 
@@ -114,7 +113,7 @@ export async function POST(request: NextRequest) {
             role: "user",
           },
         ],
-        model: "gpt-4.1-mini",
+        model,
         temperature: 0,
       }),
       headers: {
@@ -131,21 +130,21 @@ export async function POST(request: NextRequest) {
         openAiJson.error && typeof openAiJson.error === "object"
           ? (openAiJson.error as JsonObject).message
           : null;
-      throw new Error(String(apiError ?? "Image text extraction failed."));
+      throw new Error(String(apiError ?? "PDF text extraction failed."));
     }
 
     const extractedText = openAiResponseText(openAiJson);
 
     if (!extractedText) {
-      throw new Error("No text was found in that image.");
+      throw new Error("No text was found in that PDF.");
     }
 
     await logOpenAiOperationCost({
-      metadata: { image_count: images.length, scope },
-      model: "gpt-4.1-mini",
+      metadata: { pdf_count: pdfs.length },
+      model,
       openAiJson,
-      operationKey: "image_text_extraction",
-      operationLabel: "Image text extraction",
+      operationKey: "pdf_text_extraction",
+      operationLabel: "PDF text extraction",
       providerRequestId:
         openAiResponse.headers.get("x-request-id") ??
         openAiResponse.headers.get("openai-request-id"),

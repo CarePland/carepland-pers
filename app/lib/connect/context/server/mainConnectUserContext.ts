@@ -7,7 +7,6 @@ import {
 } from "@/app/lib/platform/server/supabase";
 import { connectAvatarAltText } from "../../avatar";
 import {
-  shouldListConnectPeopleFromParticipants,
   uniqueConnectParticipantPersonIds,
 } from "../connectParticipantFiltering";
 import {
@@ -226,10 +225,6 @@ export async function listPersPeopleForConnect(
     careCircleIds
   );
 
-  if (!shouldListConnectPeopleFromParticipants(participantPersonIds)) {
-    return [];
-  }
-
   let careSubjectsQuery = supabase
     .from("care_subjects")
     .select("id,care_circle_id,display_name,subject_type,is_default,is_active,avatar_url,avatar_type,avatar_alt_text")
@@ -238,7 +233,9 @@ export async function listPersPeopleForConnect(
     .order("is_default", { ascending: false })
     .order("display_name", { ascending: true });
 
-  careSubjectsQuery = careSubjectsQuery.in("id", participantPersonIds);
+  if (participantPersonIds.length > 0) {
+    careSubjectsQuery = careSubjectsQuery.in("id", participantPersonIds);
+  }
 
   const careSubjectsResult = await careSubjectsQuery;
   let data = careSubjectsResult.data as CareSubjectRow[] | null;
@@ -257,7 +254,9 @@ export async function listPersPeopleForConnect(
       .order("is_default", { ascending: false })
       .order("display_name", { ascending: true });
 
-    fallbackQuery = fallbackQuery.in("id", participantPersonIds);
+    if (participantPersonIds.length > 0) {
+      fallbackQuery = fallbackQuery.in("id", participantPersonIds);
+    }
 
     const fallbackResult = await fallbackQuery;
 
@@ -273,8 +272,8 @@ export async function listPersPeopleForConnect(
     })) as CareSubjectRow[];
   }
 
-  // TODO(connect-participants): add participant management UI. Connect should
-  // not infer participants from every active Care VIP.
+  // Until participant management exists, setup must be able to choose from
+  // active Care VIPs even before explicit Connect participant rows exist.
   const people = ((data ?? []) as CareSubjectRow[])
     .filter((row) => row.id && row.care_circle_id)
     .map((row) => ({

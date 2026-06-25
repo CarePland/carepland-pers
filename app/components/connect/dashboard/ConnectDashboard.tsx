@@ -5,6 +5,7 @@ import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CarePlandTopNav } from "../../shared/CarePlandTopNav";
+import { UserFacingFooter } from "../../public/UserFacingFooter";
 import {
   connectAuthHeaders,
   fetchConnectFocusPeople,
@@ -48,6 +49,11 @@ import {
   readCarePlandFocusId,
   writeCarePlandFocusId,
 } from "../../../lib/platform/focus";
+import {
+  clearAllPageViewState,
+  restorePageViewState,
+  savePageViewState,
+} from "../../../lib/navigation/pageViewState";
 
 type ConnectMessage = {
   audioArtifactId?: string;
@@ -101,6 +107,11 @@ type DashboardState = {
 
 type DashboardView = "connect" | "receiver" | "settings";
 type SetupView = "people" | "guide" | "receivers" | "appearance";
+type ConnectPageViewState = {
+  activeView?: DashboardView;
+  scrollY?: number;
+  setupView?: SetupView;
+};
 type RecipientCallState = "waiting" | "ringing" | "connected" | "ended" | "declined";
 type ConnectAskMessage = {
   body: string;
@@ -248,24 +259,6 @@ function firstNameLabel(value?: string | null) {
   return firstNameishPart
     ? firstNameishPart[0].toUpperCase() + firstNameishPart.slice(1)
     : "";
-}
-
-function petSubjectTypeLabel(subjectType?: string | null) {
-  const normalizedType = String(subjectType || "").trim().toLowerCase();
-
-  if (normalizedType === "cat") {
-    return "Cat";
-  }
-
-  if (normalizedType === "dog") {
-    return "Dog";
-  }
-
-  if (normalizedType === "pet" || normalizedType.startsWith("pet:")) {
-    return "Pet";
-  }
-
-  return "";
 }
 
 function personAvatarProps(person?: ConnectAvatarPerson | null) {
@@ -420,13 +413,24 @@ function buildConnectAskContext({
 }
 
 export function ConnectDashboard() {
+  const [initialConnectPageViewState] = useState<ConnectPageViewState | null>(() => {
+    const restoredState = restorePageViewState<ConnectPageViewState>("connect");
+
+    return restoredState?.engaged ? restoredState : null;
+  });
+  const restoredConnectScrollRef = useRef(false);
   const [state, setState] = useState<DashboardState>(emptyDashboardState);
   const [status, setStatus] = useState("Loading Connect state...");
   const [loading, setLoading] = useState(false);
   const [messageText, setMessageText] = useState("");
   const [actionPending, setActionPending] = useState<"call" | "message" | null>(null);
-  const [activeView, setActiveView] = useState<DashboardView>("connect");
-  const [setupView, setSetupView] = useState<SetupView>("people");
+  const [connectTool, setConnectTool] = useState<"message" | "history">("message");
+  const [activeView, setActiveView] = useState<DashboardView>(
+    initialConnectPageViewState?.activeView ?? "connect"
+  );
+  const [setupView, setSetupView] = useState<SetupView>(
+    initialConnectPageViewState?.setupView ?? "people"
+  );
   const [globalFocusId, setGlobalFocusId] = useState(() => {
     if (typeof window === "undefined") {
       return allCarePlandFocusValue;
@@ -436,6 +440,7 @@ export function ConnectDashboard() {
   });
   const [connectTargetPersonId, setConnectTargetPersonId] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
   const [selectedReceiverKey, setSelectedReceiverKey] = useState(connectPrototypeReceiverId);
   const [messageIndex, setMessageIndex] = useState(0);
   const [recording, setRecording] = useState(false);
@@ -460,6 +465,16 @@ export function ConnectDashboard() {
   const callCueRef = useRef<HTMLAudioElement | null>(null);
   const callTimeoutRef = useRef<number | null>(null);
   const latestCallAudioStateRef = useRef("");
+
+  const saveConnectViewState = useCallback((overrides: Partial<ConnectPageViewState> = {}) => {
+    savePageViewState<ConnectPageViewState>("connect", {
+      activeView,
+      scrollY: typeof window === "undefined" ? 0 : window.scrollY,
+      setupView,
+      ...overrides,
+      engaged: true,
+    });
+  }, [activeView, setupView]);
 
   const stopCallCue = useCallback(() => {
     if (callTimeoutRef.current) {
@@ -510,7 +525,9 @@ export function ConnectDashboard() {
         }),
       ]);
       const connectContext = settledValue(contextResult);
-      const focusPeople = settledValue(focusPeopleResult) ?? [];
+      const focusPeople = (settledValue(focusPeopleResult) ?? []).filter(
+        (person) => !isConnectPetSubjectType(person.subjectType)
+      );
       const provisioning = settledValue(provisioningResult);
       const focusedPersonId = resolveActiveConnectPersonId({
         connectTargetPersonId,
@@ -661,7 +678,7 @@ export function ConnectDashboard() {
   useEffect(() => {
     let cancelled = false;
 
-    void supabase.auth.getUser().then(({ data }) => {
+    void supabase.auth.getUser().then(async ({ data }) => {
       if (cancelled) {
         return;
       }
@@ -670,10 +687,20 @@ export function ConnectDashboard() {
 
       if (!user?.id) {
         setAccountEmail("");
+        setIsAdmin(false);
         return;
       }
 
       setAccountEmail(user.email ?? "");
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("is_admin")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!cancelled) {
+        setIsAdmin(profile?.is_admin === true);
+      }
     });
 
     return () => {
@@ -684,6 +711,55 @@ export function ConnectDashboard() {
   useEffect(() => {
     return () => stopCallCue();
   }, [stopCallCue]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      restoredConnectScrollRef.current ||
+      !initialConnectPageViewState?.scrollY
+    ) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: initialConnectPageViewState.scrollY });
+      restoredConnectScrollRef.current = true;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [initialConnectPageViewState]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    let frameId = 0;
+
+    const saveScrollPosition = () => {
+      const restoredState = restorePageViewState<ConnectPageViewState>("connect");
+
+      if (!restoredState?.engaged) {
+        return;
+      }
+
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        saveConnectViewState({ scrollY: window.scrollY });
+      });
+    };
+
+    window.addEventListener("scroll", saveScrollPosition, { passive: true });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("scroll", saveScrollPosition);
+    };
+  }, [activeView, saveConnectViewState, setupView]);
+
+  useEffect(() => {
+    return () => setConnectTargetPersonId("");
+  }, []);
 
   useEffect(() => {
     if (activeView !== "connect") return undefined;
@@ -778,12 +854,8 @@ export function ConnectDashboard() {
     : accountEmail
       ? firstNameLabel(accountEmail) || accountEmail
       : "Connect User";
-  const selectedPersonConnectEnabled = Boolean(selectedMainConnectUserPersonId);
   const selectedPersonFirstName =
     firstNameLabel(selectedPersonName) || selectedPersonName;
-  const emptyConnectPeopleLabel = accountEmail
-    ? "No Care VIPs available for Connect focus."
-    : "Sign in to load people.";
   const safeMessageIndex = Math.min(messageIndex, Math.max(0, state.messages.length - 1));
   const messagePageStart = Math.min(safeMessageIndex, Math.max(0, state.messages.length - 2));
   const visibleMessages = state.messages.slice(messagePageStart, messagePageStart + 2);
@@ -828,7 +900,7 @@ export function ConnectDashboard() {
   }
 
   function handleChooseConnectTarget(person: ConnectPersPerson) {
-    if (!person.id) {
+    if (!person.id || isConnectPetSubjectType(person.subjectType)) {
       return;
     }
 
@@ -845,6 +917,7 @@ export function ConnectDashboard() {
 
   async function handleSignOut() {
     await supabase.auth.signOut();
+    clearAllPageViewState();
     window.location.assign("/?personal=1");
   }
 
@@ -1244,17 +1317,21 @@ export function ConnectDashboard() {
   }
 
   return (
-    <main className="min-h-screen overflow-x-clip bg-slate-50 px-3 pb-6 pt-2 text-slate-900 sm:px-4 sm:pt-4 lg:px-6 lg:py-8">
+    <main className="min-h-screen overflow-x-clip bg-slate-50 px-3 pb-20 pt-2 text-slate-900 sm:px-4 sm:pt-4 lg:px-6 lg:py-8">
       <section className="mx-auto w-full max-w-5xl 2xl:max-w-6xl">
         <header className="sticky top-0 z-50 grid gap-2 bg-slate-50 py-1.5 sm:gap-3 sm:py-3 relative">
           <CarePlandTopNav
             accountEmail={accountEmail}
             activeModule="connect"
             askActive={connectAskOpen}
+            canShowAdmin={isAdmin}
             canShowAsk
             earlyAccessLabel="EARLY ACCESS"
             focusOptions={focusOptions}
             focusValue={globalFocusId}
+            onAdminClick={() => {
+              window.location.assign("/admin");
+            }}
             onChangeFocus={handleChangeGlobalFocus}
             onAskClick={() => {
               setConnectAskOpen((open) => !open);
@@ -1262,6 +1339,17 @@ export function ConnectDashboard() {
               }}
             onProfileClick={openProfileSettings}
             onSignOut={() => void handleSignOut()}
+            supportMetrics={
+              isAdmin
+                ? [
+                    {
+                      count: 0,
+                      label: "New",
+                      tone: "neutral",
+                    },
+                  ]
+                : []
+            }
           />
           <div className="flex w-full flex-wrap items-center justify-between gap-2">
             {activeView === "settings" ? (
@@ -1279,7 +1367,13 @@ export function ConnectDashboard() {
                           : "text-slate-500 hover:bg-blue-50/70 hover:text-blue-800"
                       }`}
                       key={view}
-                      onClick={() => setSetupView(view)}
+                      onClick={() => {
+                        setSetupView(view);
+                        saveConnectViewState({
+                          activeView: "settings",
+                          setupView: view,
+                        });
+                      }}
                       type="button"
                     >
                       {setupViewLabel(view)}
@@ -1288,12 +1382,89 @@ export function ConnectDashboard() {
                 </nav>
                 <button
                   className="min-h-9 rounded-md px-2 text-sm font-semibold text-slate-500 transition-colors hover:text-blue-800"
-                  onClick={() => setActiveView("connect")}
+                  onClick={() => {
+                    setActiveView("connect");
+                    saveConnectViewState({ activeView: "connect" });
+                  }}
                   type="button"
                 >
                   Exit
                 </button>
               </div>
+            ) : activeView === "connect" ? (
+              <>
+                {isEveryoneFocus && state.focusPeople.length > 1 ? (
+                  <div className="flex min-w-0 max-w-full items-center gap-2 overflow-x-auto">
+                    {state.focusPeople.map((person) => {
+                      const selected = person.id === activeConnectPersonId;
+
+                      return (
+                        <button
+                          aria-pressed={selected}
+                          className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full py-1 pl-1 pr-2.5 text-sm font-black transition ${
+                            selected
+                              ? "bg-[#edf5fc] text-[#244d73] ring-1 ring-[#b6d8f2]"
+                              : "text-[#345d83] hover:bg-blue-50"
+                          }`}
+                          key={person.id ?? person.displayName}
+                          onClick={() => handleChooseConnectTarget(person)}
+                          type="button"
+                        >
+                          <ConnectPersonAvatar
+                            person={focusPersonAsReceiverPerson(person)}
+                            selected={selected}
+                            size="xs"
+                          />
+                          {firstNameLabel(person.displayName)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span aria-hidden="true" />
+                )}
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+                  <button
+                    aria-pressed={connectTool === "message"}
+                    className={`inline-flex min-h-9 items-center gap-2 rounded-full px-3 text-sm font-semibold transition ${
+                      connectTool === "message"
+                        ? "border border-blue-200 bg-blue-50 text-blue-900 shadow-sm"
+                        : "text-slate-500 hover:bg-blue-50 hover:text-blue-800"
+                    }`}
+                    onClick={() => setConnectTool("message")}
+                    type="button"
+                  >
+                    {selectedPerson
+                      ? `Send a Message to ${selectedPersonFirstName}`
+                      : "Send a Message"}
+                  </button>
+                  <button
+                    aria-pressed={connectTool === "history"}
+                    className={`inline-flex min-h-9 items-center gap-2 rounded-full px-3 text-sm font-semibold transition ${
+                      connectTool === "history"
+                        ? "border border-blue-200 bg-blue-50 text-blue-900 shadow-sm"
+                        : "text-slate-500 hover:bg-blue-50 hover:text-blue-800"
+                    }`}
+                    onClick={() => setConnectTool("history")}
+                    type="button"
+                  >
+                    Message History
+                  </button>
+                  <button
+                    className="inline-flex min-h-9 items-center gap-2 rounded-full border border-blue-100 bg-blue-50/80 px-3 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100 disabled:opacity-55"
+                    disabled={actionPending === "call" || !selectedMainConnectUserPersonId}
+                    onClick={() => void startCall()}
+                    type="button"
+                  >
+                    <PhoneIcon />
+                    {actionPending === "call"
+                      ? "Calling"
+                      : selectedPerson
+                        ? `Call ${selectedPersonFirstName}`
+                        : "Call"}
+                  </button>
+                </div>
+              </>
             ) : (
               <span aria-hidden="true" />
             )}
@@ -1307,6 +1478,10 @@ export function ConnectDashboard() {
               onClick={() => {
                 setSetupView("people");
                 setActiveView("settings");
+                saveConnectViewState({
+                  activeView: "settings",
+                  setupView: "people",
+                });
               }}
               type="button"
             >
@@ -1317,100 +1492,10 @@ export function ConnectDashboard() {
 
       {activeView === "connect" ? (
         <section className="grid w-full gap-5 px-2 py-5 sm:px-4 lg:px-6">
+          {connectTool === "message" ? (
           <section className="grid max-w-[940px] items-start gap-5">
-            {isEveryoneFocus ? (
-              <div className="flex max-w-full items-center gap-2 overflow-x-auto">
-                {state.focusPeople.length ? (
-                  state.focusPeople.map((person) => {
-                    const selected = person.id === activeConnectPersonId;
-
-                    return (
-                      <button
-                        aria-pressed={selected}
-                        className={`inline-flex shrink-0 items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 text-sm font-black transition ${
-                          selected
-                            ? "bg-[#edf5fc] text-[#244d73] ring-1 ring-[#b6d8f2]"
-                            : "text-[#345d83] hover:bg-blue-50"
-                        }`}
-                        key={person.id ?? person.displayName}
-                        onClick={() => handleChooseConnectTarget(person)}
-                        type="button"
-                      >
-                        <ConnectPersonAvatar
-                          person={focusPersonAsReceiverPerson(person)}
-                          selected={selected}
-                          size="sm"
-                        />
-                        {firstNameLabel(person.displayName)}
-                      </button>
-                    );
-                  })
-                ) : (
-                  <span className="px-3 py-2 text-sm font-black text-[#5f6e84]">
-                    {emptyConnectPeopleLabel}
-                  </span>
-                )}
-              </div>
-            ) : null}
-            <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-[#d6e3f2] bg-white/75 px-3 py-1.5 text-xs font-black text-[#345d83] shadow-sm">
-              <span className="text-[#6b7f95]">Main Connect User</span>
-              <span className="min-w-0 truncate text-[#172f49]">
-                {selectedPersonName}
-              </span>
-            </div>
-            {!selectedPersonConnectEnabled ? (
-              <p className="max-w-[760px] rounded-lg border border-[#d6e3f2] bg-white/75 px-4 py-3 text-sm font-black text-[#5f6e84] shadow-sm">
-                {selectedPersonName} is the active Connect focus. Enable this person
-                for Connect before using Receiver actions, messages, calls, or audio.
-              </p>
-            ) : null}
-
-            <section className="grid max-w-[940px] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-10">
-              <aside className="grid content-start gap-4">
-                <button
-                  className="flex min-h-32 items-center justify-center gap-3 rounded-[16px] bg-[#4779a8] px-5 py-6 text-2xl font-black text-white shadow-sm hover:bg-[#3e719c] disabled:opacity-55"
-                  disabled={actionPending === "call" || !selectedMainConnectUserPersonId}
-                  onClick={() => void startCall()}
-                  type="button"
-                >
-                  <PhoneIcon />
-	                  {actionPending === "call"
-	                    ? "Calling"
-	                    : selectedPerson
-	                      ? `Call ${selectedPersonFirstName}`
-	                      : "Call"}
-                </button>
-                <div className="grid gap-3">
-                  <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-x-4">
-                    <span className="mt-2 h-5 w-5 justify-self-center rounded-full bg-[#35a36a] ring-[9px] ring-[#daf3e8]" />
-                    <div>
-                      <p className="text-2xl font-black leading-none text-[#5f6e84]">
-                        Ready
-                      </p>
-                      <p className="mt-1 text-base font-black leading-tight text-[#5f6e84]">
-                        {selectedReceiverLabel}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    className="min-h-11 rounded-lg border border-[#d6e3f2] bg-white px-5 text-base font-black text-[#0f172a] shadow-sm hover:bg-[#f8fafc] disabled:opacity-55"
-                    disabled={loading}
-                    onClick={() => void refresh()}
-                    type="button"
-                  >
-                    {loading ? "Refreshing" : "Reset"}
-                  </button>
-                </div>
-              </aside>
-
-              <section className="grid gap-4">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                <h2 className="text-2xl font-black text-[#173150]">
-                    {selectedPerson
-                      ? `Send a Message to ${selectedPersonFirstName}`
-                      : "Send a Message"}
-                  </h2>
+            <section className="grid max-w-[940px] gap-4">
+              <div>
                 <p className="text-lg font-bold text-[#5f6e84]">
                     {recording
                       ? "Recording. Press Stop when done."
@@ -1420,7 +1505,6 @@ export function ConnectDashboard() {
                           ? "Original audio and transcript will be sent together."
                         : ""}
                   </p>
-                </div>
               </div>
               <form
               className="grid gap-4"
@@ -1495,8 +1579,10 @@ export function ConnectDashboard() {
               </form>
               </section>
             </section>
+          ) : null}
 
-            <div className="mt-8">
+            {connectTool === "history" ? (
+            <div className="mt-2">
               <div className="flex items-start justify-between gap-3">
                 <h3 className="text-4xl font-black leading-none text-[#173150]">
                   Message<br className="sm:hidden" /> History
@@ -1634,7 +1720,7 @@ export function ConnectDashboard() {
                   </p>
                 )}
               </div>
-          </section>
+            ) : null}
 
           <RecipientCallPanel
               onCallAnswered={stopCallCue}
@@ -1686,6 +1772,11 @@ export function ConnectDashboard() {
         onSubmit={submitConnectAsk}
         open={connectAskOpen}
         sending={connectAskSending}
+      />
+      <UserFacingFooter
+        onWhyCarePland={() => {
+          window.location.assign("/?personal=1");
+        }}
       />
     </main>
   );
@@ -1910,95 +2001,78 @@ function ConnectAskPanel({
   if (!open) return null;
 
   return (
-    <div
-      aria-modal="true"
-      className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/35 px-4 py-8"
-      role="dialog"
-    >
-      <section className="w-full max-w-2xl rounded-2xl border border-[#cbd9e7] bg-white p-5 shadow-2xl sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-black uppercase tracking-wide text-[#5f6e84]">
-              CarePland Ask
-            </p>
-            <h2 className="text-3xl font-black text-[#0f172a]">Ask about Connect</h2>
-            <p className="mt-2 max-w-xl text-base font-semibold text-[#5f6e84]">
-              Ask about receiver setup, calls, messages, Guide Mode, optional sounds,
-              or anything confusing on this Connect screen.
-            </p>
-          </div>
+    <>
+      <button
+        aria-label="Close Ask panel"
+        className="fixed inset-0 z-[65] cursor-default bg-transparent"
+        onClick={onClose}
+        type="button"
+      />
+      <section
+        aria-label="Ask panel"
+        className="fixed inset-x-3 top-16 z-[70] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-2xl border border-blue-100 bg-white p-5 shadow-xl sm:left-auto sm:right-5 sm:top-20 sm:w-[min(32rem,calc(100vw-2.5rem))]"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-xl font-semibold text-slate-950">Ask</h2>
           <button
-            className="min-h-11 rounded-full border border-[#d6e3f2] bg-white px-5 text-sm font-black text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
+            className="rounded px-1 py-0.5 text-sm font-semibold text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-200"
             onClick={onClose}
             type="button"
           >
             Close
           </button>
         </div>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600">
+          Questions, ideas, help, feedback, or help with Connect -- ask away.
+        </p>
 
-        <div className="mt-5 max-h-72 overflow-y-auto rounded-xl border border-[#d6e3f2] bg-[#f8fbff] p-4">
-          {messages.length ? (
-            <div className="grid gap-3">
-              {messages.map((message, index) => (
-                <div
-                  className={`rounded-xl px-4 py-3 text-base leading-relaxed ${
-                    message.role === "user"
-                      ? "ml-auto max-w-[88%] bg-[#2f6693] text-white"
-                      : "mr-auto max-w-[88%] border border-[#d6e3f2] bg-white text-[#0f172a]"
-                  }`}
-                  key={`${message.role}-${index}`}
-                >
-                  <span className="block text-xs font-black uppercase opacity-75">
-                    {message.role === "user" ? "You" : "Ask"}
-                  </span>
-                  <span className="mt-1 block whitespace-pre-wrap font-semibold">
-                    {message.body}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-base font-semibold text-[#5f6e84]">
-              I’ll include your current Connect screen, selected person, receiver status,
-              recent messages, and setup context with the question.
-            </p>
-          )}
-        </div>
+        {messages.length > 0 ? (
+          <div className="mt-6 space-y-2">
+            {messages.map((message, index) => (
+              <div
+                className={`max-w-[min(100%,42rem)] rounded-xl px-4 py-3 text-sm leading-relaxed ${
+                  message.role === "user"
+                    ? "ml-auto border border-blue-100 bg-blue-50 text-slate-950"
+                    : "border border-blue-100 bg-white/85 text-slate-700"
+                }`}
+                key={`${message.role}-${index}`}
+              >
+                <p className="whitespace-pre-wrap">{message.body}</p>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {error ? (
-          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+          <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
             {error}
           </p>
         ) : null}
 
-        <form className="mt-5 grid gap-3" onSubmit={onSubmit}>
+        <form className="mt-4" onSubmit={onSubmit}>
+          <label className="sr-only" htmlFor="connect-ask-message">
+            What&apos;s on your mind?
+          </label>
           <textarea
-            className="min-h-28 resize-y rounded-xl border border-[#b6cfe8] bg-white px-4 py-3 text-base leading-relaxed shadow-inner"
+            className="min-h-36 w-full rounded-xl border border-[#d8e0dc] bg-white px-4 py-4 text-base leading-relaxed text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
             disabled={sending}
+            id="connect-ask-message"
             onChange={(event) => onChangeInput(event.target.value)}
-            placeholder="What would you like to ask?"
+            placeholder="What's on your mind?"
             value={input}
           />
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="mt-3 flex items-center justify-end">
             <button
-              className="min-h-12 rounded-xl border border-[#d6e3f2] bg-white px-6 text-base font-black text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
-              disabled={sending}
-              onClick={onClose}
-              type="button"
-            >
-              Not now
-            </button>
-            <button
-              className="min-h-12 rounded-xl bg-[#2f6693] px-7 text-base font-black text-white shadow-sm hover:bg-[#28577e] disabled:opacity-60"
+              className="rounded-md bg-[#2d6cdf] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#2457b5] disabled:cursor-not-allowed disabled:opacity-60"
               disabled={sending || !input.trim()}
               type="submit"
             >
-              {sending ? "Asking..." : "Ask"}
+              {sending ? "Sending..." : "Send"}
             </button>
           </div>
         </form>
       </section>
-    </div>
+    </>
   );
 }
 
@@ -2216,9 +2290,6 @@ function PrimaryReceiverUserPanel({
   const receiverEligiblePeople = activePeople.filter(
     (person) => !isConnectPetSubjectType(person.subjectType)
   );
-  const petPeople = activePeople.filter((person) =>
-    isConnectPetSubjectType(person.subjectType)
-  );
 
   async function selectPrimaryReceiverUser(personId: string) {
     if (!personId || personId === currentPersonId || savingPersonId) {
@@ -2275,7 +2346,7 @@ function PrimaryReceiverUserPanel({
             return (
               <button
                 aria-pressed={selected}
-                className={`inline-flex min-h-12 items-center gap-3 rounded-full border px-4 text-sm font-black transition ${
+                className={`inline-flex min-h-12 items-center gap-3 whitespace-nowrap rounded-full border px-4 text-sm font-black transition ${
                   selected
                     ? "border-[#9fc6e8] bg-[#edf5fc] text-[#172f49]"
                     : "border-[#d6e3f2] bg-white text-[#345d83] hover:bg-[#f4f8fc]"
@@ -2286,7 +2357,7 @@ function PrimaryReceiverUserPanel({
                 type="button"
               >
                 <ConnectPersonAvatar person={person} selected={selected} size="xs" />
-                <span className="min-w-0 truncate">
+                <span>
                   {firstNameLabel(person.displayName) || person.displayName}
                 </span>
                 {pending ? (
@@ -2316,27 +2387,6 @@ function PrimaryReceiverUserPanel({
             planned
           </span>
         </span>
-
-        {petPeople.map((person) => {
-          const petLabel = petSubjectTypeLabel(person.subjectType) || "Pet";
-
-          return (
-            <span
-              aria-disabled="true"
-              className="inline-flex min-h-12 cursor-not-allowed items-center gap-3 rounded-full border border-[#d6e3f2] bg-white/45 px-4 text-sm font-black text-[#8a9aad]"
-              key={person.id}
-              title={`${firstNameLabel(person.displayName) || person.displayName} is a ${petLabel.toLowerCase()}, so they cannot be the Main Connect User.`}
-            >
-              <ConnectPersonAvatar person={person} selected={false} size="xs" />
-              <span className="min-w-0 truncate">
-                {firstNameLabel(person.displayName) || person.displayName}
-              </span>
-              <span className="rounded-full bg-[#edf5fc]/70 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[#7f8fa3]">
-                {petLabel}
-              </span>
-            </span>
-          );
-        })}
       </div>
     </section>
   );
