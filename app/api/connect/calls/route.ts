@@ -1,10 +1,25 @@
 import { NextResponse } from "next/server";
 
-import { verifyConnectCallPersonAccess } from "@/app/lib/connect/calls/server/callAccess";
+import {
+  readConnectCallPersonAccessForRequest,
+  verifyConnectCallPersonAccess,
+} from "@/app/lib/connect/calls/server/callAccess";
 import {
   filterCallsForMainConnectUser,
+  mergeConnectCalls,
   type ConnectCallRecord,
 } from "@/app/lib/connect/calls/callScoping";
+import {
+  markStaleLocalConnectCallsMissed,
+  readLocalConnectCalls,
+  recordLocalConnectCall,
+} from "@/app/lib/connect/calls/server/localCalls";
+import {
+  markStaleSupabaseConnectCallsMissed,
+  readSupabaseConnectCalls,
+  recordSupabaseConnectCallEvent,
+  recordSupabaseConnectCall,
+} from "@/app/lib/connect/calls/server/supabaseCallStore";
 import { connectPrototypeEndpoints } from "@/app/lib/connect/prototypeClient";
 
 export async function GET(request: Request) {
@@ -18,12 +33,21 @@ export async function GET(request: Request) {
       );
     }
 
-    const deniedResponse = await verifyConnectCallPersonAccess(request, personId, {
-      calls: [],
-    });
-    if (deniedResponse) return deniedResponse;
+    const access = await readConnectCallPersonAccessForRequest(request, personId);
 
-    const calls = filterCallsForMainConnectUser(await fetchPrototypeCalls(), personId);
+    await Promise.all([
+      markStaleLocalConnectCallsMissed(),
+      markStaleSupabaseConnectCallsMissed(access),
+    ]);
+    const [prototypeCalls, localCallIndex, supabaseCalls] = await Promise.all([
+      fetchPrototypeCalls(),
+      readLocalConnectCalls(),
+      readSupabaseConnectCalls(access),
+    ]);
+    const calls = filterCallsForMainConnectUser(
+      mergeConnectCalls(supabaseCalls ?? localCallIndex.calls, prototypeCalls),
+      personId
+    );
 
     return NextResponse.json({
       calls,
@@ -59,28 +83,52 @@ export async function POST(request: Request) {
       );
     }
 
-    const deniedResponse = await verifyConnectCallPersonAccess(request, personId);
-    if (deniedResponse) return deniedResponse;
+    const access = await readConnectCallPersonAccessForRequest(request, personId);
 
-    const response = await fetch(connectPrototypeEndpoints.call, {
-      body: JSON.stringify({
+    const call =
+      (await recordSupabaseConnectCall(
+        {
+          ...payload,
+          mainConnectUserPersonId: personId,
+          recipientPersonId: personId,
+        },
+        access
+      )) ??
+      (await recordLocalConnectCall({
         ...payload,
         mainConnectUserPersonId: personId,
         recipientPersonId: personId,
-      }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
+      }));
+    const prototypeBody = await postPrototypeCall({
+      ...payload,
+      callId: call.callId,
+      mainConnectUserPersonId: personId,
+      recipientPersonId: personId,
     });
-    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (call.callId) {
+      void recordSupabaseConnectCallEvent(
+        {
+          actorRole: "dashboard",
+          callId: call.callId,
+          details: {
+            callerName: payload.callerName || "",
+            receiverId: payload.receiverId || "",
+            recipientName: payload.recipientName || "",
+            source: "connect_call_post",
+          },
+          eventType: "call_created",
+        },
+        access
+      );
+    }
 
-    return NextResponse.json(
-      {
-        ...body,
-        mainConnectUserPersonId: personId,
-        ok: response.ok && body.ok !== false,
-      },
-      { status: response.ok ? 200 : response.status }
-    );
+    return NextResponse.json({
+      ...prototypeBody,
+      call,
+      mainConnectUserPersonId: personId,
+      ok: true,
+      source: prototypeBody.ok === true ? "local_and_prototype" : "local",
+    });
   } catch (error) {
     return NextResponse.json(
       {
@@ -89,6 +137,21 @@ export async function POST(request: Request) {
       },
       { status: 401 }
     );
+  }
+}
+
+async function postPrototypeCall(payload: Partial<ConnectCallRecord> & { receiverId?: string }) {
+  try {
+    const response = await fetch(connectPrototypeEndpoints.call, {
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+    return response.ok ? body : {};
+  } catch {
+    return {};
   }
 }
 

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   emptyConnectCallSummary,
   filterCallsForMainConnectUser,
+  mergeConnectCalls,
   summarizeConnectCalls,
 } from "./callScoping";
 
@@ -36,9 +37,9 @@ describe("Connect call scoping", () => {
 
   it("summarizes only the already-scoped calls it receives", () => {
     const summary = summarizeConnectCalls([
-      { callId: "latest", state: "ringing" },
-      { callId: "connected", state: "connected" },
-      { callId: "ended", state: "hung_up" },
+      { callId: "ended", state: "hung_up", updatedAt: "2026-06-20T12:00:00.000Z" },
+      { callId: "latest", state: "ringing", updatedAt: "2026-06-21T12:00:00.000Z" },
+      { callId: "connected", state: "connected", updatedAt: "2026-06-20T13:00:00.000Z" },
       { callId: "unknown" },
     ]);
 
@@ -51,6 +52,35 @@ describe("Connect call scoping", () => {
       unknown: 1,
     });
     assert.equal(summary.latestCall?.callId, "latest");
+  });
+
+  it("merges calls with local records winning matching call ids", () => {
+    const calls = mergeConnectCalls(
+      [
+        {
+          callId: "same-call",
+          state: "connected",
+          updatedAt: "2026-06-21T12:01:00.000Z",
+        },
+      ],
+      [
+        {
+          callId: "same-call",
+          state: "ringing",
+          updatedAt: "2026-06-21T12:00:00.000Z",
+        },
+        {
+          callId: "prototype-only",
+          state: "ringing",
+          updatedAt: "2026-06-21T11:59:00.000Z",
+        },
+      ]
+    );
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0]?.callId, "same-call");
+    assert.equal(calls[0]?.state, "connected");
+    assert.equal(calls[1]?.callId, "prototype-only");
   });
 
   it("returns a stable empty summary shape", () => {

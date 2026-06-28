@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
 
-import { verifyConnectCallPersonAccess } from "@/app/lib/connect/calls/server/callAccess";
+import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
+import { generateConnectCallCareSummary } from "@/app/lib/connect/calls/server/callSummaryGeneration";
+import {
+  updateLocalConnectCallState,
+  updateLocalConnectCallSummary,
+} from "@/app/lib/connect/calls/server/localCalls";
+import {
+  recordSupabaseConnectCallGeneratedSummary,
+  recordSupabaseConnectCallEvent,
+  updateSupabaseConnectCallState,
+} from "@/app/lib/connect/calls/server/supabaseCallStore";
 import { connectPrototypeEndpoints } from "@/app/lib/connect/prototypeClient";
 
 type RouteContext = {
@@ -24,27 +34,105 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const deniedResponse = await verifyConnectCallPersonAccess(request, personId);
-    if (deniedResponse) return deniedResponse;
+    const access = await readConnectCallPersonAccessForRequest(request, personId);
 
-    const response = await fetch(connectPrototypeEndpoints.callState(callId), {
-      body: JSON.stringify({
-        ...payload,
+    const call =
+      (await updateSupabaseConnectCallState(callId, payload.state || "", access)) ??
+      (await updateLocalConnectCallState(callId, payload.state || "", {
         mainConnectUserPersonId: personId,
-      }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST",
+      }));
+    const prototypeBody = await postPrototypeCallState(callId, {
+      ...payload,
+      mainConnectUserPersonId: personId,
     });
-    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (call) {
+      void recordSupabaseConnectCallEvent(
+        {
+          actorRole: payload.source,
+          callId,
+          details: {
+            resultState: call.state || "",
+            source: payload.source || "",
+            state: payload.state || "",
+          },
+          eventType: "call_state_updated",
+        },
+        access
+      );
+      if (
+        ["declined", "failed", "hung_up", "missed", "receiver_unavailable"].includes(
+          String(call.state || "")
+        ) &&
+        call.transcriptText?.trim() &&
+        !["approved", "completed"].includes(String(call.summaryStatus || ""))
+      ) {
+        const generatedSummary = await generateConnectCallCareSummary({
+          transcriptText: call.transcriptText,
+        });
+        const summaryCall =
+          (await recordSupabaseConnectCallGeneratedSummary(
+            callId,
+            {
+              summaryStatus: generatedSummary.summaryStatus,
+              summaryText: generatedSummary.summaryText,
+            },
+            access
+          )) ??
+          (await updateLocalConnectCallSummary(callId, {
+            mainConnectUserPersonId: personId,
+            summaryStatus: generatedSummary.summaryStatus,
+            summaryText: generatedSummary.summaryText,
+          }));
 
-    return NextResponse.json(
-      {
-        ...body,
-        mainConnectUserPersonId: personId,
-        ok: response.ok && body.ok !== false,
-      },
-      { status: response.ok ? 200 : response.status }
-    );
+        if (summaryCall) {
+          call.summaryStatus = summaryCall.summaryStatus;
+          call.summaryText = summaryCall.summaryText;
+        }
+        void recordSupabaseConnectCallEvent(
+          {
+            actorRole: "system",
+            callId,
+            details: {
+              source: "call_state_terminal_summary_generation",
+              summaryStatus: generatedSummary.summaryStatus,
+            },
+            eventType: "call_summary_generated",
+          },
+          access
+        );
+      }
+    }
+
+    if (!call && prototypeBody.ok !== true) {
+      void recordSupabaseConnectCallEvent(
+        {
+          actorRole: payload.source,
+          callId,
+          details: {
+            source: payload.source || "",
+            state: payload.state || "",
+          },
+          eventType: "call_state_update_not_applied",
+        },
+        access
+      );
+      return NextResponse.json(
+        {
+          error: "Call state could not be updated.",
+          mainConnectUserPersonId: personId,
+          ok: false,
+        },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      ...prototypeBody,
+      call: prototypeBody.call ?? call,
+      mainConnectUserPersonId: personId,
+      ok: true,
+      source: prototypeBody.ok === true ? "local_and_prototype" : "local",
+    });
   } catch (error) {
     return NextResponse.json(
       {
@@ -54,5 +142,23 @@ export async function POST(request: Request, context: RouteContext) {
       },
       { status: 401 }
     );
+  }
+}
+
+async function postPrototypeCallState(
+  callId: string,
+  payload: { mainConnectUserPersonId?: string; source?: string; state?: string }
+) {
+  try {
+    const response = await fetch(connectPrototypeEndpoints.callState(callId), {
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+    return response.ok ? body : {};
+  } catch {
+    return {};
   }
 }

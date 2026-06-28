@@ -3,10 +3,19 @@ import { NextResponse } from "next/server";
 import {
   emptyConnectCallSummary,
   filterCallsForMainConnectUser,
+  mergeConnectCalls,
   summarizeConnectCalls,
   type ConnectCallRecord,
 } from "@/app/lib/connect/calls/callScoping";
-import { verifyConnectCallPersonAccess } from "@/app/lib/connect/calls/server/callAccess";
+import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
+import {
+  markStaleLocalConnectCallsMissed,
+  readLocalConnectCalls,
+} from "@/app/lib/connect/calls/server/localCalls";
+import {
+  markStaleSupabaseConnectCallsMissed,
+  readSupabaseConnectCalls,
+} from "@/app/lib/connect/calls/server/supabaseCallStore";
 import { connectPrototypeEndpoints } from "@/app/lib/connect/prototypeClient";
 
 export async function GET(request: Request) {
@@ -25,13 +34,21 @@ export async function GET(request: Request) {
       );
     }
 
-    const deniedResponse = await verifyConnectCallPersonAccess(request, personId, {
-      mainConnectUserPersonId: null,
-      summary: emptyConnectCallSummary(),
-    });
-    if (deniedResponse) return deniedResponse;
+    const access = await readConnectCallPersonAccessForRequest(request, personId);
 
-    const calls = filterCallsForMainConnectUser(await fetchPrototypeCalls(), personId);
+    await Promise.all([
+      markStaleLocalConnectCallsMissed(),
+      markStaleSupabaseConnectCallsMissed(access),
+    ]);
+    const [prototypeCalls, localCallIndex, supabaseCalls] = await Promise.all([
+      fetchPrototypeCalls(),
+      readLocalConnectCalls(),
+      readSupabaseConnectCalls(access),
+    ]);
+    const calls = filterCallsForMainConnectUser(
+      mergeConnectCalls(supabaseCalls ?? localCallIndex.calls, prototypeCalls),
+      personId
+    );
 
     return NextResponse.json({
       mainConnectUserPersonId: personId,

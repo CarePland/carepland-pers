@@ -72,12 +72,13 @@ export async function verifyConnectPersonAccessForRequest(
   const userContext = await createConnectUserContext(accessToken);
   const person = await findConnectPersonForUser(normalizedPersonId, userContext);
 
-  if (!isEligibleMainConnectUserPerson(person)) {
+  if (!person || !isEligibleMainConnectUserPerson(person)) {
     throw new ConnectPersonAccessDeniedError();
   }
 
   return {
     accessToken,
+    careCircleId: person.careCircleId,
     mainConnectUserPersonId: normalizedPersonId,
     userContext,
   };

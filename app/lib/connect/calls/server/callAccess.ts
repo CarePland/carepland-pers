@@ -5,6 +5,13 @@ import {
   verifyConnectPersonAccessForRequest,
 } from "@/app/lib/connect/context/server/mainConnectUserContext";
 
+export async function readConnectCallPersonAccessForRequest(
+  request: Request,
+  personId: string
+) {
+  return verifyConnectPersonAccessForRequest(personId, request);
+}
+
 export async function verifyConnectCallPersonAccess(
   request: Request,
   personId: string,
