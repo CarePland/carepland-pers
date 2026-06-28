@@ -17,6 +17,18 @@ Supabase SQL editor history.
 - `2026-06-22_connect_settings_participant_policy.sql`
   Migration patch: tightens `connect_settings` writes so the durable Main Connect User can only be set to an active non-pet Connect participant in one of the signed-in user's care circles.
 
+- `2026-06-25_connect_call_records.sql`
+  Migration: adds durable Connect call records, short-lived WebRTC signaling rows, operational call events, and brief care-only call summaries. Call transcripts are temporary on the call record until summary approval; approval should delete the transcript while retaining approved care summaries. Multiple approved summaries can be preserved for one call if both parties approve different/refined versions.
+
+- `2026-06-25_connect_call_summaries_multi_approval.sql`
+  Migration patch: removes the initial one-summary-per-call uniqueness constraint so both parties can preserve different approved/refined care summaries for the same call.
+
+- `2026-06-25_connect_call_transcript_segments.sql`
+  Migration: adds temporary call transcript segments for the 35-second window / 30-second step / 5-second overlap transcription model. Segment transcript text is deleted after summary approval and should not be treated as a permanent record.
+
+- `2026-06-25_connect_call_summary_prompt.sql`
+  Migration/admin prompt seed: adds an Admin-managed `connect_call_care_summary` prompt path for brief care-only call summaries. The prompt explicitly omits general conversation and tells the model to omit when uncertain.
+
 - `2026-06-22_care_subject_pet_types_text.sql`
   Migration patch: converts `care_subjects.subject_type` from the older enum to constrained text so Profile can save cat, dog, generic pet, and `pet:<label>` values.
 
