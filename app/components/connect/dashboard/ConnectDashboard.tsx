@@ -38,6 +38,12 @@ import {
   connectPrototypeReceiverId,
 } from "../../../lib/connect/prototypeClient";
 import {
+  createConnectCallAudioController,
+  type ConnectCallAudioStatus,
+  type ConnectCallAudioController,
+} from "../../../lib/connect/calls/browserCallAudio";
+import { recordConnectCallLifecycleEvent } from "../../../lib/connect/calls/browserCallDiagnostics";
+import {
   fetchConnectProvisioningSnapshot,
   type ConnectProvisioningSnapshot,
   type ConnectReceiverDevice,
@@ -82,6 +88,10 @@ type ConnectCallSummary = {
     callerName?: string;
     recipientName?: string;
     state?: string;
+    summaryStatus?: string;
+    summaryText?: string;
+    transcriptStatus?: string;
+    transcriptText?: string;
     updatedAt?: string;
   } | null;
   total?: number;
@@ -450,6 +460,10 @@ export function ConnectDashboard() {
   const [detailView, setDetailView] = useState(true);
   const [recipientCallState, setRecipientCallState] =
     useState<RecipientCallState>("waiting");
+  const [callAudioStatus, setCallAudioStatus] =
+    useState<ConnectCallAudioStatus>("idle");
+  const [callMuted, setCallMuted] = useState(false);
+  const [callTranscriptRuntimeStatus, setCallTranscriptRuntimeStatus] = useState("");
   const savedMainConnectUserPersonId =
     state.connectContext?.mainConnectUserPersonId ?? "";
   const [guideMode, setGuideMode] = useState(false);
@@ -464,7 +478,13 @@ export function ConnectDashboard() {
   const clientMessageCounterRef = useRef(0);
   const callCueRef = useRef<HTMLAudioElement | null>(null);
   const callTimeoutRef = useRef<number | null>(null);
+  const liveCallAudioRef = useRef<ConnectCallAudioController | null>(null);
+  const activeCallIdRef = useRef("");
+  const callAudioStatusRef = useRef<ConnectCallAudioStatus>("idle");
+  const mainConnectUserPersonIdRef = useRef("");
   const latestCallAudioStateRef = useRef("");
+  callAudioStatusRef.current = callAudioStatus;
+  mainConnectUserPersonIdRef.current = savedMainConnectUserPersonId;
 
   const saveConnectViewState = useCallback((overrides: Partial<ConnectPageViewState> = {}) => {
     savePageViewState<ConnectPageViewState>("connect", {
@@ -483,6 +503,26 @@ export function ConnectDashboard() {
     }
     callCueRef.current?.pause();
     callCueRef.current = null;
+  }, []);
+
+  const stopLiveCallAudio = useCallback(() => {
+    if (activeCallIdRef.current && mainConnectUserPersonIdRef.current) {
+      recordConnectCallLifecycleEvent({
+        actorRole: "dashboard",
+        callId: activeCallIdRef.current,
+        connectAuthHeaders,
+        details: {
+          callAudioStatus: callAudioStatusRef.current,
+          source: "dashboard_stop_live_call_audio",
+        },
+        eventType: "call_ui_audio_cleanup_requested",
+        mainConnectUserPersonId: mainConnectUserPersonIdRef.current,
+      });
+    }
+    liveCallAudioRef.current?.stop();
+    liveCallAudioRef.current = null;
+    setCallAudioStatus("idle");
+    setCallMuted(false);
   }, []);
 
   const playCallFailureSound = useCallback(() => {
@@ -614,11 +654,16 @@ export function ConnectDashboard() {
         { headers: await connectAuthHeaders() }
       );
       const latestState = callSummaryBody.summary?.latestCall?.state || "";
+      const latestCallId = callSummaryBody.summary?.latestCall?.callId || "";
 
       setState((current) => ({
         ...current,
         callSummary: callSummaryBody.summary ?? current.callSummary,
       }));
+
+      if (latestCallId && ["answered", "connected", "ringing"].includes(latestState)) {
+        activeCallIdRef.current = latestCallId;
+      }
 
       if (latestState === "ringing") setRecipientCallState("ringing");
       if (latestState === "answered" || latestState === "connected") {
@@ -627,19 +672,35 @@ export function ConnectDashboard() {
         setRecipientCallState("connected");
       }
       if (latestState === "declined" || latestState === "receiver_unavailable") {
+        if (latestCallId) {
+          logDashboardCallEvent(latestCallId, "call_dashboard_poll_terminal_state_seen", {
+            latestState,
+            source: "refreshCallState",
+          });
+        }
+        stopLiveCallAudio();
         if (latestState === "receiver_unavailable") playCallFailureSound();
         else {
           latestCallAudioStateRef.current = latestState;
           stopCallCue();
         }
+        activeCallIdRef.current = "";
         setRecipientCallState("declined");
       }
       if (latestState === "hung_up" || latestState === "missed" || latestState === "failed") {
+        if (latestCallId) {
+          logDashboardCallEvent(latestCallId, "call_dashboard_poll_terminal_state_seen", {
+            latestState,
+            source: "refreshCallState",
+          });
+        }
+        stopLiveCallAudio();
         if (latestState === "missed" || latestState === "failed") playCallFailureSound();
         else {
           latestCallAudioStateRef.current = latestState;
           stopCallCue();
         }
+        activeCallIdRef.current = "";
         setRecipientCallState("ended");
       }
     } catch {
@@ -651,6 +712,7 @@ export function ConnectDashboard() {
     playCallFailureSound,
     savedMainConnectUserPersonId,
     stopCallCue,
+    stopLiveCallAudio,
   ]);
 
   useEffect(() => {
@@ -709,8 +771,11 @@ export function ConnectDashboard() {
   }, []);
 
   useEffect(() => {
-    return () => stopCallCue();
-  }, [stopCallCue]);
+    return () => {
+      stopCallCue();
+      stopLiveCallAudio();
+    };
+  }, [stopCallCue, stopLiveCallAudio]);
 
   useEffect(() => {
     if (
@@ -948,6 +1013,84 @@ export function ConnectDashboard() {
     return () => window.removeEventListener("storage", handleStorage);
   }, [selectedPersonName]);
 
+  function logDashboardCallEvent(
+    callId: string,
+    eventType: string,
+    details: Record<string, unknown> = {}
+  ) {
+    if (!callId || !selectedMainConnectUserPersonId) return;
+    recordConnectCallLifecycleEvent({
+      actorRole: "dashboard",
+      callId,
+      connectAuthHeaders,
+      details,
+      eventType,
+      mainConnectUserPersonId: selectedMainConnectUserPersonId,
+    });
+  }
+
+  function startDashboardCallAudio(callId: string) {
+    if (!selectedMainConnectUserPersonId) {
+      setStatus(`${selectedPersonName} is not enabled for Connect calls yet.`);
+      return;
+    }
+
+    logDashboardCallEvent(callId, "call_dashboard_audio_start_requested", {
+      callMuted,
+      source: "startDashboardCallAudio",
+    });
+    stopLiveCallAudio();
+    activeCallIdRef.current = callId;
+    const controller = createConnectCallAudioController({
+      callId,
+      connectAuthHeaders,
+      mainConnectUserPersonId: selectedMainConnectUserPersonId,
+      onConnected: () => setStatus(`Connected with ${selectedPersonName}.`),
+      onError: (message) => setStatus(message),
+      onPeerEnded: () => {
+        logDashboardCallEvent(callId, "call_dashboard_peer_ended_received", {
+          source: "audio_controller_onPeerEnded",
+        });
+        setStatus(`${selectedPersonName} ended the call.`);
+        setRecipientCallState("ended");
+        stopCallCue();
+        liveCallAudioRef.current = null;
+        void reportDashboardCallState("hung_up");
+      },
+      onRemoteMutedChange: (muted) => {
+        setStatus(
+          muted
+            ? `${selectedPersonName}'s microphone is muted.`
+            : `${selectedPersonName}'s microphone is on.`
+        );
+      },
+      onTranscriptChunk: (chunkStatus, detail) => {
+        if (chunkStatus === "started") {
+          setCallTranscriptRuntimeStatus("capture_started");
+          setStatus("Connected. Preparing call notes in the background.");
+        }
+        if (chunkStatus === "completed") {
+          setCallTranscriptRuntimeStatus(detail ? `chunk_uploaded:${detail}` : "chunk_uploaded");
+        }
+        if (chunkStatus === "not_configured") {
+          setCallTranscriptRuntimeStatus("not_configured");
+        }
+        if (chunkStatus === "failed") {
+          setCallTranscriptRuntimeStatus(
+            detail ? `chunk_failed:${detail}` : "chunk_failed"
+          );
+          setStatus("Call is live. A transcript chunk could not be saved.");
+        }
+      },
+      onStatusChange: (nextStatus) => setCallAudioStatus(nextStatus),
+      role: "dashboard",
+      transcriptChunks: true,
+    });
+    controller.setMuted(callMuted);
+    liveCallAudioRef.current = controller;
+    void controller.start();
+  }
+
   async function startCall() {
     if (!selectedMainConnectUserPersonId) {
       setStatus(`${selectedPersonName} is not enabled for Connect calls yet.`);
@@ -957,9 +1100,13 @@ export function ConnectDashboard() {
     setActionPending("call");
     setStatus(`Calling ${selectedPersonName}...`);
     setRecipientCallState("ringing");
+    setCallTranscriptRuntimeStatus("");
     playCallRingback();
     try {
-      await fetchJson<{ ok?: boolean; call?: unknown }>(connectCallsEndpoint, {
+      const callResponse = await fetchJson<{
+        call?: { callId?: string };
+        ok?: boolean;
+      }>(connectCallsEndpoint, {
         body: JSON.stringify({
           callerName: "Andrew",
           mainConnectUserPersonId: selectedMainConnectUserPersonId,
@@ -973,15 +1120,117 @@ export function ConnectDashboard() {
         },
         method: "POST",
       } as RequestInit);
+      if (callResponse.call?.callId) {
+        logDashboardCallEvent(callResponse.call.callId, "call_dashboard_call_created", {
+          source: "startCall",
+        });
+        startDashboardCallAudio(callResponse.call.callId);
+      }
       setStatus(`Call sent to ${selectedPersonName}.`);
       await refresh();
     } catch (error) {
+      stopLiveCallAudio();
       playCallFailureSound();
       setRecipientCallState("waiting");
+      setCallTranscriptRuntimeStatus("");
       setStatus(error instanceof Error ? error.message : "Unable to start call.");
     } finally {
       setActionPending(null);
     }
+  }
+
+  function restartDashboardCallAudio() {
+    const callId = activeCallIdRef.current || state.callSummary?.latestCall?.callId;
+    if (!callId) {
+      setStatus("No active call was found to restart.");
+      return;
+    }
+    setCallTranscriptRuntimeStatus("");
+    setStatus("Restarting call audio.");
+    logDashboardCallEvent(callId, "call_dashboard_audio_restart_requested", {
+      callAudioStatus,
+      source: "restartDashboardCallAudio",
+    });
+    startDashboardCallAudio(callId);
+  }
+
+  async function reportDashboardCallState(
+    stateValue: string,
+    options: { callId?: string; refreshAfter?: boolean; source?: string } = {}
+  ) {
+    const callId = options.callId || activeCallIdRef.current || state.callSummary?.latestCall?.callId;
+    if (!callId || !selectedMainConnectUserPersonId) return;
+
+    try {
+      logDashboardCallEvent(callId, "call_dashboard_state_update_requested", {
+        source: options.source || "reportDashboardCallState",
+        state: stateValue,
+      });
+      await fetchJson<{ ok?: boolean }>(
+        `${connectCallsEndpoint}/${encodeURIComponent(callId)}/state`,
+        {
+          body: JSON.stringify({
+            mainConnectUserPersonId: selectedMainConnectUserPersonId,
+            source: "dashboard",
+            state: stateValue,
+          }),
+          headers: {
+            ...(await connectAuthHeaders()),
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        } as RequestInit
+      );
+      if (options.refreshAfter !== false) {
+        await refreshCallState();
+      }
+      if (
+        ["declined", "failed", "hung_up", "missed", "receiver_unavailable"].includes(
+          stateValue
+        )
+      ) {
+        stopLiveCallAudio();
+        activeCallIdRef.current = "";
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to update call.");
+    }
+  }
+
+  async function endDashboardCall() {
+    const callId = activeCallIdRef.current || state.callSummary?.latestCall?.callId;
+    if (!callId) {
+      stopCallCue();
+      stopLiveCallAudio();
+      setRecipientCallState("ended");
+      setStatus("Call ended.");
+      return;
+    }
+
+    logDashboardCallEvent(callId, "call_dashboard_hangup_clicked", {
+      callAudioStatus,
+      source: "endDashboardCall",
+    });
+    stopCallCue();
+    setRecipientCallState("ended");
+    setStatus("Ending call.");
+    stopLiveCallAudio();
+
+    await reportDashboardCallState("hung_up", {
+      callId,
+      refreshAfter: false,
+      source: "endDashboardCall",
+    });
+    activeCallIdRef.current = "";
+    await refreshCallState();
+    setStatus("Call ended.");
+  }
+
+  function toggleCallMuted() {
+    const nextMuted = !callMuted;
+    setCallMuted(nextMuted);
+    liveCallAudioRef.current?.setMuted(nextMuted);
+    setStatus(nextMuted ? "Your microphone is muted." : "Your microphone is on.");
   }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
@@ -1723,14 +1972,27 @@ export function ConnectDashboard() {
             ) : null}
 
           <RecipientCallPanel
+              callAudioStatus={callAudioStatus}
+              callMuted={callMuted}
+              onCallStateChange={(stateValue) => {
+                void reportDashboardCallState(stateValue);
+              }}
               onCallAnswered={stopCallCue}
               onCallEnded={stopCallCue}
               onCallFailed={playCallFailureSound}
+              onHangUpCall={() => {
+                void endDashboardCall();
+              }}
+              onRestartAudio={restartDashboardCallAudio}
+              onToggleMuted={toggleCallMuted}
               recipientCallState={recipientCallState}
               selectedPerson={selectedPerson}
               selectedPersonName={selectedPersonName}
               setRecipientCallState={setRecipientCallState}
               setStatus={setStatus}
+              transcriptRuntimeStatus={callTranscriptRuntimeStatus}
+              transcriptStatus={state.callSummary?.latestCall?.transcriptStatus || ""}
+              transcriptText={state.callSummary?.latestCall?.transcriptText || ""}
             />
 
         </section>
@@ -4106,23 +4368,41 @@ function ReceiverTroubleshootingView({
 }
 
 function RecipientCallPanel({
+  callAudioStatus,
+  callMuted,
+  onCallStateChange,
   onCallAnswered,
   onCallEnded,
   onCallFailed,
+  onHangUpCall,
+  onRestartAudio,
+  onToggleMuted,
   recipientCallState,
   selectedPerson,
   selectedPersonName,
   setRecipientCallState,
   setStatus,
+  transcriptRuntimeStatus,
+  transcriptStatus,
+  transcriptText,
 }: {
+  callAudioStatus: ConnectCallAudioStatus;
+  callMuted: boolean;
+  onCallStateChange: (state: string) => void;
   onCallAnswered: () => void;
   onCallEnded: () => void;
   onCallFailed: () => void;
+  onHangUpCall: () => void;
+  onRestartAudio: () => void;
+  onToggleMuted: () => void;
   recipientCallState: RecipientCallState;
   selectedPerson?: ConnectReceiverPerson;
   selectedPersonName: string;
   setRecipientCallState: (value: RecipientCallState) => void;
   setStatus: (value: string) => void;
+  transcriptRuntimeStatus: string;
+  transcriptStatus: string;
+  transcriptText: string;
 }) {
   const isRinging = recipientCallState === "ringing";
   const isConnected = recipientCallState === "connected";
@@ -4140,11 +4420,55 @@ function RecipientCallPanel({
     : isRinging
       ? "Andrew would like to talk now."
       : "A live conversation starts only if the recipient accepts.";
+  const audioLabel =
+    callAudioStatus === "remote_audio" || callAudioStatus === "connected"
+      ? "Live audio"
+      : callAudioStatus === "microphone_ready" || callAudioStatus === "connecting"
+        ? "Audio connecting"
+        : callAudioStatus === "interrupted"
+          ? "Audio interrupted"
+          : callAudioStatus === "starting"
+            ? "Starting audio"
+            : isConnected
+              ? "Waiting for audio"
+              : "Audio idle";
+  const audioDetail =
+    callAudioStatus === "remote_audio"
+      ? "Remote sound is arriving."
+      : callAudioStatus === "connected"
+        ? "Peer connection is live."
+        : callAudioStatus === "microphone_ready"
+          ? "Microphone is ready."
+          : callAudioStatus === "connecting"
+            ? "Linking both sides."
+            : callAudioStatus === "interrupted"
+              ? "Try hanging up and calling again."
+              : isConnected
+                ? "The call is connected; audio has not arrived yet."
+                : "Audio starts after the call is answered.";
+  const canRestartAudio =
+    isConnected && callAudioStatus !== "remote_audio" && callAudioStatus !== "connected";
+  const transcriptLabel = transcriptStatusLabel({
+    audioStatus: callAudioStatus,
+    callState: recipientCallState,
+    runtimeStatus: transcriptRuntimeStatus,
+    transcriptStatus,
+    transcriptText,
+  });
 
   function updateCall(value: RecipientCallState, message: string) {
     if (value === "connected") onCallAnswered();
-    if (value === "ended" || value === "declined") onCallEnded();
+    if (value === "ended") {
+      onHangUpCall();
+      setRecipientCallState(value);
+      setStatus(message);
+      return;
+    }
+    if (value === "declined") onCallEnded();
     if (value === "waiting") onCallFailed();
+    if (value === "connected") onCallStateChange("connected");
+    if (value === "declined") onCallStateChange("declined");
+    if (value === "waiting") onCallStateChange("receiver_unavailable");
     setRecipientCallState(value);
     setStatus(message);
   }
@@ -4206,6 +4530,51 @@ function RecipientCallPanel({
           <p className="mt-1 text-lg text-[#5f6e84]">{subline}</p>
         </div>
       </div>
+      <div className="mt-3 flex flex-col gap-2 rounded-lg border border-[#d6e3f2] bg-[#f8fbff] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black uppercase tracking-normal text-[#5f6e84]">
+            {audioLabel}
+          </p>
+          <p className="mt-1 text-sm font-semibold text-[#345d83]">
+            {callMuted ? "Your microphone is muted." : audioDetail}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {canRestartAudio ? (
+            <button
+              className="min-h-11 rounded-md bg-[#345d83] px-4 text-sm font-black text-white hover:bg-[#254a6d]"
+              onClick={onRestartAudio}
+              type="button"
+            >
+              Restart Audio
+            </button>
+          ) : null}
+          <button
+            className="min-h-11 rounded-md border border-[#d6e3f2] bg-white px-4 text-sm font-black text-[#345d83] hover:bg-[#edf5fc] disabled:opacity-45"
+            disabled={!isConnected}
+            onClick={onToggleMuted}
+            type="button"
+          >
+            {callMuted ? "Unmute" : "Mute"}
+          </button>
+        </div>
+      </div>
+      {isRinging || isConnected || transcriptText.trim() || transcriptLabel ? (
+        <div className="mt-3 rounded-lg border border-[#d6e3f2] bg-white p-4">
+          <p className="text-sm font-black uppercase tracking-normal text-[#5f6e84]">
+            Call transcript
+          </p>
+          {transcriptText.trim() ? (
+            <p className="mt-2 whitespace-pre-wrap text-base font-semibold leading-relaxed text-[#173150]">
+              {transcriptText}
+            </p>
+          ) : (
+            <p className="mt-2 text-base font-semibold leading-relaxed text-[#5f6e84]">
+              {transcriptLabel}
+            </p>
+          )}
+        </div>
+      ) : null}
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <button
           className="min-h-12 rounded-md bg-[#b6cfe8] px-4 text-base font-black text-white hover:bg-[#345d83] disabled:opacity-45"
@@ -4217,11 +4586,16 @@ function RecipientCallPanel({
         </button>
         <button
           className="min-h-12 rounded-md bg-[#a7adb6] px-4 text-base font-black text-white hover:bg-[#626b78] disabled:opacity-45"
-          disabled={!isConnected}
-          onClick={() => updateCall("ended", "The call ended.")}
+          disabled={!isConnected && !isRinging}
+          onClick={() =>
+            updateCall(
+              "ended",
+              isRinging ? "The call was canceled." : "The call ended."
+            )
+          }
           type="button"
         >
-          Hang Up
+          {isRinging ? "Cancel Call" : "Hang Up"}
         </button>
         <button
           className="min-h-12 rounded-md bg-[#f8eeee] px-4 text-base font-black text-[#a43f34] hover:bg-[#f3dfdc] disabled:opacity-45"
@@ -4241,6 +4615,56 @@ function RecipientCallPanel({
       </div>
     </section>
   );
+}
+
+function transcriptStatusLabel({
+  audioStatus,
+  callState,
+  runtimeStatus,
+  transcriptStatus,
+  transcriptText,
+}: {
+  audioStatus: ConnectCallAudioStatus;
+  callState: RecipientCallState;
+  runtimeStatus: string;
+  transcriptStatus: string;
+  transcriptText: string;
+}) {
+  if (transcriptText.trim()) return "";
+  if (transcriptStatus === "capturing") return "Transcript chunks are processing.";
+  if (transcriptStatus === "not_configured") return "Transcription is not configured in this environment.";
+  if (transcriptStatus === "failed") return "Transcription failed for this call.";
+  if (transcriptStatus === "deleted") return "Transcript was deleted after summary approval.";
+  if (runtimeStatus.startsWith("chunk_uploaded:")) {
+    const chunkMatch = runtimeStatus.match(/chunk:(\d+)/);
+    const assembledMatch = runtimeStatus.match(/assembled:(\d+)/);
+    const chunkLabel = chunkMatch ? `Chunk ${Number(chunkMatch[1]) + 1}` : "A transcript chunk";
+    const assembledLength = assembledMatch ? Number(assembledMatch[1]) : 0;
+    return assembledLength > 0
+      ? `${chunkLabel} uploaded and stitched into the temporary transcript.`
+      : `${chunkLabel} uploaded. Waiting for transcript text.`;
+  }
+  if (runtimeStatus === "chunk_uploaded") {
+    return "A transcript chunk was uploaded. Waiting for transcript text.";
+  }
+  if (runtimeStatus === "not_configured") {
+    return "Transcription is not configured in this environment.";
+  }
+  if (runtimeStatus.startsWith("chunk_failed:")) {
+    return runtimeStatus.replace(/^chunk_failed:/, "");
+  }
+  if (runtimeStatus === "chunk_failed") return "A transcript chunk could not be saved.";
+  if (runtimeStatus === "capture_started") {
+    return "Transcript capture started. First text usually appears after about 35-45 seconds.";
+  }
+  if (callState === "connected" && audioStatus === "remote_audio") {
+    return "Remote audio is arriving. Transcript capture should start now.";
+  }
+  if (callState === "connected") {
+    return "Waiting for remote audio before transcript capture starts.";
+  }
+  if (callState === "ringing") return "Transcript capture starts after the call is answered and remote audio arrives.";
+  return "";
 }
 
 function Metric({

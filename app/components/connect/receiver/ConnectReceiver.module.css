@@ -1,5 +1,6 @@
 .receiverPage,
-.activationScreen {
+.activationScreen,
+.registrationScreen {
   --button-highlight: rgba(255, 255, 255, 0.32);
   --button-shadow: rgba(50, 37, 22, 0.34);
   --selected-action-shadow: rgba(38, 102, 26, 0.28);
@@ -16,6 +17,20 @@
   display: grid;
   place-items: center;
   padding: 20px;
+}
+
+.registrationScreen {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px;
+  background: #050706;
+}
+
+.registrationScreen:focus-within {
+  justify-items: center;
+  align-items: start;
 }
 
 .activationPanel {
@@ -86,6 +101,131 @@
     0 8px 13px var(--button-shadow);
 }
 
+.registrationPanel {
+  display: grid;
+  gap: 18px;
+  width: min(860px, 100%);
+  border: 3px solid #dfe7df;
+  border-radius: 8px;
+  background: #f4f5f3;
+  padding: 32px;
+  text-align: center;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+}
+
+.registrationScreen:focus-within .registrationPanel {
+  margin-top: clamp(10px, 6vh, 80px);
+}
+
+.registrationPanel p,
+.registrationPanel span {
+  margin: 0;
+  color: #5d675f;
+  font-weight: 900;
+}
+
+.registrationPanel p {
+  text-transform: uppercase;
+}
+
+.registrationPanel h1 {
+  margin: 0;
+  font-size: clamp(2.35rem, 8vw, 4rem);
+  line-height: 1;
+}
+
+.registrationPanel input {
+  width: 100%;
+  min-height: 86px;
+  border: 4px solid #17231d;
+  border-radius: 8px;
+  background: white;
+  color: #17231d;
+  font: inherit;
+  font-size: clamp(2rem, 10vw, 4.5rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.registrationPanel input:focus {
+  outline: 5px solid #2f6fdd;
+  outline-offset: 4px;
+}
+
+.registrationPanel strong {
+  color: #9d1818;
+  font-size: 1.25rem;
+}
+
+.registrationPanel button {
+  min-height: 82px;
+  border: 3px solid #17440f;
+  border-radius: 8px;
+  background: #26661a;
+  color: white;
+  font: inherit;
+  font-size: 1.7rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  box-shadow:
+    inset 0 2px 0 var(--button-highlight),
+    0 5px 0 #17440f,
+    0 8px 13px var(--button-shadow);
+}
+
+@media (max-height: 720px) and (orientation: landscape) {
+  .registrationScreen:focus-within {
+    padding: 14px 24px;
+  }
+
+  .registrationScreen:focus-within .registrationPanel {
+    grid-template-columns: minmax(180px, 0.82fr) minmax(360px, 1.4fr) minmax(190px, 0.72fr);
+    align-items: center;
+    gap: 14px;
+    width: min(980px, 100%);
+    margin-top: 10px;
+    padding: 18px;
+    text-align: left;
+  }
+
+  .registrationScreen:focus-within .registrationPanel p {
+    grid-column: 1;
+    align-self: end;
+  }
+
+  .registrationScreen:focus-within .registrationPanel h1 {
+    grid-column: 1;
+    font-size: clamp(2rem, 6vh, 3rem);
+  }
+
+  .registrationScreen:focus-within .registrationPanel span {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: center;
+  }
+
+  .registrationScreen:focus-within .registrationPanel input {
+    grid-column: 2;
+    grid-row: 2;
+    min-height: 78px;
+    font-size: clamp(2.25rem, 10vh, 4rem);
+  }
+
+  .registrationScreen:focus-within .registrationPanel strong {
+    grid-column: 2;
+    grid-row: 3;
+    min-height: 1.4em;
+    text-align: center;
+  }
+
+  .registrationScreen:focus-within .registrationPanel button {
+    grid-column: 3;
+    grid-row: 1 / 4;
+    min-height: 118px;
+  }
+}
+
 .receiverPage {
   display: grid;
   justify-items: center;
@@ -125,6 +265,46 @@
   transform-origin: top left;
 }
 
+.deskPhoneMode .receiverShell {
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr);
+  grid-template-rows: 152px minmax(0, 1fr);
+  gap: 12px;
+  background: #dedfda;
+  padding: 12px;
+}
+
+.deskPhoneMode .statusZone {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-height: 0;
+}
+
+.deskPhoneMode .contactZone {
+  display: none;
+}
+
+.deskPhoneMode .actionZone {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  align-content: stretch;
+}
+
+.deskPhoneMode .workspaceZone {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.deskPhoneMode .callStatusZone {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}
+
+.deskPhoneMode .callStatusZone ~ .contactZone,
+.deskPhoneMode .callStatusZone ~ .actionZone,
+.deskPhoneMode .callStatusZone ~ .workspaceZone {
+  display: none;
+}
+
 .statusZone,
 .contactZone,
 .actionZone,
@@ -147,6 +327,30 @@
   min-height: 154px;
 }
 
+.deskPhoneMode .statusZone {
+  grid-template-columns: minmax(170px, 0.62fr) minmax(0, 1.36fr) minmax(250px, 0.82fr);
+  align-items: center;
+  gap: 12px;
+  border-color: transparent;
+  background: transparent;
+  padding: 6px 18px 10px;
+  position: relative;
+  box-shadow: none;
+}
+
+.callStatusZone {
+  display: block;
+  border-color: #111;
+  background: #050505;
+  padding: 0;
+}
+
+.callStatusZone .callPhonePanel {
+  min-height: 100%;
+  border: 0;
+  box-shadow: none;
+}
+
 .timeBlock,
 .greetingBlock {
   display: grid;
@@ -159,14 +363,84 @@
   line-height: 1;
 }
 
+.deskPhoneMode .timeBlock strong {
+  font-size: 3rem;
+}
+
+.deskPhoneMode .timeBlock {
+  align-content: center;
+  grid-column: 1;
+  z-index: 2;
+}
+
+.deskPhoneMode .dateControlRow span {
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.dateControlRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fullscreenTinyButton {
+  min-width: 52px;
+  min-height: 34px;
+  border: 2px solid #454b46;
+  border-radius: 6px;
+  background: #fffdf7;
+  color: #17231d;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    0 2px 0 rgba(42, 31, 21, 0.34);
+}
+
+.fullscreenTinyButton:active {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.2),
+    0 0 0 rgba(42, 31, 21, 0.34);
+}
+
 .greetingBlock {
   justify-items: end;
   text-align: right;
 }
 
+.deskPhoneMode .greetingBlock {
+  grid-column: 3;
+  z-index: 2;
+}
+
 .greetingBlock strong {
   font-size: clamp(1.42rem, 5cqw, 1.82rem);
   line-height: 1.05;
+}
+
+.deskPhoneMode .greetingBlock strong {
+  display: grid;
+  gap: 2px;
+  font-size: 2rem;
+  line-height: 1.02;
+}
+
+.deskPhoneMode .greetingLine,
+.deskPhoneMode .greetingName {
+  display: block;
+}
+
+.deskPhoneMode .greetingLine {
+  white-space: nowrap;
+}
+
+.deskPhoneMode .greetingName {
+  font-size: 1.08em;
 }
 
 .timeBlock span,
@@ -189,6 +463,68 @@
   display: block;
   font-size: clamp(1.45rem, 5cqw, 1.68rem);
   line-height: 1.08;
+}
+
+.deskPhoneMode .appointmentPanel strong {
+  font-size: 1.78rem;
+}
+
+.applianceAppointmentPanel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: min(470px, 42%);
+  min-height: 126px;
+  gap: 2px;
+  border: 3px solid #919892;
+  border-radius: 8px;
+  background: #f8f8f2;
+  color: #17231d;
+  cursor: pointer;
+  font: inherit;
+  padding: 12px 18px;
+  text-align: center;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 2px 5px rgba(30, 36, 34, 0.12);
+  z-index: 1;
+}
+
+.applianceAppointmentPanel:focus-visible {
+  outline: 5px solid #2f6fdd;
+  outline-offset: 4px;
+}
+
+.applianceAppointmentPanel:active {
+  transform: translate(-50%, calc(-50% + 2px));
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.12),
+    0 0 0 rgba(30, 36, 34, 0.12);
+}
+
+.applianceAppointmentPanel span {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin-inline: auto;
+  font-size: 1.7rem;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.applianceAppointmentPanel strong {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin-inline: auto;
+  font-size: 2.2rem;
+  line-height: 1.04;
+  text-align: center;
 }
 
 .appointmentPanel div:last-child {
@@ -328,6 +664,19 @@
   font-size: clamp(1.62rem, 7cqw, 2.08rem);
 }
 
+.deskPhoneMode .primaryAction {
+  min-height: clamp(146px, 26dvh, 180px);
+  border-width: 4px;
+  font-size: 2.12rem;
+  text-transform: none;
+}
+
+.deskPhoneMode .receiverHomeAction {
+  width: 100%;
+  height: auto;
+  align-self: center;
+}
+
 .secondaryActions,
 .receiverActionRow {
   display: grid;
@@ -335,11 +684,96 @@
   gap: 12px;
 }
 
+.deskPhoneMode .receiverActionRow {
+  grid-template-columns: minmax(0, 1fr) 74px 74px;
+  gap: 10px;
+}
+
 .secondaryAction {
   min-height: 78px;
   border-color: #454b46;
   background: #5f665f;
   font-size: clamp(1.2rem, 5cqw, 1.54rem);
+}
+
+.deskPhoneMode .secondaryAction {
+  min-height: clamp(146px, 26dvh, 180px);
+  border-width: 4px;
+  font-size: 1.95rem;
+}
+
+.soundEnableAction {
+  border-color: #1c4163;
+  background: #2d5c87;
+}
+
+.fullscreenAction {
+  border-color: #454b46;
+  background: #5f665f;
+}
+
+.deskPhoneUtilityRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.deskPhoneMode .actionZone {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 28px;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  padding: 18px 22px 24px;
+  box-shadow: none;
+}
+
+.deskPhoneMode .workspaceZone {
+  align-content: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 18px;
+  border-color: #919892;
+  background: #f3f4ef;
+  padding: 16px;
+}
+
+.messagesHomeAction {
+  border-color: #1c4163;
+  background: #2d5c87;
+}
+
+.deskPhoneMode .messagesHomeAction {
+  min-height: clamp(146px, 26dvh, 180px);
+}
+
+.receiverStatusCard {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  min-height: 0;
+  border: 4px solid #919892;
+  border-radius: 8px;
+  background: #fffdf7;
+  padding: 22px;
+  text-align: center;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.78),
+    0 5px 0 rgba(42, 31, 21, 0.28),
+    0 8px 13px rgba(50, 37, 22, 0.18);
+}
+
+.receiverStatusCard span {
+  color: #4f5751;
+  font-size: 2rem;
+  font-weight: 950;
+}
+
+.receiverStatusCard strong {
+  color: #17231d;
+  font-size: 2.5rem;
+  line-height: 1.04;
 }
 
 .green {
@@ -369,6 +803,10 @@
     inset 0 2px 0 var(--button-highlight),
     0 5px 0 rgba(42, 31, 21, 0.42),
     0 8px 13px var(--button-shadow);
+}
+
+.deskPhoneMode .iconAction {
+  min-height: 66px;
 }
 
 .recordAction {
@@ -458,6 +896,15 @@
   align-items: center;
 }
 
+.deskPhoneMode .workspaceNav {
+  grid-template-columns: minmax(0, 1fr) minmax(96px, 0.55fr);
+}
+
+.deskPhoneMode .workspaceNavSpacer,
+.deskPhoneMode .workspaceNav .messageAction:not(.workspaceShowAllButton) {
+  display: none;
+}
+
 .workspaceNavTitleOnly {
   grid-template-columns: 1fr;
 }
@@ -498,6 +945,10 @@
   padding: 0 16px;
 }
 
+.deskPhoneMode .messageCard strong {
+  font-size: 1.55rem;
+}
+
 .messageCard p {
   display: -webkit-box;
   margin: 0;
@@ -509,6 +960,10 @@
   white-space: pre-wrap;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.deskPhoneMode .messageCard p {
+  font-size: 1.45rem;
 }
 
 .messageAction {
@@ -1356,6 +1811,11 @@
   font-size: clamp(1.5rem, 4vw, 2.4rem);
 }
 
+.appointmentDoneAction {
+  min-height: clamp(86px, 14dvh, 128px);
+  font-size: clamp(2rem, 4.6vw, 3rem);
+}
+
 .universalAskActions {
   display: grid;
   gap: 14px;
@@ -1445,9 +1905,600 @@
   line-height: 1.12;
 }
 
+.applianceFullscreenModal {
+  padding: 0;
+  background: #eef0eb;
+  place-items: stretch;
+}
+
+.applianceListPanel {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  padding: clamp(14px, 2.8dvh, 22px) clamp(18px, 2.4vw, 28px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: clamp(10px, 2dvh, 16px);
+  overflow: hidden;
+}
+
+.applianceListToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr) minmax(126px, 154px);
+  gap: 10px;
+  align-items: center;
+}
+
+.applianceListToolbar h2 {
+  margin: 0;
+  color: #17231d;
+  font-size: clamp(2rem, 4.5vw, 3.25rem);
+  font-weight: 800;
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.applianceReaderSizeRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(8px, 1.5vw, 14px);
+}
+
+.applianceReaderSizeRow .readerSizeButton,
+.applianceListToolbar .modalButton {
+  min-height: clamp(56px, 11dvh, 74px);
+  padding: 8px;
+  font-size: clamp(0.95rem, 2vw, 1.35rem);
+  line-height: 1;
+}
+
+.applianceListToolbar > .modalButton {
+  grid-column: 3;
+}
+
+.applianceReaderSizeRow .readerSizeButtonSelected {
+  border-width: 4px;
+}
+
+.applianceMessageList {
+  align-content: start;
+  padding: 4px 0;
+}
+
+.applianceEmptyText {
+  margin: 0;
+  align-self: start;
+  color: #17231d;
+  font-size: clamp(1.95rem, 4.2vw, 3.15rem);
+  font-weight: 950;
+  line-height: 1.08;
+}
+
+.appliancePageControls {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto minmax(150px, 1fr);
+  gap: clamp(10px, 2vw, 16px);
+  align-items: center;
+}
+
+.appliancePageControls .modalButton {
+  min-height: clamp(58px, 11dvh, 74px);
+  padding: 8px 10px;
+  font-size: clamp(1.6rem, 3.2vw, 2.2rem);
+  line-height: 1;
+}
+
+.appliancePageControls span {
+  color: #5d675f;
+  font-size: clamp(1.25rem, 2.6vw, 1.75rem);
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.applianceAppointmentList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(92px, auto);
+  align-content: start;
+  gap: clamp(10px, 2dvh, 16px);
+  overflow: hidden;
+  padding: 4px 0;
+}
+
+.applianceAppointmentList .appointmentChoice {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  min-height: 92px;
+  padding: clamp(14px, 2.2dvh, 22px) 18px;
+  font-size: clamp(1.35rem, 3.2vw, 2.25rem);
+}
+
+.applianceAppointmentList .appointmentChoice span {
+  display: block;
+  color: #5d675f;
+  font-size: clamp(1.02rem, 2.2vw, 1.45rem);
+  font-weight: 900;
+  line-height: 1.08;
+}
+
+.applianceAppointmentDetailPanel {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  padding: clamp(14px, 2.8dvh, 22px) clamp(18px, 2.4vw, 28px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: clamp(12px, 2.2dvh, 18px);
+  overflow: hidden;
+}
+
+.applianceAppointmentDetailPanel .applianceListToolbar {
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+}
+
+.applianceAppointmentDetailPanel .applianceListToolbar > .modalButton {
+  grid-column: 2;
+}
+
+.applianceAppointmentDetail {
+  align-content: center;
+  gap: clamp(12px, 2.2dvh, 18px);
+  min-height: 0;
+  overflow: hidden;
+  padding: clamp(18px, 3dvh, 30px) clamp(20px, 3vw, 36px);
+}
+
+.applianceAppointmentDetail h3 {
+  font-size: clamp(2.45rem, 5.2vw, 3.8rem);
+}
+
+.applianceAppointmentDetail p {
+  font-size: clamp(1.55rem, 3vw, 2.15rem);
+}
+
+.applianceAppointmentDetail .appointmentTime {
+  font-size: clamp(2rem, 4.2vw, 3rem);
+}
+
+.applianceAppointmentActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(12px, 2vw, 18px);
+}
+
+.applianceAppointmentActions .modalButton {
+  min-height: clamp(64px, 12dvh, 82px);
+  font-size: clamp(1.45rem, 2.8vw, 2rem);
+}
+
+.applianceAppointmentActions .modalButton:only-child {
+  grid-column: 1 / -1;
+}
+
+.applianceAskPanel {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  padding: clamp(14px, 2.4dvh, 22px) clamp(18px, 2.5vw, 28px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto auto minmax(116px, 1fr) auto auto;
+  gap: clamp(9px, 1.8dvh, 14px) clamp(12px, 2vw, 18px);
+  overflow: hidden;
+}
+
+.applianceAskTitleRow,
+.applianceAskPrompt,
+.applianceAskInput,
+.applianceRequestExamples {
+  grid-column: 1 / -1;
+}
+
+.applianceAskTitleRow {
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 260px);
+  align-items: center;
+}
+
+.applianceAskTitleRow h2 {
+  font-size: clamp(2.25rem, 4.4vw, 3.2rem);
+  line-height: 0.98;
+}
+
+.applianceAskTitleRow .modalButton {
+  min-height: clamp(54px, 10dvh, 72px);
+  font-size: clamp(1.15rem, 2.2vw, 1.55rem);
+}
+
+.applianceAskPrompt {
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  line-height: 1;
+}
+
+.applianceAskInput {
+  min-height: 116px;
+  max-height: none;
+  padding: clamp(14px, 2dvh, 20px) clamp(16px, 2.2vw, 24px);
+  font-size: clamp(1.75rem, 3.4vw, 2.35rem);
+  line-height: 1.12;
+  resize: none;
+}
+
+.applianceRequestExamples {
+  gap: clamp(9px, 1.7dvh, 12px) clamp(12px, 2vw, 18px);
+}
+
+.applianceRequestExamples .requestExample {
+  min-height: clamp(58px, 10.5dvh, 72px);
+  font-size: clamp(1.2rem, 2.4vw, 1.65rem);
+  line-height: 1.05;
+}
+
+.applianceAskPanel .recordRequestButton,
+.applianceAskPanel .askSubmitButton {
+  min-height: clamp(58px, 10.5dvh, 74px);
+  padding: 8px 12px;
+  font-size: clamp(1.25rem, 2.5vw, 1.8rem);
+  line-height: 1;
+}
+
+.applianceAskPanel .recordRequestButton {
+  grid-column: 1;
+}
+
+.applianceAskPanel .askSubmitButton {
+  grid-column: 2;
+}
+
 .incomingCallModal {
   border-color: #17440f;
   background: #fbfcfa;
+}
+
+.incomingCallPrompt {
+  width: min(760px, calc(100% - 36px));
+  gap: 18px;
+  border-color: #17440f;
+  background: #fbfcfa;
+  text-align: center;
+}
+
+.deskPhoneMode .modal {
+  padding: 10px;
+}
+
+.deskPhoneMode .incomingCallPrompt {
+  width: min(980px, calc(100% - 20px));
+  max-height: calc(100% - 20px);
+  align-content: center;
+  gap: 14px;
+  border-width: 5px;
+  padding: 18px;
+}
+
+.incomingCallPrompt h2 {
+  margin: 4px 0 0;
+  color: #17231d;
+  font-size: 3.25rem;
+  line-height: 1.02;
+  overflow-wrap: anywhere;
+}
+
+.deskPhoneMode .incomingCallPrompt h2 {
+  font-size: clamp(3.5rem, 8vw, 5.4rem);
+}
+
+.incomingCallEyebrow {
+  margin: 0;
+  color: #5d675f;
+  font-size: 1.55rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.deskPhoneMode .incomingCallEyebrow {
+  font-size: 1.8rem;
+}
+
+.answerCallButton {
+  min-height: clamp(128px, 22dvh, 190px);
+  border-width: 5px;
+  font-size: 4.5rem;
+}
+
+.deskPhoneMode .answerCallButton {
+  min-height: 185px;
+  font-size: clamp(5rem, 11vw, 7rem);
+}
+
+.notNowCallButton {
+  justify-self: center;
+  width: min(320px, 100%);
+  min-height: clamp(58px, 8dvh, 82px);
+  font-size: 1.4rem;
+}
+
+.deskPhoneMode .notNowCallButton {
+  width: min(430px, 100%);
+  min-height: 78px;
+  font-size: 2rem;
+}
+
+@media (max-width: 640px) {
+  .incomingCallPrompt h2 {
+    font-size: 2.45rem;
+  }
+
+  .incomingCallEyebrow {
+    font-size: 1.25rem;
+  }
+
+  .answerCallButton {
+    font-size: 3.4rem;
+  }
+
+  .notNowCallButton {
+    font-size: 1.2rem;
+  }
+
+  .callPhoneTopRow h2 {
+    font-size: 2rem;
+  }
+
+  .callPhoneClock strong,
+  .callDuration {
+    font-size: 1.05rem;
+  }
+
+  .callPhoneClock span {
+    font-size: 0.9rem;
+  }
+
+  .callPhoneStatus,
+  .callControlButton {
+    font-size: 1.1rem;
+  }
+
+  .mutedNotice,
+  .summaryClarificationNotice {
+    font-size: 1.3rem;
+  }
+
+  .callTextToolbar h3 {
+    font-size: 1.9rem;
+  }
+
+  .incomingCallPanel h2 {
+    font-size: 2.85rem;
+  }
+
+  .incomingCallPanel span {
+    font-size: 1.45rem;
+  }
+}
+
+.callPhonePanel {
+  display: grid;
+  gap: 18px;
+  border: 4px solid #111;
+  border-radius: 8px;
+  background: #050505;
+  color: white;
+  padding: 18px;
+}
+
+.deskPhoneMode .callPhonePanel {
+  min-height: 100%;
+  align-content: center;
+  gap: 20px;
+  padding: 22px;
+}
+
+.callPhoneTopRow {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.8fr) minmax(0, 2.2fr) minmax(74px, 0.7fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.callPhoneTopRow h2 {
+  margin: 0;
+  text-align: center;
+  font-size: 2.6rem;
+  line-height: 1.02;
+  overflow-wrap: anywhere;
+}
+
+.deskPhoneMode .callPhoneTopRow h2 {
+  font-size: clamp(3.4rem, 7vw, 5.2rem);
+}
+
+.callPhoneClock,
+.callDuration {
+  display: grid;
+  gap: 2px;
+  min-height: 58px;
+  align-content: start;
+  font-weight: 950;
+}
+
+.callPhoneClock strong,
+.callDuration {
+  font-size: 1.25rem;
+}
+
+.callPhoneClock span {
+  font-size: 1rem;
+  color: #d4d7dd;
+}
+
+.callDuration {
+  justify-content: end;
+  text-align: right;
+}
+
+.callPhoneStatus {
+  min-height: 34px;
+  text-align: center;
+  color: #d4d7dd;
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.deskPhoneMode .callPhoneStatus {
+  min-height: 42px;
+  font-size: 2rem;
+}
+
+.mutedNotice {
+  color: #ff4b4b;
+  font-size: 1.6rem;
+  font-weight: 950;
+  text-align: center;
+  animation: mutedBlink 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes mutedBlink {
+  from {
+    opacity: 0.28;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.callPhoneActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.callPhoneActions.applianceCallActions {
+  grid-template-columns: minmax(240px, 0.58fr);
+  justify-content: center;
+}
+
+.deskPhoneMode .callPhoneActions,
+.deskPhoneMode .incomingCallActions {
+  gap: 18px;
+}
+
+.callControlButton {
+  min-height: 74px;
+  border: 3px solid #f4f5f3;
+  border-radius: 8px;
+  background: #1b1f25;
+  color: white;
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.deskPhoneMode .callControlButton {
+  min-height: 118px;
+  font-size: 2.05rem;
+}
+
+.deskPhoneMode .applianceCallActions .callControlButton {
+  min-height: 150px;
+  font-size: 2.65rem;
+}
+
+.callControlButton span {
+  display: block;
+  font-size: 0.82em;
+  color: #c6ccd4;
+}
+
+.callControlActive {
+  border-color: #ff4b4b;
+  background: #f7e9e9;
+  color: #8a1515;
+}
+
+.callControlActive span {
+  color: #8a1515;
+}
+
+.callEndButton {
+  border-color: #ff4b4b;
+  background: #a71f1f;
+}
+
+.endedCallActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  justify-items: center;
+  width: min(620px, 100%);
+}
+
+.endedCallActions .modalButton {
+  width: 100%;
+}
+
+.callTextView {
+  display: grid;
+  gap: 18px;
+  min-height: 430px;
+  border: 4px solid #17440f;
+  border-radius: 8px;
+  background: #fdfbf4;
+  padding: 18px;
+}
+
+.callTextToolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.callTextToolbar span {
+  color: #5d675f;
+  font-size: 1rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.callTextToolbar h3 {
+  margin: 0;
+  font-size: 2.35rem;
+  line-height: 1;
+}
+
+.callTextToolbarActions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.callSummaryActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.summaryClarificationNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  border: 3px solid #d8c48b;
+  border-radius: 8px;
+  background: #fff9e8;
+  padding: 14px;
+  color: #5a4b1e;
+  font-size: 1.55rem;
+  font-weight: 900;
+  line-height: 1.15;
 }
 
 .incomingCallPanel {
@@ -1473,13 +2524,13 @@
 
 .incomingCallPanel h2 {
   margin: 0;
-  font-size: clamp(3rem, 14vw, 4.25rem);
+  font-size: 3.6rem;
   line-height: 0.98;
   overflow-wrap: anywhere;
 }
 
 .incomingCallPanel span {
-  font-size: clamp(1.55rem, 7vw, 2rem);
+  font-size: 1.85rem;
   font-weight: 900;
   line-height: 1.12;
 }
@@ -1504,5 +2555,11 @@
 .incomingCallActions {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.connectedCallActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
 }
