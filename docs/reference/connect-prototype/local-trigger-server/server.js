@@ -153,6 +153,55 @@ const connectThemeFields = Object.freeze([
   "borderColor",
 ]);
 
+const setupCodeWords = Object.freeze({
+  adjectives: [
+    "brave",
+    "calm",
+    "clear",
+    "cozy",
+    "eager",
+    "gentle",
+    "happy",
+    "kind",
+    "lucky",
+    "merry",
+    "quick",
+    "ready",
+    "sunny",
+    "tidy",
+    "warm",
+    "wise",
+  ],
+  nouns: [
+    "anchor",
+    "bridge",
+    "garden",
+    "harbor",
+    "lantern",
+    "maple",
+    "meadow",
+    "porch",
+    "river",
+    "signal",
+    "table",
+    "window",
+  ],
+  closers: [
+    "apron",
+    "basket",
+    "button",
+    "chair",
+    "clock",
+    "drawer",
+    "kettle",
+    "pillow",
+    "radio",
+    "shelf",
+    "teacup",
+    "ticket",
+  ],
+});
+
 ensureAudioStorage(uploadsDir);
 
 function receiverEvents(receiverId) {
@@ -1251,12 +1300,45 @@ function createLocalToken(prefix) {
 }
 
 function createSetupCode() {
-  return crypto.randomBytes(3).toString("hex").toUpperCase().replace(/(.{3})/, "$1-");
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const code = [
+      randomSetupWord(setupCodeWords.adjectives),
+      randomSetupWord(setupCodeWords.nouns),
+      randomSetupWord(setupCodeWords.closers),
+    ].join("-");
+    const codeAlreadyActive = [...receiverSetupTokens.values()]
+      .map(expireSetupTokenIfNeeded)
+      .some(token => token.status === "active" && normalizeSetupCode(token.setupCode) === code);
+
+    if (!codeAlreadyActive) {
+      return code;
+    }
+  }
+
+  return `ready-${crypto.randomBytes(2).toString("hex")}`;
+}
+
+function randomSetupWord(words) {
+  return words[crypto.randomInt(0, words.length)];
 }
 
 function normalizeSetupCode(value) {
-  const cleaned = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
-  return cleaned.length > 3 ? `${cleaned.slice(0, 3)}-${cleaned.slice(3)}` : cleaned;
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw.includes("-")) {
+    return raw
+      .replace(/[^a-z0-9-]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 80);
+  }
+
+  const compact = raw.replace(/[^a-z0-9]/g, "");
+  if (/^[a-f0-9]{4,}$/i.test(compact)) {
+    const legacy = compact.toUpperCase().slice(0, 6);
+    return legacy.length > 3 ? `${legacy.slice(0, 3)}-${legacy.slice(3)}` : legacy;
+  }
+
+  return compact.slice(0, 80);
 }
 
 function addProvisioningAuditEvent(type, payload = {}) {
@@ -1846,7 +1928,7 @@ function exchangeReceiverSetupCode(setupCode) {
   const normalizedSetupCode = normalizeSetupCode(setupCode);
   const setupToken = [...receiverSetupTokens.values()]
     .map(expireSetupTokenIfNeeded)
-    .find(token => token.setupCode === normalizedSetupCode && token.status === "active");
+    .find(token => normalizeSetupCode(token.setupCode) === normalizedSetupCode && token.status === "active");
   if (!setupToken) {
     return { ok: false, status: 410, error: "Setup code is expired, revoked, or already used." };
   }

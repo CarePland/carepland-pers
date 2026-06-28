@@ -7,12 +7,17 @@ API_DIR="$REFERENCE_DIR/local-trigger-server"
 LOG_DIR="$ROOT_DIR/.logs/connect-local"
 
 NEXT_PORT="${NEXT_PORT:-3000}"
+CONNECT_HTTPS_PORT="${CONNECT_HTTPS_PORT:-3001}"
 CONNECT_API_PORT="${CONNECT_API_PORT:-8790}"
 CONNECT_STATIC_PORT="${CONNECT_STATIC_PORT:-4174}"
+WITH_HTTPS="${WITH_HTTPS:-1}"
 WITH_STATIC="${WITH_STATIC:-1}"
 
 for arg in "$@"; do
   case "$arg" in
+    --no-https)
+      WITH_HTTPS=0
+      ;;
     --no-static)
       WITH_STATIC=0
       ;;
@@ -22,15 +27,17 @@ Restart CarePland Connect local development servers.
 
 Default:
   - CarePland Next app on port $NEXT_PORT
+  - CarePland HTTPS bridge on port $CONNECT_HTTPS_PORT
   - Connect prototype API/local-trigger server on port $CONNECT_API_PORT
   - Connect static reference UI on port $CONNECT_STATIC_PORT
 
 Usage:
   scripts/restart-connect-local.sh
+  scripts/restart-connect-local.sh --no-https
   scripts/restart-connect-local.sh --no-static
 
 Environment overrides:
-  NEXT_PORT=3000 CONNECT_API_PORT=8790 CONNECT_STATIC_PORT=4174 WITH_STATIC=1
+  NEXT_PORT=3000 CONNECT_HTTPS_PORT=3001 CONNECT_API_PORT=8790 CONNECT_STATIC_PORT=4174 WITH_HTTPS=1 WITH_STATIC=1
 HELP
       exit 0
       ;;
@@ -83,6 +90,26 @@ start_next_app() {
   )
 }
 
+start_https_bridge() {
+  if [[ "$WITH_HTTPS" -ne 1 ]]; then
+    return
+  fi
+  if port_is_busy "$CONNECT_HTTPS_PORT"; then
+    echo "CarePland HTTPS bridge is already listening on port $CONNECT_HTTPS_PORT; leaving it in place."
+    return
+  fi
+
+  echo "Starting CarePland HTTPS bridge on https://localhost:$CONNECT_HTTPS_PORT"
+  (
+    cd "$ROOT_DIR"
+    nohup env \
+      CONNECT_HTTPS_PORT="$CONNECT_HTTPS_PORT" \
+      CONNECT_HTTPS_TARGET_PORT="$NEXT_PORT" \
+      npm run dev:connect-https > "$LOG_DIR/connect-https.log" 2>&1 &
+    echo $! > "$LOG_DIR/connect-https.pid"
+  )
+}
+
 start_connect_api() {
   if port_is_busy "$CONNECT_API_PORT"; then
     echo "Connect API is already listening on port $CONNECT_API_PORT; leaving it in place."
@@ -123,12 +150,16 @@ start_static_reference() {
 }
 
 stop_port "$NEXT_PORT" "CarePland Next app"
+if [[ "$WITH_HTTPS" -eq 1 ]]; then
+  stop_port "$CONNECT_HTTPS_PORT" "CarePland HTTPS bridge"
+fi
 stop_port "$CONNECT_API_PORT" "Connect API"
 if [[ "$WITH_STATIC" -eq 1 ]]; then
   stop_port "$CONNECT_STATIC_PORT" "Connect static reference UI"
 fi
 
 start_next_app
+start_https_bridge
 start_connect_api
 start_static_reference
 
@@ -138,6 +169,10 @@ echo
 echo "Restart complete."
 echo "CarePland Connect:       http://localhost:$NEXT_PORT/connect"
 echo "CarePland Receiver:      http://localhost:$NEXT_PORT/connect/receiver"
+if [[ "$WITH_HTTPS" -eq 1 ]]; then
+  echo "Connect HTTPS bridge:    https://localhost:$CONNECT_HTTPS_PORT/connect"
+  echo "HTTPS Receiver:          https://localhost:$CONNECT_HTTPS_PORT/connect/receiver"
+fi
 echo "Connect API:             http://localhost:$CONNECT_API_PORT"
 if [[ "$WITH_STATIC" -eq 1 ]]; then
   echo "Static reference UI:     http://localhost:$CONNECT_STATIC_PORT/index.html"
