@@ -2630,12 +2630,12 @@ function openOptionalSoundsPanel() {
       <h2>Optional Sounds</h2>
       <button class="modal-button secondary title-back" type="button" data-action="close">Go Back</button>
     </div>
-    <p>These sounds are helpful feedback, but Connect can still work without them.</p>
+    <p>These sounds give helpful feedback but are not required.</p>
     ${toggleRow("Retro Sounds", "retroSounds")}
     ${toggleRow("Retro Ringers", "retroRingers")}
     ${toggleRow("Button Beeps", "buttonBeeps")}
     ${showVolumeControls ? volumeRow() : ""}
-    <button class="modal-button gold" type="button" data-action="optional-sounds-help" data-no-beep="true">Fix Optional Sounds</button>
+    <button class="modal-button gold" type="button" data-action="optional-sounds-help" data-no-beep="true">Fix Sounds</button>
   `);
   modalPanel.querySelectorAll("[data-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2677,14 +2677,14 @@ function openOptionalSoundsPanel() {
 function openOptionalSoundsHelpPanel() {
   openModal(`
     <div class="modal-title-row">
-      <h2>Optional Sounds Help</h2>
+      <h2>Test Sounds</h2>
+      <button class="modal-button blue" type="button" data-action="test-now" data-no-beep="true">Run Test</button>
       <button class="modal-button secondary title-back" type="button" data-action="settings">Go Back</button>
     </div>
     ${soundStatePanel()}
-    <button class="modal-button blue" type="button" data-action="test-now" data-no-beep="true">Test Optional Sounds</button>
     ${soundDiagnosticPanel()}
     <div class="sound-help sound-help-note">
-      <p>Optional sounds include button beeps, retro ringers, and retro sound effects.</p>
+      <p>Button beeps and retro sounds are optional.</p>
       <p>Speech reminders may still work even if optional sounds are quiet or blocked.</p>
       <p>Use the device volume buttons while this screen is open.</p>
       <p>Check the current audio output if this device supports it.</p>

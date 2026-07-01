@@ -5,9 +5,14 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
-import { recordLocalConnectCallTranscriptSegment } from "@/app/lib/connect/calls/server/localCalls";
+import { generateConnectCallCareSummary } from "@/app/lib/connect/calls/server/callSummaryGeneration";
+import {
+  recordLocalConnectCallTranscriptSegment,
+  updateLocalConnectCallSummary,
+} from "@/app/lib/connect/calls/server/localCalls";
 import {
   recordSupabaseConnectCallEvent,
+  recordSupabaseConnectCallGeneratedSummary,
   recordSupabaseConnectCallTranscriptSegment,
 } from "@/app/lib/connect/calls/server/supabaseCallStore";
 import { normalizeConnectCallTranscriptChunk } from "@/app/lib/connect/calls/transcriptChunking";
@@ -117,11 +122,20 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
+    const refreshedSummary = await refreshTerminalCallSummaryFromTranscript({
+      access,
+      callId,
+      personId,
+      source: payload.source || "connect_call_transcript_chunk",
+      stored,
+    });
+
     return NextResponse.json({
       assembledTranscriptText: stored.assembledTranscriptText,
       chunk,
       ok: true,
       segment: stored.segment,
+      summaryStatus: refreshedSummary?.summaryStatus,
       transcriptStatus: transcription.status,
     });
   } catch (error) {
@@ -141,3 +155,72 @@ export async function POST(request: Request, context: RouteContext) {
     }
   }
 }
+
+async function refreshTerminalCallSummaryFromTranscript({
+  access,
+  callId,
+  personId,
+  source,
+  stored,
+}: {
+  access: Awaited<ReturnType<typeof readConnectCallPersonAccessForRequest>>;
+  callId: string;
+  personId: string;
+  source: string;
+  stored: {
+    assembledTranscriptText?: string;
+    call?: {
+      state?: string;
+      summaryStatus?: string;
+      transcriptText?: string;
+    };
+  };
+}) {
+  const call = stored.call;
+  const transcriptText = String(
+    stored.assembledTranscriptText || call?.transcriptText || ""
+  ).trim();
+
+  if (!call || !transcriptText) return null;
+  if (!terminalCallStates.has(String(call.state || ""))) return null;
+  if (String(call.summaryStatus || "") === "approved") return null;
+
+  const generatedSummary = await generateConnectCallCareSummary({ transcriptText });
+  const summaryCall =
+    (await recordSupabaseConnectCallGeneratedSummary(
+      callId,
+      {
+        summaryStatus: generatedSummary.summaryStatus,
+        summaryText: generatedSummary.summaryText,
+      },
+      access
+    )) ??
+    (await updateLocalConnectCallSummary(callId, {
+      mainConnectUserPersonId: personId,
+      summaryStatus: generatedSummary.summaryStatus,
+      summaryText: generatedSummary.summaryText,
+    }));
+
+  void recordSupabaseConnectCallEvent(
+    {
+      actorRole: "system",
+      callId,
+      details: {
+        source,
+        summaryStatus: generatedSummary.summaryStatus,
+      },
+      eventType: "call_summary_refreshed_after_transcript_chunk",
+    },
+    access
+  );
+
+  return summaryCall ?? generatedSummary;
+}
+
+const terminalCallStates = new Set([
+  "declined",
+  "failed",
+  "hung_up",
+  "missed",
+  "receiver_unavailable",
+]);

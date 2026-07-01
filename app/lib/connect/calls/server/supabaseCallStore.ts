@@ -21,6 +21,7 @@ type ConnectCallAccess = {
 };
 
 type ConnectCallRow = {
+  approved_summary_text?: string | null;
   connected_at?: string | null;
   ended_at?: string | null;
   id: string;
@@ -222,10 +223,60 @@ export async function recordSupabaseConnectCallEvent(
 
 export async function approveSupabaseConnectCallSummary(
   callId: string,
-  access: ConnectCallAccess
+  access: ConnectCallAccess,
+  input: {
+    approvedBy?: string;
+    approvedSummaryText?: string;
+  } = {}
 ) {
   return trySupabaseCallStore(async (supabase) => {
     const now = new Date().toISOString();
+    const approvedSummaryText = input.approvedSummaryText?.trim() || "";
+    if (approvedSummaryText) {
+      const { error: summaryError } = await supabase.from("connect_call_summaries").insert({
+        approved_at: now,
+        approved_by_role: normalizeActorRole(input.approvedBy || "receiver"),
+        call_id: callId,
+        care_circle_id: access.careCircleId,
+        generated_at: now,
+        main_connect_user_person_id: access.mainConnectUserPersonId,
+        model: "",
+        prompt_version: "receiver_approved_edit",
+        summary_policy: "care_record_only_when_uncertain_omit",
+        summary_status: "approved",
+        summary_text: approvedSummaryText,
+        updated_at: now,
+      });
+
+      if (summaryError) throw summaryError;
+    }
+
+    const cleanupCall = await cleanupSupabaseApprovedCallTranscript(callId, access, now);
+    return cleanupCall
+      ? {
+          ...cleanupCall,
+          approvedSummaryText: approvedSummaryText || undefined,
+          summaryText: approvedSummaryText || undefined,
+        }
+      : null;
+  }, access);
+}
+
+export async function retrySupabaseApprovedCallTranscriptCleanup(
+  callId: string,
+  access: ConnectCallAccess
+) {
+  return trySupabaseCallStore(async () => {
+    return cleanupSupabaseApprovedCallTranscript(callId, access, new Date().toISOString());
+  }, access);
+}
+
+async function cleanupSupabaseApprovedCallTranscript(
+  callId: string,
+  access: ConnectCallAccess,
+  now: string
+) {
+  const supabase = createSupabaseUserClient(access.accessToken);
     const { data, error } = await supabase
       .from("connect_calls")
       .update({
@@ -242,13 +293,17 @@ export async function approveSupabaseConnectCallSummary(
       .maybeSingle();
 
     if (error) throw error;
-    await supabase
+    const { error: transcriptSegmentDeleteError } = await supabase
       .from("connect_call_transcript_segments")
       .delete()
       .eq("call_id", callId)
       .eq("main_connect_user_person_id", access.mainConnectUserPersonId);
-    return data ? connectCallRecordFromRow(data as ConnectCallRow) : null;
-  }, access);
+    return data
+      ? {
+          ...connectCallRecordFromRow(data as ConnectCallRow),
+          transcriptCleanupStatus: transcriptSegmentDeleteError ? "pending" : "completed",
+        }
+      : null;
 }
 
 export async function recordSupabaseConnectCallTranscriptSegment(
@@ -313,7 +368,7 @@ export async function recordSupabaseConnectCallTranscriptSegment(
         ? "failed"
         : "not_started";
 
-    await supabase
+    const { data: updatedCall } = await supabase
       .from("connect_calls")
       .update({
         transcript_status: transcriptStatus,
@@ -321,10 +376,15 @@ export async function recordSupabaseConnectCallTranscriptSegment(
         updated_at: now,
       })
       .eq("id", input.callId)
-      .eq("main_connect_user_person_id", access.mainConnectUserPersonId);
+      .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
+      .select(
+        "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,transcript_deleted_at,transcript_status,transcript_text,updated_at"
+      )
+      .maybeSingle();
 
     return {
       assembledTranscriptText: transcriptText,
+      call: updatedCall ? connectCallRecordFromRow(updatedCall as ConnectCallRow) : undefined,
       segment: transcriptSegmentFromRow({
         chunk_ended_ms: input.chunkEndedMs,
         chunk_index: input.chunkIndex,

@@ -1,7 +1,9 @@
 export type ConnectCallRecord = {
+  approvedSummaryText?: string;
   callId?: string;
   callerName?: string;
   mainConnectUserPersonId?: string;
+  modelSummaryText?: string;
   recipientName?: string;
   recipientPersonId?: string;
   state?: string;
@@ -10,6 +12,7 @@ export type ConnectCallRecord = {
   summaryStatus?: string;
   summaryText?: string;
   transcriptDeletedAt?: string;
+  transcriptCleanupStatus?: "completed" | "pending";
   transcriptStatus?: string;
   transcriptText?: string;
   updatedAt?: string;

@@ -60,6 +60,10 @@ import {
   restorePageViewState,
   savePageViewState,
 } from "../../../lib/navigation/pageViewState";
+import {
+  redirectToCarePlandSignIn,
+  redirectToCarePlandSignInFromCurrentLocation,
+} from "../../../lib/platform/authRedirect";
 
 type ConnectMessage = {
   audioArtifactId?: string;
@@ -169,6 +173,8 @@ const connectAvatarsEndpoint = "/api/connect/avatars";
 const connectCallsEndpoint = "/api/connect/calls";
 const connectCallsSummaryEndpoint = "/api/connect/calls/summary";
 const connectAudioProfileEndpoint = "/api/connect/audio/profile";
+const receiverHealthyHeartbeatMs = 2 * 60 * 1000;
+const receiverStaleHeartbeatMs = 5 * 60 * 1000;
 
 function connectMessageStateEndpoint(messageId: string) {
   return `${connectMessagesEndpoint}/${encodeURIComponent(messageId)}/state`;
@@ -542,6 +548,23 @@ export function ConnectDashboard() {
     stopCallCue();
     callCueRef.current = playDashboardAudio(dashboardAudioPack.ringback, { loop: true }) || null;
     callTimeoutRef.current = window.setTimeout(() => {
+      const activeCallId = activeCallIdRef.current;
+      if (["connected", "remote_audio"].includes(callAudioStatusRef.current)) {
+        if (activeCallId) {
+          logDashboardCallEvent(activeCallId, "call_dashboard_ring_timeout_suppressed", {
+            callAudioStatus: callAudioStatusRef.current,
+            source: "playCallRingback",
+          });
+        }
+        stopCallCue();
+        return;
+      }
+      if (activeCallId) {
+        logDashboardCallEvent(activeCallId, "call_dashboard_ring_timeout_fired", {
+          callAudioStatus: callAudioStatusRef.current,
+          source: "playCallRingback",
+        });
+      }
       playCallFailureSound();
       setRecipientCallState("ended");
       setStatus("No approved receiver answered before timeout.");
@@ -724,6 +747,38 @@ export function ConnectDashboard() {
   }, [refresh]);
 
   useEffect(() => {
+    const latestCall = state.callSummary?.latestCall;
+    const latestCallState = String(latestCall?.state || "");
+    const callNeedsSummaryRefresh =
+      recipientCallState === "ended" &&
+      ["declined", "failed", "hung_up", "missed", "receiver_unavailable"].includes(
+        latestCallState
+      ) &&
+      !String(latestCall?.summaryText || "").trim() &&
+      String(latestCall?.transcriptStatus || "") !== "deleted";
+
+    if (!callNeedsSummaryRefresh) return undefined;
+
+    let attempts = 0;
+    const refreshTimer = window.setInterval(() => {
+      attempts += 1;
+      void refreshCallState();
+      if (attempts >= 4) {
+        window.clearInterval(refreshTimer);
+      }
+    }, 2500);
+
+    return () => window.clearInterval(refreshTimer);
+  }, [
+    recipientCallState,
+    refreshCallState,
+    state.callSummary?.latestCall?.callId,
+    state.callSummary?.latestCall?.state,
+    state.callSummary?.latestCall?.summaryText,
+    state.callSummary?.latestCall?.transcriptStatus,
+  ]);
+
+  useEffect(() => {
     function syncGlobalFocus(event?: StorageEvent) {
       if (event && event.key !== "carepland-ui-state:v1") {
         return;
@@ -750,6 +805,7 @@ export function ConnectDashboard() {
       if (!user?.id) {
         setAccountEmail("");
         setIsAdmin(false);
+        redirectToCarePlandSignInFromCurrentLocation();
         return;
       }
 
@@ -768,6 +824,20 @@ export function ConnectDashboard() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event !== "SIGNED_OUT" && event !== "TOKEN_REFRESHED") return;
+      if (session?.user?.id) return;
+      setAccountEmail("");
+      setIsAdmin(false);
+      redirectToCarePlandSignInFromCurrentLocation();
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -983,7 +1053,7 @@ export function ConnectDashboard() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     clearAllPageViewState();
-    window.location.assign("/?personal=1");
+    redirectToCarePlandSignIn();
   }
 
   useEffect(() => {
@@ -1045,7 +1115,10 @@ export function ConnectDashboard() {
       callId,
       connectAuthHeaders,
       mainConnectUserPersonId: selectedMainConnectUserPersonId,
-      onConnected: () => setStatus(`Connected with ${selectedPersonName}.`),
+      onConnected: () => {
+        stopCallCue();
+        setStatus(`Connected with ${selectedPersonName}.`);
+      },
       onError: (message) => setStatus(message),
       onPeerEnded: () => {
         logDashboardCallEvent(callId, "call_dashboard_peer_ended_received", {
@@ -1082,7 +1155,12 @@ export function ConnectDashboard() {
           setStatus("Call is live. A transcript chunk could not be saved.");
         }
       },
-      onStatusChange: (nextStatus) => setCallAudioStatus(nextStatus),
+      onStatusChange: (nextStatus) => {
+        if (nextStatus === "connected" || nextStatus === "remote_audio") {
+          stopCallCue();
+        }
+        setCallAudioStatus(nextStatus);
+      },
       role: "dashboard",
       transcriptChunks: true,
     });
@@ -1972,28 +2050,35 @@ export function ConnectDashboard() {
             ) : null}
 
           <RecipientCallPanel
-              callAudioStatus={callAudioStatus}
-              callMuted={callMuted}
-              onCallStateChange={(stateValue) => {
-                void reportDashboardCallState(stateValue);
-              }}
-              onCallAnswered={stopCallCue}
-              onCallEnded={stopCallCue}
-              onCallFailed={playCallFailureSound}
-              onHangUpCall={() => {
-                void endDashboardCall();
-              }}
-              onRestartAudio={restartDashboardCallAudio}
-              onToggleMuted={toggleCallMuted}
-              recipientCallState={recipientCallState}
-              selectedPerson={selectedPerson}
-              selectedPersonName={selectedPersonName}
-              setRecipientCallState={setRecipientCallState}
-              setStatus={setStatus}
-              transcriptRuntimeStatus={callTranscriptRuntimeStatus}
-              transcriptStatus={state.callSummary?.latestCall?.transcriptStatus || ""}
-              transcriptText={state.callSummary?.latestCall?.transcriptText || ""}
-            />
+            activeCallState={state.callSummary?.latestCall?.state || ""}
+            canShowDiagnostics={isAdmin}
+            callAudioStatus={callAudioStatus}
+            callMuted={callMuted}
+            onCallStateChange={(stateValue) => {
+              void reportDashboardCallState(stateValue);
+            }}
+            onCallAnswered={stopCallCue}
+            onCallEnded={stopCallCue}
+            onCallFailed={playCallFailureSound}
+            onHangUpCall={() => {
+              void endDashboardCall();
+            }}
+            onRefreshCallNotes={() => {
+              void refreshCallState();
+            }}
+            onRestartAudio={restartDashboardCallAudio}
+            onToggleMuted={toggleCallMuted}
+            recipientCallState={recipientCallState}
+            selectedPerson={selectedPerson}
+            selectedPersonName={selectedPersonName}
+            setRecipientCallState={setRecipientCallState}
+            setStatus={setStatus}
+            summaryStatus={state.callSummary?.latestCall?.summaryStatus || ""}
+            summaryText={state.callSummary?.latestCall?.summaryText || ""}
+            transcriptRuntimeStatus={callTranscriptRuntimeStatus}
+            transcriptStatus={state.callSummary?.latestCall?.transcriptStatus || ""}
+            transcriptText={state.callSummary?.latestCall?.transcriptText || ""}
+          />
 
         </section>
       ) : activeView === "receiver" ? (
@@ -3140,6 +3225,7 @@ function SetupPanel({
   const [setupActionPending, setSetupActionPending] = useState<"pair" | "recover" | null>(null);
   const [setupLink, setSetupLink] = useState<ReceiverSetupLink | null>(null);
   const [setupStatus, setSetupStatus] = useState("Setup links expire after 30 minutes.");
+  const [receiverActionPending, setReceiverActionPending] = useState<string | null>(null);
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [peopleActionPending, setPeopleActionPending] = useState<"household" | null>(null);
   const [appearanceTheme, setAppearanceTheme] = useState("Mid-Century");
@@ -3375,7 +3461,119 @@ function SetupPanel({
     const lastSeen = device.lastSeenAt
       ? `Last seen ${formatDateTime(device.lastSeenAt)}`
       : "No heartbeat yet";
-    return `${pairedLabel} · ${lastSeen}`;
+    const mode = receiverModeLabel(device.receiverMode);
+    return `${pairedLabel} · ${lastSeen}${mode ? ` · ${mode}` : ""}`;
+  }
+
+  function receiverHeartbeatState(device: ConnectReceiverDevice) {
+    if (!device.lastSeenAt) {
+      return {
+        isStale: device.status === "bound",
+        label: "No heartbeat yet",
+      };
+    }
+
+    const lastSeenMs = new Date(device.lastSeenAt).getTime();
+    if (!Number.isFinite(lastSeenMs)) {
+      return {
+        isStale: true,
+        label: "Heartbeat time unreadable",
+      };
+    }
+
+    const ageMs = Date.now() - lastSeenMs;
+    if (ageMs <= receiverHealthyHeartbeatMs) {
+      return {
+        isStale: false,
+        label: "Checked in recently",
+      };
+    }
+    if (ageMs <= receiverStaleHeartbeatMs) {
+      return {
+        isStale: false,
+        label: "Last check-in a few minutes ago",
+      };
+    }
+
+    return {
+      isStale: true,
+      label: `Needs check-in · last seen ${formatDateTime(device.lastSeenAt)}`,
+    };
+  }
+
+  function receiverModeLabel(receiverMode?: string) {
+    if (receiverMode === "dedicated") return "Dedicated mode";
+    if (receiverMode === "personal") return "Regular app mode";
+    return "";
+  }
+
+  function receiverDeviceModelLine(device: ConnectReceiverDevice) {
+    const model = [device.nativeManufacturer, device.nativeModel].filter(Boolean).join(" ");
+    const api = device.nativeSdk ? `Android API ${device.nativeSdk}` : "";
+    return [model, api].filter(Boolean).join(" · ") || "Not reported";
+  }
+
+  function receiverAppVersionLine(device: ConnectReceiverDevice) {
+    const version = device.nativeVersionName
+      ? `${device.nativeVersionName}${device.nativeVersionCode ? ` (${device.nativeVersionCode})` : ""}`
+      : device.nativeVersionCode
+        ? String(device.nativeVersionCode)
+        : "";
+    return [version, device.shellVersion ? `Shell ${device.shellVersion}` : ""]
+      .filter(Boolean)
+      .join(" · ") || "Not reported";
+  }
+
+  function receiverKioskLine(device: ConnectReceiverDevice) {
+    if (device.lockTaskActive) return "Kiosk active";
+    if (device.lockTaskPermitted) return "Kiosk available";
+    if (device.deviceOwner) return "Device owner";
+    return "Not enabled";
+  }
+
+  function receiverUpdateLine(device: ConnectReceiverDevice) {
+    if (device.updateAction === "required") return "Update required";
+    if (device.updateAction === "recommended") return "Update available";
+    if (device.updateAction === "none") return "Current";
+    return "Not reported";
+  }
+
+  function receiverRecoveryLine(device: ConnectReceiverDevice) {
+    if (!device.lastRecoveryAction) return "No restart recovery reported yet";
+    const actionLabel =
+      device.lastRecoveryAction === "android.intent.action.BOOT_COMPLETED"
+        ? "Started after reboot"
+        : device.lastRecoveryAction === "android.intent.action.MY_PACKAGE_REPLACED"
+          ? "Restarted after app update"
+          : device.lastRecoveryAction === "dedicated_soft_reopen"
+            ? "Reopened after leaving app"
+            : device.lastRecoveryAction === "receiver_load_timeout"
+              ? "Receiver page timed out"
+              : device.lastRecoveryAction === "receiver_network_error"
+                ? "Receiver page connection failed"
+                : device.lastRecoveryAction === "receiver_ssl_error"
+                  ? "Receiver page security check failed"
+                  : device.lastRecoveryAction.startsWith("receiver_http_error")
+                    ? "Receiver page returned an error"
+                    : statusLabel(device.lastRecoveryAction);
+    return device.lastRecoveryAt
+      ? `${actionLabel} · ${formatDateTime(device.lastRecoveryAt)}`
+      : actionLabel;
+  }
+
+  function receiverApplianceLine(device: ConnectReceiverDevice) {
+    const mode = receiverModeLabel(device.receiverMode) || "Mode not reported";
+    const bootStart = capabilityStatusLabel(device.capabilityStatuses?.bootStart);
+    const kiosk = receiverKioskLine(device);
+    return `${mode} · Auto-start ${bootStart.toLowerCase()} · ${kiosk}`;
+  }
+
+  function capabilityStatusLabel(status?: string) {
+    if (status === "enabled") return "On";
+    if (status === "supported") return "Available";
+    if (status === "unavailable") return "Not available";
+    if (status === "unknown") return "Unknown";
+    return "Not reported";
   }
 
   function receiverAuditEvents(receiverDeviceId?: string, receiverHouseholdId?: string) {
@@ -3478,6 +3676,49 @@ function SetupPanel({
       setSetupStatus("Setup link copied.");
     } catch {
       setSetupStatus("Copy failed. Open the setup link and copy it from the browser.");
+    }
+  }
+
+  async function revokeReceiverDevice(device: ConnectReceiverDevice) {
+    if (!device.id) {
+      setSetupStatus("Select a receiver first.");
+      return;
+    }
+
+    const label = device.name || device.receiverId || "this receiver";
+    const confirmed = window.confirm(
+      `Revoke ${label}? This will not delete the Android app. It only removes this receiver's server approval, so it will need setup again.`
+    );
+    if (!confirmed) return;
+
+    setReceiverActionPending(device.id);
+    setSetupStatus("Revoking receiver...");
+    try {
+      const response = await fetch(
+        `/api/connect/provisioning/receiver-devices/${encodeURIComponent(device.id)}/revoke`,
+        {
+          body: JSON.stringify({
+            confirmedPrototypeWrite: true,
+            operationReason: `Admin revoked receiver ${label}.`,
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+      };
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `Revoke returned ${response.status}`);
+      }
+
+      setSetupStatus("Receiver revoked. The Android app remains installed and will need setup again.");
+      await onRefresh();
+    } catch (error) {
+      setSetupStatus(error instanceof Error ? error.message : "Receiver could not be revoked.");
+    } finally {
+      setReceiverActionPending(null);
     }
   }
 
@@ -3676,6 +3917,59 @@ function SetupPanel({
               </button>
             </div>
 
+            {selectedDevice ? (
+              <div className="mt-4 rounded-xl border border-[#b9d5ee] bg-[#f8fbff] p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black uppercase text-[#5f6e84]">
+                      Selected Receiver
+                    </p>
+                    <h3 className="mt-1 text-2xl font-black text-[#172f49]">
+                      {selectedDevice.name || selectedDevice.receiverId || "Receiver"}
+                    </h3>
+                    <p className="mt-1 text-sm font-semibold text-[#5f6e84]">
+                      {receiverConnectionLine(selectedDevice)}
+                    </p>
+                  </div>
+                  <button
+                    className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc]"
+                    onClick={() => void onRefresh()}
+                    type="button"
+                  >
+                    Check status
+                  </button>
+                </div>
+                {receiverHeartbeatState(selectedDevice).isStale ? (
+                  <p className="mt-4 rounded-lg border border-[#d9a441] bg-[#fff8df] px-4 py-3 text-sm font-black text-[#6f4d00]">
+                    {receiverHeartbeatState(selectedDevice).label}. Open the app on the device or tap
+                    Check status after it is online.
+                  </p>
+                ) : null}
+                <div className="mt-4 grid gap-3 md:grid-cols-5">
+                  <MiniStatus
+                    label="Heartbeat"
+                    value={receiverHeartbeatState(selectedDevice).label}
+                  />
+                  <MiniStatus
+                    label="APK"
+                    value={receiverAppVersionLine(selectedDevice)}
+                  />
+                  <MiniStatus
+                    label="Update"
+                    value={receiverUpdateLine(selectedDevice)}
+                  />
+                  <MiniStatus
+                    label="Appliance"
+                    value={receiverApplianceLine(selectedDevice)}
+                  />
+                  <MiniStatus
+                    label="Restart recovery"
+                    value={receiverRecoveryLine(selectedDevice)}
+                  />
+                </div>
+              </div>
+            ) : null}
+
             {revokedDeviceCount ? (
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#d6e3f2] bg-white p-3">
                 <span className="text-sm font-black text-[#5f6e84]">
@@ -3779,12 +4073,21 @@ function SetupPanel({
                             {device.status === "revoked" ? "Re-pair" : "New link"}
                           </button>
                           <button
-                            className="min-h-11 rounded-lg border border-[#e4b9b5] bg-white px-5 text-base font-black text-[#a52b25] opacity-60"
-                            disabled
-                            title="Revoke is pending in the integrated Connect API."
+                            className="min-h-11 rounded-lg border border-[#e4b9b5] bg-white px-5 text-base font-black text-[#a52b25] hover:bg-[#fff5f3] disabled:opacity-55"
+                            disabled={
+                              !device.id ||
+                              device.status === "revoked" ||
+                              receiverActionPending === device.id
+                            }
+                            onClick={() => void revokeReceiverDevice(device)}
+                            title={
+                              device.status === "revoked"
+                                ? "Receiver already revoked."
+                                : "Revoke server approval for this receiver."
+                            }
                             type="button"
                           >
-                            Revoke
+                            {receiverActionPending === device.id ? "Revoking" : "Revoke"}
                           </button>
                         </div>
                       </div>
@@ -3797,6 +4100,85 @@ function SetupPanel({
                             />
                             <MiniStatus label="Setup tokens" value={String(deviceTokens.length)} />
                             <MiniStatus label="Audit events" value={String(deviceEvents.length)} />
+                          </div>
+                          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <MiniStatus
+                              label="Receiver mode"
+                              value={receiverModeLabel(device.receiverMode) || "Not reported"}
+                            />
+                            <MiniStatus
+                              label="Provisioned"
+                              value={
+                                device.provisioningCompletedAt
+                                  ? formatDateTime(device.provisioningCompletedAt)
+                                  : "Not reported"
+                              }
+                            />
+                            <MiniStatus
+                              label="Android device"
+                              value={receiverDeviceModelLine(device)}
+                            />
+                            <MiniStatus
+                              label="App version"
+                              value={receiverAppVersionLine(device)}
+                            />
+                            <MiniStatus label="Update" value={receiverUpdateLine(device)} />
+                            <MiniStatus label="Kiosk" value={receiverKioskLine(device)} />
+                            <MiniStatus
+                              label="Hardware profile"
+                              value={device.hardwareProfile || "Not reported"}
+                            />
+                            <MiniStatus
+                              label="Recovery"
+                              value={
+                                device.lastRecoveryAction
+                                  ? `${device.lastRecoveryAction}${
+                                      device.lastRecoveryAt
+                                        ? ` · ${formatDateTime(device.lastRecoveryAt)}`
+                                        : ""
+                                    }`
+                                  : "None reported"
+                              }
+                            />
+                          </div>
+                          <div className="mt-4 rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-3">
+                            <p className="text-sm font-black uppercase text-[#5f6e84]">
+                              Receiver setup checks
+                            </p>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                              <MiniStatus
+                                label="Full screen"
+                                value={capabilityStatusLabel(device.capabilityStatuses?.fullscreen)}
+                              />
+                              <MiniStatus
+                                label="Keep awake"
+                                value={capabilityStatusLabel(device.capabilityStatuses?.keepAwake)}
+                              />
+                              <MiniStatus
+                                label="Microphone"
+                                value={capabilityStatusLabel(device.capabilityStatuses?.microphone)}
+                              />
+                              <MiniStatus
+                                label="Kiosk"
+                                value={capabilityStatusLabel(device.capabilityStatuses?.kiosk)}
+                              />
+                              <MiniStatus
+                                label="Battery"
+                                value={capabilityStatusLabel(
+                                  device.capabilityStatuses?.batteryOptimization
+                                )}
+                              />
+                              <MiniStatus
+                                label="Auto-start"
+                                value={capabilityStatusLabel(device.capabilityStatuses?.bootStart)}
+                              />
+                              <MiniStatus
+                                label="Update checks"
+                                value={capabilityStatusLabel(
+                                  device.capabilityStatuses?.updateChecks
+                                )}
+                              />
+                            </div>
                           </div>
                           <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
                             <label className="grid gap-2 text-sm font-black uppercase text-[#5f6e84]">
@@ -4368,6 +4750,8 @@ function ReceiverTroubleshootingView({
 }
 
 function RecipientCallPanel({
+  activeCallState,
+  canShowDiagnostics,
   callAudioStatus,
   callMuted,
   onCallStateChange,
@@ -4375,6 +4759,7 @@ function RecipientCallPanel({
   onCallEnded,
   onCallFailed,
   onHangUpCall,
+  onRefreshCallNotes,
   onRestartAudio,
   onToggleMuted,
   recipientCallState,
@@ -4382,10 +4767,14 @@ function RecipientCallPanel({
   selectedPersonName,
   setRecipientCallState,
   setStatus,
+  summaryStatus,
+  summaryText,
   transcriptRuntimeStatus,
   transcriptStatus,
   transcriptText,
 }: {
+  activeCallState: string;
+  canShowDiagnostics: boolean;
   callAudioStatus: ConnectCallAudioStatus;
   callMuted: boolean;
   onCallStateChange: (state: string) => void;
@@ -4393,6 +4782,7 @@ function RecipientCallPanel({
   onCallEnded: () => void;
   onCallFailed: () => void;
   onHangUpCall: () => void;
+  onRefreshCallNotes: () => void;
   onRestartAudio: () => void;
   onToggleMuted: () => void;
   recipientCallState: RecipientCallState;
@@ -4400,12 +4790,16 @@ function RecipientCallPanel({
   selectedPersonName: string;
   setRecipientCallState: (value: RecipientCallState) => void;
   setStatus: (value: string) => void;
+  summaryStatus: string;
+  summaryText: string;
   transcriptRuntimeStatus: string;
   transcriptStatus: string;
   transcriptText: string;
 }) {
   const isRinging = recipientCallState === "ringing";
   const isConnected = recipientCallState === "connected";
+  const hasServerActiveCall = ["answered", "connected", "ringing"].includes(activeCallState);
+  const canEndCall = isConnected || isRinging || hasServerActiveCall;
   const headline = isConnected
     ? `Connected with ${selectedPersonName}.`
     : isRinging
@@ -4455,6 +4849,17 @@ function RecipientCallPanel({
     transcriptStatus,
     transcriptText,
   });
+  const callNotesLabel = callNotesStatusLabel({
+    callState: recipientCallState,
+    summaryStatus,
+    summaryText,
+    transcriptStatus,
+    transcriptText,
+  });
+  const hasTranscriptDiagnostics =
+    Boolean(transcriptText.trim()) || Boolean(transcriptLabel) || Boolean(transcriptRuntimeStatus);
+  const canRefreshCallNotes =
+    recipientCallState === "ended" && !summaryText.trim() && transcriptStatus !== "deleted";
 
   function updateCall(value: RecipientCallState, message: string) {
     if (value === "connected") onCallAnswered();
@@ -4559,20 +4964,60 @@ function RecipientCallPanel({
           </button>
         </div>
       </div>
-      {isRinging || isConnected || transcriptText.trim() || transcriptLabel ? (
+      {isRinging || isConnected || callNotesLabel ? (
         <div className="mt-3 rounded-lg border border-[#d6e3f2] bg-white p-4">
           <p className="text-sm font-black uppercase tracking-normal text-[#5f6e84]">
-            Call transcript
+            Call notes
           </p>
-          {transcriptText.trim() ? (
-            <p className="mt-2 whitespace-pre-wrap text-base font-semibold leading-relaxed text-[#173150]">
-              {transcriptText}
+          <p className="mt-2 text-base font-semibold leading-relaxed text-[#345d83]">
+            {callNotesLabel}
+          </p>
+          {canRefreshCallNotes ? (
+            <button
+              className="mt-3 min-h-10 rounded-md border border-[#d6e3f2] bg-white px-4 text-sm font-black text-[#345d83] hover:bg-[#edf5fc]"
+              onClick={onRefreshCallNotes}
+              type="button"
+            >
+              Check Again
+            </button>
+          ) : null}
+          {canShowDiagnostics && hasTranscriptDiagnostics ? (
+            <details className="mt-3 rounded-md border border-[#d6e3f2] bg-[#f8fafc] p-3">
+              <summary className="cursor-pointer text-sm font-black text-[#173150]">
+                Diagnostics
+              </summary>
+              {transcriptLabel ? (
+                <p className="mt-2 text-sm font-semibold leading-relaxed text-[#5f6e84]">
+                  {transcriptLabel}
+                </p>
+              ) : null}
+              {transcriptRuntimeStatus ? (
+                <p className="mt-2 text-xs font-bold uppercase tracking-normal text-[#7f8794]">
+                  Runtime: {transcriptRuntimeStatus}
+                </p>
+              ) : null}
+              {transcriptText.trim() ? (
+                <p className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded border border-[#d6e3f2] bg-white p-3 text-sm font-semibold leading-relaxed text-[#173150]">
+                  {transcriptText}
+                </p>
+              ) : null}
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+      {summaryText.trim() ? (
+        <div className="mt-3 rounded-lg border border-[#b9d4ba] bg-[#f7fcf5] p-4">
+          <p className="text-sm font-black uppercase tracking-normal text-[#52695a]">
+            Care summary
+          </p>
+          <p className="mt-2 whitespace-pre-wrap text-base font-semibold leading-relaxed text-[#173b22]">
+            {summaryText.trim()}
+          </p>
+          {summaryStatus === "approved" ? (
+            <p className="mt-2 text-sm font-black text-[#2e6f36]">
+              Approved summary saved.
             </p>
-          ) : (
-            <p className="mt-2 text-base font-semibold leading-relaxed text-[#5f6e84]">
-              {transcriptLabel}
-            </p>
-          )}
+          ) : null}
         </div>
       ) : null}
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -4586,7 +5031,7 @@ function RecipientCallPanel({
         </button>
         <button
           className="min-h-12 rounded-md bg-[#a7adb6] px-4 text-base font-black text-white hover:bg-[#626b78] disabled:opacity-45"
-          disabled={!isConnected && !isRinging}
+          disabled={!canEndCall}
           onClick={() =>
             updateCall(
               "ended",
@@ -4664,6 +5109,49 @@ function transcriptStatusLabel({
     return "Waiting for remote audio before transcript capture starts.";
   }
   if (callState === "ringing") return "Transcript capture starts after the call is answered and remote audio arrives.";
+  return "";
+}
+
+function callNotesStatusLabel({
+  callState,
+  summaryStatus,
+  summaryText,
+  transcriptStatus,
+  transcriptText,
+}: {
+  callState: RecipientCallState;
+  summaryStatus: string;
+  summaryText: string;
+  transcriptStatus: string;
+  transcriptText: string;
+}) {
+  if (summaryStatus === "approved" && summaryText.trim()) {
+    return "The approved care summary is saved below.";
+  }
+  if (summaryText.trim()) {
+    return "A draft care summary is ready for review.";
+  }
+  if (transcriptStatus === "deleted") {
+    return "The temporary transcript was deleted after the care summary was approved.";
+  }
+  if (transcriptStatus === "failed" || transcriptStatus === "not_configured") {
+    return "Call notes are not available yet. The call can still continue.";
+  }
+  if (transcriptText.trim()) {
+    if (callState === "connected") {
+      return "Temporary transcript text has been captured. A care summary will be prepared after the call ends.";
+    }
+    return "Care notes are being prepared from the temporary call transcript.";
+  }
+  if (callState === "ended") {
+    return "Care summary is being prepared if enough care-relevant conversation was captured.";
+  }
+  if (callState === "connected") {
+    return "Care notes will begin after enough call audio is captured.";
+  }
+  if (callState === "ringing") {
+    return "Care notes start only after the call is answered.";
+  }
   return "";
 }
 

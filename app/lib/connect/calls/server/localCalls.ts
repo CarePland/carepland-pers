@@ -99,11 +99,13 @@ export async function recordLocalConnectCall(
   const now = new Date().toISOString();
   const personId = input.mainConnectUserPersonId || input.recipientPersonId || "";
   const call: ConnectCallRecord = {
+    approvedSummaryText: input.approvedSummaryText,
     callId:
       input.callId ||
       `connect-call-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     callerName: input.callerName || "Andrew",
     mainConnectUserPersonId: personId,
+    modelSummaryText: input.modelSummaryText,
     recipientName: input.recipientName || "",
     recipientPersonId: personId,
     state: isConnectCallState(input.state) ? input.state : "ringing",
@@ -172,6 +174,7 @@ export async function approveLocalConnectCallSummary(
   callId: string,
   options: {
     approvedBy?: string;
+    approvedSummaryText?: string;
     indexPath?: string;
     mainConnectUserPersonId?: string;
   } = {}
@@ -191,12 +194,18 @@ export async function approveLocalConnectCallSummary(
       return call;
     }
 
+    const approvedSummaryText =
+      options.approvedSummaryText?.trim() || call.summaryText || "";
     updated = {
       ...call,
+      approvedSummaryText,
+      modelSummaryText: call.modelSummaryText || call.summaryText || "",
       summaryApprovedAt: now,
       summaryApprovedBy: options.approvedBy || "receiver",
       summaryStatus: "approved",
+      summaryText: approvedSummaryText,
       transcriptDeletedAt: now,
+      transcriptCleanupStatus: "completed",
       transcriptStatus: "deleted",
       transcriptText: undefined,
       updatedAt: now,
@@ -287,6 +296,7 @@ export async function recordLocalConnectCallTranscriptSegment(
   return updatedCall
     ? {
         assembledTranscriptText: updatedCall.transcriptText || "",
+        call: updatedCall,
         segment: storedSegment,
       }
     : null;
@@ -300,7 +310,7 @@ export async function updateLocalConnectCallSummary(
     summaryText: string;
   },
   options: { indexPath?: string } = {}
-) {
+): Promise<ConnectCallRecord | null> {
   const indexPath = options.indexPath ?? defaultIndexPath;
   const index = await readLocalCallsIndex(indexPath);
   const now = new Date().toISOString();
@@ -318,6 +328,10 @@ export async function updateLocalConnectCallSummary(
 
     updated = {
       ...call,
+      modelSummaryText:
+        input.summaryStatus === "completed"
+          ? input.summaryText
+          : call.modelSummaryText,
       summaryStatus: input.summaryStatus,
       summaryText: input.summaryText,
       updatedAt: now,

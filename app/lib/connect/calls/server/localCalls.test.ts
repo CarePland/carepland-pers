@@ -9,6 +9,8 @@ import {
   markStaleLocalConnectCallsMissed,
   readLocalConnectCalls,
   recordLocalConnectCall,
+  recordLocalConnectCallTranscriptSegment,
+  updateLocalConnectCallSummary,
   updateLocalConnectCallState,
 } from "./localCalls";
 
@@ -187,13 +189,148 @@ describe("local Connect calls", () => {
 
       assert.equal(approved?.summaryStatus, "approved");
       assert.equal(approved?.summaryText, "Medication was discussed.");
+      assert.equal(approved?.modelSummaryText, "Medication was discussed.");
+      assert.equal(approved?.approvedSummaryText, "Medication was discussed.");
       assert.equal(approved?.transcriptText, undefined);
+      assert.equal(approved?.transcriptCleanupStatus, "completed");
       assert.equal(approved?.transcriptStatus, "deleted");
       assert.equal(storedCall?.summaryStatus, "approved");
       assert.equal(storedCall?.summaryText, "Medication was discussed.");
+      assert.equal(storedCall?.modelSummaryText, "Medication was discussed.");
+      assert.equal(storedCall?.approvedSummaryText, "Medication was discussed.");
       assert.equal(storedCall?.transcriptText, undefined);
+      assert.equal(storedCall?.transcriptCleanupStatus, "completed");
       assert.equal(storedCall?.transcriptStatus, "deleted");
       assert.ok(storedCall?.transcriptDeletedAt);
+    });
+  });
+
+  it("keeps generated and user-approved local summaries separate", async () => {
+    await withTempCallIndex(async (indexPath) => {
+      await recordLocalConnectCall(
+        {
+          callId: "call-1",
+          mainConnectUserPersonId: "person-bob",
+          state: "hung_up",
+          summaryStatus: "completed",
+          summaryText: "Model summary.",
+          transcriptStatus: "ready_for_summary",
+          transcriptText: "Temporary transcript.",
+        },
+        { indexPath }
+      );
+
+      const approved = await approveLocalConnectCallSummary("call-1", {
+        approvedBy: "receiver",
+        approvedSummaryText: "Edited approved summary.",
+        indexPath,
+        mainConnectUserPersonId: "person-bob",
+      });
+
+      assert.equal(approved?.summaryText, "Edited approved summary.");
+      assert.equal(approved?.approvedSummaryText, "Edited approved summary.");
+      assert.equal(approved?.modelSummaryText, "Model summary.");
+      assert.equal(approved?.transcriptText, undefined);
+    });
+  });
+
+  it("stores completed generated summaries as the local model summary baseline", async () => {
+    await withTempCallIndex(async (indexPath) => {
+      await recordLocalConnectCall(
+        {
+          callId: "call-1",
+          mainConnectUserPersonId: "person-bob",
+          modelSummaryText: "Older model summary.",
+          state: "hung_up",
+          summaryStatus: "failed",
+          summaryText: "",
+        },
+        { indexPath }
+      );
+
+      const updated = await updateLocalConnectCallSummary(
+        "call-1",
+        {
+          mainConnectUserPersonId: "person-bob",
+          summaryStatus: "completed",
+          summaryText: "Updated model summary.",
+        },
+        { indexPath }
+      );
+
+      assert.equal(updated?.summaryStatus, "completed");
+      assert.equal(updated?.summaryText, "Updated model summary.");
+      assert.equal(updated?.modelSummaryText, "Updated model summary.");
+    });
+  });
+
+  it("returns updated call context after storing a transcript segment", async () => {
+    await withTempCallIndex(async (indexPath) => {
+      await recordLocalConnectCall(
+        {
+          callId: "call-1",
+          mainConnectUserPersonId: "person-bob",
+          state: "hung_up",
+          summaryStatus: "completed",
+          summaryText: "Earlier summary.",
+        },
+        { indexPath }
+      );
+
+      const stored = await recordLocalConnectCallTranscriptSegment(
+        {
+          callId: "call-1",
+          chunkEndedMs: 35_000,
+          chunkIndex: 0,
+          chunkStartedMs: 0,
+          mainConnectUserPersonId: "person-bob",
+          overlapStartedMs: 30_000,
+          transcriptStatus: "completed",
+          transcriptText: "Medication list is on the PillPack box.",
+        },
+        { indexPath }
+      );
+
+      assert.equal(
+        stored?.assembledTranscriptText,
+        "Medication list is on the PillPack box."
+      );
+      assert.equal(stored?.call?.state, "hung_up");
+      assert.equal(stored?.call?.summaryStatus, "completed");
+      assert.equal(
+        stored?.call?.transcriptText,
+        "Medication list is on the PillPack box."
+      );
+    });
+  });
+
+  it("does not replace the local model summary baseline when regeneration fails", async () => {
+    await withTempCallIndex(async (indexPath) => {
+      await recordLocalConnectCall(
+        {
+          callId: "call-1",
+          mainConnectUserPersonId: "person-bob",
+          modelSummaryText: "Last successful model summary.",
+          state: "hung_up",
+          summaryStatus: "completed",
+          summaryText: "Last successful model summary.",
+        },
+        { indexPath }
+      );
+
+      const updated = await updateLocalConnectCallSummary(
+        "call-1",
+        {
+          mainConnectUserPersonId: "person-bob",
+          summaryStatus: "failed",
+          summaryText: "",
+        },
+        { indexPath }
+      );
+
+      assert.equal(updated?.summaryStatus, "failed");
+      assert.equal(updated?.summaryText, "");
+      assert.equal(updated?.modelSummaryText, "Last successful model summary.");
     });
   });
 });

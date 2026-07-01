@@ -69,6 +69,13 @@ type ReceiverUser = {
   statusLabel: string;
 };
 
+type ReceiverTodayFocusHomeItem = {
+  id: string;
+  kind?: "checkoff" | "weight";
+  promptText?: string | null;
+  title: string;
+};
+
 type Message = {
   audioArtifactId?: string;
   audioDurationMs?: number;
@@ -93,6 +100,7 @@ type ReceiverCall = {
   state: string;
   summaryStatus?: string;
   summaryText?: string;
+  transcriptCleanupStatus?: string;
   transcriptStatus?: string;
   transcriptText?: string;
 };
@@ -117,6 +125,8 @@ const RECEIVER_CANVAS_WIDTH = 900;
 const RECEIVER_CANVAS_HEIGHT = 1047;
 const DESK_PHONE_CANVAS_WIDTH = 1024;
 const DESK_PHONE_CANVAS_HEIGHT = 600;
+const RECEIVER_BINDING_HEARTBEAT_MS = 60_000;
+const SCREEN_CLEANING_DURATION_SECONDS = 120;
 const receiverAudioPack = {
   button: "/connect/receiver/audio/microwave-beep.mp3",
   incoming: "/connect/receiver/audio/old-phone-ringing.mp3",
@@ -153,6 +163,17 @@ type PlaybackVariant = ConnectPlaybackVariant;
 type ReceiverPlaybackHandle = ConnectPlaybackHandle;
 type AudioPreference = ConnectAudioPreference;
 type ReceiverAudioEnhancementProfile = ConnectAudioEnhancementProfile;
+
+type ScreenCleaningSession = {
+  cleaningCount: number;
+  message: string;
+  receiverDeviceId: string;
+  receiverId: string;
+  receiverInstallId: string;
+  receiverMode: "Dedicated" | "Personal";
+  sessionId: string;
+  startedAt: string;
+};
 
 type AskAnswer = {
   question: string;
@@ -195,18 +216,80 @@ type NativeReceiverProvisioningConfig = {
   displayWidthDp?: number;
   displayWidthPx?: number;
   hardwareProfile?: string;
+  bindingStatus?: string;
+  deviceOwner?: boolean;
+  lockTaskActive?: boolean;
+  lockTaskPermitted?: boolean;
+  lastRecoveryAction?: string;
+  lastRecoveryAtMs?: number;
   manufacturer?: string;
   model?: string;
+  provisionedAtMs?: number;
+  provisioningCompletedAtMs?: number;
+  receiverMode?: "dedicated" | "personal" | string;
+  receiverDeviceId?: string;
+  receiverInstallId?: string;
   receiverUrl?: string;
+  setupClaim?: string;
   setupCode?: string;
   shellVersion?: string;
+  nativeSdk?: number;
+  sdkVersion?: number;
+  uiLayout?: string;
+  updatePolicyUrl?: string;
+  versionCode?: number;
+  versionName?: string;
+  capabilities?: {
+    batteryOptimization?: string;
+    bootStart?: string;
+    fullscreen?: string;
+    keepAwake?: string;
+    kiosk?: string;
+    microphone?: string;
+    updateChecks?: string;
+  };
+};
+
+type StoredReceiverBinding = {
+  bindingStatus?: string;
+  capabilityStatuses?: NativeReceiverProvisioningConfig["capabilities"];
+  deviceOwner?: boolean;
+  deviceProfile?: string;
+  hardwareProfile?: string;
+  lastRecoveryAction?: string;
+  lastRecoveryAt?: string;
+  lockTaskActive?: boolean;
+  lockTaskPermitted?: boolean;
+  nativeManufacturer?: string;
+  nativeModel?: string;
+  nativeSdk?: number;
+  nativeVersionCode?: number;
+  nativeVersionName?: string;
+  provisioningCompletedAt?: string;
+  receiverDeviceId?: string;
+  receiverInstallId?: string;
+  receiverMode?: string;
+  receiverUrl?: string;
+  shellVersion?: string;
+  storageSource?: string;
+  uiLayout?: string;
 };
 
 declare global {
   interface Window {
     CarePlandReceiver?: {
       getProvisioningJson?: () => string;
+      getUpdatePolicyUrl?: () => string;
       reloadReceiver?: () => void;
+      reportReceiverError?: (message: string) => void;
+      receiverReady?: () => void;
+      saveBinding?: (
+        receiverDeviceId: string,
+        bindingStatus: string,
+        deviceProfile: string,
+        hardwareProfile: string,
+        uiLayout: string
+      ) => void;
     };
   }
 }
@@ -214,14 +297,16 @@ declare global {
 type ModalState =
   | { type: "contact"; contactId: string }
   | { type: "ask" }
+  | { type: "screenCleaningConfirm" }
   | { type: "askRecordReview"; transcript: string }
-  | { type: "askAnswer"; answer: AskAnswer }
-  | { type: "askRecovery"; question: string }
+  | { type: "askAnswer"; answer: AskAnswer; page?: number }
+  | { type: "askRecovery"; question: string; page?: number }
   | { type: "appointmentsLoading" }
   | { type: "appointmentsEmpty" }
   | { type: "appointmentsList"; appointments: ReceiverAppointment[]; page: number }
   | { type: "appointmentDetail"; appointment: ReceiverAppointment; appointments: ReceiverAppointment[]; page: number }
   | { type: "appointmentAddress"; appointment: ReceiverAppointment; appointments: ReceiverAppointment[]; page: number }
+  | { type: "todayFocusWeight"; item: ReceiverTodayFocusHomeItem }
   | { type: "sent"; recipientName: string }
   | { type: "reader"; message: Message; returnPage?: number; returnTo?: "allMessages" | "home" }
   | { type: "allMessages"; page: number }
@@ -235,10 +320,14 @@ type ModalState =
       callState: Exclude<ReceiverCallUiState, "idle">;
       summaryApproval?: "approved";
       summaryClarificationOpen?: boolean;
+      approvedSummaryText?: string;
+      summaryDraft?: string;
+      summaryAutoOpened?: boolean;
       summaryStatus?: string;
       summaryText?: string;
       transcriptStatus?: string;
       transcriptText?: string;
+      transcriptCleanupStatus?: string;
       textView?: "captions" | "summary";
     }
   | null;
@@ -298,14 +387,112 @@ function fallbackNextReceiverAppointment(): ReceiverAppointment {
 const receiverGuideTargetStorageKey = "carepland-connect-guide-target";
 const receiverGuideRectStorageKey = "carepland-connect-guide-rect";
 const receiverLastPressStorageKey = "carepland-connect-last-press";
+const receiverBindingStorageKey = "carepland-connect-receiver-binding";
 const receiverRegistrationStorageKey = "carepland-connect-receiver-registration";
 const receiverSessionStorageKey = "carepland-connect-receiver-session";
 const receiverAutoHearStorageKey = "carepland-connect-auto-hear-messages";
 const receiverDeviceProfileStorageKey = "carepland-connect-receiver-device-profile";
 const connectMessagesEndpoint = "/api/connect/messages";
 const connectCallsEndpoint = "/api/connect/calls";
+const connectTodayFocusEndpoint = "/api/connect/today-focus";
 const connectAudioPlaybackEventsEndpoint = "/api/connect/audio/playback-events";
 const connectAudioProfileEndpoint = "/api/connect/audio/profile";
+const connectReceiverCleaningSessionsEndpoint = "/api/connect/receiver/cleaning-sessions";
+const receiverApkDownloadEndpoint = "/api/connect/receiver-shell/apk/debug";
+const receiverScreenCleaningDefaultSeenStorageKey =
+  "carepland-connect-screen-cleaning-default-seen";
+const receiverScreenCleaningCountStorageKey =
+  "carepland-connect-screen-cleaning-count";
+
+const fallbackTodayFocusItems: ReceiverTodayFocusHomeItem[] = [
+  { id: "fallback-medications", title: "Take morning medications" },
+  { id: "fallback-weight", kind: "weight", title: "Weigh yourself" },
+  { id: "fallback-water", title: "Drink water with lunch" },
+];
+
+const brainStretchPrompt =
+  "What is the only English word that is five letters long, is eaten by people, and when you remove the first letter, turns into a form of energy?";
+
+function measurementDigitLimitForFocusItem(item: ReceiverTodayFocusHomeItem): number {
+  switch (item.kind) {
+    case "weight":
+      return 3;
+    default:
+      return 6;
+  }
+}
+
+function isAppointmentReminderFocusItem(item: ReceiverTodayFocusHomeItem): boolean {
+  const text = `${item.title} ${item.promptText || ""}`.toLowerCase();
+
+  return (
+    text.includes("appointment") ||
+    text.includes("doctor") ||
+    text.includes("cardiology") ||
+    text.includes("follow-up") ||
+    text.includes("follow up")
+  );
+}
+
+function normalizeDecimalMeasurementInput(value: string, maxDigits: number): string {
+  let nextValue = "";
+  let digitCount = 0;
+  let hasDecimal = false;
+
+  for (const character of value) {
+    if (/\d/.test(character)) {
+      if (digitCount >= maxDigits) continue;
+      nextValue += character;
+      digitCount += 1;
+      continue;
+    }
+
+    if (character === "." && !hasDecimal) {
+      nextValue = nextValue ? `${nextValue}.` : "0.";
+      hasDecimal = true;
+    }
+  }
+
+  return nextValue;
+}
+
+const screenCleaningMessages = [
+  "You can safely clean the screen.\nIt's good to have a clean machine.",
+  "No matter what the season\nWe can do a little screen cleaning.",
+  "Rub-a-dub-dub,\nTwo minutes to scrub.",
+  "Dust or rain or winter's gleam,\nNothing beats a cleaner screen.",
+  "A swipe, a shine, a little care-\nA cleaner screen is nice to share.",
+  "When smudges gather here and there,\nA little cleaning shows you care.",
+  "A little polish, a little sheen-\nNow that's a happy, healthy screen.",
+  "Fingerprints smudge the best of intentions.\nThanks for taking back your screen.",
+  "You're quite the overachiever\nFor cleaning the CarePland Receiver.",
+  "Don't change that dial!\nWe'll be back in just a minute.",
+  "The smudges, the pawprints\nwe're wipin' them varmints.",
+  "Dust be gone, streaks take flight.\nWe'll have things looking just right.",
+  "Every swipe's a little cheer.\nThanks for keeping CarePland clear.",
+  "Shine it up from edge to edge.\nYour Receiver says, \"Much obliged!\"",
+  "Smudges come and smudges go.\nA cleaner screen helps CarePland glow.",
+];
+
+const screenCleaningMilestoneMessages: Record<number, string> = {
+  5: "Thanks for the fifth cleaning.\nI feel better already!",
+  10: "This is the tenth screen cleaning!\nNice work keeping the Receiver easy to read.",
+  20: "Twenty cleanings makes for 2/3 of an hour well spent.",
+  24: "Twenty-four cleanings.\nIf you had an hour for every cleaning..",
+  31: "The 31st cleaning - your favorite flavor is clean!\nAnd you've now given the Receiver more than an hour of care.",
+  50: "You have a half-century of shine: 50 cleanings!\nThanks for having such a clean machine!",
+  64: "Will you still clean me?\nClearly so, at 64!",
+  81: "81 minutes: London to Paris.\n81 cleanings: your screen has a capital shine!",
+  88: "One cleaning for every piano key.\n\n(Hint: you've got 88!)",
+  96: "96 Cleanings! That would be two orbits of Sputnik 1.",
+  100: "A full century of cleanings.\nHere's to the next 100!",
+  108: "108 Cleanings!\nYuri Gagarin completed the first ever human spaceflight in 108 minutes.",
+  127: "127 Cleanings!\nIt takes 127 minutes for sunlight to reach Saturn.",
+  143: "143 Cleanings!\nNeil Armstrong and Buzz Aldrin took 143 minutes to complete their Apollo 11 moonwalk.",
+  151: "151 Cleanings!\n151 minutes from Chicago to New York City.",
+  162: "162 Cleanings!\nJames Cameron's epic sci-fi film Avatar is 162 minutes.",
+  169: "169 Cleanings!\nIt takes 169 minutes for the high-speed train to travel from Tokyo to Kyoto.\nYou just completed the roundtrip!",
+};
 
 const defaultSoundSettings: SoundSettings = {
   buttonBeeps: true,
@@ -392,7 +579,7 @@ function readReceiverProfileSelection() {
   }
   const params = new URLSearchParams(window.location.search);
   const nativeConfig = readNativeReceiverProvisioningConfig();
-  const explicitUiLayout = normalizedProfileValue(params.get("uiLayout") || params.get("layout"));
+  const explicitUiLayout = normalizedProfileValue(params.get("uiLayout") || params.get("layout") || nativeConfig.uiLayout);
   const legacyDevice = normalizedProfileValue(params.get("device") || nativeConfig.deviceProfile);
   const hardwareProfile = normalizedProfileValue(
     params.get("hardwareProfile") ||
@@ -450,6 +637,49 @@ function readInitialDeskPhoneMode() {
   return readReceiverProfileSelection().uiLayout === "desk_phone_1024x600";
 }
 
+function readInitialGxvHomeLayout() {
+  if (typeof window === "undefined") return "classic";
+  const params = new URLSearchParams(window.location.search);
+  const value = normalizedProfileValue(
+    params.get("homeLayout") ||
+      params.get("home_layout") ||
+      params.get("gxvHome") ||
+      params.get("gxv_home")
+  );
+
+  return ["focus", "focus_v1", "today_focus", "v1"].includes(value)
+    ? "focus_v1"
+    : "classic";
+}
+
+function statusLooksEnabled(value?: string | null) {
+  return ["1", "active", "allowed", "available", "enabled", "locked", "on", "permitted", "true"].includes(
+    normalizedProfileValue(value)
+  );
+}
+
+function readInitialKioskManagedFullscreen() {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  const nativeConfig = readNativeReceiverProvisioningConfig();
+  const storedBinding = readStoredReceiverBinding();
+  const nativeCapabilities = nativeConfig.capabilities || {};
+  const storedCapabilities = storedBinding.capabilityStatuses || {};
+
+  return (
+    params.get("kiosk") === "1" ||
+    params.get("kioskMode") === "1" ||
+    params.get("lockTaskActive") === "1" ||
+    nativeConfig.lockTaskActive === true ||
+    storedBinding.lockTaskActive === true ||
+    statusLooksEnabled(params.get("kiosk")) ||
+    statusLooksEnabled(params.get("kioskMode")) ||
+    statusLooksEnabled(params.get("lockTaskActive")) ||
+    statusLooksEnabled(nativeCapabilities.kiosk) ||
+    statusLooksEnabled(storedCapabilities.kiosk)
+  );
+}
+
 function readStoredReceiverSession(): StoredReceiverSession {
   if (typeof window === "undefined") return {};
 
@@ -488,7 +718,212 @@ function readInitialSelectedReceiverUserId() {
 
 function readInitialReceiverRegistration() {
   if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(receiverRegistrationStorageKey) === testReceiverUser.id;
+  return (
+    window.localStorage.getItem(receiverRegistrationStorageKey) === testReceiverUser.id ||
+    Boolean(readStoredReceiverBinding().receiverDeviceId) ||
+    readLocalTestReceiverProvisioning()
+  );
+}
+
+function readLocalTestReceiverProvisioning() {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  const nativeConfig = readNativeReceiverProvisioningConfig();
+  const bindingStatus = normalizedProfileValue(
+    params.get("receiverBindingStatus") || nativeConfig.bindingStatus
+  );
+  const setupCode = (
+    params.get("setupCode") ||
+    params.get("code") ||
+    nativeConfig.setupCode ||
+    ""
+  ).trim();
+  return bindingStatus === "local_test" && setupCode === testReceiverRegistrationCode;
+}
+
+function readReceiverShellClaim() {
+  if (typeof window === "undefined") return "";
+  const params = new URLSearchParams(window.location.search);
+  const nativeConfig = readNativeReceiverProvisioningConfig();
+  return (params.get("setupClaim") || params.get("claim") || nativeConfig.setupClaim || "").trim();
+}
+
+function readReceiverInstallId() {
+  if (typeof window === "undefined") return "";
+  const params = new URLSearchParams(window.location.search);
+  const nativeConfig = readNativeReceiverProvisioningConfig();
+  const storedBinding = readStoredReceiverBinding();
+  return (
+    params.get("receiverInstallId") ||
+    nativeConfig.receiverInstallId ||
+    storedBinding.receiverInstallId ||
+    ""
+  ).trim();
+}
+
+function readReceiverDeviceId() {
+  if (typeof window === "undefined") return "";
+  const params = new URLSearchParams(window.location.search);
+  const nativeConfig = readNativeReceiverProvisioningConfig();
+  const storedBinding = readStoredReceiverBinding();
+  return (
+    params.get("receiverDeviceId") ||
+    nativeConfig.receiverDeviceId ||
+    storedBinding.receiverDeviceId ||
+    ""
+  ).trim();
+}
+
+function readReceiverModeLabel(): ScreenCleaningSession["receiverMode"] {
+  if (typeof window === "undefined") return "Dedicated";
+  const params = new URLSearchParams(window.location.search);
+  const nativeConfig = readNativeReceiverProvisioningConfig();
+  const storedBinding = readStoredReceiverBinding();
+  const rawMode = (
+    params.get("receiverMode") ||
+    nativeConfig.receiverMode ||
+    storedBinding.receiverMode ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+
+  return rawMode === "personal" ? "Personal" : "Dedicated";
+}
+
+function nextScreenCleaningCount() {
+  if (typeof window === "undefined") return 1;
+
+  const storedCount = Number(
+    window.localStorage.getItem(receiverScreenCleaningCountStorageKey) || "0"
+  );
+  const nextCount = Number.isFinite(storedCount) && storedCount >= 0
+    ? Math.floor(storedCount) + 1
+    : 1;
+  window.localStorage.setItem(receiverScreenCleaningCountStorageKey, String(nextCount));
+
+  return nextCount;
+}
+
+function chooseScreenCleaningMessage(cleaningCount: number) {
+  const milestoneMessage = screenCleaningMilestoneMessages[cleaningCount];
+  if (milestoneMessage) return milestoneMessage;
+
+  if (typeof window === "undefined") return screenCleaningMessages[0];
+
+  const defaultSeen =
+    window.localStorage.getItem(receiverScreenCleaningDefaultSeenStorageKey) === "true";
+  if (!defaultSeen) {
+    window.localStorage.setItem(receiverScreenCleaningDefaultSeenStorageKey, "true");
+    return screenCleaningMessages[0];
+  }
+
+  const index = Math.floor(Math.random() * screenCleaningMessages.length);
+  return screenCleaningMessages[index] || screenCleaningMessages[0];
+}
+
+function readStoredReceiverBinding(): StoredReceiverBinding {
+  if (typeof window === "undefined") return {};
+  try {
+    const rawBinding = window.localStorage.getItem(receiverBindingStorageKey);
+    if (!rawBinding) return {};
+    const parsed = JSON.parse(rawBinding) as StoredReceiverBinding;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveReceiverBinding(binding: StoredReceiverBinding) {
+  if (typeof window === "undefined") return;
+  const receiverDeviceId = binding.receiverDeviceId?.trim() || "";
+  const receiverInstallId = binding.receiverInstallId?.trim() || readReceiverInstallId();
+  if (!receiverDeviceId || !receiverInstallId) return;
+
+  const storedBinding: StoredReceiverBinding = {
+    bindingStatus: binding.bindingStatus?.trim() || "bound",
+    capabilityStatuses: binding.capabilityStatuses,
+    deviceOwner: binding.deviceOwner,
+    deviceProfile: binding.deviceProfile?.trim() || "",
+    hardwareProfile: binding.hardwareProfile?.trim() || "",
+    lastRecoveryAction: binding.lastRecoveryAction?.trim() || "",
+    lastRecoveryAt: binding.lastRecoveryAt?.trim() || "",
+    lockTaskActive: binding.lockTaskActive,
+    lockTaskPermitted: binding.lockTaskPermitted,
+    nativeManufacturer: binding.nativeManufacturer?.trim() || "",
+    nativeModel: binding.nativeModel?.trim() || "",
+    nativeSdk: binding.nativeSdk,
+    nativeVersionCode: binding.nativeVersionCode,
+    nativeVersionName: binding.nativeVersionName?.trim() || "",
+    provisioningCompletedAt: binding.provisioningCompletedAt?.trim() || "",
+    receiverDeviceId,
+    receiverInstallId,
+    receiverMode: binding.receiverMode?.trim() || "",
+    receiverUrl: binding.receiverUrl?.trim() || "",
+    shellVersion: binding.shellVersion?.trim() || "",
+    storageSource: binding.storageSource?.trim() || "",
+    uiLayout: binding.uiLayout?.trim() || "",
+  };
+  window.localStorage.setItem(receiverBindingStorageKey, JSON.stringify(storedBinding));
+  window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
+  window.CarePlandReceiver?.saveBinding?.(
+    storedBinding.receiverDeviceId || "",
+    storedBinding.bindingStatus || "bound",
+    storedBinding.deviceProfile || "",
+    storedBinding.hardwareProfile || "",
+    storedBinding.uiLayout || ""
+  );
+}
+
+function clearReceiverBinding() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(receiverBindingStorageKey);
+  window.localStorage.removeItem(receiverRegistrationStorageKey);
+}
+
+async function verifyReceiverBindingHeartbeat() {
+  const receiverDeviceId = readReceiverDeviceId();
+  const receiverInstallId = readReceiverInstallId();
+  if (!receiverDeviceId || !receiverInstallId) return null;
+
+  const nativeConfig = readNativeReceiverProvisioningConfig();
+  const response = await fetch("/api/connect/receiver-shell/devices/binding", {
+    body: JSON.stringify({
+      capabilities: nativeConfig.capabilities,
+      deviceOwner: nativeConfig.deviceOwner,
+      lastRecoveryAction: nativeConfig.lastRecoveryAction,
+      lastRecoveryAtMs: nativeConfig.lastRecoveryAtMs,
+      lockTaskActive: nativeConfig.lockTaskActive,
+      lockTaskPermitted: nativeConfig.lockTaskPermitted,
+      nativeManufacturer: nativeConfig.manufacturer,
+      nativeModel: nativeConfig.model,
+      nativeSdk: nativeConfig.nativeSdk || nativeConfig.sdkVersion,
+      nativeVersionCode: nativeConfig.versionCode,
+      nativeVersionName: nativeConfig.versionName,
+      provisioningCompletedAtMs: nativeConfig.provisioningCompletedAtMs,
+      receiverDeviceId,
+      receiverInstallId,
+      receiverMode: nativeConfig.receiverMode,
+      shellVersion: nativeConfig.shellVersion,
+    }),
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  const payload = (await response.json().catch(() => ({}))) as StoredReceiverBinding & {
+    error?: string;
+    ok?: boolean;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error || "Receiver setup could not be confirmed.");
+  }
+
+  return {
+    ...payload,
+    receiverDeviceId,
+    receiverInstallId,
+  };
 }
 
 function readInitialModal(): ModalState {
@@ -553,8 +988,7 @@ function storableReceiverModal(modal: ModalState): StoredReceiverModal {
   if (
     modal?.type === "contact" ||
     modal?.type === "ask" ||
-    modal?.type === "askRecordReview" ||
-    modal?.type === "soundSettings"
+    modal?.type === "askRecordReview"
   ) {
     return modal;
   }
@@ -635,6 +1069,13 @@ function formatReceiverCallDuration(
   const totalSeconds = Math.floor((ended - started) / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+function formatCountdownSeconds(totalSeconds: number) {
+  const boundedSeconds = Math.max(0, Math.ceil(totalSeconds));
+  const minutes = Math.floor(boundedSeconds / 60);
+  const seconds = String(boundedSeconds % 60).padStart(2, "0");
   return `${minutes}:${seconds}`;
 }
 
@@ -904,7 +1345,7 @@ function generateSoundHelp(problem: SoundProblem): SoundHelp {
       actions: ["enable_sounds", "set_volume_high"],
       steps: [
         "Make sure Retro Sounds and Retro Ringers are on.",
-        "Run Test Optional Sounds again.",
+        "Run Test again.",
         "If speech works but ringers do not, continue using the receiver; ringers are optional feedback.",
       ],
       summary: "Receiver ring sounds did not play.",
@@ -917,7 +1358,7 @@ function generateSoundHelp(problem: SoundProblem): SoundHelp {
       "Keep this receiver page open while changing volume.",
       "Press the physical volume up button several times.",
       "Check that sound is playing through this device, not headphones or another output.",
-      "Tap Test Optional Sounds again after changing settings.",
+      "Tap Run Test again after changing settings.",
       "Do not reset the device or erase settings for this issue.",
     ],
     summary: "No beep, ring, or spoken sound was heard.",
@@ -1060,6 +1501,8 @@ function answerForAsk(rawText: string, selectedContact: Contact): AskAnswer {
 export function ConnectReceiver() {
   const initialDevicePixelRatioRef = useRef(initialReceiverDevicePixelRatio());
   const [deskPhoneMode] = useState(readInitialDeskPhoneMode);
+  const [gxvHomeLayout, setGxvHomeLayout] = useState(readInitialGxvHomeLayout);
+  const [kioskManagedFullscreen] = useState(readInitialKioskManagedFullscreen);
   const [applianceStyle, setApplianceStyle] = useState<CSSProperties>(() =>
     receiverApplianceStyle(initialReceiverDevicePixelRatio(), readInitialDeskPhoneMode())
   );
@@ -1077,10 +1520,17 @@ export function ConnectReceiver() {
   const [registrationCode, setRegistrationCode] = useState(testReceiverRegistrationCode);
   const [registrationError, setRegistrationError] = useState("");
   const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [todayFocusItems, setTodayFocusItems] = useState<ReceiverTodayFocusHomeItem[]>(fallbackTodayFocusItems);
+  const [todayFocusCompletingId, setTodayFocusCompletingId] = useState("");
+  const [todayFocusCompletedIds, setTodayFocusCompletedIds] = useState<string[]>([]);
   const [messageTextSize, setMessageTextSize] = useState<ReaderTextSize>(readInitialMessageTextSize);
   const [focusedMessageIndex, setFocusedMessageIndex] = useState(0);
   const [, setStatus] = useState("Ready.");
   const [modal, setModal] = useState<ModalState>(readInitialModal);
+  const [screenCleaningSecondsRemaining, setScreenCleaningSecondsRemaining] =
+    useState<number | null>(null);
+  const [screenCleaningSession, setScreenCleaningSession] =
+    useState<ScreenCleaningSession | null>(null);
   const [contactDraft, setContactDraft] = useState(() => readStoredReceiverSession().contactDraft || "");
   const [askDraft, setAskDraft] = useState(() => readStoredReceiverSession().askDraft || "");
   const [guideTarget, setGuideTarget] = useState<GuideTarget | null>(null);
@@ -1113,10 +1563,41 @@ export function ConnectReceiver() {
   const playingMessageRef = useRef<Message | null>(null);
   const cueAudioRef = useRef<HTMLAudioElement | null>(null);
   const cueTimeoutRef = useRef<number | null>(null);
+  const todayFocusCompletionTimerRef = useRef<number | null>(null);
   const receiverRecordingControllerRef = useRef<ConnectAudioRecordingController | null>(null);
   const receiverCaptureIdRef = useRef("");
   const contactRecordingControllerRef = useRef<ConnectAudioRecordingController | null>(null);
   const contactCaptureIdRef = useRef("");
+  const screenCleaningSessionRef = useRef<ScreenCleaningSession | null>(null);
+
+  useEffect(() => {
+    window.CarePlandReceiver?.receiverReady?.();
+
+    function reportNativeReceiverError(message: string) {
+      window.CarePlandReceiver?.reportReceiverError?.(message);
+    }
+
+    function handleWindowError(event: ErrorEvent) {
+      reportNativeReceiverError(
+        `${event.message || "Receiver script error"} at ${event.filename || "unknown"}:${event.lineno || 0}`
+      );
+    }
+
+    function handleUnhandledRejection(event: PromiseRejectionEvent) {
+      const reason = event.reason instanceof Error
+        ? event.reason.message
+        : String(event.reason || "Receiver promise error");
+      reportNativeReceiverError(reason);
+    }
+
+    window.addEventListener("error", handleWindowError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener("error", handleWindowError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, []);
 
   const refreshMessages = useCallback(async () => {
     if (!selectedReceiverUserId) return;
@@ -1143,6 +1624,57 @@ export function ConnectReceiver() {
       }
     } catch {
       // Keep the local seed messages if the Connect local server is unavailable.
+    }
+  }, [selectedReceiverUserId]);
+
+  function resetTodayFocusMockList(items: ReceiverTodayFocusHomeItem[]) {
+    setTodayFocusItems(items);
+    setTodayFocusCompletedIds([]);
+    setTodayFocusCompletingId("");
+    if (todayFocusCompletionTimerRef.current) {
+      window.clearTimeout(todayFocusCompletionTimerRef.current);
+      todayFocusCompletionTimerRef.current = null;
+    }
+  }
+
+  const refreshTodayFocus = useCallback(async () => {
+    if (!selectedReceiverUserId) {
+      setTodayFocusItems(fallbackTodayFocusItems);
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${connectTodayFocusEndpoint}?personId=${encodeURIComponent(selectedReceiverUserId)}`,
+        {
+          cache: "no-store",
+          headers: await connectAuthHeaders(),
+        }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        focusItems?: Array<Partial<ReceiverTodayFocusHomeItem> & { id?: string; title?: string }>;
+      };
+
+      if (!response.ok || !Array.isArray(payload.focusItems)) return;
+
+      const nextItems = payload.focusItems
+        .filter((item): item is ReceiverTodayFocusHomeItem => Boolean(item.id && item.title))
+        .map((item) => ({
+          id: String(item.id),
+          promptText: item.promptText ?? null,
+          title: String(item.title),
+        }))
+        .filter((item) => !isAppointmentReminderFocusItem(item))
+        .slice(0, 3);
+
+      if (nextItems.length) {
+        resetTodayFocusMockList(nextItems);
+        return;
+      }
+
+      resetTodayFocusMockList(fallbackTodayFocusItems);
+    } catch {
+      // Today's Focus should improve the home screen when available, never block it.
     }
   }, [selectedReceiverUserId]);
 
@@ -1174,17 +1706,36 @@ export function ConnectReceiver() {
               (call) => call.callId === current.callId
             );
             if (!endedCall) return current;
+            const nextSummaryStatus = String(
+              endedCall.summaryStatus || current.summaryStatus || ""
+            );
+            const nextSummaryText = String(
+              endedCall.summaryText || current.summaryText || ""
+            );
+            const summaryReadyForReview =
+              Boolean(nextSummaryText.trim()) ||
+              ["failed", "not_needed", "approved"].includes(nextSummaryStatus);
 
             return {
               ...current,
-              summaryStatus: String(endedCall.summaryStatus || current.summaryStatus || ""),
-              summaryText: String(endedCall.summaryText || current.summaryText || ""),
+              summaryAutoOpened: current.summaryAutoOpened || summaryReadyForReview,
+              summaryStatus: nextSummaryStatus,
+              summaryText: nextSummaryText,
+              summaryDraft:
+                current.summaryDraft ??
+                nextSummaryText,
               transcriptStatus: String(
                 endedCall.transcriptStatus || current.transcriptStatus || ""
               ),
               transcriptText: String(
                 endedCall.transcriptText || current.transcriptText || ""
               ),
+              transcriptCleanupStatus: String(
+                endedCall.transcriptCleanupStatus || current.transcriptCleanupStatus || ""
+              ),
+              textView:
+                current.textView ||
+                (!current.summaryAutoOpened && summaryReadyForReview ? "summary" : undefined),
             };
           }
           logReceiverCallEvent(current.callId, "call_receiver_poll_no_active_call", {
@@ -1306,6 +1857,26 @@ export function ConnectReceiver() {
   }, []);
 
   useEffect(() => {
+    if (screenCleaningSecondsRemaining === null) return undefined;
+
+    const timer = window.setInterval(() => {
+      setScreenCleaningSecondsRemaining((remaining) => {
+        if (remaining === null) return null;
+        if (remaining <= 1) {
+          completeScreenCleaningSession();
+          setModal(null);
+          setStatus("Ready.");
+          return null;
+        }
+
+        return remaining - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [screenCleaningSecondsRemaining]);
+
+  useEffect(() => {
     function syncFullscreenState() {
       const fullscreenDocument = document as FullscreenDocument;
       setFullscreenActive(
@@ -1375,6 +1946,9 @@ export function ConnectReceiver() {
       if (pendingContactRecording?.recording.localUrl) {
         URL.revokeObjectURL(pendingContactRecording.recording.localUrl);
       }
+      if (todayFocusCompletionTimerRef.current) {
+        window.clearTimeout(todayFocusCompletionTimerRef.current);
+      }
     };
   }, [pendingContactRecording]);
 
@@ -1415,6 +1989,138 @@ export function ConnectReceiver() {
     soundSettings,
     started,
   ]);
+
+  useEffect(() => {
+    if (readLocalTestReceiverProvisioning()) {
+      clearReceiverBinding();
+      window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
+      setReceiverRegistered(true);
+      setActiveReceiverUsers([testReceiverUser]);
+      setSelectedReceiverUserId(testReceiverUser.id);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (readLocalTestReceiverProvisioning()) return;
+    const receiverDeviceId = readReceiverDeviceId();
+    const receiverInstallId = readReceiverInstallId();
+    if (!receiverDeviceId || !receiverInstallId) return;
+    let cancelled = false;
+    let hasConfirmedBinding = false;
+
+    async function verifyBinding() {
+      try {
+        const payload = await verifyReceiverBindingHeartbeat();
+        if (!payload) return;
+        if (cancelled) return;
+
+        saveReceiverBinding(payload);
+        hasConfirmedBinding = true;
+        setReceiverRegistered(true);
+        setActiveReceiverUsers([testReceiverUser]);
+        setSelectedReceiverUserId(testReceiverUser.id);
+        setRegistrationError("");
+      } catch (error) {
+        if (cancelled) return;
+        const message =
+          error instanceof Error ? error.message : "Receiver setup could not be confirmed.";
+        if (
+          message.includes("revoked") ||
+          message.includes("not found") ||
+          message.includes("does not match") ||
+          message.includes("not complete")
+        ) {
+          clearReceiverBinding();
+          setReceiverRegistered(false);
+          setActiveReceiverUsers(receiverUsers);
+          setSelectedReceiverUserId("");
+          setRegistrationError(message);
+          return;
+        }
+        if (!hasConfirmedBinding) {
+          setStatus("Receiver setup check is pending.");
+        }
+      }
+    }
+
+    void verifyBinding();
+    const heartbeatId = window.setInterval(() => {
+      void verifyBinding();
+    }, RECEIVER_BINDING_HEARTBEAT_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(heartbeatId);
+    };
+  }, []);
+
+  useEffect(() => {
+    const claim = readReceiverShellClaim();
+    if (!claim || receiverRegistered) return;
+    let cancelled = false;
+
+    async function redeemClaim() {
+      try {
+        const response = await fetch("/api/connect/receiver-shell/claims/redeem", {
+          body: JSON.stringify({
+            claim,
+            receiverInstallId: readReceiverInstallId(),
+          }),
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          bindingStatus?: string;
+          deviceProfile?: string;
+          error?: string;
+          hardwareProfile?: string;
+          receiverDeviceId?: string;
+          receiverInstallId?: string;
+          receiverUrl?: string;
+          storageSource?: string;
+          uiLayout?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error || "Receiver setup link could not be verified.");
+        }
+        if (cancelled) return;
+
+        saveReceiverBinding({
+          bindingStatus: payload.bindingStatus || "bound",
+          deviceProfile: payload.deviceProfile,
+          hardwareProfile: payload.hardwareProfile,
+          receiverDeviceId: payload.receiverDeviceId,
+          receiverInstallId: payload.receiverInstallId || readReceiverInstallId(),
+          receiverUrl: payload.receiverUrl,
+          storageSource: payload.storageSource,
+          uiLayout: payload.uiLayout,
+        });
+        window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
+        setReceiverRegistered(true);
+        setActiveReceiverUsers([testReceiverUser]);
+        setSelectedReceiverUserId(testReceiverUser.id);
+        setRegistrationCode("");
+        setRegistrationError("");
+        setStatus(
+          payload.receiverDeviceId
+            ? `Receiver linked: ${payload.receiverDeviceId}.`
+            : "Receiver linked."
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setRegistrationError(
+          error instanceof Error ? error.message : "Receiver setup link could not be verified."
+        );
+      }
+    }
+
+    void redeemClaim();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [receiverRegistered]);
 
   useEffect(() => {
     if (receiverRegistered) {
@@ -1467,6 +2173,22 @@ export function ConnectReceiver() {
       window.clearInterval(timer);
     };
   }, [refreshMessages, started]);
+
+  useEffect(() => {
+    if (!started || !deskPhoneMode || gxvHomeLayout !== "focus_v1") return undefined;
+
+    const firstRefresh = window.setTimeout(() => {
+      void refreshTodayFocus();
+    }, 0);
+    const timer = window.setInterval(() => {
+      void refreshTodayFocus();
+    }, 60000);
+
+    return () => {
+      window.clearTimeout(firstRefresh);
+      window.clearInterval(timer);
+    };
+  }, [deskPhoneMode, gxvHomeLayout, refreshTodayFocus, started]);
 
   useEffect(() => {
     if (!started) return undefined;
@@ -1532,6 +2254,11 @@ export function ConnectReceiver() {
     noMainConnectUser;
   const focusedMessage = messages[focusedMessageIndex] ?? messages[0] ?? null;
   const hasMessagePaging = messages.length > 1;
+  const gxvFocusHomeEnabled = deskPhoneMode && gxvHomeLayout === "focus_v1";
+  const visibleTodayFocusItems = (todayFocusItems.length ? todayFocusItems : fallbackTodayFocusItems)
+    .filter((item) => !isAppointmentReminderFocusItem(item))
+    .filter((item) => !todayFocusCompletedIds.includes(item.id))
+    .slice(0, 3);
 
   function clearGuideBecauseReceiverActed() {
     if (guideTarget || guideRect) {
@@ -1548,6 +2275,54 @@ export function ConnectReceiver() {
     }
   }
 
+  function toggleGxvHomeLayout() {
+    const nextLayout = gxvHomeLayout === "focus_v1" ? "classic" : "focus_v1";
+    setGxvHomeLayout(nextLayout);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (nextLayout === "focus_v1") {
+        url.searchParams.set("homeLayout", "focus_v1");
+      } else {
+        url.searchParams.delete("homeLayout");
+      }
+      window.history.replaceState(null, "", url.toString());
+    }
+    if (nextLayout === "focus_v1") {
+      resetTodayFocusMockList(todayFocusItems.length ? todayFocusItems : fallbackTodayFocusItems);
+      void refreshTodayFocus();
+    }
+  }
+
+  function completeTodayFocusItem(item: ReceiverTodayFocusHomeItem) {
+    clearGuideBecauseReceiverActed();
+    if (todayFocusCompletingId || todayFocusCompletedIds.includes(item.id)) return;
+    if (item.kind === "weight") {
+      setModal({ type: "todayFocusWeight", item });
+      return;
+    }
+
+    markTodayFocusComplete(item);
+  }
+
+  function markTodayFocusComplete(item: ReceiverTodayFocusHomeItem) {
+    if (todayFocusCompletingId || todayFocusCompletedIds.includes(item.id)) return;
+
+    setTodayFocusCompletingId(item.id);
+    setStatus(`${item.title} completed.`);
+
+    if (todayFocusCompletionTimerRef.current) {
+      window.clearTimeout(todayFocusCompletionTimerRef.current);
+    }
+
+    todayFocusCompletionTimerRef.current = window.setTimeout(() => {
+      setTodayFocusCompletedIds((current) =>
+        current.includes(item.id) ? current : [...current, item.id]
+      );
+      setTodayFocusCompletingId("");
+      todayFocusCompletionTimerRef.current = null;
+    }, 3000);
+  }
+
   function registerReceiverWithCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalizedCode = registrationCode.trim();
@@ -1557,6 +2332,7 @@ export function ConnectReceiver() {
       return;
     }
 
+    clearReceiverBinding();
     window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
     setReceiverRegistered(true);
     setActiveReceiverUsers([testReceiverUser]);
@@ -2037,8 +2813,15 @@ export function ConnectReceiver() {
 
   function openOptionalSounds() {
     clearGuideBecauseReceiverActed();
+    resetSoundTestState();
     setModal({ type: "soundSettings", view: "settings" });
     setStatus("Optional sounds settings are open.");
+  }
+
+  function resetSoundTestState() {
+    setSoundDiagnostic("");
+    setSoundHelp(null);
+    setSelectedSoundProblem(null);
   }
 
   function updateSoundSetting(key: keyof SoundSettings, value: boolean | SoundSettings["comfortVolume"]) {
@@ -2560,11 +3343,16 @@ export function ConnectReceiver() {
   }
 
   async function approveCallSummary(callId: string | undefined) {
+    const approvedSummaryText =
+      modal?.type === "incomingCall"
+        ? String(modal.summaryDraft ?? modal.summaryText ?? "").trim()
+        : "";
     if (!callId || !selectedReceiverUser.id) {
       setModal((current) =>
         current?.type === "incomingCall"
           ? {
               ...current,
+              approvedSummaryText,
               summaryApproval: "approved",
               summaryClarificationOpen: false,
             }
@@ -2578,6 +3366,7 @@ export function ConnectReceiver() {
         body: JSON.stringify({
           action: "approve",
           approvedBy: "receiver",
+          approvedSummaryText,
           mainConnectUserPersonId: selectedReceiverUser.id,
         }),
         headers: {
@@ -2587,20 +3376,143 @@ export function ConnectReceiver() {
         method: "POST",
       });
 
-      if (!response.ok) throw new Error("Summary approval failed.");
+      const payload = (await response.json().catch(() => ({}))) as {
+        call?: ReceiverCall;
+        error?: string;
+      };
+
+      if (!response.ok) throw new Error(payload.error || "Summary approval failed.");
 
       setModal((current) =>
         current?.type === "incomingCall"
           ? {
               ...current,
+              approvedSummaryText,
               summaryApproval: "approved",
               summaryClarificationOpen: false,
+              summaryText: approvedSummaryText || current.summaryText,
+              transcriptCleanupStatus: String(
+                payload.call?.transcriptCleanupStatus ||
+                  current.transcriptCleanupStatus ||
+                  ""
+              ),
             }
           : current
       );
-      setStatus("Call summary approved.");
+      setStatus(
+        payload.call?.transcriptCleanupStatus === "pending"
+          ? "Call summary approved. Transcript cleanup is pending."
+          : "Call summary approved."
+      );
     } catch {
       setStatus("Could not approve the call summary on the local server.");
+    }
+  }
+
+  async function regenerateCallSummary(callId: string | undefined) {
+    if (!callId || !selectedReceiverUser.id) {
+      setStatus("A call transcript is required before recreating the summary.");
+      return;
+    }
+
+    setStatus("Recreating call summary.");
+    try {
+      const response = await fetch(`${connectCallsEndpoint}/${encodeURIComponent(callId)}/summary`, {
+        body: JSON.stringify({
+          action: "regenerate",
+          approvedBy: "receiver",
+          mainConnectUserPersonId: selectedReceiverUser.id,
+        }),
+        headers: {
+          ...(await connectAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        call?: ReceiverCall;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Summary could not be recreated.");
+      }
+
+      const nextSummaryText = String(payload.call?.summaryText || "");
+      const nextSummaryStatus = String(payload.call?.summaryStatus || "");
+      setModal((current) =>
+        current?.type === "incomingCall"
+          ? {
+              ...current,
+              summaryDraft: nextSummaryText,
+              summaryStatus: nextSummaryStatus || current.summaryStatus,
+              summaryText: nextSummaryText || current.summaryText,
+            }
+          : current
+      );
+      setStatus(
+        nextSummaryText
+          ? "Call summary recreated."
+          : "Call summary could not be recreated yet."
+      );
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Could not recreate the call summary on the local server."
+      );
+    }
+  }
+
+  async function retryCallTranscriptCleanup(callId: string | undefined) {
+    if (!callId || !selectedReceiverUser.id) {
+      setStatus("A call record is required before retrying transcript cleanup.");
+      return;
+    }
+
+    setStatus("Retrying transcript cleanup.");
+    try {
+      const response = await fetch(`${connectCallsEndpoint}/${encodeURIComponent(callId)}/summary`, {
+        body: JSON.stringify({
+          action: "cleanup_transcript",
+          approvedBy: "receiver",
+          mainConnectUserPersonId: selectedReceiverUser.id,
+        }),
+        headers: {
+          ...(await connectAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        call?: ReceiverCall;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Transcript cleanup could not be retried.");
+      }
+
+      const cleanupStatus = String(payload.call?.transcriptCleanupStatus || "completed");
+      setModal((current) =>
+        current?.type === "incomingCall"
+          ? {
+              ...current,
+              transcriptCleanupStatus: cleanupStatus,
+            }
+          : current
+      );
+      setStatus(
+        cleanupStatus === "pending"
+          ? "Transcript cleanup is still pending."
+          : "Transcript cleanup completed."
+      );
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Could not retry transcript cleanup on the local server."
+      );
     }
   }
 
@@ -2758,7 +3670,94 @@ export function ConnectReceiver() {
     if (playingMessageId || audioRef.current || playingMessageRef.current) {
       stopMessagePlayback();
     }
+    if (modal?.type === "soundSettings") {
+      resetSoundTestState();
+    }
     setModal(null);
+  }
+
+  function openScreenCleaningConfirm() {
+    clearGuideBecauseReceiverActed();
+    setModal({ type: "screenCleaningConfirm" });
+    setStatus("Screen cleaning confirmation opened.");
+  }
+
+  function buildScreenCleaningSession(): ScreenCleaningSession {
+    const cleaningCount = nextScreenCleaningCount();
+    const receiverDeviceId = readReceiverDeviceId();
+    const receiverInstallId = readReceiverInstallId();
+    const receiverId = receiverDeviceId || receiverInstallId || connectPrototypeReceiverId;
+    return {
+      cleaningCount,
+      message: chooseScreenCleaningMessage(cleaningCount),
+      receiverDeviceId,
+      receiverId,
+      receiverInstallId,
+      receiverMode: readReceiverModeLabel(),
+      sessionId: `screen-cleaning-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      startedAt: new Date().toISOString(),
+    };
+  }
+
+  async function recordScreenCleaningSession(
+    session: ScreenCleaningSession,
+    completedAt?: string
+  ) {
+    const startedMs = Date.parse(session.startedAt);
+    const completedMs = completedAt ? Date.parse(completedAt) : Number.NaN;
+    const duration = Number.isFinite(startedMs) && Number.isFinite(completedMs)
+      ? Math.max(0, Math.round((completedMs - startedMs) / 1000))
+      : undefined;
+
+    try {
+      await fetch(connectReceiverCleaningSessionsEndpoint, {
+        body: JSON.stringify({
+          cleaningCount: session.cleaningCount,
+          cleaningCompletedAt: completedAt,
+          cleaningStartedAt: session.startedAt,
+          deviceIdentifier: session.receiverId,
+          duration,
+          mainConnectUserPersonId: selectedReceiverUserId || undefined,
+          message: session.message,
+          receiverDeviceId: session.receiverDeviceId,
+          receiverId: session.receiverId,
+          receiverInstallId: session.receiverInstallId,
+          receiverMode: session.receiverMode,
+          sessionId: session.sessionId,
+        }),
+        cache: "no-store",
+        headers: {
+          ...(await connectAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        keepalive: true,
+        method: "POST",
+      });
+    } catch {
+      // Cleaning should never fail because analytics could not be recorded.
+    }
+  }
+
+  function completeScreenCleaningSession() {
+    const session = screenCleaningSessionRef.current;
+    if (!session) return;
+
+    const completedAt = new Date().toISOString();
+    screenCleaningSessionRef.current = null;
+    setScreenCleaningSession(null);
+    void recordScreenCleaningSession(session, completedAt);
+  }
+
+  function startScreenCleaning() {
+    stopReceiverCue();
+    stopMessagePlayback();
+    const session = buildScreenCleaningSession();
+    screenCleaningSessionRef.current = session;
+    setScreenCleaningSession(session);
+    setModal(null);
+    setScreenCleaningSecondsRemaining(SCREEN_CLEANING_DURATION_SECONDS);
+    setStatus("Screen cleaning mode started.");
+    void recordScreenCleaningSession(session);
   }
 
   function handleReceiverButtonClickCapture(event: MouseEvent<HTMLElement>) {
@@ -2792,7 +3791,7 @@ export function ConnectReceiver() {
       <main className={styles.registrationScreen}>
         <form className={styles.registrationPanel} onSubmit={registerReceiverWithCode}>
           <p>CarePland Connect</p>
-          <h1>Register Receiver</h1>
+          <h1>Finish Setup</h1>
           <span>Enter setup code</span>
           <input
             autoComplete="one-time-code"
@@ -2809,7 +3808,7 @@ export function ConnectReceiver() {
             aria-label="Receiver setup code"
           />
           {registrationError ? <strong>{registrationError}</strong> : null}
-          <button type="submit">Register</button>
+          <button type="submit">Finish Setup</button>
         </form>
       </main>
     );
@@ -2818,8 +3817,8 @@ export function ConnectReceiver() {
   return (
     <main
       className={`${styles.receiverPage} ${deskPhoneMode ? styles.deskPhoneMode : ""} ${
-        guideTarget || guideRect ? styles.guideActive : ""
-      }`}
+        gxvFocusHomeEnabled ? styles.gxvFocusHomeMode : ""
+      } ${guideTarget || guideRect ? styles.guideActive : ""}`}
       onClick={clearGuideBecauseReceiverActed}
     >
       <div className={styles.applianceFrame} style={applianceStyle}>
@@ -2829,11 +3828,12 @@ export function ConnectReceiver() {
           data-receiver-shell="true"
           onClickCapture={handleReceiverButtonClickCapture}
         >
-          <header
-            className={`${styles.statusZone} ${
-              modal?.type === "incomingCall" ? styles.callStatusZone : ""
-            }`}
-          >
+          {gxvFocusHomeEnabled && modal?.type !== "incomingCall" ? null : (
+            <header
+              className={`${styles.statusZone} ${
+                modal?.type === "incomingCall" ? styles.callStatusZone : ""
+              }`}
+            >
             {modal?.type === "incomingCall" ? (
               <ReceiverCallStatusPanel
                 applianceMode={deskPhoneMode}
@@ -2853,7 +3853,7 @@ export function ConnectReceiver() {
                   <strong>{formatTime(now)}</strong>
                   <div className={styles.dateControlRow}>
                     <span>{formatDate(now)}</span>
-                    {deskPhoneMode ? (
+                    {deskPhoneMode && !kioskManagedFullscreen ? (
                       <button
                         className={styles.fullscreenTinyButton}
                         type="button"
@@ -2864,6 +3864,19 @@ export function ConnectReceiver() {
                         }}
                       >
                         {fullscreenActive ? "MIN" : "MAX"}
+                      </button>
+                    ) : null}
+                    {deskPhoneMode ? (
+                      <button
+                        className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
+                        type="button"
+                        aria-label={gxvHomeLayout === "focus_v1" ? "Use classic GXV home layout" : "Try GXV focus home layout"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleGxvHomeLayout();
+                        }}
+                      >
+                        {gxvHomeLayout === "focus_v1" ? "OLD" : "V1"}
                       </button>
                     ) : null}
                   </div>
@@ -2878,9 +3891,11 @@ export function ConnectReceiver() {
                       openHeaderAppointment();
                     }}
                   >
-                    <span>{nextAppointment.dayLabel}</span>
+                    <span className={styles.focusHomeAppointmentMeta}>
+                      <span>{nextAppointment.dayLabel}</span>
+                      <span>{nextAppointment.timeLabel}</span>
+                    </span>
                     <strong>{nextAppointment.title}</strong>
-                    <span>{nextAppointment.timeLabel}</span>
                   </button>
                 ) : null}
                 <div className={styles.greetingBlock}>
@@ -2910,7 +3925,8 @@ export function ConnectReceiver() {
                 ) : null}
               </>
             )}
-          </header>
+            </header>
+          )}
 
           {!deskPhoneMode ? (
             <section className={styles.contactZone} aria-label="Main Connect User selector">
@@ -2950,7 +3966,188 @@ export function ConnectReceiver() {
 
           <section className={styles.actionZone} aria-label="Primary actions">
             {deskPhoneMode ? (
-              <>
+              gxvFocusHomeEnabled ? (
+                <>
+                  <div className={styles.focusHomeLayoutControls} aria-label="Layout controls">
+                    {!kioskManagedFullscreen ? (
+                      <button
+                        className={styles.fullscreenTinyButton}
+                        type="button"
+                        aria-label={fullscreenActive ? "Exit full screen" : "Enter full screen"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void toggleReceiverFullscreen();
+                        }}
+                      >
+                        {fullscreenActive ? "MIN" : "MAX"}
+                      </button>
+                    ) : null}
+                    <button
+                      className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
+                      type="button"
+                      aria-label="Use classic GXV home layout"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleGxvHomeLayout();
+                      }}
+                    >
+                      OLD
+                    </button>
+                  </div>
+                  <section className={styles.focusHomeGreetingPanel} aria-label="Receiver">
+                    <a
+                      className={styles.focusHomeLogo}
+                      download
+                      href={receiverApkDownloadEndpoint}
+                      onClick={(event) => event.stopPropagation()}
+                      title="Download Receiver APK"
+                    >
+                      <img src="/carepland-loop-mark.png" alt="" />
+                    </a>
+                    <span>{greetingFor(now)}</span>
+                    <strong>{selectedReceiverUser.displayName}</strong>
+                  </section>
+                  <button
+                    className={`${styles.talkFooterAction} ${styles.focusHomeTalkAction}`}
+                    type="button"
+                    aria-label="Talk"
+                    disabled={receiverRecordingProcessing}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void startReceiverRecording();
+                    }}
+                  >
+                    <span className={styles.talkFooterIcon} aria-hidden="true" />
+                    <span>Talk</span>
+                  </button>
+                  <section className={styles.focusHomeTimePanel} aria-label="Current time">
+                    <strong>{formatTime(now)}</strong>
+                    <div className={styles.dateControlRow}>
+                      <span>{formatDate(now)}</span>
+                    </div>
+                    <span>{receiver.locationLabel}</span>
+                  </section>
+                  <section className={styles.todayFocusPanel} aria-label="Today's Focus">
+                    {visibleTodayFocusItems.length ? (
+                      <>
+                        <h2>Today&apos;s Focus</h2>
+                        <ul>
+                          {visibleTodayFocusItems.map((item) => (
+                            <li key={item.id}>
+                              <button
+                                className={item.id === todayFocusCompletingId ? styles.todayFocusCompletedItem : ""}
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  completeTodayFocusItem(item);
+                                }}
+                              >
+                                {item.promptText || item.title}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : (
+                      <div className={styles.brainStretchPrompt}>
+                        <h2>Brain Stretch</h2>
+                        <p>{brainStretchPrompt}</p>
+                      </div>
+                    )}
+                  </section>
+                  <button
+                    className={`${styles.appointmentPanel} ${styles.applianceAppointmentPanel} ${styles.focusHomeAppointmentPanel}`}
+                    type="button"
+                    aria-label={`Open appointment details for ${nextAppointment.title}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openHeaderAppointment();
+                    }}
+                  >
+                    <strong>
+                      {nextAppointment.dayLabel} {nextAppointment.timeLabel.replace(/\s+/g, "").toLowerCase()}:{" "}
+                      {nextAppointment.title}
+                    </strong>
+                  </button>
+                  <div className={styles.focusHomeActionStack}>
+                    <button
+                      className={`${styles.secondaryAction} ${styles.blue} ${styles.focusHomeMessagesAction}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        showAllMessages();
+                      }}
+                    >
+                      Messages
+                    </button>
+                    <button
+                      className={`${styles.secondaryAction} ${styles.blue} ${styles.focusHomeAppointmentAction}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        askAppointmentQuestion();
+                      }}
+                    >
+                      Appointment
+                    </button>
+                    <button
+                      className={`${styles.primaryAction} ${styles.focusHomeAskAction} ${
+                        guideTarget === "ask"
+                          ? styles.guideTarget
+                          : guideTarget
+                            ? styles.guideDim
+                            : ""
+                      }`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openAsk();
+                      }}
+                    >
+                      Ask a Question
+                    </button>
+                    <button
+                      className={`${styles.primaryAction} ${styles.focusHomeCallAction} ${
+                        guideTarget === "primary"
+                          ? styles.guideTarget
+                          : guideTarget
+                            ? styles.guideDim
+                            : ""
+                      }`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        callContact(selectedContact);
+                      }}
+                    >
+                      Call {selectedContact.displayName}
+                    </button>
+                  </div>
+                  <div className={styles.focusHomeUtilityStack}>
+                    <button
+                      className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openOptionalSounds();
+                      }}
+                    >
+                      Sounds
+                    </button>
+                    <button
+                      className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openScreenCleaningConfirm();
+                      }}
+                    >
+                      Clean
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
                 <button
                   className={`${styles.primaryAction} ${styles.receiverHomeAction} ${
                     guideTarget === "ask"
@@ -2981,7 +4178,7 @@ export function ConnectReceiver() {
                     callContact(selectedContact);
                   }}
                 >
-                  Andrew
+                  Call {selectedContact.displayName}
                 </button>
                 <button
                   className={`${styles.secondaryAction} ${styles.blue} ${styles.wideAction} ${
@@ -3009,7 +4206,43 @@ export function ConnectReceiver() {
                 >
                   Messages
                 </button>
+                <div className={styles.cleaningFooterRow}>
+                  <button
+                    className={styles.talkFooterAction}
+                    type="button"
+                    aria-label="Talk"
+                    disabled={receiverRecordingProcessing}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void startReceiverRecording();
+                    }}
+                  >
+                    <span className={styles.talkFooterIcon} aria-hidden="true" />
+                    <span>Talk</span>
+                  </button>
+                  <button
+                    className={`${styles.footerUtilityAction} ${styles.soundsFooterAction}`}
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openOptionalSounds();
+                    }}
+                  >
+                    Sounds
+                  </button>
+                  <button
+                    className={`${styles.footerUtilityAction} ${styles.cleanFooterAction}`}
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openScreenCleaningConfirm();
+                    }}
+                  >
+                    Clean
+                  </button>
+                </div>
               </>
+              )
             ) : (
               <>
                 <button
@@ -3204,6 +4437,7 @@ export function ConnectReceiver() {
               onCallContact={callContact}
               onClose={closeModal}
               onContactDraftChange={setContactDraft}
+              onCompleteTodayFocusItem={markTodayFocusComplete}
               onEscalateAskRecovery={escalateAskRecovery}
               onMessageTextSizeChange={setMessageTextSize}
               onOpenMessageFromAllMessages={openMessageFromAllMessages}
@@ -3217,9 +4451,13 @@ export function ConnectReceiver() {
               onRecordRequest={startReceiverRecording}
               onReportSoundProblem={reportSoundProblem}
               onRecordHearingFeedback={recordHearingFeedback}
+              onRegenerateCallSummary={regenerateCallSummary}
+              onRetryCallTranscriptCleanup={retryCallTranscriptCleanup}
               onResolveSoundHelp={markSoundHelpResolved}
+              onResetSoundTestState={resetSoundTestState}
               onSendContact={sendMessage}
               onSetModal={setModal}
+              onStartScreenCleaning={startScreenCleaning}
               onSubmitAsk={submitAsk}
               onTestSound={testOptionalSound}
               onToggleAutoHearPreference={toggleAutoHearPreference}
@@ -3248,9 +4486,57 @@ export function ConnectReceiver() {
               }
             />
           ) : null}
+          {screenCleaningSecondsRemaining !== null ? (
+            <ScreenCleaningView
+              message={screenCleaningSession?.message || screenCleaningMessages[0]}
+              secondsRemaining={screenCleaningSecondsRemaining}
+            />
+          ) : null}
         </section>
       </div>
     </main>
+  );
+}
+
+function ScreenCleaningView({
+  message,
+  secondsRemaining,
+}: {
+  message: string;
+  secondsRemaining: number;
+}) {
+  return (
+    <div
+      className={styles.screenCleaningView}
+      role="status"
+      aria-live="polite"
+      onClickCapture={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onPointerDownCapture={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onPointerUpCapture={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onTouchStartCapture={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onTouchEndCapture={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
+      <h1>CarePland Receiver Screen Cleaning</h1>
+      <div className={styles.screenCleaningCenter}>
+        <p>{message}</p>
+        <strong>{formatCountdownSeconds(secondsRemaining)}</strong>
+      </div>
+    </div>
   );
 }
 
@@ -3290,17 +4576,27 @@ function SoundToggleRow({
 function CallTextView({
   actions,
   closeLabel = "Close Text View",
+  editableLabel,
+  editableStatusText,
+  editableText,
   messageTextSize,
   onClose,
+  onEditableTextChange,
   onMessageTextSizeChange,
+  policyNotice,
   text,
   title,
 }: {
   actions?: ReactNode;
   closeLabel?: string;
+  editableLabel?: string;
+  editableStatusText?: string;
+  editableText?: string;
   messageTextSize: ReaderTextSize;
   onClose: () => void;
+  onEditableTextChange?: (value: string) => void;
   onMessageTextSizeChange: (value: ReaderTextSize) => void;
+  policyNotice?: string;
   text: string;
   title: string;
 }) {
@@ -3343,7 +4639,23 @@ function CallTextView({
           </button>
         </div>
       </div>
-      <p className={`${styles.readerText} ${textSizeClass}`}>{text}</p>
+      {policyNotice ? <p className={styles.callSummaryPolicyNotice}>{policyNotice}</p> : null}
+      {onEditableTextChange ? (
+        <>
+          {editableStatusText ? (
+            <p className={styles.callSummaryStatusNotice}>{editableStatusText}</p>
+          ) : null}
+          <label className={styles.callSummaryEditBox}>
+            <span>{editableLabel || "Review summary"}</span>
+            <textarea
+              value={editableText ?? text}
+              onChange={(event) => onEditableTextChange(event.target.value)}
+            />
+          </label>
+        </>
+      ) : (
+        <p className={`${styles.readerText} ${textSizeClass}`}>{text}</p>
+      )}
       {actions ? <div className={styles.callSummaryActions}>{actions}</div> : null}
     </section>
   );
@@ -3376,6 +4688,7 @@ function ReceiverCallStatusPanel({
   const connecting = modal.callState === "connecting";
   const ended = modal.callState === "ended";
   const captionsOpen = modal.textView === "captions";
+  const transcriptReady = Boolean(modal.transcriptText?.trim());
   const callDuration = formatReceiverCallDuration(
     modal.callStartedAt,
     modal.callEndedAt,
@@ -3391,6 +4704,14 @@ function ReceiverCallStatusPanel({
           : callAudioStatus === "starting"
             ? "Starting audio"
             : "Audio will start after answer";
+  const endedSummaryStatus = callEndedSummaryStatusLabel(modal);
+  const endedSummaryActionLabel = modal.summaryText?.trim()
+    ? "Review Call Summary"
+    : modal.summaryStatus === "failed"
+      ? "Review Call Notes"
+      : modal.summaryStatus === "not_needed"
+        ? "Review Call Notes"
+        : "Open Call Notes";
 
   return (
     <div className={styles.callPhonePanel}>
@@ -3412,20 +4733,34 @@ function ReceiverCallStatusPanel({
       </div>
       {!ended ? (
         <div className={styles.callPhoneStatus}>
-          {connected ? "Use the handset or speaker." : connecting ? callAudioLabel : "Pick up the handset or press ANSWER."}
+          {transcriptReady
+            ? "Closed captioning text is ready."
+            : connected
+              ? "Use the handset or speaker."
+              : connecting
+                ? callAudioLabel
+                : "Pick up the handset or press ANSWER."}
         </div>
+      ) : null}
+      {transcriptReady && !ended ? (
+        <p className={styles.liveCaptionNotice}>
+          Temporary transcript captured for call notes.
+        </p>
       ) : null}
       {callMuted && connected ? (
         <div className={styles.mutedNotice}>YOU ARE MUTED</div>
       ) : null}
       {ended ? (
         <div className={styles.endedCallActions}>
+          {endedSummaryStatus ? (
+            <p className={styles.endedCallSummaryStatus}>{endedSummaryStatus}</p>
+          ) : null}
           <button
             className={styles.modalButton}
             type="button"
             onClick={() => onSetModal({ ...modal, textView: "summary" })}
           >
-            View Call Summary
+            {endedSummaryActionLabel}
           </button>
           <button
             className={`${styles.modalButton} ${styles.secondary}`}
@@ -3465,7 +4800,11 @@ function ReceiverCallStatusPanel({
                 })
               }
             >
-              {captionsOpen ? "Hide Closed Captioning" : "Show Closed Captioning"}
+              {captionsOpen
+                ? "Hide Closed Captioning"
+                : transcriptReady
+                  ? "Show Captions"
+                  : "Show Closed Captioning"}
             </button>
           ) : null}
         </div>
@@ -3489,6 +4828,29 @@ function ReceiverCallStatusPanel({
       )}
     </div>
   );
+}
+
+function callEndedSummaryStatusLabel(
+  modal: Extract<NonNullable<ModalState>, { type: "incomingCall" }>
+) {
+  const summaryText = modal.summaryText?.trim() || "";
+  const summaryStatus = modal.summaryStatus || "";
+  if (modal.summaryApproval === "approved" || summaryStatus === "approved") {
+    return "Care summary approved.";
+  }
+  if (summaryText) {
+    return "Care summary is ready to review.";
+  }
+  if (summaryStatus === "pending") {
+    return "Care summary is being prepared.";
+  }
+  if (summaryStatus === "failed") {
+    return "Care summary needs review.";
+  }
+  if (summaryStatus === "not_needed") {
+    return "No care details were captured for a summary.";
+  }
+  return "Care summary will appear if enough care details were captured.";
 }
 
 function IncomingCallPrompt({
@@ -3559,6 +4921,7 @@ function ReceiverModal({
   onCallBackForMessage,
   onCallContact,
   onClose,
+  onCompleteTodayFocusItem,
   onContactDraftChange,
   onEscalateAskRecovery,
   onMessageTextSizeChange,
@@ -3568,10 +4931,14 @@ function ReceiverModal({
   onRecordRequest,
   onRecordHearingFeedback,
   onReportSoundProblem,
+  onRegenerateCallSummary,
   onResolveSoundHelp,
+  onResetSoundTestState,
+  onRetryCallTranscriptCleanup,
   onRetryAsk,
   onSendContact,
   onSetModal,
+  onStartScreenCleaning,
   onSubmitAsk,
   onTestSound,
   onToggleAutoHearPreference,
@@ -3601,6 +4968,7 @@ function ReceiverModal({
   onCallBackForMessage: (message: Message) => void;
   onCallContact: (contact: Contact) => void;
   onClose: () => void;
+  onCompleteTodayFocusItem: (item: ReceiverTodayFocusHomeItem) => void;
   onContactDraftChange: (value: string) => void;
   onEscalateAskRecovery: (question: string) => void;
   onMessageTextSizeChange: (value: ReaderTextSize) => void;
@@ -3610,10 +4978,14 @@ function ReceiverModal({
   onRecordRequest: () => Promise<void>;
   onRecordHearingFeedback: (message: Message, choice: string) => void;
   onReportSoundProblem: (problem: SoundProblem) => void;
+  onRegenerateCallSummary: (callId?: string) => Promise<void>;
   onResolveSoundHelp: () => void;
+  onResetSoundTestState: () => void;
+  onRetryCallTranscriptCleanup: (callId?: string) => Promise<void>;
   onRetryAsk: (question: string) => void;
   onSendContact: (contact: Contact, body: string, recording?: PendingContactRecording | null) => void;
   onSetModal: (modal: ModalState) => void;
+  onStartScreenCleaning: () => void;
   onSubmitAsk: () => void;
   onTestSound: () => void;
   onToggleAutoHearPreference: () => void;
@@ -3632,6 +5004,8 @@ function ReceiverModal({
   const [playedComparisonVariants, setPlayedComparisonVariants] =
     useState<Record<string, boolean>>({});
   const [comparisonVersions] = useState(randomizedConnectComparisonVersions);
+  const [todayFocusWeightDraft, setTodayFocusWeightDraft] = useState("");
+  const [todayFocusWeightUnit, setTodayFocusWeightUnit] = useState<"lbs" | "kg">("lbs");
   const autoPlayedMessageIdRef = useRef("");
   const readerPageIndex = readerPageState.key === readerPageKey ? readerPageState.index : 0;
 
@@ -3650,6 +5024,116 @@ function ReceiverModal({
       void onPlayMessage(modal.message, "default", true);
     }
   }, [autoHearPreference, modal, onPlayMessage]);
+
+  if (modal.type === "todayFocusWeight") {
+    const measurementDigitLimit = measurementDigitLimitForFocusItem(modal.item);
+    const weightUnitLabel = todayFocusWeightUnit === "kg" ? "kgs" : "lbs";
+    const canSaveWeight = /\d/.test(todayFocusWeightDraft);
+    const appendWeightDigit = (digit: string) => {
+      setTodayFocusWeightDraft((current) => {
+        if (digit === "backspace") return current.slice(0, -1);
+        if (digit === "." && current.includes(".")) return current;
+        if (digit !== "." && current.replace(/\D/g, "").length >= measurementDigitLimit) return current;
+        if (digit === "." && !current) return "0.";
+        return `${current}${digit}`;
+      });
+    };
+
+    return (
+      <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="today-focus-weight-title">
+        <section className={`${styles.modalPanel} ${styles.todayFocusWeightPanel}`}>
+          <div className={styles.modalTitleRow}>
+            <h2 id="today-focus-weight-title">What was your weight?</h2>
+            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+              Go Back
+            </button>
+          </div>
+          <div className={styles.weightEntryGrid}>
+            <div className={styles.weightEntryControls}>
+              <label className={styles.weightEntryField}>
+                <span className={styles.srOnly}>Weight</span>
+                <span className={styles.weightEntryInputWrap}>
+                  <input
+                    inputMode="decimal"
+                    type="text"
+                    aria-label={`Weight in ${weightUnitLabel}`}
+                    value={todayFocusWeightDraft}
+                    onChange={(event) => {
+                      setTodayFocusWeightDraft(
+                        normalizeDecimalMeasurementInput(event.target.value, measurementDigitLimit)
+                      );
+                    }}
+                    autoFocus
+                  />
+                  <span aria-hidden="true">{weightUnitLabel}</span>
+                </span>
+              </label>
+              <div className={styles.weightUnitChoices} aria-label="Weight unit">
+                <button
+                  className={`${styles.modalButton} ${todayFocusWeightUnit === "lbs" ? "" : styles.secondary}`}
+                  type="button"
+                  onClick={() => setTodayFocusWeightUnit("lbs")}
+                >
+                  lbs
+                </button>
+                <button
+                  className={`${styles.modalButton} ${todayFocusWeightUnit === "kg" ? "" : styles.secondary}`}
+                  type="button"
+                  onClick={() => setTodayFocusWeightUnit("kg")}
+                >
+                  kg
+                </button>
+              </div>
+              <button
+                className={styles.modalButton}
+                type="button"
+                disabled={!canSaveWeight}
+                onClick={() => {
+                  onCompleteTodayFocusItem(modal.item);
+                  setTodayFocusWeightDraft("");
+                  setTodayFocusWeightUnit("lbs");
+                  onClose();
+                }}
+              >
+                Done
+              </button>
+            </div>
+            <div className={styles.weightKeypad} aria-label="Weight keypad">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "backspace"].map((key) => (
+                <button
+                  className={styles.weightKey}
+                  key={key}
+                  type="button"
+                  onClick={() => appendWeightDigit(key)}
+                >
+                  {key === "backspace" ? "⌫" : key}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (modal.type === "screenCleaningConfirm") {
+    return (
+      <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="screen-cleaning-title">
+        <section className={`${styles.modalPanel} ${styles.screenCleaningConfirmPanel}`}>
+          <h2 id="screen-cleaning-title">Screen Cleaning</h2>
+          <p>Clean the screen now?</p>
+          <div className={styles.screenCleaningConfirmActions}>
+            <button className={styles.modalButton} type="button" onClick={onStartScreenCleaning}>
+              Start Cleaning
+            </button>
+            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+              Cancel
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   if (modal.type === "contact") {
     const contact = contacts.find((item) => item.id === modal.contactId) ?? contacts[0];
@@ -3833,26 +5317,127 @@ function ReceiverModal({
   if (modal.type === "askAnswer") {
     const recipient = contacts.find((contact) => contact.id === modal.answer.recipientId) ?? contacts[0];
     const canSend = modal.answer.type === "message" && Boolean(modal.answer.messageBody.trim());
+    const askedPages = paginateReaderText(modal.answer.question, messageTextSize);
+    const askedPageCount = askedPages.length;
+    const currentAskedPage = Math.min(
+      Math.max(modal.page ?? 0, 0),
+      Math.max(askedPageCount - 1, 0)
+    );
+    const textSizeClass =
+      messageTextSize === "standard"
+        ? styles.readerTextStandard
+        : messageTextSize === "extra"
+          ? styles.readerTextExtra
+          : styles.readerTextLarge;
+
+    if (applianceMode) {
+      return (
+        <div className={`${styles.modal} ${styles.applianceFullscreenModal}`} role="dialog" aria-modal="true" aria-labelledby="ask-answer-title">
+          <section className={`${styles.modalPanel} ${styles.applianceListPanel} ${styles.applianceAskAnswerPanel}`}>
+            <div className={styles.applianceListToolbar}>
+              <h2 id="ask-answer-title">You Asked</h2>
+              <div className={styles.applianceReaderSizeRow} aria-label="Asked text size">
+                {[
+                  ["standard", "Standard"],
+                  ["large", "Large"],
+                  ["extra", "X-Large"],
+                ].map(([value, label]) => {
+                  const selected = messageTextSize === value;
+                  return (
+                    <button
+                      className={`${styles.readerSizeButton} ${selected ? styles.readerSizeButtonSelected : ""}`}
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        onMessageTextSizeChange(value as ReaderTextSize);
+                        onSetModal({ ...modal, page: 0 });
+                      }}
+                    >
+                      {selected ? label.toUpperCase() : label}
+                    </button>
+                  );
+                })}
+              </div>
+              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+                Go Home
+              </button>
+            </div>
+            <p className={`${styles.askedText} ${styles.askAnswerText} ${styles.applianceAskAnswerText} ${textSizeClass}`}>
+              {askedPages[currentAskedPage] || modal.answer.question}
+            </p>
+            {!canSend ? <p className={styles.interpreterMessage}>{modal.answer.answer}</p> : null}
+            <div className={styles.appliancePageControls} aria-label="Asked text page controls">
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                disabled={currentAskedPage === 0}
+                type="button"
+                onClick={() =>
+                  onSetModal({
+                    ...modal,
+                    page: Math.max(0, currentAskedPage - 1),
+                  })
+                }
+              >
+                ◀
+              </button>
+              <span>
+                {currentAskedPage + 1} / {askedPageCount}
+              </span>
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                disabled={currentAskedPage >= askedPageCount - 1}
+                type="button"
+                onClick={() =>
+                  onSetModal({
+                    ...modal,
+                    page: Math.min(askedPageCount - 1, currentAskedPage + 1),
+                  })
+                }
+              >
+                ▶
+              </button>
+            </div>
+            <div className={`${styles.universalAskActions} ${styles.askAnswerActions} ${styles.applianceAskAnswerActions}`}>
+              <button
+                className={styles.modalButton}
+                type="button"
+                onClick={() => {
+                  if (canSend) {
+                    onSendContact(recipient, modal.answer.messageBody);
+                    return;
+                  }
+                  onClose();
+                }}
+              >
+                {modal.answer.actionLabel}
+              </button>
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                type="button"
+                onClick={() => onSetModal({ type: "askRecovery", question: modal.answer.question })}
+              >
+                This wasn&apos;t helpful
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
 
     return (
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="ask-answer-title">
-        <section className={styles.modalPanel}>
+        <section className={`${styles.modalPanel} ${styles.askAnswerPanel}`}>
           <div className={styles.modalTitleRow}>
-            <div>
-              <span className={styles.askedLabel}>You asked</span>
-              <h2 id="ask-answer-title">{modal.answer.question}</h2>
-            </div>
+            <h2 id="ask-answer-title">You Asked</h2>
             <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
               Go Home
             </button>
           </div>
-          <p className={styles.interpreterMessage}>{modal.answer.answer}</p>
-          {canSend ? (
-            <p className={styles.askedText}>
-              <span>Message:</span> {modal.answer.messageBody}
-            </p>
-          ) : null}
-          <div className={styles.universalAskActions}>
+          <p className={`${styles.askedText} ${styles.askAnswerText} ${textSizeClass}`}>
+            {askedPages[currentAskedPage] || modal.answer.question}
+          </p>
+          {!canSend ? <p className={styles.interpreterMessage}>{modal.answer.answer}</p> : null}
+          <div className={`${styles.universalAskActions} ${styles.askAnswerActions}`}>
             <button
               className={styles.modalButton}
               type="button"
@@ -3873,8 +5458,58 @@ function ReceiverModal({
             >
               This wasn&apos;t helpful
             </button>
-            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => onSetModal({ type: "ask" })}>
-              Ask Andrew
+          </div>
+          <div className={styles.askAnswerReaderControls}>
+            <button
+              className={`${styles.modalButton} ${styles.secondary}`}
+              disabled={currentAskedPage === 0}
+              type="button"
+              onClick={() =>
+                onSetModal({
+                  ...modal,
+                  page: Math.max(0, currentAskedPage - 1),
+                })
+              }
+            >
+              ◀
+            </button>
+            <div className={styles.askAnswerSizeRow} aria-label="Text size">
+              {[
+                ["standard", "standard"],
+                ["large", "large"],
+                ["extra", "x-large"],
+              ].map(([value, label]) => {
+                const selected = messageTextSize === value;
+                return (
+                  <button
+                    className={`${styles.readerSizeButton} ${selected ? styles.readerSizeButtonSelected : ""}`}
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      onMessageTextSizeChange(value as ReaderTextSize);
+                      onSetModal({ ...modal, page: 0 });
+                    }}
+                  >
+                    {selected ? label.toUpperCase() : label}
+                  </button>
+                );
+              })}
+            </div>
+            <span className={styles.askAnswerPageIndicator}>
+              {currentAskedPage + 1} / {askedPageCount}
+            </span>
+            <button
+              className={`${styles.modalButton} ${styles.secondary}`}
+              disabled={currentAskedPage >= askedPageCount - 1}
+              type="button"
+              onClick={() =>
+                onSetModal({
+                  ...modal,
+                  page: Math.min(askedPageCount - 1, currentAskedPage + 1),
+                })
+              }
+            >
+              ▶
             </button>
           </div>
         </section>
@@ -3883,20 +5518,168 @@ function ReceiverModal({
   }
 
   if (modal.type === "askRecovery") {
+    const recoveryPages = paginateReaderText(modal.question, messageTextSize);
+    const recoveryPageCount = recoveryPages.length;
+    const currentRecoveryPage = Math.min(
+      Math.max(modal.page ?? 0, 0),
+      Math.max(recoveryPageCount - 1, 0)
+    );
+    const textSizeClass =
+      messageTextSize === "standard"
+        ? styles.readerTextStandard
+        : messageTextSize === "extra"
+          ? styles.readerTextExtra
+          : styles.readerTextLarge;
+
+    if (applianceMode) {
+      return (
+        <div className={`${styles.modal} ${styles.applianceFullscreenModal}`} role="dialog" aria-modal="true" aria-labelledby="recovery-title">
+          <section className={`${styles.modalPanel} ${styles.applianceListPanel} ${styles.applianceAskRecoveryPanel}`}>
+            <div className={styles.applianceListToolbar}>
+              <h2 id="recovery-title">You Asked</h2>
+              <div className={styles.applianceReaderSizeRow} aria-label="Asked text size">
+                {[
+                  ["standard", "Standard"],
+                  ["large", "Large"],
+                  ["extra", "X-Large"],
+                ].map(([value, label]) => {
+                  const selected = messageTextSize === value;
+                  return (
+                    <button
+                      className={`${styles.readerSizeButton} ${selected ? styles.readerSizeButtonSelected : ""}`}
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        onMessageTextSizeChange(value as ReaderTextSize);
+                        onSetModal({ ...modal, page: 0 });
+                      }}
+                    >
+                      {selected ? label.toUpperCase() : label}
+                    </button>
+                  );
+                })}
+              </div>
+              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+                Go Home
+              </button>
+            </div>
+            <p className={`${styles.askedText} ${styles.askAnswerText} ${styles.applianceAskAnswerText} ${textSizeClass}`}>
+              {recoveryPages[currentRecoveryPage] || modal.question}
+            </p>
+            <div className={styles.appliancePageControls} aria-label="Asked text page controls">
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                disabled={currentRecoveryPage === 0}
+                type="button"
+                onClick={() =>
+                  onSetModal({
+                    ...modal,
+                    page: Math.max(0, currentRecoveryPage - 1),
+                  })
+                }
+              >
+                ◀
+              </button>
+              <span>
+                {currentRecoveryPage + 1} / {recoveryPageCount}
+              </span>
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                disabled={currentRecoveryPage >= recoveryPageCount - 1}
+                type="button"
+                onClick={() =>
+                  onSetModal({
+                    ...modal,
+                    page: Math.min(recoveryPageCount - 1, currentRecoveryPage + 1),
+                  })
+                }
+              >
+                ▶
+              </button>
+            </div>
+            <p className={`${styles.interpreterMessage} ${styles.applianceRecoveryPrompt}`}>
+              I didn&apos;t quite understand. What would you like to do?
+            </p>
+            <div className={`${styles.universalAskActions} ${styles.askAnswerActions} ${styles.applianceAskAnswerActions}`}>
+              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => onRetryAsk(modal.question)}>
+                I&apos;ll try rephrasing it
+              </button>
+              <button className={styles.modalButton} type="button" onClick={() => onEscalateAskRecovery(modal.question)}>
+                Send this to Andrew
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     return (
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="recovery-title">
-        <section className={styles.modalPanel}>
+        <section className={`${styles.modalPanel} ${styles.askAnswerPanel}`}>
           <div className={styles.modalTitleRow}>
-            <div>
-              <span className={styles.askedLabel}>You asked</span>
-              <h2 id="recovery-title">{modal.question}</h2>
-            </div>
+            <h2 id="recovery-title">You Asked</h2>
             <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
               Go Home
             </button>
           </div>
+          <p className={`${styles.askedText} ${styles.askAnswerText} ${textSizeClass}`}>
+            {recoveryPages[currentRecoveryPage] || modal.question}
+          </p>
+          <div className={styles.askAnswerReaderControls}>
+            <button
+              className={`${styles.modalButton} ${styles.secondary}`}
+              disabled={currentRecoveryPage === 0}
+              type="button"
+              onClick={() =>
+                onSetModal({
+                  ...modal,
+                  page: Math.max(0, currentRecoveryPage - 1),
+                })
+              }
+            >
+              ◀
+            </button>
+            <div className={styles.askAnswerSizeRow} aria-label="Text size">
+              {[
+                ["standard", "standard"],
+                ["large", "large"],
+                ["extra", "x-large"],
+              ].map(([value, label]) => {
+                const selected = messageTextSize === value;
+                return (
+                  <button
+                    className={`${styles.readerSizeButton} ${selected ? styles.readerSizeButtonSelected : ""}`}
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      onMessageTextSizeChange(value as ReaderTextSize);
+                      onSetModal({ ...modal, page: 0 });
+                    }}
+                  >
+                    {selected ? label.toUpperCase() : label}
+                  </button>
+                );
+              })}
+            </div>
+            <span className={styles.askAnswerPageIndicator}>
+              {currentRecoveryPage + 1} / {recoveryPageCount}
+            </span>
+            <button
+              className={`${styles.modalButton} ${styles.secondary}`}
+              disabled={currentRecoveryPage >= recoveryPageCount - 1}
+              type="button"
+              onClick={() =>
+                onSetModal({
+                  ...modal,
+                  page: Math.min(recoveryPageCount - 1, currentRecoveryPage + 1),
+                })
+              }
+            >
+              ▶
+            </button>
+          </div>
           <p className={styles.interpreterMessage}>I didn&apos;t quite understand. What would you like to do?</p>
-          <div className={styles.universalAskActions}>
+          <div className={`${styles.universalAskActions} ${styles.askAnswerActions}`}>
             <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => onRetryAsk(modal.question)}>
               I&apos;ll try rephrasing it
             </button>
@@ -3915,14 +5698,36 @@ function ReceiverModal({
     const callTranscriptText =
       modal.transcriptText?.trim() ||
       receiverTranscriptStatusLabel(modal.transcriptStatus || "");
+    const generatedSummaryText = modal.summaryText?.trim() || "";
     const callSummaryText =
       modal.summaryApproval === "approved"
-        ? "Summary approved. The temporary transcript will be deleted while the approved care summary remains attached to this call."
-        : modal.summaryText?.trim()
-          ? modal.summaryText.trim()
-          : modal.summaryStatus === "failed"
-            ? "A care summary could not be created yet. The temporary transcript should remain until summary review can be completed."
-            : "No care summary has been created yet. Future summaries should include only care-relevant details from the call and omit general conversation when uncertain.";
+        ? modal.transcriptCleanupStatus === "pending"
+          ? "Summary approved. Transcript cleanup is still pending; use Retry Cleanup to delete the temporary transcript."
+          : "Summary approved. The temporary transcript was deleted while the approved care summary remains attached to this call."
+        : generatedSummaryText
+          ? generatedSummaryText
+          : modal.summaryStatus === "pending"
+            ? "CarePland is preparing the call summary. Keep this open for a moment, or close it and check again after the call record refreshes."
+            : modal.summaryStatus === "failed"
+              ? "A care summary could not be created yet. You can write one here if needed, or use Try Again when a temporary transcript is available."
+              : modal.summaryStatus === "not_needed"
+                ? "No care-relevant details were captured for the call summary. You can still add a brief care note if something important was discussed."
+                : "No care summary has been created yet. You can write one here if needed, using only care-relevant details from the call.";
+    const summaryDraftText = modal.summaryDraft ?? generatedSummaryText;
+    const summaryStatusNotice =
+      summaryOpen && modal.summaryApproval !== "approved" && !generatedSummaryText
+        ? callSummaryText
+        : undefined;
+    const approvedDraftReady = summaryDraftText.trim().length > 0;
+    const canRegenerateSummary =
+      summaryOpen &&
+      modal.summaryApproval !== "approved" &&
+      Boolean(modal.transcriptText?.trim()) &&
+      (modal.summaryStatus === "failed" || !modal.summaryText?.trim());
+    const canRetryTranscriptCleanup =
+      summaryOpen &&
+      modal.summaryApproval === "approved" &&
+      modal.transcriptCleanupStatus === "pending";
 
     if (!captionsOpen && !summaryOpen) {
       return null;
@@ -3937,12 +5742,12 @@ function ReceiverModal({
                 <>
                   {modal.summaryClarificationOpen ? (
                     <p className={styles.summaryClarificationNotice}>
-                      This is where clarification and summary refinement will happen.
+                      Add or change only details that belong in a care or appointment record.
                     </p>
                   ) : null}
                   <button
                     className={styles.modalButton}
-                    disabled={modal.summaryApproval === "approved"}
+                    disabled={modal.summaryApproval === "approved" || !approvedDraftReady}
                     type="button"
                     onClick={() => {
                       void onApproveCallSummary(modal.callId);
@@ -3963,13 +5768,52 @@ function ReceiverModal({
                   >
                     Not Quite
                   </button>
+                  {canRegenerateSummary ? (
+                    <button
+                      className={`${styles.modalButton} ${styles.secondary}`}
+                      type="button"
+                      onClick={() => {
+                        void onRegenerateCallSummary(modal.callId);
+                      }}
+                    >
+                      Try Again
+                    </button>
+                  ) : null}
+                  {canRetryTranscriptCleanup ? (
+                    <button
+                      className={`${styles.modalButton} ${styles.secondary}`}
+                      type="button"
+                      onClick={() => {
+                        void onRetryCallTranscriptCleanup(modal.callId);
+                      }}
+                    >
+                      Retry Cleanup
+                    </button>
+                  ) : null}
                 </>
               ) : null
             }
             closeLabel="Close Call"
+            editableLabel={summaryOpen ? "Approved care summary" : undefined}
+            editableStatusText={summaryStatusNotice}
+            editableText={summaryOpen && modal.summaryApproval !== "approved" ? summaryDraftText : undefined}
             messageTextSize={messageTextSize}
             onClose={() => onSetModal(summaryOpen ? null : { ...modal, textView: undefined })}
+            onEditableTextChange={
+              summaryOpen && modal.summaryApproval !== "approved"
+                ? (value) =>
+                    onSetModal({
+                      ...modal,
+                      summaryDraft: value,
+                    })
+                : undefined
+            }
             onMessageTextSizeChange={onMessageTextSizeChange}
+            policyNotice={
+              summaryOpen && modal.summaryApproval !== "approved"
+                ? "Review this care summary before approving. Include only information relevant to care, appointments, health, caregiving, or follow-up. When uncertain, omit."
+                : undefined
+            }
             text={summaryOpen ? callSummaryText : callTranscriptText}
             title={summaryOpen ? "Call Summary" : "Closed Captioning"}
           />
@@ -4237,8 +6081,18 @@ function ReceiverModal({
                   Where is it?
                 </button>
               ) : null}
-              <button className={`${styles.modalButton} ${styles.secondary} ${styles.appointmentDoneAction}`} type="button" onClick={onClose}>
-                Done
+              <button
+                className={`${styles.modalButton} ${styles.secondary} ${styles.appointmentDoneAction}`}
+                type="button"
+                onClick={() =>
+                  onSetModal({
+                    type: "appointmentsList",
+                    appointments: modal.appointments,
+                    page: modal.page,
+                  })
+                }
+              >
+                More Appointments
               </button>
             </div>
           </section>
@@ -4329,40 +6183,77 @@ function ReceiverModal({
     };
 
     return (
-      <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="sound-title">
-        <section className={`${styles.modalPanel} ${styles.soundPanel}`}>
-          <div className={styles.modalTitleRow}>
+      <div
+        className={`${styles.modal} ${applianceMode ? styles.applianceFullscreenModal : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sound-title"
+      >
+        <section
+          className={`${styles.modalPanel} ${styles.soundPanel} ${
+            applianceMode ? styles.applianceSoundPanel : ""
+          }`}
+        >
+          <div
+            className={`${styles.modalTitleRow} ${
+              modal.view === "help" ? styles.soundTestTitleRow : styles.soundSettingsTitleRow
+            }`}
+          >
             <h2 id="sound-title">
-              {modal.view === "help" ? "Optional Sounds Help" : "Optional Sounds"}
+              {modal.view === "help" ? "Test Sounds" : "Optional Sounds"}
             </h2>
+            {modal.view === "help" ? (
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                type="button"
+                onClick={() => {
+                  onResetSoundTestState();
+                  onSetModal({ type: "soundSettings", view: "settings" });
+                }}
+              >
+                Go Back
+              </button>
+            ) : null}
             <button
-              className={`${styles.modalButton} ${styles.secondary}`}
+              className={`${styles.modalButton} ${styles.secondary} ${styles.soundHomeButton}`}
               type="button"
               onClick={onClose}
             >
               Go Home
             </button>
+            {modal.view === "help" ? (
+              <button
+                className={`${styles.modalButton} ${styles.soundHeaderRunButton}`}
+                data-receiver-no-beep="true"
+                type="button"
+                onClick={onTestSound}
+              >
+                Run Test
+              </button>
+            ) : null}
           </div>
           {modal.view === "settings" ? (
             <>
               <p className={styles.settingsCopy}>
-                These sounds are helpful feedback, but Connect can still work without them.
+                These sounds give helpful feedback but are not required.
               </p>
-              <SoundToggleRow
-                label="Retro Sounds"
-                onToggle={(value) => onUpdateSoundSetting("retroSounds", value)}
-                value={soundSettings.retroSounds}
-              />
-              <SoundToggleRow
-                label="Retro Ringers"
-                onToggle={(value) => onUpdateSoundSetting("retroRingers", value)}
-                value={soundSettings.retroRingers}
-              />
-              <SoundToggleRow
-                label="Button Beeps"
-                onToggle={(value) => onUpdateSoundSetting("buttonBeeps", value)}
-                value={soundSettings.buttonBeeps}
-              />
+              <div className={styles.soundToggleGrid}>
+                <SoundToggleRow
+                  label="Retro Sounds"
+                  onToggle={(value) => onUpdateSoundSetting("retroSounds", value)}
+                  value={soundSettings.retroSounds}
+                />
+                <SoundToggleRow
+                  label="Retro Ringers"
+                  onToggle={(value) => onUpdateSoundSetting("retroRingers", value)}
+                  value={soundSettings.retroRingers}
+                />
+                <SoundToggleRow
+                  label="Button Beeps"
+                  onToggle={(value) => onUpdateSoundSetting("buttonBeeps", value)}
+                  value={soundSettings.buttonBeeps}
+                />
+              </div>
               {showVolumeControls ? (
                 <div className={styles.soundSettingGroup}>
                   <strong>Volume</strong>
@@ -4382,31 +6273,27 @@ function ReceiverModal({
                   </div>
                 </div>
               ) : null}
-              <button
-                className={`${styles.modalButton} ${styles.gold}`}
-                type="button"
-                onClick={() => onSetModal({ type: "soundSettings", view: "help" })}
-              >
-                Fix Optional Sounds
-              </button>
+              <div className={styles.soundFixRow}>
+                <p>Having problems with optional sounds?</p>
+                <button
+                  className={`${styles.modalButton} ${styles.gold}`}
+                  type="button"
+                  onClick={() => onSetModal({ type: "soundSettings", view: "help" })}
+                >
+                  Fix Sounds
+                </button>
+              </div>
             </>
           ) : (
             <>
-              <button
-                className={`${styles.modalButton} ${styles.soundTestButton}`}
-                data-receiver-no-beep="true"
-                type="button"
-                onClick={onTestSound}
-              >
-                Test Optional Sounds
-              </button>
-              {soundDiagnostic ? <p className={styles.diagnosticText}>{soundDiagnostic}</p> : null}
-              <div className={styles.soundHelpPanel}>
-                <p>Optional sounds include button beeps and retro sounds.</p>
-                <p>Speech may work even when other sounds are quiet.</p>
-                <p>Adjust volume while this screen is open.</p>
-                <p>Check audio output settings if available.</p>
+              <div className={styles.soundTestIntro}>
+                <ul className={styles.soundHelpPanel}>
+                  <li>Button beeps and retro sounds are optional.</li>
+                  <li>Speech can work even if these sounds are quiet.</li>
+                  <li>Use device volume buttons while this screen is open.</li>
+                </ul>
               </div>
+              {soundDiagnostic ? <p className={styles.diagnosticText}>{soundDiagnostic}</p> : null}
               <div className={styles.soundProblemGrid}>
                 <p>Problem:</p>
                 <div className={styles.soundProblemChoices}>
@@ -4424,10 +6311,16 @@ function ReceiverModal({
                   ))}
                 </div>
               </div>
-              {soundHelp ? (
-                <section className={styles.soundHelpRecipe} aria-live="polite">
+              <section
+                className={`${styles.soundHelpRecipe} ${
+                  soundHelp ? "" : styles.soundHelpRecipePlaceholder
+                }`}
+                aria-hidden={soundHelp ? undefined : "true"}
+                aria-live={soundHelp ? "polite" : undefined}
+              >
+                {soundHelp ? (
+                  <>
                   <h3>{soundHelp.title}</h3>
-                  <p>{soundHelp.summary}</p>
                   <ol>
                     {soundHelp.steps.map((step) => (
                       <li key={step}>{step}</li>
@@ -4454,14 +6347,15 @@ function ReceiverModal({
                       type="button"
                       onClick={onTestSound}
                     >
-                      Test Again
+                      Run Test
                     </button>
                     <button className={styles.soundChoice} type="button" onClick={onResolveSoundHelp}>
                       This Fixed It
                     </button>
                   </div>
-                </section>
-              ) : null}
+                  </>
+                ) : null}
+              </section>
               <dl className={styles.soundContext}>
                 <div>
                   <dt>Device</dt>
@@ -4735,6 +6629,12 @@ function ReceiverModal({
         : messageTextSize === "extra"
           ? styles.allMessagesExtra
           : styles.allMessagesLarge;
+    const emptyTextSizeClass =
+      messageTextSize === "standard"
+        ? styles.readerTextStandard
+        : messageTextSize === "extra"
+          ? styles.readerTextExtra
+          : styles.readerTextLarge;
     const allMessagesPageSize = messageTextSize === "standard" ? 4 : messageTextSize === "extra" ? 2 : 3;
     const allMessagesPageCount = Math.max(1, Math.ceil(messages.length / allMessagesPageSize));
     const currentAllMessagesPage = Math.min(Math.max(modal.page, 0), allMessagesPageCount - 1);
@@ -4788,7 +6688,7 @@ function ReceiverModal({
                   </button>
                 ))
               ) : (
-                <p className={styles.applianceEmptyText}>No messages yet.</p>
+                <p className={`${styles.applianceEmptyText} ${emptyTextSizeClass}`}>No messages yet.</p>
               )}
             </div>
             <div className={styles.appliancePageControls} aria-label="All messages page controls">
@@ -4871,7 +6771,7 @@ function ReceiverModal({
                 </button>
               ))
             ) : (
-              <p className={styles.readerText}>No messages yet.</p>
+              <p className={`${styles.readerText} ${emptyTextSizeClass}`}>No messages yet.</p>
             )}
           </div>
           <div className={styles.readerPageControls} aria-label="All messages page controls">
@@ -4905,6 +6805,23 @@ function ReceiverModal({
               ▶
             </button>
           </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (applianceMode) {
+    return (
+      <div className={`${styles.modal} ${styles.applianceFullscreenModal}`} role="dialog" aria-modal="true" aria-labelledby="sent-title">
+        <section className={`${styles.modalPanel} ${styles.applianceListPanel} ${styles.applianceSentPanel}`}>
+          <div className={styles.applianceListToolbar}>
+            <h2 id="sent-title">Message Sent</h2>
+            <span aria-hidden="true" />
+            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+              Go Home
+            </button>
+          </div>
+          <p className={styles.applianceSentText}>Your message was sent to {modal.recipientName}.</p>
         </section>
       </div>
     );
