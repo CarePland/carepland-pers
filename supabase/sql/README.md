@@ -5,6 +5,12 @@ Supabase SQL editor history.
 
 ## Current Committed SQL
 
+- `2026-07-01_care_recommendations_foundation.sql`
+  Migration: adds reviewable CarePland Recommendation candidates and supporting evidence rows. Recommendations bridge existing CarePland knowledge to possible Focus Items, but are not automatically shown or converted; initial generation is deterministic and evidence-based, with no AI prompt seeded. The v1 backend uses `dedupe_key` and `evidence_hash` so repeated scans can update open candidates without duplicating evidence.
+
+- `2026-07-01_track_today_focus_foundation.sql`
+  Migration: adds the first Track / Today's Focus foundation with person-scoped `focus_items` for intentions/prompts and `track_events` for recorded reality. Focus Items include an `importance_score` ranking hint for the first Receiver proof of concept. The model is source-traceable, non-destructive, compatible with future Talk/Receiver/reminder/CarePrep ingestion, and intentionally avoids diagnosis or clinical decision support logic.
+
 - `2026-06-19_connect_main_user_context.sql`
   Migration: adds Connect-local settings in `connect_settings`, Pers-backed Connect participant enablement in `connect_participants`, and RLS policies for the Main Connect User model. This migration intentionally does not backfill every active `care_subjects` row into Connect.
 
