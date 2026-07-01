@@ -58,12 +58,32 @@ export type ConnectReceiverHousehold = {
 
 export type ConnectReceiverDevice = {
   active?: boolean;
+  capabilityStatuses?: {
+    batteryOptimization?: string;
+    bootStart?: string;
+    fullscreen?: string;
+    keepAwake?: string;
+    kiosk?: string;
+    microphone?: string;
+    updateChecks?: string;
+  };
   careCircleId?: string;
+  deviceOwner?: boolean;
+  hardwareProfile?: string;
   id?: string;
+  lastRecoveryAction?: string;
+  lastRecoveryAt?: string;
   lastSeenAt?: string;
   linkedCareCircleId?: string | null;
+  lockTaskActive?: boolean;
+  lockTaskPermitted?: boolean;
   locationLabel?: string;
   name?: string;
+  nativeManufacturer?: string;
+  nativeModel?: string;
+  nativeSdk?: number;
+  nativeVersionCode?: number;
+  nativeVersionName?: string;
   pairedAt?: string;
   presence?: {
     label?: string;
@@ -72,10 +92,16 @@ export type ConnectReceiverDevice = {
     state?: ConnectReceiverDevicePresenceState | string;
   };
   productEligibility?: ConnectProductEligibility | null;
+  provisioningCompletedAt?: string;
   receiverHouseholdId?: string;
   receiverId?: string;
+  receiverMode?: "dedicated" | "personal" | string;
   revokedAt?: string;
+  shellVersion?: string;
   status?: ConnectProvisioningLifecycleStatus | string;
+  updateAction?: "none" | "recommended" | "required" | string;
+  updateAvailable?: boolean;
+  updateRequired?: boolean;
 };
 
 export type ConnectReceiverSetupToken = {

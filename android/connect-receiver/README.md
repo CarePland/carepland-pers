@@ -8,9 +8,11 @@ This is the native Android appliance shell for CarePland Connect Receiver. It is
 - Receiver URL configuration through provisioning links.
 - Microphone permission pass-through for WebRTC/audio features.
 - Native JavaScript bridge exposed as `window.CarePlandReceiver`.
+- Native device/profile facts appended to the Receiver URL for early layout selection and diagnostics.
 - Screen-awake appliance mode.
+- Managed-device lock-task support for future kiosk provisioning.
 - Best-effort relaunch after normal device reboot or app update.
-- Local fallback screen when the hosted Receiver cannot load.
+- Local fallback screen with Retry and device/config details when the hosted Receiver cannot load.
 
 The configured minimum supported Android version is Android 7.0 / API 24.
 
@@ -40,10 +42,40 @@ carepland://receiver/provision?claim=APP_CLAIM_CODE&device=android_receiver
 Optional development override for the native claim link:
 
 ```text
-carepland://receiver/provision?receiver_url=https%3A%2F%2Fexample.test%2Fconnect%2Freceiver&claim=APP_CLAIM_CODE&device=gxv3370
+carepland://receiver/provision?receiver_url=https%3A%2F%2Fexample.test%2Fconnect%2Freceiver&claim=APP_CLAIM_CODE&device=gxv3370&hardwareProfile=grandstream_gxv3370&uiLayout=desk_phone_1024x600
 ```
 
-The app stores the claim/setup code and device profile locally, then opens the configured Receiver URL with `setupCode` and `device` query parameters when they are not already present.
+The app stores the claim/setup code, device profile, hardware profile, UI layout, optional receiver-device ID, and a generated local receiver install ID. It then opens the configured Receiver URL with `setupCode`, `device`, `hardwareProfile`, `uiLayout`, `receiverInstallId`, and `receiverDeviceId` query parameters when they are not already present.
+
+The shell also appends non-secret native facts to the Receiver URL when they are not already present:
+
+```text
+nativeShell=android
+shellVersion=0.1.0
+nativeVersionName=...
+nativeVersionCode=...
+receiverInstallId=...
+detectedHardwareProfile=...
+nativeManufacturer=...
+nativeModel=...
+nativeSdk=...
+displayWidthPx=...
+displayHeightPx=...
+displayDensityDpi=...
+nativeOrientation=...
+```
+
+These values are layout and diagnostics hints only; they are not authentication credentials.
+
+When the APK is provisioned as Android device owner, it also reports kiosk state through the native bridge:
+
+```json
+{
+  "deviceOwner": true,
+  "lockTaskPermitted": true,
+  "lockTaskActive": true
+}
+```
 
 The long-term server flow should exchange the one-time app claim for a revocable receiver-device credential. Do not put permanent account credentials in provisioning URLs.
 
@@ -54,6 +86,8 @@ The hosted Receiver can read native shell state with:
 ```js
 const nativeConfig = window.CarePlandReceiver?.getProvisioningJson?.();
 ```
+
+That JSON includes the same non-secret provisioning values, version fields, display facts, kiosk flags, `receiverInstallId`, optional `receiverDeviceId`, and `provisionedAtMs`.
 
 ## Build
 
@@ -103,4 +137,26 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradle
 
 ## Notes
 
-True kiosk behavior and reliable unattended app launch are Android Enterprise / device-owner concerns. The shell can support those modes later, but sideloaded demo installs should be treated as soft appliance mode.
+True kiosk behavior and reliable unattended app launch are Android Enterprise / device-owner concerns. Sideloaded demo installs should be treated as soft appliance mode.
+
+Dedicated Receiver mode enables the native shell's soft appliance recovery: boot/package-replaced launch is allowed only after the local wizard records Dedicated mode, and the app attempts to reopen itself shortly after being pushed into the background. Personal Device mode stays a normal Android app and does not auto-launch or force itself back to the foreground.
+
+The current shell includes a `DeviceAdminReceiver` so a test device can be provisioned as owner. In owner mode, the app permits itself for lock task, disables keyguard/status bar where Android allows it, and starts lock-task mode. It does not force screen pinning on ordinary sideloaded installs.
+
+For emulator or wiped-device testing, install the debug APK before accounts are added, then run:
+
+```text
+adb shell dpm set-device-owner com.carepland.connectreceiver/.ReceiverDeviceAdminReceiver
+```
+
+Removing owner/admin state for testing usually requires a factory reset. Some emulator images allow:
+
+```text
+adb shell dpm remove-active-admin com.carepland.connectreceiver/.ReceiverDeviceAdminReceiver
+```
+
+## Update Direction
+
+The shell reports `versionName`, `versionCode`, and `shellVersion` to the hosted Receiver and appends non-secret version hints to the Receiver URL. The hosted app can use `/api/connect/receiver-shell/update-policy` for remote update prompts, compatibility warnings, or managed-device policy later.
+
+The APK does not silently install arbitrary remote APK files. Reliable unattended APK updates should go through managed Play, Android Enterprise/MDM, or an explicitly approved sideload/update flow for test devices.

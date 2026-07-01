@@ -2,6 +2,10 @@
   "name": "carepland-pers",
   "version": "0.1.0",
   "private": true,
+  "browserslist": [
+    "chrome 51",
+    "and_chr 51"
+  ],
   "scripts": {
     "dev": "next dev",
     "dev:https": "next dev --experimental-https",
@@ -9,11 +13,13 @@
     "build": "node scripts/write-build-info.mjs && next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsc -p tsconfig.test.json && node --test .tmp-tests/app/lib/connect/appointments/*.test.js .tmp-tests/app/lib/connect/audio/*.test.js .tmp-tests/app/lib/connect/audio/server/*.test.js .tmp-tests/app/lib/connect/calls/*.test.js .tmp-tests/app/lib/connect/calls/server/*.test.js .tmp-tests/app/lib/connect/context/*.test.js .tmp-tests/app/lib/connect/messaging/server/*.test.js .tmp-tests/app/lib/personal/consumerCareKnowledge/*.test.js .tmp-tests/app/lib/personal/editor/*.test.js .tmp-tests/app/lib/personal/healthTopics/*.test.js .tmp-tests/app/lib/personal/importAnything/*.test.js .tmp-tests/app/lib/personal/profile/*.test.js .tmp-tests/app/lib/personal/reports/*.test.js .tmp-tests/app/lib/platform/ai/*.test.js .tmp-tests/app/lib/platform/audio/*.test.js .tmp-tests/app/lib/platform/server/*.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test .tmp-tests/app/lib/connect/appointments/*.test.js .tmp-tests/app/lib/connect/audio/*.test.js .tmp-tests/app/lib/connect/audio/server/*.test.js .tmp-tests/app/lib/connect/calls/*.test.js .tmp-tests/app/lib/connect/calls/server/*.test.js .tmp-tests/app/lib/connect/context/*.test.js .tmp-tests/app/lib/connect/messaging/server/*.test.js .tmp-tests/app/lib/connect/receiverShell/*.test.js .tmp-tests/app/lib/personal/consumerCareKnowledge/*.test.js .tmp-tests/app/lib/personal/editor/*.test.js .tmp-tests/app/lib/personal/healthTopics/*.test.js .tmp-tests/app/lib/personal/importAnything/*.test.js .tmp-tests/app/lib/personal/profile/*.test.js .tmp-tests/app/lib/personal/recommendations/*.test.js .tmp-tests/app/lib/personal/reports/*.test.js .tmp-tests/app/lib/personal/track/*.test.js .tmp-tests/app/lib/platform/ai/*.test.js .tmp-tests/app/lib/platform/audio/*.test.js .tmp-tests/app/lib/platform/server/*.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
+    "@types/qrcode": "^1.5.6",
     "next": "16.2.6",
+    "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },

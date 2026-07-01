@@ -137,6 +137,7 @@ import {
   restorePageViewState,
   savePageViewState,
 } from "./lib/navigation/pageViewState";
+import { carePlandReturnToFromCurrentLocation } from "./lib/platform/authRedirect";
 import { OnboardingGate } from "./components/personal/onboarding/OnboardingGate";
 import { PersonalOverlays } from "./components/personal/PersonalOverlays";
 import { PasswordUpdatePanel } from "./components/shared/auth/PasswordUpdatePanel";
@@ -2307,7 +2308,9 @@ export function CarePlandPers({
         : restoredState;
     });
   const [authMode, setAuthMode] = useState<AuthMode>("signIn");
-  const [showAuthGateway, setShowAuthGateway] = useState(adminRoute);
+  const [showAuthGateway, setShowAuthGateway] = useState(
+    adminRoute || shouldStayOnPersonalRoute()
+  );
   const [planHelpExpanded, setPlanHelpExpanded] = useState(false);
   const [adminPlanPreviewId, setAdminPlanPreviewId] = useState("");
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
@@ -6080,6 +6083,14 @@ export function CarePlandPers({
       setSignedInEmail(trimmedEmail);
       setWelcomeGuideDismissed(false);
       recordSessionActivity();
+
+      const returnTo = carePlandReturnToFromCurrentLocation();
+      if (returnTo) {
+        setLoading(false);
+        window.location.assign(returnTo);
+        return;
+      }
+
       setLoading(false);
       void loadAppContent();
       void loadAppSessionSettings();

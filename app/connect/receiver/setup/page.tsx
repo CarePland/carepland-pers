@@ -1,0 +1,75 @@
+import type { Metadata } from "next";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+
+import { ReceiverSetupClient } from "./ReceiverSetupClient";
+
+export const metadata: Metadata = {
+  title: "Receiver Setup | CarePland Connect",
+  description: "Approve and open a CarePland Connect Receiver install.",
+};
+
+type ReceiverSetupPageProps = {
+  searchParams: Promise<{
+    code?: string;
+    device?: string;
+    hardwareProfile?: string;
+    layout?: string;
+    receiverUrl?: string;
+    uiLayout?: string;
+  }>;
+};
+
+export default async function ReceiverSetupPage({
+  searchParams,
+}: ReceiverSetupPageProps) {
+  const params = await searchParams;
+  const apkDownloadUrl =
+    process.env.CONNECT_RECEIVER_APK_URL ||
+    "/api/connect/receiver-shell/apk/debug";
+
+  return (
+    <ReceiverSetupClient
+      apkDownloadUrl={apkDownloadUrl}
+      apkSha256Checksum={receiverApkChecksum(apkDownloadUrl)}
+      apkVersionName={process.env.CONNECT_RECEIVER_LATEST_VERSION_NAME || ""}
+      initialCode={params.code || ""}
+      initialDevice={params.device || "gxv3370"}
+      initialHardwareProfile={params.hardwareProfile || "studio_gxv3370_1024x600"}
+      initialReceiverUrl={params.receiverUrl || ""}
+      initialUiLayout={params.uiLayout || params.layout || "desk_phone_1024x600"}
+      setupBaseUrl={process.env.CONNECT_RECEIVER_SETUP_BASE_URL || ""}
+    />
+  );
+}
+
+function receiverApkChecksum(apkDownloadUrl: string) {
+  if (process.env.CONNECT_RECEIVER_APK_SHA256_CHECKSUM) {
+    return process.env.CONNECT_RECEIVER_APK_SHA256_CHECKSUM;
+  }
+
+  if (process.env.NODE_ENV === "production" || apkDownloadUrl !== "/api/connect/receiver-shell/apk/debug") {
+    return "";
+  }
+
+  const apkPath = path.join(
+    process.cwd(),
+    "android",
+    "connect-receiver",
+    "app",
+    "build",
+    "outputs",
+    "apk",
+    "debug",
+    "app-debug.apk"
+  );
+
+  if (!existsSync(apkPath)) {
+    return "";
+  }
+
+  return createHash("sha256")
+    .update(readFileSync(apkPath))
+    .digest("base64url");
+}

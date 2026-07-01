@@ -1,0 +1,302 @@
+.page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: #eef0eb;
+  color: #17231d;
+  padding: 24px;
+}
+
+.panel {
+  width: min(760px, 100%);
+  display: grid;
+  gap: 18px;
+  border: 3px solid #919892;
+  border-radius: 8px;
+  background: #f8f8f2;
+  padding: clamp(22px, 4vw, 34px);
+  box-shadow: 0 12px 28px rgba(20, 28, 24, 0.16);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.header p {
+  margin: 0 0 4px;
+  color: #5d675f;
+  font-size: 0.95rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 7vw, 4rem);
+  line-height: 0.95;
+}
+
+.header > span {
+  border: 2px solid #b9beb8;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: white;
+  color: #5d675f;
+  font-weight: 900;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field span {
+  color: #5d675f;
+  font-size: 0.95rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  min-height: 54px;
+  border: 2px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  color: #17231d;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 1.08rem;
+  font-weight: 800;
+}
+
+.statusStrip {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 2px solid #b9beb8;
+  border-radius: 8px;
+  background: #eef4ec;
+  padding: 12px 14px;
+}
+
+.statusStrip span,
+.statusStrip strong {
+  color: #17231d;
+  font-size: 0.98rem;
+  font-weight: 950;
+}
+
+.statusStrip span {
+  color: #5d675f;
+  text-transform: uppercase;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.installGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.installStep,
+.qrPanel,
+.detailsPanel {
+  display: grid;
+  gap: 12px;
+  border: 2px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  padding: 16px;
+}
+
+.installStep > span {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #236b1a;
+  color: white;
+  font-size: 1.25rem;
+  font-weight: 950;
+}
+
+.installStep strong,
+.qrPanel span,
+.detailsPanel summary {
+  color: #17231d;
+  font-size: 1.2rem;
+  font-weight: 950;
+}
+
+.installStep p,
+.qrPanel p,
+.detailsPanel p {
+  margin: 0;
+  color: #5d675f;
+  font-size: 0.98rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.qrImage,
+.smallQrImage {
+  width: min(280px, 100%);
+  height: auto;
+  justify-self: center;
+  border: 2px solid #d7ddd6;
+  border-radius: 8px;
+  background: white;
+  padding: 10px;
+}
+
+.smallQrImage {
+  width: min(190px, 100%);
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 190px);
+  gap: 12px;
+}
+
+.actionsThree {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.primaryAction,
+.secondaryAction {
+  min-height: 62px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #17440f;
+  border-radius: 8px;
+  background: #236b1a;
+  color: white;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 1.2rem;
+  font-weight: 950;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.secondaryAction {
+  border-color: #b9beb8;
+  background: white;
+  color: #17231d;
+}
+
+.disabled {
+  border-color: #a9b2ab;
+  background: #d0d6d2;
+  color: #5d675f;
+  pointer-events: none;
+}
+
+.primaryAction:disabled,
+.secondaryAction:disabled {
+  border-color: #a9b2ab;
+  background: #d0d6d2;
+  color: #5d675f;
+  cursor: not-allowed;
+}
+
+.emulatorPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 190px);
+  gap: 12px;
+  align-items: stretch;
+  border: 2px solid #b9beb8;
+  border-radius: 8px;
+  background: white;
+  padding: 12px;
+}
+
+.emulatorPanel > div {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.emulatorPanel span {
+  color: #5d675f;
+  font-size: 0.9rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.emulatorPanel code {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #17231d;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.linkButton {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: #17440f;
+  padding: 0;
+  font: inherit;
+  font-size: 0.98rem;
+  font-weight: 950;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.note {
+  margin: 0;
+  color: #5d675f;
+  font-size: 0.98rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.errorNote {
+  margin: 0;
+  color: #8b1d1d;
+  font-size: 0.98rem;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.warningNote {
+  margin: 0;
+  border: 2px solid #d2aa3d;
+  border-radius: 8px;
+  background: #fff8df;
+  color: #5e4300;
+  padding: 12px 14px;
+  font-size: 0.98rem;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+@media (max-width: 700px) {
+  .grid,
+  .actions,
+  .actionsThree,
+  .installGrid,
+  .emulatorPanel {
+    grid-template-columns: 1fr;
+  }
+}

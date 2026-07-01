@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">CarePland Receiver</string>
+    <string name="device_admin_description">Allows CarePland Receiver to run as a managed dedicated receiver when this device is provisioned for kiosk mode.</string>
     <string name="default_receiver_url">https://carepland.com/connect/receiver?device=android_receiver</string>
 </resources>
