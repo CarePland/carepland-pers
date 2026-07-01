@@ -1,0 +1,391 @@
+import { NextResponse } from "next/server";
+
+import {
+  ConnectPersonAccessDeniedError,
+  verifyConnectPersonAccessForRequest,
+} from "@/app/lib/connect/context/server/mainConnectUserContext";
+import {
+  buildReceiverTodayFocusCompletionEvent,
+  normalizeReceiverTodayFocusRows,
+  type ReceiverTodayFocusRow,
+} from "@/app/lib/personal/track/receiverTodayFocus";
+import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+
+export async function GET(request: Request) {
+  try {
+    const requestUrl = new URL(request.url);
+    const personId = requestUrl.searchParams.get("personId")?.trim();
+
+    if (!personId) {
+      return NextResponse.json(
+        {
+          error: "Select a Main Connect User before loading Today’s Focus.",
+          focusItems: [],
+          ok: false,
+        },
+        { status: 400 }
+      );
+    }
+
+    const { accessToken } = await verifyAccess(personId, request);
+    const supabase = createSupabaseUserClient(accessToken);
+    const today = new Date().toISOString().slice(0, 10);
+
+    const { data, error } = await supabase
+      .from("focus_items")
+      .select(
+        [
+          "id",
+          "care_circle_id",
+          "care_subject_id",
+          "title",
+          "focus_type",
+          "prompt_text",
+          "recurrence_rule",
+          "schedule",
+          "active_start_date",
+          "active_end_date",
+          "completion_type",
+          "completion_event_type",
+          "completion_prompt_text",
+          "completion_config",
+          "importance_score",
+          "metadata",
+          "status",
+          "sort_order",
+          "created_at",
+        ].join(",")
+      )
+      .eq("care_subject_id", personId)
+      .eq("status", "active")
+      .or(`active_start_date.is.null,active_start_date.lte.${today}`)
+      .or(`active_end_date.is.null,active_end_date.gte.${today}`)
+      .order("importance_score", { ascending: false })
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: false })
+      .limit(12);
+
+    if (error) {
+      if (isTrackStorageUnavailable(error)) {
+        return NextResponse.json(
+          {
+            error: "Today’s Focus storage is not available yet.",
+            focusItems: [],
+            ok: false,
+          },
+          { status: 503 }
+        );
+      }
+
+      throw error;
+    }
+
+    const { completedFocusItemIds, skippedFocusItemIds } =
+      await loadTodayFocusTrackContext(supabase, personId, today);
+
+    return NextResponse.json({
+      focusItems: normalizeReceiverTodayFocusRows(
+        (data ?? []) as unknown as ReceiverTodayFocusRow[],
+        new Date(),
+        {
+          completedFocusItemIds,
+          skippedFocusItemIds,
+        }
+      ),
+      mainConnectUserPersonId: personId,
+      ok: true,
+    });
+  } catch (error) {
+    return focusRouteError(error, "Unable to load Today’s Focus.");
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const personId = stringValue(body.personId);
+    const focusItemId = stringValue(body.focusItemId);
+
+    if (!personId || !focusItemId) {
+      return NextResponse.json(
+        {
+          error: "Today’s Focus completion requires a person and focus item.",
+          ok: false,
+        },
+        { status: 400 }
+      );
+    }
+
+    const { accessToken, userContext } = await verifyAccess(personId, request);
+    const supabase = createSupabaseUserClient(accessToken);
+
+    const { data: focusItemRow, error: focusItemError } = await supabase
+      .from("focus_items")
+      .select(
+        [
+          "id",
+          "care_circle_id",
+          "care_subject_id",
+          "title",
+          "focus_type",
+          "prompt_text",
+          "recurrence_rule",
+          "schedule",
+          "active_start_date",
+          "active_end_date",
+          "completion_type",
+          "completion_event_type",
+          "completion_prompt_text",
+          "completion_config",
+          "importance_score",
+          "metadata",
+          "status",
+          "sort_order",
+          "created_at",
+        ].join(",")
+      )
+      .eq("id", focusItemId)
+      .eq("care_subject_id", personId)
+      .single();
+
+    if (focusItemError) {
+      if (isTrackStorageUnavailable(focusItemError)) {
+        return NextResponse.json(
+          {
+            error: "Today’s Focus storage is not available yet.",
+            ok: false,
+          },
+          { status: 503 }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          error: "Focus item not found for this person.",
+          ok: false,
+        },
+        { status: 404 }
+      );
+    }
+
+    const [focusItem] = normalizeReceiverTodayFocusRows(
+      [focusItemRow as unknown as ReceiverTodayFocusRow],
+      new Date()
+    );
+
+    if (!focusItem) {
+      return NextResponse.json(
+        {
+          error: "Focus item is not active today.",
+          ok: false,
+        },
+        { status: 409 }
+      );
+    }
+
+    const eventDraft = buildReceiverTodayFocusCompletionEvent({
+      focusItem,
+      note: stringValue(body.note) || null,
+      occurredAt: stringValue(body.occurredAt) || null,
+      unit: stringValue(body.unit) || null,
+      value: numberValue(body.value),
+    });
+
+    const { data: eventRow, error: eventError } = await supabase
+      .from("track_events")
+      .insert({
+        care_circle_id: eventDraft.careCircleId,
+        care_subject_id: eventDraft.careSubjectId,
+        confidence: eventDraft.confidence ?? 1,
+        created_by_user_id: userContext.userId,
+        event_type: eventDraft.eventType,
+        focus_item_id: eventDraft.focusItemId,
+        needs_review: eventDraft.needsReview ?? false,
+        note: eventDraft.note,
+        occurred_at: eventDraft.occurredAt,
+        source: eventDraft.source,
+        structured_payload: eventDraft.structuredPayload ?? {},
+        title: eventDraft.title,
+        unit: eventDraft.unit,
+        value: eventDraft.value,
+      })
+      .select("id,event_type,title,occurred_at,value,unit,source")
+      .single();
+
+    if (eventError) {
+      if (isTrackStorageUnavailable(eventError)) {
+        return NextResponse.json(
+          {
+            error: "Today’s Focus storage is not available yet.",
+            ok: false,
+          },
+          { status: 503 }
+        );
+      }
+
+      throw eventError;
+    }
+
+    return NextResponse.json({
+      focusItemId: focusItem.id,
+      ok: true,
+      trackEvent: eventRow,
+    });
+  } catch (error) {
+    return focusRouteError(error, "Unable to save Today’s Focus completion.");
+  }
+}
+
+async function loadTodayFocusTrackContext(
+  supabase: ReturnType<typeof createSupabaseUserClient>,
+  personId: string,
+  today: string
+) {
+  const tomorrow = nextDay(today);
+  const twoWeeksAgo = new Date(`${today}T00:00:00.000Z`);
+  twoWeeksAgo.setUTCDate(twoWeeksAgo.getUTCDate() - 14);
+
+  const [completedResult, skippedResult] = await Promise.all([
+    supabase
+      .from("track_events")
+      .select("focus_item_id")
+      .eq("care_subject_id", personId)
+      .eq("event_status", "active")
+      .not("focus_item_id", "is", null)
+      .neq("event_type", "medication.skipped")
+      .gte("occurred_at", `${today}T00:00:00.000Z`)
+      .lt("occurred_at", `${tomorrow}T00:00:00.000Z`)
+      .limit(100),
+    supabase
+      .from("track_events")
+      .select("focus_item_id")
+      .eq("care_subject_id", personId)
+      .eq("event_status", "active")
+      .eq("event_type", "medication.skipped")
+      .not("focus_item_id", "is", null)
+      .gte("occurred_at", twoWeeksAgo.toISOString())
+      .limit(100),
+  ]);
+
+  if (completedResult.error) {
+    throw completedResult.error;
+  }
+
+  if (skippedResult.error) {
+    throw skippedResult.error;
+  }
+
+  return {
+    completedFocusItemIds: uniqueFocusItemIds(completedResult.data),
+    skippedFocusItemIds: repeatedFocusItemIds(skippedResult.data),
+  };
+}
+
+function uniqueFocusItemIds(rows: unknown) {
+  return Array.from(
+    new Set(
+      (Array.isArray(rows) ? rows : [])
+        .map((row) =>
+          row && typeof row === "object"
+            ? (row as { focus_item_id?: unknown }).focus_item_id
+            : null
+        )
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    )
+  );
+}
+
+function repeatedFocusItemIds(rows: unknown) {
+  const counts = new Map<string, number>();
+
+  for (const id of focusItemIds(rows)) {
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .filter(([, count]) => count >= 2)
+    .map(([id]) => id);
+}
+
+function focusItemIds(rows: unknown) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) =>
+      row && typeof row === "object"
+        ? (row as { focus_item_id?: unknown }).focus_item_id
+        : null
+    )
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+function nextDay(day: string) {
+  const date = new Date(`${day}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+async function verifyAccess(personId: string, request: Request) {
+  try {
+    return await verifyConnectPersonAccessForRequest(personId, request);
+  } catch (error) {
+    if (!(error instanceof ConnectPersonAccessDeniedError)) {
+      throw error;
+    }
+
+    throw error;
+  }
+}
+
+function focusRouteError(error: unknown, fallbackMessage: string) {
+  if (error instanceof ConnectPersonAccessDeniedError) {
+    return NextResponse.json(
+      {
+        error: "Choose a Main Connect User from your CarePland collection.",
+        ok: false,
+      },
+      { status: 403 }
+    );
+  }
+
+  return NextResponse.json(
+    {
+      error: error instanceof Error ? error.message : fallbackMessage,
+      ok: false,
+    },
+    { status: 500 }
+  );
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function numberValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isTrackStorageUnavailable(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const maybeError = error as { code?: string; message?: string };
+  const message = maybeError.message ?? "";
+
+  return (
+    maybeError.code === "42P01" ||
+    maybeError.code === "42703" ||
+    maybeError.code === "PGRST205" ||
+    message.includes("focus_items") ||
+    message.includes("track_events") ||
+    message.includes("importance_score")
+  );
+}
