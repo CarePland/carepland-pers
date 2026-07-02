@@ -16,7 +16,7 @@ import {
   platformModuleVisibilityOverrideChangedEvent,
   readShowAllPlatformModulesOverride,
 } from "../../lib/platform/moduleAccess";
-import { PersonAvatar } from "./PersonAvatar";
+import { ManagedByHouseholdHeart, PersonAvatar } from "./PersonAvatar";
 import type { AvatarPerson } from "../../lib/platform/avatar";
 
 export type CarePlandTopNavModule =
@@ -438,6 +438,9 @@ export function CarePlandTopNav({
               <span className="min-w-0 truncate font-semibold">
                 {currentFocus.type === "everyone" ? "Everyone" : currentFocusLabel}
               </span>
+              {currentFocusAvatar?.managedByHousehold ? (
+                <ManagedByHouseholdHeart className="text-lg" />
+              ) : null}
             </button>
             {focusMenuOpen ? (
               <div
@@ -482,6 +485,9 @@ export function CarePlandTopNav({
                           />
                         )}
                         <span className="min-w-0 truncate">{label}</span>
+                        {option.avatar?.managedByHousehold ? (
+                          <ManagedByHouseholdHeart className="text-lg" />
+                        ) : null}
                       </button>
                     );
                   })}

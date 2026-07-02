@@ -127,7 +127,7 @@ The resulting Track Event stores:
 
 ## Future Connections
 
-- **Talk**: Talk button interpretation can create `track_events` with `source = talk_voice`, a care-relevant `structured_payload`, and review flags when confidence is low.
+- **Talk**: Talk button interpretation can create `track_events` with `source = talk_voice`, a care-relevant `structured_payload`, and review flags when confidence is low. V1 is deterministic and supports walking/activity, broad medication completion, weight measurement, Connect call requests, next-appointment questions, and safe unknown handling. See `docs/TALK_INTENT_FOUNDATION.md`.
 - **Reminders**: reminder responses can create `track_events` with `source = reminder`; reminders may also be generated from active `focus_items`.
 - **Receiver Today’s Focus**: Receiver should read active `focus_items` for the active `care_subject_id` and create `track_events` when something is recorded. It should not store checkbox state as the source of truth.
 - **Appointment Notes / Connect Call Summaries**: approved summaries can create source-linked events when they contain concrete observations or actions.
@@ -172,6 +172,7 @@ Endpoint:
 
 - `GET /api/connect/today-focus?personId={care_subject_id}` returns the ranked item list.
 - `POST /api/connect/today-focus` with `personId`, `focusItemId`, and optional `occurredAt`, `note`, `value`, `unit` creates the Track Event.
+- `POST /api/connect/talk` with `personId`, reviewed `inputText`, optional `receiverDeviceId`, and optional contacts interprets Talk input. It writes a `track_events` row only for high-confidence, no-review Track intents.
 
 This slice does not add AI ranking. If AI-assisted ranking or focus generation is introduced later, the prompt must be stored in the existing Admin-editable AI prompt system before it is used in product flows.
 

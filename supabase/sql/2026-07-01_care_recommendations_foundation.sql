@@ -45,7 +45,7 @@ create table if not exists public.care_recommendations (
   source_id uuid,
   confidence numeric not null default 0.5,
   priority text not null default 'normal'
-    check (priority in ('critical', 'high', 'normal', 'low')),
+    check (priority in ('strong', 'high', 'normal', 'low')),
   expires_at timestamptz,
   status text not null default 'candidate'
     check (
@@ -81,7 +81,7 @@ comment on column public.care_recommendations.dedupe_key is
   'Deterministic generation key used to merge repeated v1 scans into the same open candidate instead of creating duplicates.';
 
 comment on column public.care_recommendations.priority is
-  'Simple priority based on evidence strength/source, not autonomous AI opinion. Critical is reserved for explicit source wording and should not be inferred.';
+  'Simple priority based on evidence strength/source, not autonomous AI opinion. Use strong, high, normal, or low; avoid emergency-sounding priority labels.';
 
 comment on column public.care_recommendations.structured_payload is
   'Recommended completion type, event type, prompt config, matched topics, and other reviewable details for future approval workflows.';

@@ -11,6 +11,7 @@ import { AdminDashboardPanel } from "./AdminDashboardPanel";
 import { AdminEarlyAccessIntakePanel } from "./AdminEarlyAccessIntakePanel";
 import { AdminIntegrationErrorsPanel } from "./AdminIntegrationErrorsPanel";
 import { AdminProductManagementPanel } from "./AdminProductManagementPanel";
+import { AdminRecommendationsReviewPanel } from "./AdminRecommendationsReviewPanel";
 import { AdminSupportTicketsPanel } from "./AdminSupportTicketsPanel";
 import { AdminToolsPanel } from "./AdminToolsPanel";
 import { AdminUsersPanel } from "./AdminUsersPanel";
@@ -26,6 +27,7 @@ export type AdminWorkspaceTab =
   | "errors"
   | "intake"
   | "product"
+  | "recommendations"
   | "tickets"
   | "tools"
   | "userAudit"
@@ -34,6 +36,7 @@ export type AdminWorkspaceTab =
 export type AdminWorkspaceTopTab =
   | "connect"
   | "dashboard"
+  | "recommendations"
   | "support"
   | "system"
   | "tools"
@@ -52,6 +55,7 @@ export type AdminWorkspaceProps = {
   onSelectSecondary: (tab: AdminWorkspaceTab) => void;
   onSelectTop: (tab: AdminWorkspaceTopTab) => void;
   product: ComponentProps<typeof AdminProductManagementPanel>;
+  recommendations: ComponentProps<typeof AdminRecommendationsReviewPanel>;
   secondaryItems?: AdminNavItem<AdminWorkspaceTab>[];
   stickyTop: number;
   tickets: ComponentProps<typeof AdminSupportTicketsPanel>;
@@ -73,6 +77,7 @@ export function AdminWorkspace({
   onSelectSecondary,
   onSelectTop,
   product,
+  recommendations,
   secondaryItems,
   stickyTop,
   tickets,
@@ -95,6 +100,10 @@ export function AdminWorkspace({
       ) : null}
 
       {activeSecondaryKey === "tools" ? <AdminToolsPanel {...tools} /> : null}
+
+      {activeSecondaryKey === "recommendations" ? (
+        <AdminRecommendationsReviewPanel {...recommendations} />
+      ) : null}
 
       {activeSecondaryKey === "users" ? <AdminUsersPanel {...users} /> : null}
 

@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
+import { recordCarePlandWorkEventBestEffort } from "@/app/lib/personal/workEvents";
 import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
 
 type JsonObject = Record<string, unknown>;
@@ -1004,6 +1005,43 @@ export async function POST(request: NextRequest) {
     if (guidanceError) {
       throw guidanceError;
     }
+
+    await recordCarePlandWorkEventBestEffort(supabase, {
+      careCircleId: appointment.care_circle_id,
+      careSubjectId: appointment.care_subject_id,
+      confidence: 1,
+      createdByUserId: userId,
+      idempotencyKey: `careprep_prepared:${guidanceRow.id}`,
+      outcomeCategory: "visit_prepared",
+      relatedSources: [
+        {
+          label: appointmentLabel(appointment),
+          role: "appointment_prepared",
+          source_id: appointment.id,
+          source_table: "appointments",
+          source_type: "appointments",
+        },
+        {
+          label: "CarePrep guidance",
+          role: "prepared_context",
+          source_id: guidanceRow.id,
+          source_table: "careprep_guidance",
+          source_type: "careprep",
+        },
+      ],
+      sourceId: guidanceRow.id,
+      sourceTable: "careprep_guidance",
+      sourceType: "careprep",
+      structuredPayload: {
+        generationMode,
+        priorAppointmentCount:
+          priorAppointmentTotalCount ?? pastAppointments.length,
+        reviewStatus: preapproveGeneratedCarePrep ? "accepted" : "draft",
+      },
+      summary: `CarePrep was prepared for ${appointmentLabel(appointment)}.`,
+      title: "CarePrep prepared",
+      workType: "careprep_prepared",
+    });
 
     await logOpenAiOperationCost({
       careCircleId: appointment.care_circle_id,

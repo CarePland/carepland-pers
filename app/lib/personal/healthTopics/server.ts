@@ -10,6 +10,7 @@ import {
   relatedTopicSlugsForMention,
   type HealthTopic,
 } from ".";
+import { recordCarePlandWorkEventBestEffort } from "../workEvents";
 
 type SupabaseClientLike = SupabaseClient;
 
@@ -48,6 +49,12 @@ type ExistingTopicMentionRow = {
   status_source: "ai" | "system" | "user";
   status_updated_at: string | null;
   status_updated_by_user_id: string | null;
+};
+
+type InsertedTopicMentionRow = {
+  confidence: number | null;
+  id: string;
+  normalized_topic_slug: string;
 };
 
 export type ExtractTopicMentionsForNoteResult = {
@@ -221,13 +228,72 @@ export async function extractTopicMentionsForNote({
     };
   });
 
-  const { error: insertError } = await serviceClient
+  const { data: insertedMentionRows, error: insertError } = await serviceClient
     .from("topic_mentions")
-    .insert(insertRows);
+    .insert(insertRows)
+    .select("id,normalized_topic_slug,confidence");
 
   if (insertError) {
     throw insertError;
   }
+
+  const insertedMentions = (insertedMentionRows ?? []) as InsertedTopicMentionRow[];
+  const insertedTopicLabels = insertedMentions.map((mention) =>
+    normalizeTopicSlug(mention.normalized_topic_slug)
+  );
+  const averageConfidence =
+    insertedMentions.length > 0
+      ? insertedMentions.reduce(
+          (total, mention) => total + Number(mention.confidence ?? 0.5),
+          0
+        ) / insertedMentions.length
+      : 0.5;
+
+  await recordCarePlandWorkEventBestEffort(serviceClient, {
+    careCircleId: appointmentRow.care_circle_id,
+    careSubjectId: appointmentRow.care_subject_id,
+    confidence: Number(Math.min(1, Math.max(0, averageConfidence)).toFixed(3)),
+    idempotencyKey: `health_story_connected:${noteRow.id}:${
+      noteTextHash ?? insertedTopicLabels.join(".")
+    }`,
+    outcomeCategory: "context_connected",
+    relatedSources: [
+      {
+        label: "Visit Notes",
+        role: "source_note",
+        source_id: noteRow.id,
+        source_table: "appointment_notes",
+        source_type: "health_focus",
+      },
+      {
+        label: "Appointment",
+        role: "source_appointment",
+        source_id: appointmentRow.id,
+        source_table: "appointments",
+        source_type: "appointments",
+      },
+      ...insertedMentions.slice(0, 8).map((mention) => ({
+        label: normalizeTopicSlug(mention.normalized_topic_slug),
+        role: "topic_mention",
+        source_id: mention.id,
+        source_table: "topic_mentions",
+        source_type: "health_focus",
+      })),
+    ],
+    sourceId: noteRow.id,
+    sourceTable: "appointment_notes",
+    sourceType: "health_focus",
+    structuredPayload: {
+      extractionMethod: "catalog_match_v1",
+      insertedMentionCount: insertedMentions.length,
+      topicSlugs: insertedTopicLabels,
+    },
+    summary: `${insertedMentions.length} Health ${
+      insertedMentions.length === 1 ? "Story signal was" : "Story signals were"
+    } connected from Visit Notes.`,
+    title: "Health Story context connected",
+    workType: "health_story_connected",
+  });
 
   return {
     appointmentId: appointmentRow.id,

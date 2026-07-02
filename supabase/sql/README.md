@@ -5,8 +5,23 @@ Supabase SQL editor history.
 
 ## Current Committed SQL
 
+- `2026-07-02_carepland_work_events_foundation.sql`
+  Migration: adds `carepland_work_events`, the Layer 2 record of what CarePland actually handled, connected, prepared, coordinated, or made reviewable. This bridges raw facts to future `CarePland at a Glance` human-outcome summaries. The vocabulary is intentionally constrained through `work_type`, `outcome_category`, `source_type`, and optional conservative avoided-effort fields.
+
 - `2026-07-01_care_recommendations_foundation.sql`
   Migration: adds reviewable CarePland Recommendation candidates and supporting evidence rows. Recommendations bridge existing CarePland knowledge to possible Focus Items, but are not automatically shown or converted; initial generation is deterministic and evidence-based, with no AI prompt seeded. The v1 backend uses `dedupe_key` and `evidence_hash` so repeated scans can update open candidates without duplicating evidence.
+
+- `2026-07-01_care_recommendation_review_events.sql`
+  Migration patch: adds append-only audit events for recommendation review decisions, including approve, dismiss, expire, and write-to-focus actions. Dismissal can be temporary, permanent, or snoozed until new evidence; the audit row also stores first-class recommendation outcomes for future learning analysis.
+
+- `2026-07-01_recommendations_service_role_source_grants.sql`
+  Migration patch: grants the Admin Today's Focus Review recommendation scanner service-role access to the source tables it reads, including appointments, Visit Notes, CarePrep guidance, Health Focus topic mentions, Track Events, and the recommendation/focus tables it writes.
+
+- `2026-07-01_recommendations_priority_language_patch.sql`
+  Migration patch: renames the top recommendation priority from `critical` to `strong`, updates existing recommendation rows, and refreshes the table constraint/comment to avoid emergency-sounding language in medical-adjacent recommendation review.
+
+- `2026-07-01_recommendations_today_focus_analysis_report.sql`
+  Read-only analysis utility: reports available source coverage, rough recommendation candidates, stored recommendation/evidence rows, and rough Today’s Focus ranking inputs for existing data.
 
 - `2026-07-01_track_today_focus_foundation.sql`
   Migration: adds the first Track / Today's Focus foundation with person-scoped `focus_items` for intentions/prompts and `track_events` for recorded reality. Focus Items include an `importance_score` ranking hint for the first Receiver proof of concept. The model is source-traceable, non-destructive, compatible with future Talk/Receiver/reminder/CarePrep ingestion, and intentionally avoids diagnosis or clinical decision support logic.
@@ -37,6 +52,9 @@ Supabase SQL editor history.
 
 - `2026-06-22_care_subject_pet_types_text.sql`
   Migration patch: converts `care_subjects.subject_type` from the older enum to constrained text so Profile can save cat, dog, generic pet, and `pet:<label>` values.
+
+- `2026-07-02_care_subject_managed_by_household.sql`
+  Migration patch: adds `care_subjects.managed_by_household` for Care VIPs primarily managed by the household/caregiver and backfills pets as managed.
 
 - `2026-06-22_care_providers.sql`
   Migration: adds per-Care-VIP durable provider records for Personal, scoped by `care_subject_id` so provider nicknames and edits do not merge across patients.

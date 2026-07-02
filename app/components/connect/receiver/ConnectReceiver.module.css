@@ -623,6 +623,38 @@
   pointer-events: none;
 }
 
+.guideIdentifyOverlay {
+  position: fixed;
+  z-index: 80;
+  top: max(20px, env(safe-area-inset-top));
+  left: 50%;
+  display: grid;
+  min-width: min(360px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  justify-items: center;
+  gap: 6px;
+  border: 8px solid #111;
+  border-radius: 18px;
+  background: #fff6bf;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.38);
+  color: #101813;
+  padding: 18px 28px 20px;
+  pointer-events: none;
+}
+
+.guideIdentifyOverlay span {
+  font-size: clamp(1rem, 2.2vw, 1.35rem);
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.guideIdentifyOverlay strong {
+  font-size: clamp(4.5rem, 14vw, 8rem);
+  font-weight: 950;
+  line-height: 0.9;
+}
+
 .actionZone,
 .workspaceZone,
 .modalPanel {
@@ -907,10 +939,11 @@
 .todayFocusPanel {
   grid-area: focus;
   position: relative;
+  z-index: 10;
   display: grid;
   align-content: start;
   gap: 8px;
-  overflow: hidden;
+  overflow: visible;
   background: transparent;
   color: #17231d;
   padding: 6px 18px 8px;
@@ -925,7 +958,7 @@
   line-height: 1.05;
 }
 
-.todayFocusPanel ul {
+.todayFocusPanel :global(.today-focus-list) {
   display: grid;
   gap: 4px;
   margin: 0;
@@ -933,13 +966,25 @@
   list-style: none;
 }
 
-.todayFocusPanel li {
+.todayFocusPanel :global(.today-focus-list-item) {
+  position: relative;
   min-width: 0;
 }
 
-.todayFocusPanel li button {
+.todayFocusPanel :global(.today-focus-list-item-open) {
+  z-index: 30;
+}
+
+.todayFocusPanel :global(.today-focus-item-row) {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 8px;
+}
+
+.todayFocusPanel :global(.today-focus-complete-button) {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -958,20 +1003,23 @@
   white-space: nowrap;
 }
 
-.todayFocusPanel li button::before {
+.todayFocusPanel :global(.today-focus-checkbox) {
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  border: 3px solid #5d675f;
-  border-radius: 4px;
-  color: #17440f;
-  content: "";
-  font-size: 0.9rem;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  color: #5d675f;
+  font-size: 1.55rem;
+  font-weight: 950;
   line-height: 1;
 }
 
-.todayFocusPanel li button.todayFocusCompletedItem {
+.todayFocusPanel :global(.today-focus-checkbox)::before {
+  content: "✓";
+}
+
+.todayFocusPanel :global(.today-focus-complete-active) {
   border-radius: 6px;
   background: #dff1d8;
   color: #17440f;
@@ -979,13 +1027,91 @@
   outline-offset: 2px;
 }
 
-.todayFocusPanel li button.todayFocusCompletedItem::before {
-  border-color: #17440f;
-  background: #ffffff;
+.todayFocusPanel :global(.today-focus-complete-active) :global(.today-focus-checkbox) {
   color: #17440f;
-  content: "✓";
-  font-size: 1.2rem;
+}
+
+.todayFocusPanel :global(.today-focus-undo-label) {
+  color: #17440f;
+  font-size: 0.94rem;
   font-weight: 950;
+  line-height: 1;
+  padding-right: 4px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.todayFocusPanel :global(.today-focus-preference-button) {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #5d675f;
+  font-size: 1.4rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.todayFocusPanel :global(.today-focus-preference-button:focus-visible),
+.todayFocusPanel :global(.today-focus-preference-button:hover) {
+  background: #eef3ed;
+  color: #17231d;
+  outline: 3px solid #8bb4d7;
+}
+
+.todayFocusPanel :global(.today-focus-preference-popover) {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  top: 34px;
+  display: grid;
+  gap: 6px;
+  box-sizing: border-box;
+  width: min(360px, 100%);
+  padding: 10px;
+  border: 3px solid #5d675f;
+  border-radius: 10px;
+  background: #fbfaf3;
+  box-shadow: 0 10px 0 rgba(55, 58, 52, 0.24);
+}
+
+.todayFocusPanel :global(.today-focus-preference-popover button) {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #17231d;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1.1;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.todayFocusPanel :global(.today-focus-preference-popover button:hover),
+.todayFocusPanel :global(.today-focus-preference-popover button:focus-visible) {
+  background: #eef3ed;
+  outline: 2px solid #8bb4d7;
+}
+
+.todayFocusPanel :global(.today-focus-preference-cancel) {
+  margin-top: 10px;
+  color: #5d675f;
+}
+
+.todayFocusLoadingState {
+  display: grid;
+  gap: 12px;
+}
+
+.todayFocusLoadingState p {
+  margin: 0;
+  color: #5d675f;
+  font-size: 1.08rem;
+  font-weight: 850;
 }
 
 .brainStretchPrompt {

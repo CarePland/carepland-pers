@@ -101,6 +101,7 @@ export function createAdminWorkspaceProps({
   assistantReviewRecommendedAction,
   assistantReviewStatus,
   cancelEditingProductMgmtItem,
+  careSubjects,
   carePrepHistory,
   closeAdminReadonlyUserView,
   createProductItemFromAskRecommendation,
@@ -270,6 +271,7 @@ export function createAdminWorkspaceProps({
   setAdminEmailUpdateNewEmail,
   setAdminEmailUpdateReason,
   setAdminEmailUpdateResult,
+  setAdminRecommendationsReviewDraftSummary,
   setAdminSampleEmail,
   setAdminSampleForceDeclined,
   setAdminSampleStatus,
@@ -348,6 +350,22 @@ export function createAdminWorkspaceProps({
   usersAdminNavItems,
   visibleProductMgmtSections,
 }: AdminWorkspaceSourceProps): AdminWorkspaceProps {
+  const recommendationsReviewProps = {
+    careSubjects: (careSubjects ?? []).map(
+      (subject: {
+        care_circle_id: string;
+        display_name: string;
+        id: string;
+      }) => ({
+        careCircleId: subject.care_circle_id,
+        displayName: subject.display_name,
+        id: subject.id,
+      })
+    ),
+    formatDate: formatAdminDate,
+    onDraftSummaryChange: setAdminRecommendationsReviewDraftSummary,
+  };
+
   return {
     activeSecondaryKey: adminTab,
     activeTopKey: activeAdminTopTab,
@@ -683,6 +701,7 @@ export function createAdminWorkspaceProps({
                     : supportAdminTabs.includes(adminTab)
                       ? supportAdminNavItems
                       : undefined,
+    recommendations: recommendationsReviewProps,
     stickyTop: stickySecondaryOffset,
     tickets: {
                   adminTicketCategory,
@@ -723,6 +742,7 @@ export function createAdminWorkspaceProps({
                   adminSampleForceDeclined,
                   adminSampleStatus,
                   appSessionSettings,
+                  recommendationsReview: recommendationsReviewProps,
                   loadingAdminSampleStatus,
                   onChangeAdminEmailUpdateCurrentEmail:
                     setAdminEmailUpdateCurrentEmail,

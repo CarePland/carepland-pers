@@ -1,6 +1,9 @@
 import { FormEvent, useRef, useState } from "react";
 import { type ProfileDraft } from "../../../lib/personal/profile/profileDraft";
-import { PersonAvatar } from "../../shared/PersonAvatar";
+import {
+  ManagedByHouseholdHeart,
+  PersonAvatar,
+} from "../../shared/PersonAvatar";
 import { gentleSmallSecondaryButtonClass } from "../../shared/uiStyles";
 
 type TimeZoneOption = {
@@ -18,6 +21,7 @@ type ProfileContactPerson = {
   displayName: string;
   id: string;
   label?: string;
+  managedByHousehold?: boolean | null;
   subjectType?: string | null;
 };
 
@@ -31,6 +35,10 @@ type ProfileContactDetailsFormProps = {
   onRenamePerson?: (subjectId: string, displayName: string) => Promise<void>;
   onRemoveAvatar?: (subjectId: string) => Promise<void>;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateManagedByHousehold?: (
+    subjectId: string,
+    managedByHousehold: boolean
+  ) => Promise<void>;
   onUpdatePetType?: (subjectId: string, subjectType: string) => Promise<void>;
   onUploadAvatar?: (subjectId: string, file: File) => Promise<void>;
   primaryButtonClassName: string;
@@ -58,6 +66,7 @@ export function ProfileContactDetailsForm({
   onRenamePerson,
   onRemoveAvatar,
   onSubmit,
+  onUpdateManagedByHousehold,
   onUpdatePetType,
   onUploadAvatar,
   primaryButtonClassName,
@@ -130,6 +139,16 @@ export function ProfileContactDetailsForm({
               }
             : undefined
         }
+        onUpdateManagedByHousehold={
+          onUpdateManagedByHousehold
+            ? async (managedByHousehold) => {
+                await onUpdateManagedByHousehold(
+                  selectedAvatarPersonId,
+                  managedByHousehold
+                );
+              }
+            : undefined
+        }
         person={selectedPerson}
       />
     ) : null;
@@ -163,7 +182,12 @@ export function ProfileContactDetailsForm({
                 type="button"
               >
                 <PersonAvatar person={person} size="sm" />
-                <span>{firstName}</span>
+                <span>
+                  {firstName}
+                  {person.managedByHousehold ? (
+                    <ManagedByHouseholdHeart className="ml-1" />
+                  ) : null}
+                </span>
               </button>
             );
           })}
@@ -408,6 +432,7 @@ export function ProfileContactDetailsForm({
 function SelectedPersonAvatarControls({
   avatarPending,
   onRemoveAvatar,
+  onUpdateManagedByHousehold,
   onRenamePerson,
   onUpdatePetType,
   onUploadAvatar,
@@ -416,6 +441,7 @@ function SelectedPersonAvatarControls({
   avatarPending: boolean;
   onRemoveAvatar: () => Promise<void>;
   onRenamePerson?: (displayName: string) => Promise<void>;
+  onUpdateManagedByHousehold?: (managedByHousehold: boolean) => Promise<void>;
   onUpdatePetType?: (subjectType: string) => Promise<void>;
   onUploadAvatar: (file: File) => Promise<void>;
   person: ProfileContactPerson;
@@ -429,8 +455,16 @@ function SelectedPersonAvatarControls({
   const [otherPetDraft, setOtherPetDraft] = useState(initialPetState.otherValue);
   const [petEnabled, setPetEnabled] = useState(initialPetState.isPet);
   const [petKind, setPetKind] = useState<PetKind | null>(initialPetState.kind);
+  const [managedByHousehold, setManagedByHousehold] = useState(
+    Boolean(person.managedByHousehold)
+  );
+  const [managedByHouseholdPending, setManagedByHouseholdPending] =
+    useState(false);
   const [petPending, setPetPending] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const managedByHouseholdLocked = petEnabled;
+  const managedByHouseholdChecked =
+    managedByHouseholdLocked || managedByHousehold;
   const petDefaultAvatarEmoji =
     petEnabled && petKind ? defaultPetAvatarEmojiForKind(petKind) : "";
   const realAvatarUrl =
@@ -502,6 +536,29 @@ function SelectedPersonAvatarControls({
     setPetEnabled(true);
     setPetKind(null);
     setEditingSpecies(true);
+  }
+
+  function saveManagedByHousehold(nextManagedByHousehold: boolean) {
+    if (
+      !onUpdateManagedByHousehold ||
+      managedByHouseholdPending ||
+      managedByHouseholdLocked
+    ) {
+      return;
+    }
+
+    const previousManagedByHousehold = managedByHousehold;
+
+    setManagedByHousehold(nextManagedByHousehold);
+    setManagedByHouseholdPending(true);
+
+    void onUpdateManagedByHousehold(nextManagedByHousehold)
+      .catch(() => {
+        setManagedByHousehold(previousManagedByHousehold);
+      })
+      .finally(() => {
+        setManagedByHouseholdPending(false);
+      });
   }
 
   async function handleRename() {
@@ -576,6 +633,9 @@ function SelectedPersonAvatarControls({
               <p className="shrink-0 truncate text-sm font-semibold text-slate-900">
                 {person.displayName}
               </p>
+              {managedByHouseholdChecked ? (
+                <ManagedByHouseholdHeart className="shrink-0" />
+              ) : null}
               {onRenamePerson ? (
                 <button
                   aria-label={`Edit ${person.displayName}`}
@@ -689,6 +749,33 @@ function SelectedPersonAvatarControls({
                     </>
                   ) : null}
                 </>
+              ) : null}
+              {onUpdateManagedByHousehold ? (
+                <label
+                  className={`inline-flex shrink-0 items-center gap-2 text-sm font-semibold ${
+                    managedByHouseholdLocked
+                      ? "cursor-not-allowed text-slate-400"
+                      : "text-slate-600"
+                  }`}
+                  title={
+                    managedByHouseholdLocked
+                      ? "Pets are managed by household."
+                      : "This person is primarily managed by the household."
+                  }
+                >
+                  <input
+                    checked={managedByHouseholdChecked}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-300"
+                    disabled={
+                      managedByHouseholdLocked || managedByHouseholdPending
+                    }
+                    onChange={(event) =>
+                      saveManagedByHousehold(event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  <span>Managed by Household</span>
+                </label>
               ) : null}
             </div>
           </>

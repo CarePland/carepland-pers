@@ -174,6 +174,7 @@ export function createAdminNavigationModel({
   const topAdminNavItems: AdminNavItem<AdminWorkspaceTopTab>[] = [
     { key: "dashboard", label: "Dashboard" },
     { key: "connect", label: "Connect" },
+    { key: "recommendations", label: "Today's Focus" },
     { key: "tools", label: "Tools" },
     { ...usersAdminAttentionCounts, key: "users", label: "Users" },
     { ...systemAdminAttentionCounts, key: "system", label: "System" },
@@ -187,7 +188,9 @@ export function createAdminNavigationModel({
       ? "system"
       : supportAdminTabs.includes(adminTab)
         ? "support"
-        : adminTab === "connect"
+        : adminTab === "recommendations"
+          ? "recommendations"
+          : adminTab === "connect"
           ? "connect"
           : adminTab === "dashboard"
             ? "dashboard"

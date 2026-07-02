@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { ManagedByHouseholdHeart } from "../../shared/PersonAvatar";
+
 export type AppointmentView = "archived" | "logged" | "upcoming";
 
 type AppointmentViewToolbarProps = {
@@ -9,6 +11,7 @@ type AppointmentViewToolbarProps = {
     avatarEmoji?: string | null;
     display_name: string;
     id: string;
+    managed_by_household?: boolean | null;
   }>;
   disabled: boolean;
   hideOlder?: boolean;
@@ -124,6 +127,9 @@ export function AppointmentViewToolbar({
                             {" "}
                             {subject.display_name.slice(shortName.length).trim()}
                           </span>
+                        ) : null}
+                        {subject.managed_by_household ? (
+                          <ManagedByHouseholdHeart className="ml-1" />
                         ) : null}
                       </span>
                     )}

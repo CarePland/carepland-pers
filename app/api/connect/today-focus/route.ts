@@ -4,12 +4,22 @@ import {
   ConnectPersonAccessDeniedError,
   verifyConnectPersonAccessForRequest,
 } from "@/app/lib/connect/context/server/mainConnectUserContext";
+import { appContentDefaults } from "@/app/lib/platform/content/appContentConfig";
 import {
   buildReceiverTodayFocusCompletionEvent,
   normalizeReceiverTodayFocusRows,
   type ReceiverTodayFocusRow,
 } from "@/app/lib/personal/track/receiverTodayFocus";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+import {
+  focusCadenceSuppressionForRows,
+  focusCadenceTargetFromMetadata,
+  type FocusCadencePreferenceRow,
+} from "@/app/lib/personal/track/focusCadencePreferences";
+import { todayFocusCompletionWindow } from "@/app/lib/personal/track/todayFocusDay";
+import {
+  createSupabaseServiceClient,
+  createSupabaseUserClient,
+} from "@/app/lib/platform/server/supabase";
 
 export async function GET(request: Request) {
   try {
@@ -27,8 +37,10 @@ export async function GET(request: Request) {
       );
     }
 
-    const { accessToken } = await verifyAccess(personId, request);
+    const { accessToken, userContext } = await verifyAccess(personId, request);
     const supabase = createSupabaseUserClient(accessToken);
+    const timeZone = await loadUserTimeZone(supabase, userContext.userId);
+    const completionWindow = todayFocusCompletionWindow(new Date(), timeZone);
     const today = new Date().toISOString().slice(0, 10);
 
     const { data, error } = await supabase
@@ -81,11 +93,35 @@ export async function GET(request: Request) {
     }
 
     const { completedFocusItemIds, skippedFocusItemIds } =
-      await loadTodayFocusTrackContext(supabase, personId, today);
+      await loadTodayFocusTrackContext(
+        supabase,
+        personId,
+        completionWindow.startUtc,
+        completionWindow.endUtc
+      );
+
+    const preferences = await loadTodayFocusCadencePreferences(
+      supabase,
+      personId
+    );
+    const receiverConfig = await loadReceiverTodayFocusConfig(supabase);
+    const preferenceFilteredRows = (data ?? []).filter((row) => {
+      const focusRow = row as unknown as ReceiverTodayFocusRow;
+      const target = focusCadenceTargetFromMetadata({
+        focusItemId: focusRow.id,
+        metadata: focusRow.metadata ?? null,
+      });
+
+      return !focusCadenceSuppressionForRows(
+        preferences,
+        target,
+        new Date()
+      );
+    });
 
     return NextResponse.json({
       focusItems: normalizeReceiverTodayFocusRows(
-        (data ?? []) as unknown as ReceiverTodayFocusRow[],
+        preferenceFilteredRows as unknown as ReceiverTodayFocusRow[],
         new Date(),
         {
           completedFocusItemIds,
@@ -94,10 +130,73 @@ export async function GET(request: Request) {
       ),
       mainConnectUserPersonId: personId,
       ok: true,
+      receiverConfig,
     });
   } catch (error) {
     return focusRouteError(error, "Unable to load Today’s Focus.");
   }
+}
+
+async function loadTodayFocusCadencePreferences(
+  supabase: ReturnType<typeof createSupabaseUserClient>,
+  personId: string
+) {
+  const { data, error } = await supabase
+    .from("focus_cadence_preferences")
+    .select(
+      "focus_item_id,recommendation_id,target_type,target_key,preference_action,cadence,snoozed_until,evidence_signature"
+    )
+    .eq("care_subject_id", personId)
+    .limit(200);
+
+  if (error) {
+    if (isFocusCadencePreferenceUnavailable(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  return (data ?? []) as FocusCadencePreferenceRow[];
+}
+
+async function loadReceiverTodayFocusConfig(
+  supabase: ReturnType<typeof createSupabaseUserClient>
+) {
+  const fallbackUndoSeconds = receiverUndoSecondsFromText(
+    appContentDefaults.connect_receiver_undo_seconds
+  );
+  const { data, error } = await supabase
+    .from("app_content_versions")
+    .select("body")
+    .eq("content_key", "connect_receiver_undo_seconds")
+    .eq("is_current", true)
+    .maybeSingle();
+
+  if (error) {
+    return { undoWindowMs: fallbackUndoSeconds * 1000 };
+  }
+
+  return {
+    undoWindowMs:
+      receiverUndoSecondsFromText(
+        typeof data?.body === "string" ? data.body : null,
+        fallbackUndoSeconds
+      ) * 1000,
+  };
+}
+
+function receiverUndoSecondsFromText(
+  value: string | null | undefined,
+  fallback = 10
+) {
+  const seconds = Number.parseFloat(String(value ?? "").trim());
+
+  if (!Number.isFinite(seconds)) {
+    return fallback;
+  }
+
+  return Math.min(30, Math.max(3, seconds));
 }
 
 export async function POST(request: Request) {
@@ -236,13 +335,88 @@ export async function POST(request: Request) {
   }
 }
 
+export async function DELETE(request: Request) {
+  try {
+    const requestUrl = new URL(request.url);
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const personId =
+      stringValue(body.personId) || requestUrl.searchParams.get("personId")?.trim() || "";
+    const focusItemId =
+      stringValue(body.focusItemId) ||
+      requestUrl.searchParams.get("focusItemId")?.trim() ||
+      "";
+    const trackEventId =
+      stringValue(body.trackEventId) ||
+      requestUrl.searchParams.get("trackEventId")?.trim() ||
+      "";
+
+    if (!personId || !focusItemId || !trackEventId) {
+      return NextResponse.json(
+        {
+          error: "Undo requires a person, focus item, and completion event.",
+          ok: false,
+        },
+        { status: 400 }
+      );
+    }
+
+    const { userContext } = await verifyAccess(personId, request);
+    const supabase = createSupabaseServiceClient();
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+    const { data, error } = await supabase
+      .from("track_events")
+      .delete()
+      .eq("id", trackEventId)
+      .eq("care_subject_id", personId)
+      .eq("focus_item_id", focusItemId)
+      .eq("created_by_user_id", userContext.userId)
+      .eq("source", "receiver_today_focus")
+      .gte("created_at", tenMinutesAgo)
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      if (isTrackStorageUnavailable(error)) {
+        return NextResponse.json(
+          {
+            error: "Today’s Focus storage is not available yet.",
+            ok: false,
+          },
+          { status: 503 }
+        );
+      }
+
+      throw error;
+    }
+
+    if (!data?.id) {
+      return NextResponse.json(
+        {
+          error: "This completion can no longer be undone.",
+          ok: false,
+        },
+        { status: 409 }
+      );
+    }
+
+    return NextResponse.json({
+      focusItemId,
+      ok: true,
+      undoneTrackEventId: data.id,
+    });
+  } catch (error) {
+    return focusRouteError(error, "Unable to undo Today’s Focus completion.");
+  }
+}
+
 async function loadTodayFocusTrackContext(
   supabase: ReturnType<typeof createSupabaseUserClient>,
   personId: string,
-  today: string
+  completedWindowStartUtc: Date,
+  completedWindowEndUtc: Date
 ) {
-  const tomorrow = nextDay(today);
-  const twoWeeksAgo = new Date(`${today}T00:00:00.000Z`);
+  const twoWeeksAgo = new Date(completedWindowEndUtc);
   twoWeeksAgo.setUTCDate(twoWeeksAgo.getUTCDate() - 14);
 
   const [completedResult, skippedResult] = await Promise.all([
@@ -253,8 +427,8 @@ async function loadTodayFocusTrackContext(
       .eq("event_status", "active")
       .not("focus_item_id", "is", null)
       .neq("event_type", "medication.skipped")
-      .gte("occurred_at", `${today}T00:00:00.000Z`)
-      .lt("occurred_at", `${tomorrow}T00:00:00.000Z`)
+      .gte("occurred_at", completedWindowStartUtc.toISOString())
+      .lt("occurred_at", completedWindowEndUtc.toISOString())
       .limit(100),
     supabase
       .from("track_events")
@@ -317,12 +491,6 @@ function focusItemIds(rows: unknown) {
     .filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
-function nextDay(day: string) {
-  const date = new Date(`${day}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + 1);
-  return date.toISOString().slice(0, 10);
-}
-
 async function verifyAccess(personId: string, request: Request) {
   try {
     return await verifyConnectPersonAccessForRequest(personId, request);
@@ -333,6 +501,23 @@ async function verifyAccess(personId: string, request: Request) {
 
     throw error;
   }
+}
+
+async function loadUserTimeZone(
+  supabase: ReturnType<typeof createSupabaseUserClient>,
+  userId: string
+) {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("timezone")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    return null;
+  }
+
+  return typeof data?.timezone === "string" ? data.timezone : null;
 }
 
 function focusRouteError(error: unknown, fallbackMessage: string) {
@@ -387,5 +572,21 @@ function isTrackStorageUnavailable(error: unknown) {
     message.includes("focus_items") ||
     message.includes("track_events") ||
     message.includes("importance_score")
+  );
+}
+
+function isFocusCadencePreferenceUnavailable(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const maybeError = error as { code?: string; message?: string };
+  const message = maybeError.message ?? "";
+
+  return (
+    maybeError.code === "42P01" ||
+    maybeError.code === "42703" ||
+    maybeError.code === "PGRST205" ||
+    message.includes("focus_cadence_preferences")
   );
 }

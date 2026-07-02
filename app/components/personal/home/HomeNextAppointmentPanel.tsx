@@ -44,6 +44,7 @@ type HomeNextAppointmentPanelProps = {
   onAddAppointment: () => void;
   onAddNotes?: () => void;
   practiceLabel: string;
+  title?: string;
 };
 
 function MapPinMiniIcon({ className = "h-3.5 w-3.5" }: { className?: string }) {
@@ -149,6 +150,7 @@ export function HomeNextAppointmentPanel({
   onAddAppointment,
   onAddNotes,
   practiceLabel,
+  title = "Next appointment",
 }: HomeNextAppointmentPanelProps) {
   const [carePrepOpen, setCarePrepOpen] = useState(false);
   const mobileDate = formatMobileAppointmentDate(appointment?.starts_at ?? null);
@@ -175,7 +177,7 @@ export function HomeNextAppointmentPanel({
           {appointment ? (
             <div>
               <span className="block text-sm font-semibold text-blue-700">
-                Next appointment
+                {title}
               </span>
               <span className="mt-1 flex flex-wrap items-center gap-2">
                 <span className="min-w-0 truncate text-4xl font-semibold text-slate-950">
@@ -213,7 +215,7 @@ export function HomeNextAppointmentPanel({
           ) : (
             <>
               <p className="text-sm font-semibold text-blue-700">
-                Next appointment
+                {title}
               </p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-950">
                 Nothing scheduled
@@ -311,7 +313,7 @@ export function HomeNextAppointmentPanel({
 
       {addNotesOpen && children ? <div className="mt-4">{children}</div> : null}
 
-      {appointment && (appointment.provider_name || nextSubject) ? (
+      {appointment && nextSubject ? (
         <div className="mt-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs font-medium text-[#767676]">
           <PersonChip
             person={nextSubjectAvatar ?? { displayName: nextSubject }}

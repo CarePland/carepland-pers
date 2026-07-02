@@ -22,11 +22,15 @@ import {
   type RecommendationTopicMentionRow,
   type RecommendationTrackEventRow,
 } from "@/app/lib/personal/recommendations/sources";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+import {
+  createSupabaseServiceClient,
+  createSupabaseUserClient,
+} from "@/app/lib/platform/server/supabase";
 
 type UserContext = {
   accessToken: string;
   careCircleId: string;
+  isAdmin: boolean;
   personId: string;
   userId: string;
 };
@@ -49,6 +53,7 @@ type RecommendationRow = {
   description: string | null;
   expires_at: string | null;
   id: string;
+  metadata: Record<string, unknown> | null;
   priority: string;
   reason: string;
   recommendation_type: string;
@@ -73,6 +78,34 @@ type RecommendationEvidenceRow = {
   source_table: string | null;
   source_type: string;
 };
+
+type RecommendationDismissalType =
+  | "permanent"
+  | "snooze_until_new_evidence"
+  | "temporary";
+
+type RecommendationReviewAuditInput = {
+  action: RecommendationReviewAction;
+  dismissalType?: RecommendationDismissalType | null;
+  focusItemId?: string | null;
+  priorStatus: RecommendationStatus;
+  recommendation: RecommendationRow & {
+    converted_focus_item_id?: string | null;
+    priority: RecommendationPriority;
+  };
+  recommendationOutcome: RecommendationOutcome;
+  resultingStatus: RecommendationStatus;
+  reviewNote: string;
+  reviewedAt: string;
+};
+
+type RecommendationOutcome =
+  | "approved"
+  | "dismissed_permanent"
+  | "dismissed_temporary"
+  | "snoozed_time"
+  | "snoozed_until_new_evidence"
+  | "written_to_focus";
 
 export async function GET(request: Request) {
   try {
@@ -103,7 +136,7 @@ export async function GET(request: Request) {
     }
 
     const userContext = await verifyPersonAccess(personId, request);
-    const supabase = createSupabaseUserClient(userContext.accessToken);
+    const supabase = recommendationSupabaseClient(userContext);
     const recommendations = await listRecommendations(supabase, personId, status);
 
     return NextResponse.json({
@@ -136,7 +169,7 @@ export async function POST(request: Request) {
     }
 
     const userContext = await verifyPersonAccess(personId, request);
-    const supabase = createSupabaseUserClient(userContext.accessToken);
+    const supabase = recommendationSupabaseClient(userContext);
     const sources = await collectRecommendationSources(supabase, personId);
     const candidates = generateRecommendationCandidates(sources);
     const persistence = await persistRecommendationCandidates(
@@ -154,6 +187,7 @@ export async function POST(request: Request) {
       personId,
       recommendations,
       sourcesScanned: sources.length,
+      suppressed: persistence.suppressed,
       updated: persistence.updated,
     });
   } catch (error) {
@@ -167,6 +201,8 @@ export async function PATCH(request: Request) {
     const personId = stringValue(body.personId);
     const recommendationId = stringValue(body.recommendationId);
     const action = reviewActionValue(body.action);
+    const dismissalType = dismissalTypeValue(body.dismissalType);
+    const reviewNote = stringValue(body.reviewNote);
 
     if (!personId || !recommendationId || !action) {
       return NextResponse.json(
@@ -178,8 +214,18 @@ export async function PATCH(request: Request) {
       );
     }
 
+    if (action === "dismiss" && (!reviewNote || !dismissalType)) {
+      return NextResponse.json(
+        {
+          error: "Choose a dismissal type and add a short dismissal reason.",
+          ok: false,
+        },
+        { status: 400 }
+      );
+    }
+
     const userContext = await verifyPersonAccess(personId, request);
-    const supabase = createSupabaseUserClient(userContext.accessToken);
+    const supabase = recommendationSupabaseClient(userContext);
     const recommendation = await loadRecommendationForReview(
       supabase,
       userContext,
@@ -190,7 +236,9 @@ export async function PATCH(request: Request) {
       const focusItem = await convertRecommendationToFocusItem(
         supabase,
         userContext,
-        recommendation
+        recommendation,
+        null,
+        reviewNote
       );
       const recommendations = await listRecommendations(supabase, personId, "all");
 
@@ -208,8 +256,11 @@ export async function PATCH(request: Request) {
     const recommendationRow = await updateRecommendationStatus(
       supabase,
       userContext,
-      recommendationId,
-      status
+      recommendation,
+      action,
+      action === "dismiss" ? dismissalType : null,
+      status,
+      reviewNote
     );
 
     return NextResponse.json({
@@ -298,6 +349,7 @@ async function persistRecommendationCandidates(
 ) {
   let created = 0;
   let evidenceAdded = 0;
+  let suppressed = 0;
   let updated = 0;
 
   for (const candidate of candidates) {
@@ -341,6 +393,24 @@ async function persistRecommendationCandidates(
 
       updated += 1;
     } else {
+      const dismissedCandidateContext = await dismissedCandidateReturnContext(
+        supabase,
+        userContext,
+        candidate
+      );
+
+      if (dismissedCandidateContext.suppress) {
+        suppressed += 1;
+        continue;
+      }
+
+      if (dismissedCandidateContext.snoozeReturn) {
+        payload.structured_payload = {
+          ...(payload.structured_payload ?? {}),
+          snoozeReturn: dismissedCandidateContext.snoozeReturn,
+        };
+      }
+
       const { data: inserted, error: insertError } = await supabase
         .from("care_recommendations")
         .insert(payload)
@@ -363,7 +433,7 @@ async function persistRecommendationCandidates(
     );
   }
 
-  return { created, evidenceAdded, updated };
+  return { created, evidenceAdded, suppressed, updated };
 }
 
 async function loadRecommendationForReview(
@@ -374,7 +444,7 @@ async function loadRecommendationForReview(
   const { data, error } = await supabase
     .from("care_recommendations")
     .select(
-      "id,care_circle_id,care_subject_id,recommendation_type,title,description,reason,dedupe_key,source_type,source_table,source_id,confidence,priority,expires_at,status,created_at,updated_at,structured_payload,converted_focus_item_id"
+      "id,care_circle_id,care_subject_id,recommendation_type,title,description,reason,dedupe_key,source_type,source_table,source_id,confidence,priority,expires_at,status,created_at,updated_at,structured_payload,metadata,converted_focus_item_id"
     )
     .eq("id", recommendationId)
     .eq("care_subject_id", userContext.personId)
@@ -394,18 +464,34 @@ async function loadRecommendationForReview(
 async function updateRecommendationStatus(
   supabase: ReturnType<typeof createSupabaseUserClient>,
   userContext: UserContext,
-  recommendationId: string,
-  status: RecommendationStatus
+  recommendation: RecommendationRow & {
+    converted_focus_item_id?: string | null;
+    priority: RecommendationPriority;
+  },
+  action: RecommendationReviewAction,
+  dismissalType: RecommendationDismissalType | null,
+  status: RecommendationStatus,
+  reviewNote: string
 ) {
+  const reviewedAt = new Date().toISOString();
   const { data, error } = await supabase
     .from("care_recommendations")
     .update({
+      metadata: reviewMetadata(recommendation.metadata, {
+        action,
+        dismissalType,
+        priorStatus: recommendation.status,
+        resultingStatus: status,
+        reviewedAt,
+        reviewedByUserId: userContext.userId,
+        reviewNote,
+      }),
       status,
-      status_updated_at: new Date().toISOString(),
+      status_updated_at: reviewedAt,
       status_updated_by_user_id: userContext.userId,
-      updated_at: new Date().toISOString(),
+      updated_at: reviewedAt,
     })
-    .eq("id", recommendationId)
+    .eq("id", recommendation.id)
     .eq("care_subject_id", userContext.personId)
     .select(
       "id,care_subject_id,title,reason,priority,status,status_updated_at,converted_focus_item_id"
@@ -416,6 +502,18 @@ async function updateRecommendationStatus(
     throw error;
   }
 
+  await insertRecommendationReviewEvent(supabase, userContext, {
+    action,
+    dismissalType,
+    focusItemId: null,
+    priorStatus: recommendation.status,
+    recommendation,
+    recommendationOutcome: recommendationOutcomeForReview(action, dismissalType),
+    resultingStatus: status,
+    reviewNote,
+    reviewedAt,
+  });
+
   return data;
 }
 
@@ -425,7 +523,9 @@ async function convertRecommendationToFocusItem(
   recommendation: RecommendationRow & {
     converted_focus_item_id?: string | null;
     priority: RecommendationPriority;
-  }
+  },
+  dismissalType: RecommendationDismissalType | null,
+  reviewNote: string
 ) {
   if (recommendation.converted_focus_item_id) {
     return {
@@ -480,8 +580,10 @@ async function convertRecommendationToFocusItem(
       importance_score: draft.importanceScore,
       metadata: {
         focusRankingDecision: rankingDecision,
+        focusTitle: draft.title,
         recommendationId: recommendation.id,
         recommendationReason: recommendation.reason,
+        recommendationTitle: recommendation.title,
         recommendationTrace:
           recommendation.structured_payload?.recommendationTrace ?? null,
         source: "care_recommendation",
@@ -502,14 +604,25 @@ async function convertRecommendationToFocusItem(
     throw focusError;
   }
 
+  const reviewedAt = new Date().toISOString();
   const { error: recommendationUpdateError } = await supabase
     .from("care_recommendations")
     .update({
       converted_focus_item_id: (focusItem as { id: string }).id,
+      metadata: reviewMetadata(recommendation.metadata, {
+        action: "convert_to_focus",
+        dismissalType,
+        focusItemId: (focusItem as { id: string }).id,
+        priorStatus: recommendation.status,
+        resultingStatus: "converted_to_focus",
+        reviewedAt,
+        reviewedByUserId: userContext.userId,
+        reviewNote,
+      }),
       status: "converted_to_focus",
-      status_updated_at: new Date().toISOString(),
+      status_updated_at: reviewedAt,
       status_updated_by_user_id: userContext.userId,
-      updated_at: new Date().toISOString(),
+      updated_at: reviewedAt,
     })
     .eq("id", recommendation.id)
     .eq("care_subject_id", userContext.personId);
@@ -518,7 +631,197 @@ async function convertRecommendationToFocusItem(
     throw recommendationUpdateError;
   }
 
+  await insertRecommendationReviewEvent(supabase, userContext, {
+    action: "convert_to_focus",
+    dismissalType,
+    focusItemId: (focusItem as { id: string }).id,
+    priorStatus: recommendation.status,
+    recommendation,
+    recommendationOutcome: "written_to_focus",
+    resultingStatus: "converted_to_focus",
+    reviewNote,
+    reviewedAt,
+  });
+
   return focusItem;
+}
+
+async function dismissedCandidateReturnContext(
+  supabase: ReturnType<typeof createSupabaseUserClient>,
+  userContext: UserContext,
+  candidate: RecommendationCandidate
+) {
+  const { data: dismissedRows, error: dismissedError } = await supabase
+    .from("care_recommendations")
+    .select("id,metadata,status_updated_at,updated_at")
+    .eq("care_subject_id", userContext.personId)
+    .eq("recommendation_type", candidate.recommendationType)
+    .eq("dedupe_key", candidate.dedupeKey)
+    .eq("status", "dismissed")
+    .order("status_updated_at", { ascending: false, nullsFirst: false })
+    .order("updated_at", { ascending: false, nullsFirst: false })
+    .limit(1);
+
+  if (dismissedError) {
+    throw dismissedError;
+  }
+
+  const dismissed = (dismissedRows ?? [])[0] as
+    | { id: string; metadata: Record<string, unknown> | null }
+    | undefined;
+  const dismissalType = dismissalTypeFromMetadata(dismissed?.metadata);
+
+  if (
+    !dismissed ||
+    (dismissalType !== "permanent" &&
+      dismissalType !== "snooze_until_new_evidence")
+  ) {
+    return { suppress: false };
+  }
+
+  const { data: evidenceRows, error: evidenceError } = await supabase
+    .from("care_recommendation_evidence")
+    .select("evidence_hash")
+    .eq("recommendation_id", dismissed.id);
+
+  if (evidenceError) {
+    throw evidenceError;
+  }
+
+  const priorEvidenceHashes = new Set(
+    ((evidenceRows ?? []) as { evidence_hash: string }[])
+      .map((row) => row.evidence_hash)
+      .filter(Boolean)
+  );
+  const currentEvidenceHashes = candidate.evidence.map(recommendationEvidenceHash);
+
+  const suppress =
+    priorEvidenceHashes.size > 0 &&
+    currentEvidenceHashes.every((hash) => priorEvidenceHashes.has(hash));
+
+  if (suppress || dismissalType !== "snooze_until_new_evidence") {
+    return { suppress };
+  }
+
+  const newEvidenceCount = currentEvidenceHashes.filter(
+    (hash) => !priorEvidenceHashes.has(hash)
+  ).length;
+
+  return {
+    snoozeReturn: {
+      dismissedRecommendationId: dismissed.id,
+      newEvidenceCount,
+      rationale:
+        newEvidenceCount > 0
+          ? `This recommendation was previously snoozed until new evidence. It returned because ${newEvidenceCount} new supporting evidence item(s) were found.`
+          : "This recommendation was previously snoozed and returned after the evidence set changed.",
+      returnedAt: new Date().toISOString(),
+    },
+    suppress: false,
+  };
+}
+
+async function insertRecommendationReviewEvent(
+  supabase: ReturnType<typeof createSupabaseUserClient>,
+  userContext: UserContext,
+  input: RecommendationReviewAuditInput
+) {
+  const { error } = await supabase
+    .from("care_recommendation_review_events")
+    .insert({
+      action: input.action,
+      care_circle_id: input.recommendation.care_circle_id,
+      care_subject_id: input.recommendation.care_subject_id,
+      dismissal_type: input.dismissalType ?? null,
+      focus_item_id: input.focusItemId ?? null,
+      metadata: {
+        recommendationOutcome: input.recommendationOutcome,
+        source: "todays_focus_review_v1",
+      },
+      prior_status: input.priorStatus,
+      recommendation_id: input.recommendation.id,
+      recommendation_outcome: input.recommendationOutcome,
+      resulting_status: input.resultingStatus,
+      review_note: input.reviewNote || null,
+      reviewed_at: input.reviewedAt,
+      reviewed_by_user_id: userContext.userId,
+    });
+
+  if (error && !isReviewEventsTableUnavailable(error)) {
+    throw error;
+  }
+}
+
+function reviewMetadata(
+  metadata: Record<string, unknown> | null,
+  input: {
+    action: RecommendationReviewAction;
+    dismissalType?: RecommendationDismissalType | null;
+    focusItemId?: string | null;
+    priorStatus: RecommendationStatus;
+    resultingStatus: RecommendationStatus;
+    reviewedAt: string;
+    reviewedByUserId: string;
+    reviewNote: string;
+  }
+) {
+  return {
+    ...(metadata ?? {}),
+    latestReview: {
+      action: input.action,
+      dismissalType: input.dismissalType ?? null,
+      focusItemId: input.focusItemId ?? null,
+      priorStatus: input.priorStatus,
+      recommendationOutcome: recommendationOutcomeForReview(
+        input.action,
+        input.dismissalType ?? null
+      ),
+      resultingStatus: input.resultingStatus,
+      reviewNote: input.reviewNote || null,
+      reviewedAt: input.reviewedAt,
+      reviewedByUserId: input.reviewedByUserId,
+    },
+  };
+}
+
+function recommendationOutcomeForReview(
+  action: RecommendationReviewAction,
+  dismissalType: RecommendationDismissalType | null
+): RecommendationOutcome {
+  if (action === "approve") {
+    return "approved";
+  }
+
+  if (action === "convert_to_focus") {
+    return "written_to_focus";
+  }
+
+  if (action === "dismiss") {
+    switch (dismissalType) {
+      case "permanent":
+        return "dismissed_permanent";
+      case "snooze_until_new_evidence":
+        return "snoozed_until_new_evidence";
+      case "temporary":
+      default:
+        return "dismissed_temporary";
+    }
+  }
+
+  return "dismissed_temporary";
+}
+
+function dismissalTypeFromMetadata(
+  metadata: Record<string, unknown> | null | undefined
+): RecommendationDismissalType | null {
+  const latestReview =
+    metadata?.latestReview &&
+    typeof metadata.latestReview === "object" &&
+    !Array.isArray(metadata.latestReview)
+      ? (metadata.latestReview as Record<string, unknown>)
+      : null;
+
+  return dismissalTypeValue(latestReview?.dismissalType);
 }
 
 function recommendationPayload(
@@ -679,6 +982,18 @@ async function verifyPersonAccess(
     throw new Error("Please sign in before loading recommendations.");
   }
 
+  const { data: adminProfile, error: adminProfileError } = await supabase
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", userId)
+    .single();
+
+  if (adminProfileError) {
+    throw adminProfileError;
+  }
+
+  const isAdmin = adminProfile?.is_admin === true;
+
   const { data: memberships, error: membershipsError } = await supabase
     .from("care_circle_memberships")
     .select("care_circle_id")
@@ -693,16 +1008,22 @@ async function verifyPersonAccess(
     .map((membership) => membership.care_circle_id)
     .filter(Boolean);
 
-  if (careCircleIds.length === 0) {
+  if (careCircleIds.length === 0 && !isAdmin) {
     throw new RecommendationAccessDeniedError();
   }
 
-  const { data: people, error: peopleError } = await supabase
+  const subjectClient = isAdmin ? createSupabaseServiceClient() : supabase;
+  let peopleQuery = subjectClient
     .from("care_subjects")
     .select("id,care_circle_id")
     .eq("id", personId)
-    .in("care_circle_id", careCircleIds)
     .limit(1);
+
+  if (!isAdmin) {
+    peopleQuery = peopleQuery.in("care_circle_id", careCircleIds);
+  }
+
+  const { data: people, error: peopleError } = await peopleQuery;
 
   if (peopleError) {
     throw peopleError;
@@ -717,9 +1038,16 @@ async function verifyPersonAccess(
   return {
     accessToken,
     careCircleId: person.care_circle_id,
+    isAdmin,
     personId: person.id,
     userId,
   };
+}
+
+function recommendationSupabaseClient(userContext: UserContext) {
+  return userContext.isAdmin
+    ? createSupabaseServiceClient()
+    : createSupabaseUserClient(userContext.accessToken);
 }
 
 function groupEvidence(rows: RecommendationEvidenceRow[]) {
@@ -746,6 +1074,7 @@ function compareRecommendationRows(left: RecommendationRow, right: Recommendatio
 
 function priorityRank(priority: string) {
   switch (priority) {
+    case "strong":
     case "critical":
       return 4;
     case "high":
@@ -802,14 +1131,51 @@ function recommendationsRouteError(error: unknown, fallbackMessage: string) {
 
   return NextResponse.json(
     {
-      error: error instanceof Error ? error.message : fallbackMessage,
+      error: getErrorMessage(error) || fallbackMessage,
       ok: false,
     },
     { status: 500 }
   );
 }
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const maybeError = error as {
+    code?: string;
+    details?: string;
+    hint?: string;
+    message?: string;
+  };
+  const messageParts = [
+    maybeError.message,
+    maybeError.details,
+    maybeError.hint ? `Hint: ${maybeError.hint}` : "",
+    maybeError.code ? `Code: ${maybeError.code}` : "",
+  ].filter(Boolean);
+
+  return messageParts.join(" ");
+}
+
 function isRecommendationStorageUnavailable(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const maybeError = error as { code?: string };
+
+  return ["42P01", "42703", "PGRST205", "PGRST204"].includes(
+    maybeError.code ?? ""
+  );
+}
+
+function isReviewEventsTableUnavailable(error: unknown) {
   if (!error || typeof error !== "object") {
     return false;
   }
@@ -821,10 +1187,9 @@ function isRecommendationStorageUnavailable(error: unknown) {
     maybeError.code === "42P01" ||
     maybeError.code === "42703" ||
     maybeError.code === "PGRST205" ||
-    message.includes("care_recommendations") ||
-    message.includes("care_recommendation_evidence") ||
-    message.includes("dedupe_key") ||
-    message.includes("evidence_hash")
+    message.includes("care_recommendation_review_events") ||
+    message.includes("dismissal_type") ||
+    message.includes("recommendation_outcome")
   );
 }
 
@@ -857,6 +1222,18 @@ function reviewActionValue(value: unknown): RecommendationReviewAction | null {
     value === "convert_to_focus" ||
     value === "dismiss" ||
     value === "expire"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function dismissalTypeValue(value: unknown): RecommendationDismissalType | null {
+  if (
+    value === "permanent" ||
+    value === "snooze_until_new_evidence" ||
+    value === "temporary"
   ) {
     return value;
   }

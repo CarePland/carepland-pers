@@ -22,7 +22,7 @@ Key fields:
 - `dedupe_key`: deterministic generation key used by rerunnable v1 scans to update the same open candidate.
 - `source_type`, `source_table`, `source_id`: primary source hint.
 - `confidence`: confidence in the extraction/match, not confidence that the person should do it.
-- `priority`: `critical`, `high`, `normal`, or `low`.
+- `priority`: `strong`, `high`, `normal`, or `low`.
 - `expires_at`: optional candidate freshness boundary.
 - `status`: `candidate`, `approved`, `dismissed`, `expired`, or `converted_to_focus`.
 - `converted_focus_item_id`: set only after an approval workflow creates a Focus Item.
@@ -57,7 +57,7 @@ Initial rules:
 
 Priority must come from evidence:
 
-- `critical`: only when the source explicitly says urgent/critical or equivalent. Do not infer.
+- `strong`: only when source evidence explicitly uses strong importance language. Do not use emergency-sounding labels such as critical or urgent for recommendation priority.
 - `high`: provider instruction, CarePrep next step, or multiple independent supporting sources.
 - `normal`: single user/caregiver goal or broad Health Focus/Track-history support.
 - `low`: weak, old, or low-confidence support.
@@ -70,11 +70,37 @@ The first backend endpoint is `/api/personal/recommendations`.
 - `POST /api/personal/recommendations` with `{ personId }` scans existing CarePland data, generates deterministic candidates, stores new candidates, updates existing open candidates with the same `dedupe_key`, and adds only new evidence rows.
 - `PATCH /api/personal/recommendations` with `{ personId, recommendationId, action }` supports `approve`, `dismiss`, `expire`, and `convert_to_focus`.
 - Source scanning currently uses current appointment notes, current CarePrep guidance, Health Focus topic mentions, and Track history when those tables are available.
-- `convert_to_focus` creates an active `focus_items` row using the recommendation title, priority, suggested completion type, suggested event type, and measured follow-up config where known. It marks the recommendation `converted_to_focus` and stores `converted_focus_item_id`.
+- `convert_to_focus` creates an active `focus_items` row using a person-facing Focus title, priority, suggested completion type, suggested event type, and measured follow-up config where known. It marks the recommendation `converted_to_focus`, stores `converted_focus_item_id`, and preserves the original recommendation title in Focus Item metadata.
 - Converted Focus Items store `metadata.focusRankingDecision` with the recommendation id, source, priority-to-importance mapping, final `importanceScore`, and rationale. They also carry `metadata.recommendationTrace` so the original recommendation decision remains inspectable after conversion.
 - Recommendations remain reviewable candidates until an explicit review action is taken. The endpoint does not automatically show, convert, or rank Focus Items for Receiver Today’s Focus.
-- TODO(recommendations-approval-ui): design the approve/modify/dismiss UI around these backend actions.
 - TODO(recommendations-admin-ai): if AI enters recommendation generation or ranking, seed the prompt through Admin-managed `ai_instruction_versions` first.
+
+## V1 Admin Review Surface
+
+Admin includes a foundation-only `Today's Focus` tab with a `Today's Focus
+Review` panel. The same panel is also visible in Admin > Tools as an
+operational fallback while the final review workflow is still forming.
+
+The panel can:
+
+- Choose a Care VIP group, then either all Care VIPs in that group or specific Care VIPs.
+- Start from all unreviewed recommendations, or narrow by user/account, Care VIP group, and specific Care VIPs.
+- Show a total unreviewed count plus user/account, group, and Care VIP unreviewed counts for candidates still in `candidate` or `approved` status.
+- Load stored recommendations or scan the current CarePland data for deterministic candidates.
+- Show status, priority, confidence, reason, evidence snippets, matched keywords, and ranking/confidence rationale.
+- Select one candidate, several candidates, or `Select all` reviewable candidates.
+- Approve, dismiss, or write selected candidate recommendations to Today’s Focus.
+
+Current limits:
+
+- This is an operational v1, not the final caregiver/user approval UI.
+- Global review access is gated by `profiles.is_admin`; normal users still use authenticated person-scoped access.
+- `Write to Focus` is the first conversion path. It does not yet support editing the recommendation before conversion.
+- Recommendation titles may be review-oriented, such as `Record weight` or `Track home blood pressure readings`. Converted Focus Items should use person-facing prompt titles, such as `Weigh yourself` or `Take today's blood pressure reading`, while preserving the original recommendation title in Focus Item metadata.
+- Review decisions are audited in `care_recommendation_review_events` when the audit migration is applied. The audit row includes first-class `recommendation_outcome` values: `approved`, `dismissed_temporary`, `dismissed_permanent`, `snoozed_time`, `snoozed_until_new_evidence`, and `written_to_focus`. The recommendation row also keeps a `metadata.latestReview` summary for quick inspection.
+- Dismissal requires a review note and a dismissal type: `temporary`, `snooze_until_new_evidence`, or `permanent`. Temporary means not today and may return later. Snooze and permanent suppress the same candidate until new supporting evidence appears. When a snoozed candidate returns because new evidence is found, `structured_payload.snoozeReturn` explains why it is back.
+- TODO(recommendations-approval-ui): design the polished approve/modify/dismiss workflow for caregivers and users.
+- TODO(recommendations-admin-audit): expand audit visibility if this becomes a true cross-account operations workflow.
 
 ## Example Recommendations From Project Seed Data
 

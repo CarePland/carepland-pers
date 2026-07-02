@@ -181,8 +181,12 @@ port_is_busy() {
 
 start_next_app() {
   if port_is_busy "$NEXT_PORT"; then
-    echo "CarePland Next app is already listening on port $NEXT_PORT; leaving it in place."
-    return
+    echo "CarePland Next app is still listening on port $NEXT_PORT; restarting it before launch."
+    stop_port "$NEXT_PORT" "CarePland Next app"
+  fi
+  if port_is_busy "$NEXT_PORT"; then
+    echo "Unable to free port $NEXT_PORT for the CarePland Next app." >&2
+    return 1
   fi
   echo "Starting CarePland Next app on http://localhost:$NEXT_PORT ($NEXT_APP_MODE)"
   (
@@ -320,6 +324,10 @@ sleep 2
 
 echo
 echo "Restart complete."
+echo "CarePland Next mode:     $NEXT_APP_MODE"
+if [[ "$NEXT_APP_MODE" == "production" ]]; then
+  echo "Production mode serves the last built app. Use --dev-next to see local code changes immediately."
+fi
 if [[ "$SETUP_NETWORK_MODE" -eq 1 ]]; then
   echo
   echo "CarePland Setup Network mode"

@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent } from "react";
+import { ComponentProps, FormEvent } from "react";
 
 import { AppSessionSettings } from "../../lib/platform/sessionSettings";
+import { AdminRecommendationsReviewPanel } from "./AdminRecommendationsReviewPanel";
 import { AdminSessionSettingsPanel } from "./AdminSessionSettingsPanel";
 
 type AdminSampleDataStatus = {
@@ -18,6 +19,7 @@ type AdminToolsPanelProps = {
   adminSampleForceDeclined: boolean;
   adminSampleStatus: AdminSampleDataStatus | null;
   appSessionSettings: AppSessionSettings;
+  recommendationsReview: ComponentProps<typeof AdminRecommendationsReviewPanel>;
   loadingAdminSampleStatus: boolean;
   onChangeAdminEmailUpdateCurrentEmail: (value: string) => void;
   onChangeAdminEmailUpdateNewEmail: (value: string) => void;
@@ -46,6 +48,7 @@ export function AdminToolsPanel({
   adminSampleForceDeclined,
   adminSampleStatus,
   appSessionSettings,
+  recommendationsReview,
   loadingAdminSampleStatus,
   onChangeAdminEmailUpdateCurrentEmail,
   onChangeAdminEmailUpdateNewEmail,
@@ -141,6 +144,8 @@ export function AdminToolsPanel({
         saving={savingAppSessionSettings}
         settings={appSessionSettings}
       />
+
+      <AdminRecommendationsReviewPanel {...recommendationsReview} />
 
       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="text-lg font-semibold text-slate-900">Sample data</h3>

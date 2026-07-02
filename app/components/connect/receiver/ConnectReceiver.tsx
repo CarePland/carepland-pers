@@ -39,6 +39,11 @@ import {
   updateConnectMainUserContext,
 } from "../../../lib/connect/context/client";
 import {
+  TodayFocusList,
+  type TodayFocusCadencePreferenceAction,
+  type TodayFocusCadencePreferenceCadence,
+} from "../../todayFocus/TodayFocusList";
+import {
   createConnectCallAudioController,
   type ConnectCallAudioStatus,
   type ConnectCallAudioController,
@@ -70,10 +75,25 @@ type ReceiverUser = {
 };
 
 type ReceiverTodayFocusHomeItem = {
+  completionConfig?: {
+    unit?: string | null;
+    unitOptions?: string[];
+    valuePromptText?: string | null;
+  } | null;
+  completionType?: string | null;
   id: string;
   kind?: "checkoff" | "weight";
   promptText?: string | null;
   title: string;
+};
+
+type ReceiverTodayFocusCompletionInput = {
+  unit?: string | null;
+  value?: number | null;
+};
+
+type ReceiverTodayFocusPendingCompletion = {
+  trackEventId: string;
 };
 
 type Message = {
@@ -127,6 +147,7 @@ const DESK_PHONE_CANVAS_WIDTH = 1024;
 const DESK_PHONE_CANVAS_HEIGHT = 600;
 const RECEIVER_BINDING_HEARTBEAT_MS = 60_000;
 const SCREEN_CLEANING_DURATION_SECONDS = 120;
+const DEFAULT_TODAY_FOCUS_UNDO_WINDOW_MS = 10_000;
 const receiverAudioPack = {
   button: "/connect/receiver/audio/microwave-beep.mp3",
   incoming: "/connect/receiver/audio/old-phone-ringing.mp3",
@@ -182,6 +203,20 @@ type AskAnswer = {
   messageBody: string;
   recipientId: string;
   type: "answer" | "message";
+};
+
+type TalkApiResult = {
+  completed_focus_item_id?: string;
+  confidence?: number;
+  created_track_event_id?: string;
+  display_response?: string;
+  intent?: string;
+  needs_confirmation?: boolean;
+  needs_review?: boolean;
+  proposed_action?: string;
+  spoken_response?: string;
+  structured_payload?: Record<string, unknown>;
+  title?: string;
 };
 
 type ReceiverAppointment = {
@@ -387,6 +422,8 @@ function fallbackNextReceiverAppointment(): ReceiverAppointment {
 const receiverGuideTargetStorageKey = "carepland-connect-guide-target";
 const receiverGuideRectStorageKey = "carepland-connect-guide-rect";
 const receiverLastPressStorageKey = "carepland-connect-last-press";
+const receiverGuideEndpoint = "/api/connect/receiver-guide";
+const receiverGuideSessionStorageKey = "carepland-connect-receiver-guide-session";
 const receiverBindingStorageKey = "carepland-connect-receiver-binding";
 const receiverRegistrationStorageKey = "carepland-connect-receiver-registration";
 const receiverSessionStorageKey = "carepland-connect-receiver-session";
@@ -395,6 +432,8 @@ const receiverDeviceProfileStorageKey = "carepland-connect-receiver-device-profi
 const connectMessagesEndpoint = "/api/connect/messages";
 const connectCallsEndpoint = "/api/connect/calls";
 const connectTodayFocusEndpoint = "/api/connect/today-focus";
+const connectTodayFocusPreferencesEndpoint = "/api/connect/today-focus/preferences";
+const connectTalkEndpoint = "/api/connect/talk";
 const connectAudioPlaybackEventsEndpoint = "/api/connect/audio/playback-events";
 const connectAudioProfileEndpoint = "/api/connect/audio/profile";
 const connectReceiverCleaningSessionsEndpoint = "/api/connect/receiver/cleaning-sessions";
@@ -403,12 +442,6 @@ const receiverScreenCleaningDefaultSeenStorageKey =
   "carepland-connect-screen-cleaning-default-seen";
 const receiverScreenCleaningCountStorageKey =
   "carepland-connect-screen-cleaning-count";
-
-const fallbackTodayFocusItems: ReceiverTodayFocusHomeItem[] = [
-  { id: "fallback-medications", title: "Take morning medications" },
-  { id: "fallback-weight", kind: "weight", title: "Weigh yourself" },
-  { id: "fallback-water", title: "Drink water with lunch" },
-];
 
 const brainStretchPrompt =
   "What is the only English word that is five letters long, is eaten by people, and when you remove the first letter, turns into a form of energy?";
@@ -772,6 +805,29 @@ function readReceiverDeviceId() {
     storedBinding.receiverDeviceId ||
     ""
   ).trim();
+}
+
+function readReceiverGuideId() {
+  if (typeof window === "undefined") return connectPrototypeReceiverId;
+  const params = new URLSearchParams(window.location.search);
+  return (
+    params.get("receiverId") ||
+    params.get("receiverDeviceId") ||
+    readReceiverDeviceId() ||
+    connectPrototypeReceiverId
+  ).trim();
+}
+
+function readReceiverGuideSessionId() {
+  if (typeof window === "undefined") return "";
+  const current = window.sessionStorage.getItem(receiverGuideSessionStorageKey);
+  if (current) return current;
+  const next =
+    typeof window.crypto?.randomUUID === "function"
+      ? window.crypto.randomUUID()
+      : `receiver-session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  window.sessionStorage.setItem(receiverGuideSessionStorageKey, next);
+  return next;
 }
 
 function readReceiverModeLabel(): ScreenCleaningSession["receiverMode"] {
@@ -1520,9 +1576,22 @@ export function ConnectReceiver() {
   const [registrationCode, setRegistrationCode] = useState(testReceiverRegistrationCode);
   const [registrationError, setRegistrationError] = useState("");
   const [messages, setMessages] = useState<Message[]>(initialMessages);
-  const [todayFocusItems, setTodayFocusItems] = useState<ReceiverTodayFocusHomeItem[]>(fallbackTodayFocusItems);
+  const [todayFocusItems, setTodayFocusItems] = useState<ReceiverTodayFocusHomeItem[]>([]);
   const [todayFocusCompletingId, setTodayFocusCompletingId] = useState("");
   const [todayFocusCompletedIds, setTodayFocusCompletedIds] = useState<string[]>([]);
+  const [todayFocusPendingCompletions, setTodayFocusPendingCompletions] =
+    useState<Record<string, ReceiverTodayFocusPendingCompletion>>({});
+  const [todayFocusUndoWindowMs, setTodayFocusUndoWindowMs] = useState(
+    DEFAULT_TODAY_FOCUS_UNDO_WINDOW_MS
+  );
+  const [todayFocusLoadState, setTodayFocusLoadState] = useState<
+    "idle" | "loading" | "ready" | "empty" | "error"
+  >("idle");
+  const [todayFocusStatus, setTodayFocusStatus] = useState("");
+  const [todayFocusPreferenceItem, setTodayFocusPreferenceItem] =
+    useState<ReceiverTodayFocusHomeItem | null>(null);
+  const [todayFocusPreferenceStep, setTodayFocusPreferenceStep] =
+    useState<"main" | "cadence">("main");
   const [messageTextSize, setMessageTextSize] = useState<ReaderTextSize>(readInitialMessageTextSize);
   const [focusedMessageIndex, setFocusedMessageIndex] = useState(0);
   const [, setStatus] = useState("Ready.");
@@ -1535,6 +1604,7 @@ export function ConnectReceiver() {
   const [askDraft, setAskDraft] = useState(() => readStoredReceiverSession().askDraft || "");
   const [guideTarget, setGuideTarget] = useState<GuideTarget | null>(null);
   const [guideRect, setGuideRect] = useState<GuideRect | null>(null);
+  const [guideIdentifyCode, setGuideIdentifyCode] = useState("");
   const [receiverRecording, setReceiverRecording] = useState(false);
   const [receiverRecordingProcessing, setReceiverRecordingProcessing] = useState(false);
   const [contactRecording, setContactRecording] = useState(false);
@@ -1563,12 +1633,13 @@ export function ConnectReceiver() {
   const playingMessageRef = useRef<Message | null>(null);
   const cueAudioRef = useRef<HTMLAudioElement | null>(null);
   const cueTimeoutRef = useRef<number | null>(null);
-  const todayFocusCompletionTimerRef = useRef<number | null>(null);
+  const todayFocusCompletionTimersRef = useRef<Record<string, number>>({});
   const receiverRecordingControllerRef = useRef<ConnectAudioRecordingController | null>(null);
   const receiverCaptureIdRef = useRef("");
   const contactRecordingControllerRef = useRef<ConnectAudioRecordingController | null>(null);
   const contactCaptureIdRef = useRef("");
   const screenCleaningSessionRef = useRef<ScreenCleaningSession | null>(null);
+  const gxvFocusHomeEnabled = deskPhoneMode && gxvHomeLayout === "focus_v1";
 
   useEffect(() => {
     window.CarePlandReceiver?.receiverReady?.();
@@ -1627,20 +1698,64 @@ export function ConnectReceiver() {
     }
   }, [selectedReceiverUserId]);
 
-  function resetTodayFocusMockList(items: ReceiverTodayFocusHomeItem[]) {
+  function resetTodayFocusList(items: ReceiverTodayFocusHomeItem[]) {
     setTodayFocusItems(items);
     setTodayFocusCompletedIds([]);
+    setTodayFocusPendingCompletions({});
     setTodayFocusCompletingId("");
-    if (todayFocusCompletionTimerRef.current) {
-      window.clearTimeout(todayFocusCompletionTimerRef.current);
-      todayFocusCompletionTimerRef.current = null;
+    setTodayFocusStatus("");
+    setTodayFocusLoadState(items.length ? "ready" : "empty");
+    clearTodayFocusCompletionTimers();
+  }
+
+  function clearTodayFocusCompletionTimers() {
+    for (const timerId of Object.values(todayFocusCompletionTimersRef.current)) {
+      window.clearTimeout(timerId);
+    }
+    todayFocusCompletionTimersRef.current = {};
+  }
+
+  function clearTodayFocusCompletionTimer(focusItemId: string) {
+    const timerId = todayFocusCompletionTimersRef.current[focusItemId];
+    if (timerId) {
+      window.clearTimeout(timerId);
+      delete todayFocusCompletionTimersRef.current[focusItemId];
     }
   }
 
+  function normalizeTodayFocusUndoWindowMs(value: unknown) {
+    const milliseconds =
+      typeof value === "number" && Number.isFinite(value)
+        ? value
+        : DEFAULT_TODAY_FOCUS_UNDO_WINDOW_MS;
+
+    return Math.min(30_000, Math.max(3_000, Math.round(milliseconds)));
+  }
+
+  useEffect(() => {
+    setTodayFocusItems([]);
+    setTodayFocusCompletedIds([]);
+    setTodayFocusPendingCompletions({});
+    setTodayFocusCompletingId("");
+    setTodayFocusStatus("");
+    setTodayFocusLoadState(selectedReceiverUserId ? "loading" : "idle");
+    clearTodayFocusCompletionTimers();
+  }, [selectedReceiverUserId]);
+
   const refreshTodayFocus = useCallback(async () => {
     if (!selectedReceiverUserId) {
-      setTodayFocusItems(fallbackTodayFocusItems);
+      if (todayFocusItems.length === 0) {
+        setTodayFocusLoadState("idle");
+      }
+      setTodayFocusStatus("Choose a Main Connect User to show Today’s Focus.");
       return;
+    }
+
+    setTodayFocusLoadState((current) =>
+      todayFocusItems.length > 0 && current === "ready" ? "ready" : "loading"
+    );
+    if (todayFocusItems.length === 0) {
+      setTodayFocusStatus("");
     }
 
     try {
@@ -1652,15 +1767,36 @@ export function ConnectReceiver() {
         }
       );
       const payload = (await response.json().catch(() => ({}))) as {
-        focusItems?: Array<Partial<ReceiverTodayFocusHomeItem> & { id?: string; title?: string }>;
+        focusItems?: Array<
+          Partial<ReceiverTodayFocusHomeItem> & { id?: string; title?: string }
+        >;
+        receiverConfig?: {
+          undoWindowMs?: unknown;
+        };
       };
 
-      if (!response.ok || !Array.isArray(payload.focusItems)) return;
+      if (!response.ok || !Array.isArray(payload.focusItems)) {
+        setTodayFocusLoadState(todayFocusItems.length ? "ready" : "error");
+        if (todayFocusItems.length === 0) {
+          setTodayFocusStatus(
+            "Today’s Focus could not load for this Receiver user."
+          );
+        }
+        return;
+      }
+
+      setTodayFocusUndoWindowMs(
+        normalizeTodayFocusUndoWindowMs(payload.receiverConfig?.undoWindowMs)
+      );
 
       const nextItems = payload.focusItems
         .filter((item): item is ReceiverTodayFocusHomeItem => Boolean(item.id && item.title))
         .map((item) => ({
+          completionConfig: item.completionConfig ?? null,
+          completionType: item.completionType ?? null,
           id: String(item.id),
+          kind:
+            item.completionType === "measured_value" ? "weight" : item.kind,
           promptText: item.promptText ?? null,
           title: String(item.title),
         }))
@@ -1668,15 +1804,25 @@ export function ConnectReceiver() {
         .slice(0, 3);
 
       if (nextItems.length) {
-        resetTodayFocusMockList(nextItems);
+        resetTodayFocusList(nextItems);
         return;
       }
 
-      resetTodayFocusMockList(fallbackTodayFocusItems);
+      if (todayFocusItems.length > 0) {
+        setTodayFocusLoadState("ready");
+        return;
+      }
+
+      resetTodayFocusList([]);
+      setTodayFocusStatus("No Today’s Focus items are ready for this person.");
     } catch {
       // Today's Focus should improve the home screen when available, never block it.
+      setTodayFocusLoadState(todayFocusItems.length ? "ready" : "error");
+      if (todayFocusItems.length === 0) {
+        setTodayFocusStatus("Today’s Focus could not load right now.");
+      }
     }
-  }, [selectedReceiverUserId]);
+  }, [selectedReceiverUserId, todayFocusItems.length]);
 
   const refreshCalls = useCallback(async () => {
     if (!selectedReceiverUserId) return;
@@ -1946,9 +2092,7 @@ export function ConnectReceiver() {
       if (pendingContactRecording?.recording.localUrl) {
         URL.revokeObjectURL(pendingContactRecording.recording.localUrl);
       }
-      if (todayFocusCompletionTimerRef.current) {
-        window.clearTimeout(todayFocusCompletionTimerRef.current);
-      }
+      clearTodayFocusCompletionTimers();
     };
   }, [pendingContactRecording]);
 
@@ -2017,8 +2161,6 @@ export function ConnectReceiver() {
         saveReceiverBinding(payload);
         hasConfirmedBinding = true;
         setReceiverRegistered(true);
-        setActiveReceiverUsers([testReceiverUser]);
-        setSelectedReceiverUserId(testReceiverUser.id);
         setRegistrationError("");
       } catch (error) {
         if (cancelled) return;
@@ -2098,8 +2240,6 @@ export function ConnectReceiver() {
         });
         window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
         setReceiverRegistered(true);
-        setActiveReceiverUsers([testReceiverUser]);
-        setSelectedReceiverUserId(testReceiverUser.id);
         setRegistrationCode("");
         setRegistrationError("");
         setStatus(
@@ -2123,12 +2263,6 @@ export function ConnectReceiver() {
   }, [receiverRegistered]);
 
   useEffect(() => {
-    if (receiverRegistered) {
-      setActiveReceiverUsers([testReceiverUser]);
-      setSelectedReceiverUserId(testReceiverUser.id);
-      return;
-    }
-
     let ignore = false;
 
     async function refreshReceiverUsers() {
@@ -2144,10 +2278,13 @@ export function ConnectReceiver() {
         }));
 
         if (ignore) return;
-        setActiveReceiverUsers(users);
+        setActiveReceiverUsers(users.length ? users : receiverUsers);
         setSelectedReceiverUserId(context.mainConnectUserPersonId || "");
       } catch {
-        // Keep the current receiver context when Pers context is temporarily unavailable.
+        if (!ignore && receiverRegistered) {
+          setActiveReceiverUsers([testReceiverUser]);
+          setSelectedReceiverUserId(testReceiverUser.id);
+        }
       }
     }
 
@@ -2244,6 +2381,79 @@ export function ConnectReceiver() {
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
+  useEffect(() => {
+    if (!started) return undefined;
+    let cancelled = false;
+    const receiverId = readReceiverGuideId();
+    const receiverSessionId = readReceiverGuideSessionId();
+
+    async function syncReceiverGuideState() {
+      try {
+        await fetch(receiverGuideEndpoint, {
+          body: JSON.stringify({
+            action: "presence",
+            deviceProfile: deskPhoneMode ? "gxv3370" : "default",
+            pageUrl: window.location.pathname + window.location.search,
+            receiverId,
+            receiverSessionId,
+            uiLayout: gxvFocusHomeEnabled ? "desk_phone_focus_v1" : "default_receiver",
+          }),
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+
+        const response = await fetch(
+          `${receiverGuideEndpoint}?receiverId=${encodeURIComponent(receiverId)}`,
+          { cache: "no-store" }
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          guide?: {
+            identifyRequests?: Array<{
+              code?: string;
+              expiresAt?: number;
+              receiverSessionId?: string;
+            }>;
+            rect?: GuideRect | null;
+            target?: string | null;
+            targetReceiverSessionId?: string;
+          };
+        };
+        const guide = payload.guide;
+        const targetSessionId = guide?.targetReceiverSessionId || "";
+
+        if (cancelled) return;
+        if (targetSessionId && targetSessionId !== receiverSessionId) {
+          setGuideTarget(null);
+          setGuideRect(null);
+          setGuideIdentifyCode("");
+          return;
+        }
+
+        const identifyRequest = guide?.identifyRequests?.find(
+          (request) =>
+            request.receiverSessionId === receiverSessionId &&
+            Number(request.expiresAt || 0) > Date.now()
+        );
+        setGuideTarget(parseGuideTarget(guide?.target ?? null));
+        setGuideRect(guide?.rect ?? null);
+        setGuideIdentifyCode(String(identifyRequest?.code || ""));
+      } catch {
+        // Remote guide sync is best-effort; same-browser storage remains available.
+      }
+    }
+
+    void syncReceiverGuideState();
+    const timer = window.setInterval(() => {
+      void syncReceiverGuideState();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [started]);
+
   const selectedContact = useMemo(
     () => contacts.find((contact) => contact.id === selectedContactId) ?? contacts[0],
     [selectedContactId]
@@ -2254,21 +2464,41 @@ export function ConnectReceiver() {
     noMainConnectUser;
   const focusedMessage = messages[focusedMessageIndex] ?? messages[0] ?? null;
   const hasMessagePaging = messages.length > 1;
-  const gxvFocusHomeEnabled = deskPhoneMode && gxvHomeLayout === "focus_v1";
-  const visibleTodayFocusItems = (todayFocusItems.length ? todayFocusItems : fallbackTodayFocusItems)
+  const visibleTodayFocusItems = todayFocusItems
     .filter((item) => !isAppointmentReminderFocusItem(item))
     .filter((item) => !todayFocusCompletedIds.includes(item.id))
     .slice(0, 3);
+  const todayFocusDisplayMode =
+    visibleTodayFocusItems.length > 0
+      ? "items"
+      : todayFocusLoadState === "idle" || todayFocusLoadState === "loading"
+        ? "loading"
+        : "receiver_fallback";
 
   function clearGuideBecauseReceiverActed() {
     if (guideTarget || guideRect) {
       const pressedLabel = guideRect?.label;
+      const receiverId = readReceiverGuideId();
+      const receiverSessionId = readReceiverGuideSessionId();
       window.localStorage.removeItem(receiverGuideTargetStorageKey);
       window.localStorage.removeItem(receiverGuideRectStorageKey);
       window.localStorage.setItem(
         receiverLastPressStorageKey,
         JSON.stringify({ label: pressedLabel, pressedAt: currentEpochMs(), target: guideTarget })
       );
+      void fetch(receiverGuideEndpoint, {
+        body: JSON.stringify({
+          action: "press",
+          label: pressedLabel,
+          pressedAt: currentEpochMs(),
+          receiverId,
+          receiverSessionId,
+          target: guideTarget,
+        }),
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }).catch(() => undefined);
       setGuideTarget(null);
       setGuideRect(null);
       setStatus("Guide cleared. You chose what to do.");
@@ -2288,15 +2518,21 @@ export function ConnectReceiver() {
       window.history.replaceState(null, "", url.toString());
     }
     if (nextLayout === "focus_v1") {
-      resetTodayFocusMockList(todayFocusItems.length ? todayFocusItems : fallbackTodayFocusItems);
+      resetTodayFocusList(todayFocusItems);
       void refreshTodayFocus();
     }
   }
 
   function completeTodayFocusItem(item: ReceiverTodayFocusHomeItem) {
     clearGuideBecauseReceiverActed();
-    if (todayFocusCompletingId || todayFocusCompletedIds.includes(item.id)) return;
-    if (item.kind === "weight") {
+    if (
+      todayFocusCompletingId ||
+      todayFocusCompletedIds.includes(item.id) ||
+      todayFocusPendingCompletions[item.id]
+    ) {
+      return;
+    }
+    if (item.completionType === "measured_value" || item.kind === "weight") {
       setModal({ type: "todayFocusWeight", item });
       return;
     }
@@ -2304,23 +2540,208 @@ export function ConnectReceiver() {
     markTodayFocusComplete(item);
   }
 
-  function markTodayFocusComplete(item: ReceiverTodayFocusHomeItem) {
-    if (todayFocusCompletingId || todayFocusCompletedIds.includes(item.id)) return;
-
-    setTodayFocusCompletingId(item.id);
-    setStatus(`${item.title} completed.`);
-
-    if (todayFocusCompletionTimerRef.current) {
-      window.clearTimeout(todayFocusCompletionTimerRef.current);
+  async function markTodayFocusComplete(
+    item: ReceiverTodayFocusHomeItem,
+    completion: ReceiverTodayFocusCompletionInput = {}
+  ) {
+    if (
+      todayFocusCompletingId ||
+      todayFocusCompletedIds.includes(item.id) ||
+      todayFocusPendingCompletions[item.id]
+    ) {
+      return;
     }
 
-    todayFocusCompletionTimerRef.current = window.setTimeout(() => {
+    if (!selectedReceiverUserId) {
+      setStatus("Choose a Main Connect User before saving Today’s Focus.");
+      return;
+    }
+
+    setTodayFocusCompletingId(item.id);
+    setStatus(`Saving ${item.title}.`);
+
+    try {
+      const response = await fetch(connectTodayFocusEndpoint, {
+        body: JSON.stringify({
+          focusItemId: item.id,
+          occurredAt: new Date().toISOString(),
+          personId: selectedReceiverUserId,
+          unit: completion.unit ?? null,
+          value: completion.value ?? null,
+        }),
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await connectAuthHeaders()),
+        },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+        trackEvent?: {
+          id?: string;
+        };
+      };
+
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || "Today’s Focus could not be saved.");
+      }
+
+      const trackEventId = String(payload.trackEvent?.id || "");
+      if (!trackEventId) {
+        throw new Error("Today’s Focus was saved, but Undo is not available.");
+      }
+
+      setTodayFocusPendingCompletions((current) => ({
+        ...current,
+        [item.id]: { trackEventId },
+      }));
+      clearTodayFocusCompletionTimer(item.id);
+      todayFocusCompletionTimersRef.current[item.id] = window.setTimeout(() => {
+        setTodayFocusPendingCompletions((current) => {
+          const next = { ...current };
+          delete next[item.id];
+          return next;
+        });
+        setTodayFocusCompletedIds((current) =>
+          current.includes(item.id) ? current : [...current, item.id]
+        );
+        delete todayFocusCompletionTimersRef.current[item.id];
+      }, todayFocusUndoWindowMs);
+      setStatus(`${item.title} saved.`);
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Today’s Focus could not be saved."
+      );
+    } finally {
+      setTodayFocusCompletingId("");
+    }
+  }
+
+  async function undoTodayFocusCompletion(item: ReceiverTodayFocusHomeItem) {
+    const pendingCompletion = todayFocusPendingCompletions[item.id];
+
+    if (!pendingCompletion || !selectedReceiverUserId) {
+      return;
+    }
+
+    clearTodayFocusCompletionTimer(item.id);
+    setTodayFocusPendingCompletions((current) => {
+      const next = { ...current };
+      delete next[item.id];
+      return next;
+    });
+    setStatus(`Undoing ${item.title}.`);
+
+    try {
+      const response = await fetch(connectTodayFocusEndpoint, {
+        body: JSON.stringify({
+          focusItemId: item.id,
+          personId: selectedReceiverUserId,
+          trackEventId: pendingCompletion.trackEventId,
+        }),
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await connectAuthHeaders()),
+        },
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+      };
+
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || "Today’s Focus could not be undone.");
+      }
+
+      setTodayFocusCompletedIds((current) =>
+        current.filter((completedId) => completedId !== item.id)
+      );
+      setStatus(`${item.title} unchecked.`);
+    } catch (error) {
+      setTodayFocusPendingCompletions((current) => ({
+        ...current,
+        [item.id]: pendingCompletion,
+      }));
+      todayFocusCompletionTimersRef.current[item.id] = window.setTimeout(() => {
+        setTodayFocusPendingCompletions((current) => {
+          const next = { ...current };
+          delete next[item.id];
+          return next;
+        });
+        setTodayFocusCompletedIds((current) =>
+          current.includes(item.id) ? current : [...current, item.id]
+        );
+        delete todayFocusCompletionTimersRef.current[item.id];
+      }, todayFocusUndoWindowMs);
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Today’s Focus could not be undone."
+      );
+    }
+  }
+
+  async function chooseTodayFocusPreference(
+    action: TodayFocusCadencePreferenceAction,
+    cadence?: TodayFocusCadencePreferenceCadence
+  ) {
+    const item = todayFocusPreferenceItem;
+
+    if (!item || !selectedReceiverUserId) {
+      return;
+    }
+
+    if (action === "show_less_often" && !cadence) {
+      setTodayFocusPreferenceStep("cadence");
+      return;
+    }
+
+    setTodayFocusStatus("Saving Today’s Focus preference.");
+
+    try {
+      const response = await fetch(connectTodayFocusPreferencesEndpoint, {
+        body: JSON.stringify({
+          action,
+          cadence: cadence ?? null,
+          focusItemId: item.id,
+          personId: selectedReceiverUserId,
+        }),
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await connectAuthHeaders()),
+        },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+      };
+
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || "Today’s Focus preference could not be saved.");
+      }
+
       setTodayFocusCompletedIds((current) =>
         current.includes(item.id) ? current : [...current, item.id]
       );
-      setTodayFocusCompletingId("");
-      todayFocusCompletionTimerRef.current = null;
-    }, 3000);
+      setTodayFocusPreferenceItem(null);
+      setTodayFocusPreferenceStep("main");
+      setTodayFocusStatus("CarePland will adjust how often this appears.");
+      void refreshTodayFocus();
+    } catch (error) {
+      setTodayFocusStatus(
+        error instanceof Error
+          ? error.message
+          : "Today’s Focus preference could not be saved."
+      );
+    }
   }
 
   function registerReceiverWithCode(event: FormEvent<HTMLFormElement>) {
@@ -3209,11 +3630,18 @@ export function ConnectReceiver() {
     setStatus("Showing all messages.");
   }
 
-  function submitAsk() {
+  async function submitAsk() {
     const question = askDraft.trim();
     if (!question) {
       setStatus("Type what you want to ask first.");
       return;
+    }
+
+    if (modal?.type === "askRecordReview" || pendingAskAudio) {
+      const handled = await submitTalkInterpretation(question);
+      if (handled) {
+        return;
+      }
     }
 
     if (isLowConfidenceAsk(question)) {
@@ -3224,6 +3652,88 @@ export function ConnectReceiver() {
 
     setModal({ type: "askAnswer", answer: answerForAsk(question, selectedContact) });
     setStatus("Ask found an answer.");
+  }
+
+  async function submitTalkInterpretation(question: string) {
+    if (!selectedReceiverUser.id) {
+      setStatus("Choose a Main Connect User before using Talk.");
+      return false;
+    }
+
+    try {
+      const response = await fetch(connectTalkEndpoint, {
+        body: JSON.stringify({
+          contacts: contacts.map((contact) => ({
+            displayName: contact.displayName,
+            id: contact.id,
+          })),
+          inputText: question,
+          personId: selectedReceiverUser.id,
+          receiverDeviceId: readReceiverDeviceId(),
+          source: "receiver_talk",
+        }),
+        headers: {
+          ...(await connectAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        result?: TalkApiResult;
+      };
+
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error || "Talk could not understand that yet.");
+      }
+
+      return handleTalkResult(question, payload.result);
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Talk could not understand that yet."
+      );
+      return false;
+    }
+  }
+
+  function handleTalkResult(question: string, result: TalkApiResult) {
+    const displayResponse =
+      String(result.display_response || result.spoken_response || "").trim() ||
+      "I heard that.";
+    const proposedAction = String(result.proposed_action || "");
+
+    if (result.intent === "connect_call_request") {
+      const contactId = String(result.structured_payload?.contactId || "");
+      const contact = contacts.find((item) => item.id === contactId);
+      if (contact) {
+        callContact(contact);
+        return true;
+      }
+    }
+
+    if (proposedAction === "clarify" || result.intent === "unknown") {
+      setModal({ type: "askRecovery", question });
+      setStatus(displayResponse);
+      return true;
+    }
+
+    setPendingAskAudio(null);
+    setModal({
+      type: "askAnswer",
+      answer: {
+        actionLabel: "That answered my question",
+        answer: displayResponse,
+        messageBody: "",
+        question,
+        recipientId: "",
+        type: "answer",
+      },
+    });
+    setStatus(displayResponse);
+    void refreshTodayFocus();
+    return true;
   }
 
   function escalateAskRecovery(question: string) {
@@ -3821,6 +4331,12 @@ export function ConnectReceiver() {
       } ${guideTarget || guideRect ? styles.guideActive : ""}`}
       onClick={clearGuideBecauseReceiverActed}
     >
+      {guideIdentifyCode ? (
+        <div className={styles.guideIdentifyOverlay} aria-live="assertive">
+          <span>Guide ID</span>
+          <strong>{guideIdentifyCode}</strong>
+        </div>
+      ) : null}
       <div className={styles.applianceFrame} style={applianceStyle}>
         <section
           className={styles.receiverShell}
@@ -4028,29 +4544,38 @@ export function ConnectReceiver() {
                     <span>{receiver.locationLabel}</span>
                   </section>
                   <section className={styles.todayFocusPanel} aria-label="Today's Focus">
-                    {visibleTodayFocusItems.length ? (
+                    {todayFocusDisplayMode === "items" ? (
                       <>
                         <h2>Today&apos;s Focus</h2>
-                        <ul>
-                          {visibleTodayFocusItems.map((item) => (
-                            <li key={item.id}>
-                              <button
-                                className={item.id === todayFocusCompletingId ? styles.todayFocusCompletedItem : ""}
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  completeTodayFocusItem(item);
-                                }}
-                              >
-                                {item.promptText || item.title}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
+                        <TodayFocusList
+                          completedItemIds={Object.keys(todayFocusPendingCompletions)}
+                          completingId={todayFocusCompletingId}
+                          items={visibleTodayFocusItems}
+                          onCancelPreference={() => {
+                            setTodayFocusPreferenceItem(null);
+                            setTodayFocusPreferenceStep("main");
+                          }}
+                          onChoosePreference={chooseTodayFocusPreference}
+                          onComplete={completeTodayFocusItem}
+                          onOpenPreference={(item) => {
+                            setTodayFocusPreferenceItem(item);
+                            setTodayFocusPreferenceStep("main");
+                          }}
+                          onUndoComplete={undoTodayFocusCompletion}
+                          preferenceOpenForId={todayFocusPreferenceItem?.id ?? null}
+                          preferenceStep={todayFocusPreferenceStep}
+                          variant="receiver"
+                        />
                       </>
+                    ) : todayFocusDisplayMode === "loading" ? (
+                      <div className={styles.todayFocusLoadingState}>
+                        <h2>Today&apos;s Focus</h2>
+                        <p>Loading...</p>
+                      </div>
                     ) : (
                       <div className={styles.brainStretchPrompt}>
                         <h2>Brain Stretch</h2>
+                        {todayFocusStatus ? <p>{todayFocusStatus}</p> : null}
                         <p>{brainStretchPrompt}</p>
                       </div>
                     )}
@@ -4968,7 +5493,10 @@ function ReceiverModal({
   onCallBackForMessage: (message: Message) => void;
   onCallContact: (contact: Contact) => void;
   onClose: () => void;
-  onCompleteTodayFocusItem: (item: ReceiverTodayFocusHomeItem) => void;
+  onCompleteTodayFocusItem: (
+    item: ReceiverTodayFocusHomeItem,
+    completion?: ReceiverTodayFocusCompletionInput
+  ) => void | Promise<void>;
   onContactDraftChange: (value: string) => void;
   onEscalateAskRecovery: (question: string) => void;
   onMessageTextSizeChange: (value: ReaderTextSize) => void;
@@ -4986,7 +5514,7 @@ function ReceiverModal({
   onSendContact: (contact: Contact, body: string, recording?: PendingContactRecording | null) => void;
   onSetModal: (modal: ModalState) => void;
   onStartScreenCleaning: () => void;
-  onSubmitAsk: () => void;
+  onSubmitAsk: () => void | Promise<void>;
   onTestSound: () => void;
   onToggleAutoHearPreference: () => void;
   onUpdateSoundSetting: (key: keyof SoundSettings, value: boolean | SoundSettings["comfortVolume"]) => void;
@@ -5028,6 +5556,8 @@ function ReceiverModal({
   if (modal.type === "todayFocusWeight") {
     const measurementDigitLimit = measurementDigitLimitForFocusItem(modal.item);
     const weightUnitLabel = todayFocusWeightUnit === "kg" ? "kgs" : "lbs";
+    const measurementPrompt =
+      modal.item.completionConfig?.valuePromptText || "What was your weight?";
     const canSaveWeight = /\d/.test(todayFocusWeightDraft);
     const appendWeightDigit = (digit: string) => {
       setTodayFocusWeightDraft((current) => {
@@ -5043,7 +5573,7 @@ function ReceiverModal({
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="today-focus-weight-title">
         <section className={`${styles.modalPanel} ${styles.todayFocusWeightPanel}`}>
           <div className={styles.modalTitleRow}>
-            <h2 id="today-focus-weight-title">What was your weight?</h2>
+            <h2 id="today-focus-weight-title">{measurementPrompt}</h2>
             <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
               Go Back
             </button>
@@ -5089,7 +5619,10 @@ function ReceiverModal({
                 type="button"
                 disabled={!canSaveWeight}
                 onClick={() => {
-                  onCompleteTodayFocusItem(modal.item);
+                  void onCompleteTodayFocusItem(modal.item, {
+                    unit: todayFocusWeightUnit === "kg" ? "kg" : "lb",
+                    value: Number(todayFocusWeightDraft),
+                  });
                   setTodayFocusWeightDraft("");
                   setTodayFocusWeightUnit("lbs");
                   onClose();

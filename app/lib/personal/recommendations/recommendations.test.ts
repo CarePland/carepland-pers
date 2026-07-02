@@ -79,7 +79,7 @@ describe("recommendations foundation", () => {
     assert.equal(candidate?.structuredPayload.completionEventType, "note.caregiver");
   });
 
-  it("uses evidence wording for critical priority and does not infer it otherwise", () => {
+  it("uses strong-importance wording for top priority and does not infer it otherwise", () => {
     assert.equal(
       recommendationPriorityFromEvidence([
         {
@@ -93,11 +93,11 @@ describe("recommendations foundation", () => {
     assert.equal(
       recommendationPriorityFromEvidence([
         {
-          evidenceText: "Urgent provider instruction was documented.",
+          evidenceText: "Provider documented this as an important follow-up.",
           sourceType: "appointment_note",
         },
       ]),
-      "critical"
+      "strong"
     );
   });
 
@@ -121,6 +121,34 @@ describe("recommendations foundation", () => {
       candidates.map((candidate) => candidate.title),
       ["Record weight", "Take a short walk"]
     );
+  });
+
+  it("creates a general review candidate when source-backed context has no specific rule match", () => {
+    const candidates = generateRecommendationCandidates([
+      {
+        confidence: 0.82,
+        evidenceText: "Follow up with the clinic after the visit summary is reviewed.",
+        occurredAt: "2026-06-20T12:00:00.000Z",
+        sourceId: "careprep-1",
+        sourceLabel: "Primary care CarePrep",
+        sourceTable: "careprep_guidance",
+        sourceType: "careprep_guidance",
+        text: "Follow up with the clinic after the visit summary is reviewed.",
+      },
+    ]);
+
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0]?.title, "Review recent care context");
+    assert.equal(candidates[0]?.dedupeKey, "review_recent_care_context");
+    assert.equal(candidates[0]?.structuredPayload.completionType, "note_required");
+    assert.equal(
+      candidates[0]?.structuredPayload.recommendationTrace?.generationRule,
+      "review_recent_care_context"
+    );
+  });
+
+  it("does not create a recommendation without source-backed context", () => {
+    assert.deepEqual(generateRecommendationCandidates([]), []);
   });
 
   it("builds recommendation sources from existing CarePland rows", () => {
@@ -220,6 +248,37 @@ describe("recommendations foundation", () => {
     assert.equal(focusItem.completionConfig?.unit, "lb");
     assert.equal(focusItem.completionPromptText, "What was the weight?");
     assert.equal(focusItem.importanceScore, 85);
+    assert.equal(focusItem.title, "Weigh yourself");
+    assert.equal(
+      focusItem.promptText,
+      "Step on the scale and enter the number when you are ready."
+    );
+  });
+
+  it("uses person-facing Focus titles while preserving review-oriented candidates", () => {
+    const bloodPressureFocusItem = buildFocusItemDraftFromRecommendation({
+      careCircleId: "circle-1",
+      careSubjectId: "person-1",
+      id: "recommendation-2",
+      priority: "high",
+      reason: "Provider asked for home readings.",
+      status: "approved",
+      structuredPayload: {
+        completionEventType: "measurement.blood_pressure",
+        completionType: "measured_value",
+        generationRule: "home_blood_pressure_monitoring",
+      },
+      title: "Track home blood pressure readings",
+    });
+
+    assert.equal(
+      bloodPressureFocusItem.title,
+      "Take today's blood pressure reading"
+    );
+    assert.equal(
+      bloodPressureFocusItem.promptText,
+      "Take the reading and enter the numbers when you are done."
+    );
   });
 
   it("explains recommendation-to-focus ranking decisions", () => {

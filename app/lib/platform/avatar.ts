@@ -4,6 +4,7 @@ export type AvatarPerson = {
   avatarType?: string | null;
   avatarUrl?: string | null;
   displayName?: string | null;
+  managedByHousehold?: boolean | null;
 };
 
 export function avatarInitials(displayName?: string | null) {

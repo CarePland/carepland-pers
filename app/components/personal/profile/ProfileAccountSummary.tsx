@@ -1,5 +1,6 @@
 import { FormEvent } from "react";
 
+import { ManagedByHouseholdHeart } from "../../shared/PersonAvatar";
 import {
   gentleCautionButtonClass,
   gentlePrimaryButtonClass,
@@ -17,6 +18,7 @@ type CareSubject = {
   display_name: string;
   is_default: boolean;
   is_active: boolean;
+  managed_by_household?: boolean | null;
   subject_type: string;
 };
 
@@ -238,6 +240,9 @@ export function ProfileAccountSummary({
                     <span className="min-w-0 truncate">
                       {subject.display_name}
                     </span>
+                    {isManagedByHouseholdSubject(subject) ? (
+                      <ManagedByHouseholdHeart className="shrink-0" />
+                    ) : null}
                     {!subject.is_default ? (
                       <button
                         aria-label={`Deactivate ${subject.display_name}`}
@@ -290,6 +295,12 @@ export function ProfileAccountSummary({
               </section>
             ) : null}
             <form className="mt-7 lg:mt-auto" onSubmit={onCreateCareVip}>
+              {careSubjects.length > 0 ? (
+                <p className="mb-2 flex items-center gap-1 text-xs font-semibold text-slate-500">
+                  <ManagedByHouseholdHeart />
+                  <span>= Managed by household</span>
+                </p>
+              ) : null}
               <label className="sr-only" htmlFor="new-care-vip-name">
                 Care VIP name or email
               </label>
@@ -411,5 +422,22 @@ export function ProfileAccountSummary({
         </section>
       </div>
     </section>
+  );
+}
+
+function isManagedByHouseholdSubject(
+  subject: Pick<CareSubject, "managed_by_household" | "subject_type">
+) {
+  return Boolean(subject.managed_by_household) || isPetSubjectType(subject.subject_type);
+}
+
+function isPetSubjectType(subjectType?: string | null) {
+  const normalizedSubjectType = subjectType?.trim().toLowerCase() ?? "";
+
+  return (
+    normalizedSubjectType === "cat" ||
+    normalizedSubjectType === "dog" ||
+    normalizedSubjectType === "pet" ||
+    normalizedSubjectType.startsWith("pet:")
   );
 }

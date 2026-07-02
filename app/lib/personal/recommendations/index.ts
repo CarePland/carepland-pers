@@ -1,4 +1,4 @@
-export type RecommendationPriority = "critical" | "high" | "low" | "normal";
+export type RecommendationPriority = "high" | "low" | "normal" | "strong";
 
 export type RecommendationStatus =
   | "approved"
@@ -169,6 +169,19 @@ const recommendationRules: RecommendationRule[] = [
   },
 ];
 
+const generalCareContextRule: RecommendationRule = {
+  completionEventType: "note.caregiver",
+  completionType: "note_required",
+  description:
+    "Review recent CarePland context and decide whether anything belongs in Today's Focus.",
+  eventKeywords: [],
+  generationRule: "review_recent_care_context",
+  reason:
+    "Recent CarePland context exists, but no more specific Today's Focus rule matched yet.",
+  relatedTopics: ["care_context_review"],
+  title: "Review recent care context",
+};
+
 export function generateRecommendationCandidates(
   sources: RecommendationInputSource[]
 ): RecommendationCandidate[] {
@@ -187,6 +200,20 @@ export function generateRecommendationCandidates(
     candidates.set(rule.generationRule, candidate);
   }
 
+  if (candidates.size === 0) {
+    const generalEvidence = generalCareContextEvidence(sources);
+
+    if (generalEvidence.length > 0) {
+      candidates.set(
+        generalCareContextRule.generationRule,
+        recommendationCandidateFromEvidence(
+          generalCareContextRule,
+          generalEvidence
+        )
+      );
+    }
+  }
+
   return Array.from(candidates.values()).sort(compareRecommendationCandidates);
 }
 
@@ -201,14 +228,14 @@ export function recommendationPriorityDecisionFromEvidence(
 ) {
   if (
     evidence.some((item) =>
-      /\b(critical|urgent|emergency)\b/i.test(item.evidenceText)
+      /\b(strongly|important|priority)\b/i.test(item.evidenceText)
     )
   ) {
     return {
-      priority: "critical" as const,
+      priority: "strong" as const,
       rationale:
-        "Priority is critical because at least one source explicitly used urgent, critical, or emergency language.",
-      signals: ["explicit_urgent_language"],
+        "Priority is strong because at least one source explicitly used strong importance language.",
+      signals: ["explicit_strong_importance_language"],
     };
   }
 
@@ -243,7 +270,7 @@ export function recommendationPriorityDecisionFromEvidence(
   return {
     priority: "normal" as const,
     rationale:
-      "Priority is normal because the candidate has supporting evidence but no urgent language, provider/CarePrep boost, three-source boost, or low-confidence downgrade.",
+      "Priority is normal because the candidate has supporting evidence but no strong-importance language, provider/CarePrep boost, three-source boost, or low-confidence downgrade.",
     signals: ["supported_candidate"],
   };
 }
@@ -386,9 +413,54 @@ function compareRecommendationCandidates(
   return right.confidence - left.confidence;
 }
 
+function generalCareContextEvidence(sources: RecommendationInputSource[]) {
+  const supportedSources = sources.filter((source) =>
+    [
+      "appointment_note",
+      "careprep_guidance",
+      "health_focus",
+      "provider_recommendation",
+      "track_history",
+    ].includes(source.sourceType)
+  );
+
+  return supportedSources
+    .sort((left, right) => {
+      const sourceDelta =
+        generalSourceRank(right.sourceType) - generalSourceRank(left.sourceType);
+
+      if (sourceDelta !== 0) {
+        return sourceDelta;
+      }
+
+      return timestampValue(right.occurredAt) - timestampValue(left.occurredAt);
+    })
+    .slice(0, 5);
+}
+
+function timestampValue(value: string | null | undefined) {
+  const timestamp = Date.parse(value ?? "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function generalSourceRank(sourceType: RecommendationSourceType) {
+  switch (sourceType) {
+    case "provider_recommendation":
+    case "appointment_note":
+    case "careprep_guidance":
+      return 3;
+    case "health_focus":
+      return 2;
+    case "track_history":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 function priorityRank(priority: RecommendationPriority) {
   switch (priority) {
-    case "critical":
+    case "strong":
       return 4;
     case "high":
       return 3;

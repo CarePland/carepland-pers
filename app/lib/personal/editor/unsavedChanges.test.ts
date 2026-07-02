@@ -182,6 +182,40 @@ describe("unsavedChanges", () => {
     assert.equal(hasAnyUnsavedWork(changes), true);
   });
 
+  it("summarizes pending Today's Focus review work", () => {
+    assert.deepEqual(
+      buildEmptySignOutChanges({
+        adminRecommendationsReviewDraft: {
+          hasReviewNote: false,
+          selectedCount: 3,
+        },
+      }),
+      [
+        {
+          detail: "3 selected",
+          key: "admin-todays-focus-review",
+          label: "Today's Focus Review",
+        },
+      ]
+    );
+
+    assert.deepEqual(
+      buildEmptySignOutChanges({
+        adminRecommendationsReviewDraft: {
+          hasReviewNote: true,
+          selectedCount: 0,
+        },
+      }),
+      [
+        {
+          detail: "Review note drafted",
+          key: "admin-todays-focus-review",
+          label: "Today's Focus Review",
+        },
+      ]
+    );
+  });
+
   it("ignores appointment edits restored to saved values", () => {
     const changes = buildEmptySignOutChanges({
       appointmentDrafts: {

@@ -165,9 +165,24 @@ type ReceiverGuideRect = {
   y: number;
 };
 
+type ReceiverGuideSession = {
+  deviceProfile?: string;
+  lastSeenAt: number;
+  pageUrl?: string;
+  receiverId: string;
+  receiverSessionId: string;
+  uiLayout?: string;
+};
+
+type ReceiverGuideState = {
+  activeSessions?: ReceiverGuideSession[];
+  receiverId: string;
+};
+
 const receiverGuideTargetStorageKey = "carepland-connect-guide-target";
 const receiverGuideRectStorageKey = "carepland-connect-guide-rect";
 const receiverLastPressStorageKey = "carepland-connect-last-press";
+const receiverGuideEndpoint = "/api/connect/receiver-guide";
 const connectMessagesEndpoint = "/api/connect/messages";
 const connectAvatarsEndpoint = "/api/connect/avatars";
 const connectCallsEndpoint = "/api/connect/calls";
@@ -284,6 +299,7 @@ function personAvatarProps(person?: ConnectAvatarPerson | null) {
     avatarType: person?.avatarType ?? undefined,
     avatarUrl: person?.avatarUrl ?? undefined,
     displayName: person?.displayName ?? undefined,
+    managedByHousehold: person?.managedByHousehold ?? undefined,
   };
 }
 
@@ -489,6 +505,7 @@ export function ConnectDashboard() {
   const callAudioStatusRef = useRef<ConnectCallAudioStatus>("idle");
   const mainConnectUserPersonIdRef = useRef("");
   const latestCallAudioStateRef = useRef("");
+  const latestGuidePressRef = useRef(0);
   callAudioStatusRef.current = callAudioStatus;
   mainConnectUserPersonIdRef.current = savedMainConnectUserPersonId;
 
@@ -967,13 +984,21 @@ export function ConnectDashboard() {
   });
   const isEveryoneFocus = globalFocusId === allCarePlandFocusValue;
 
-  const selectedReceiver =
-    activeDevices.find((device) => receiverKey(device) === selectedReceiverKey) ??
-    activeDevices[0];
+  const selectedReceiverMatch = activeDevices.find(
+    (device) => receiverKey(device) === selectedReceiverKey
+  );
+  const selectedReceiver = selectedReceiverMatch ?? activeDevices[0];
 
   const selectedReceiverLabel =
-    selectedReceiver?.name || selectedReceiver?.receiverId || "Kitchen Receiver";
+    selectedReceiverMatch?.name ||
+    selectedReceiverMatch?.receiverId ||
+    (selectedReceiverKey && selectedReceiverKey !== connectPrototypeReceiverId
+      ? selectedReceiverKey
+      : selectedReceiver?.name || selectedReceiver?.receiverId || "Kitchen Receiver");
   const selectedReceiverId = selectedReceiver?.receiverId || connectPrototypeReceiverId;
+  const selectedReceiverGuideId = selectedReceiverMatch
+    ? receiverKey(selectedReceiverMatch)
+    : selectedReceiverKey || selectedReceiverId;
   const focusedPersPerson = activeConnectPersonId
     ? state.focusPeople.find((person) => person.id === activeConnectPersonId) ??
       state.connectContext?.people.find((person) => person.id === activeConnectPersonId)
@@ -1564,11 +1589,79 @@ export function ConnectDashboard() {
     setStatus("Message cleared.");
   }
 
-  function chooseGuidePreviewTarget(highlight: ReceiverGuideRect) {
+  function chooseGuidePreviewTarget(
+    highlight: ReceiverGuideRect,
+    targetReceiverSessionId?: string
+  ) {
     if (!guideMode) return;
     window.localStorage.removeItem(receiverGuideTargetStorageKey);
     window.localStorage.setItem(receiverGuideRectStorageKey, JSON.stringify(highlight));
+    void publishReceiverGuideHighlight(
+      selectedReceiverGuideId,
+      highlight,
+      targetReceiverSessionId
+    );
     setStatus(`Pointing to ${highlight.label} on ${selectedReceiverLabel}.`);
+  }
+
+  async function publishReceiverGuideHighlight(
+    receiverId: string,
+    highlight: ReceiverGuideRect,
+    targetReceiverSessionId?: string
+  ) {
+    await fetch(receiverGuideEndpoint, {
+      body: JSON.stringify({ receiverId, rect: highlight, targetReceiverSessionId }),
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+  }
+
+  useEffect(() => {
+    if (!guideMode) return undefined;
+    let cancelled = false;
+
+    async function pollReceiverGuideState() {
+      try {
+        const response = await fetch(
+          `${receiverGuideEndpoint}?receiverId=${encodeURIComponent(selectedReceiverGuideId)}`,
+          { cache: "no-store" }
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          guide?: { lastPress?: { label?: string; pressedAt?: number } };
+        };
+        const lastPress = payload.guide?.lastPress;
+        const pressedAt = Number(lastPress?.pressedAt || 0);
+
+        if (!cancelled && pressedAt && pressedAt > latestGuidePressRef.current) {
+          latestGuidePressRef.current = pressedAt;
+          setStatus(
+            `${selectedPersonName} pressed ${lastPress?.label || "a receiver control"}.`
+          );
+        }
+      } catch {
+        // Guide feedback is best-effort and should never interrupt the dashboard.
+      }
+    }
+
+    void pollReceiverGuideState();
+    const timer = window.setInterval(() => {
+      void pollReceiverGuideState();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [guideMode, selectedPersonName, selectedReceiverGuideId]);
+
+  async function clearPublishedReceiverGuide(receiverId: string) {
+    await fetch(receiverGuideEndpoint, {
+      body: JSON.stringify({ action: "clear", receiverId }),
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
   }
 
   async function submitConnectAsk(event: FormEvent<HTMLFormElement>) {
@@ -2084,8 +2177,12 @@ export function ConnectDashboard() {
       ) : activeView === "receiver" ? (
         <ReceiverTroubleshootingView
           activeDevices={activeDevices}
+          clearReceiverGuide={() => {
+            void clearPublishedReceiverGuide(selectedReceiverGuideId);
+          }}
           chooseGuidePreviewTarget={chooseGuidePreviewTarget}
           guideMode={guideMode}
+          receiverGuideId={selectedReceiverGuideId}
           selectedReceiverKey={selectedReceiverKey}
           selectedReceiverLabel={selectedReceiverLabel}
           setGuideMode={setGuideMode}
@@ -2099,8 +2196,12 @@ export function ConnectDashboard() {
           households={households}
           onRefresh={refresh}
           selectedReceiverKey={selectedReceiverKey}
+          clearReceiverGuide={() => {
+            void clearPublishedReceiverGuide(selectedReceiverGuideId);
+          }}
           chooseGuidePreviewTarget={chooseGuidePreviewTarget}
           guideMode={guideMode}
+          receiverGuideId={selectedReceiverGuideId}
           setSelectedReceiverKey={setSelectedReceiverKey}
           setGuideMode={setGuideMode}
           setupView={setupView}
@@ -2426,10 +2527,12 @@ function ConnectAskPanel({
 function ConnectSettingsView({
   activeDevices,
   activeMainConnectUserPersonId,
+  clearReceiverGuide,
   chooseGuidePreviewTarget,
   guideMode,
   households,
   onRefresh,
+  receiverGuideId,
   selectedReceiverKey,
   setGuideMode,
   setSelectedReceiverKey,
@@ -2440,10 +2543,15 @@ function ConnectSettingsView({
 }: {
   activeDevices: ConnectReceiverDevice[];
   activeMainConnectUserPersonId: string;
-  chooseGuidePreviewTarget: (highlight: ReceiverGuideRect) => void;
+  clearReceiverGuide: () => void;
+  chooseGuidePreviewTarget: (
+    highlight: ReceiverGuideRect,
+    targetReceiverSessionId?: string
+  ) => void;
   guideMode: boolean;
   households: ConnectReceiverHousehold[];
   onRefresh: () => Promise<void>;
+  receiverGuideId: string;
   selectedReceiverKey: string;
   setGuideMode: (value: boolean) => void;
   setSelectedReceiverKey: (value: string) => void;
@@ -2588,10 +2696,17 @@ function ConnectSettingsView({
         ) : setupView === "guide" ? (
           <ReceiverTroubleshootingView
             activeDevices={activeDevices}
+            clearReceiverGuide={clearReceiverGuide}
             chooseGuidePreviewTarget={chooseGuidePreviewTarget}
             guideMode={guideMode}
+            receiverGuideId={receiverGuideId}
             selectedReceiverKey={selectedReceiverKey}
-            selectedReceiverLabel={receiverLabel}
+            selectedReceiverLabel={
+              activeDevices.find((device) => receiverKey(device) === selectedReceiverKey)?.name ||
+              activeDevices.find((device) => receiverKey(device) === selectedReceiverKey)
+                ?.receiverId ||
+              receiverLabel
+            }
             setGuideMode={setGuideMode}
             setSelectedReceiverKey={setSelectedReceiverKey}
             status={status}
@@ -4575,8 +4690,10 @@ function SetupPanel({
 
 function ReceiverTroubleshootingView({
   activeDevices,
+  clearReceiverGuide,
   chooseGuidePreviewTarget,
   guideMode,
+  receiverGuideId,
   selectedReceiverKey,
   selectedReceiverLabel,
   setGuideMode,
@@ -4584,8 +4701,13 @@ function ReceiverTroubleshootingView({
   status,
 }: {
   activeDevices: ConnectReceiverDevice[];
-  chooseGuidePreviewTarget: (highlight: ReceiverGuideRect) => void;
+  clearReceiverGuide: () => void;
+  chooseGuidePreviewTarget: (
+    highlight: ReceiverGuideRect,
+    targetReceiverSessionId?: string
+  ) => void;
   guideMode: boolean;
+  receiverGuideId: string;
   selectedReceiverKey: string;
   selectedReceiverLabel: string;
   setGuideMode: (value: boolean) => void;
@@ -4593,9 +4715,37 @@ function ReceiverTroubleshootingView({
   status: string;
 }) {
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const [receiverGuideSessions, setReceiverGuideSessions] = useState<ReceiverGuideSession[]>([]);
+  const [allReceiverGuideSessions, setAllReceiverGuideSessions] = useState<
+    ReceiverGuideSession[]
+  >([]);
+  const [targetReceiverSessionId, setTargetReceiverSessionId] = useState("");
+  const [identifyCodeInput, setIdentifyCodeInput] = useState("");
+  const [identifyCodeStatus, setIdentifyCodeStatus] = useState("");
+  const [identifyCodesBySession, setIdentifyCodesBySession] = useState<
+    Record<string, { code: string; receiverId: string }>
+  >({});
+  const liveReceiverOptions = allReceiverGuideSessions
+    .filter(
+      (session, index, sessions) =>
+        sessions.findIndex((item) => item.receiverId === session.receiverId) === index
+    )
+    .filter(
+      (session) =>
+        !activeDevices.some((device) => receiverKey(device) === session.receiverId)
+    )
+    .map((session) => ({
+      id: session.receiverId,
+      name:
+        session.deviceProfile === "gxv3370"
+          ? "Live GXV browser window"
+          : "Live Receiver browser window",
+      receiverId: session.receiverId,
+      status: "browser_open",
+    }));
   const receiverOptions =
     activeDevices.length > 0
-      ? activeDevices
+      ? [...activeDevices, ...liveReceiverOptions]
       : [
           {
             id: connectPrototypeReceiverId,
@@ -4609,10 +4759,160 @@ function ReceiverTroubleshootingView({
             receiverId: "persistence-test-receiver",
             status: "online",
           },
+          ...liveReceiverOptions,
         ];
   const guideText = guideMode
     ? "Guide Mode: What you see is what they see. Click a button to highlight it on the receiver. They still have full control and can press any button."
     : `This does not reflect what is actually seen on ${selectedReceiverLabel} but is a reference for discussion.`;
+  const activeGuideSessions = guideMode ? receiverGuideSessions : [];
+  const selectedIdentifySession = targetReceiverSessionId
+    ? allReceiverGuideSessions.find(
+        (session) => session.receiverSessionId === targetReceiverSessionId
+      )
+    : null;
+
+  async function showReceiverIdentifyCodes() {
+    const liveSessions = allReceiverGuideSessions;
+
+    if (!liveSessions.length) {
+      setIdentifyCodeStatus("No live Receiver windows have checked in yet.");
+      return;
+    }
+
+    const usedCodes = new Set<string>();
+    const nextCodesBySession: Record<string, { code: string; receiverId: string }> = {};
+
+    for (const session of liveSessions) {
+      let code = "";
+      for (let attempt = 0; attempt < 90 && !code; attempt += 1) {
+        const candidate = String(10 + Math.floor(Math.random() * 90));
+        if (!usedCodes.has(candidate)) {
+          usedCodes.add(candidate);
+          code = candidate;
+        }
+      }
+
+      nextCodesBySession[session.receiverSessionId] = {
+        code: code || "99",
+        receiverId: session.receiverId,
+      };
+    }
+
+    const requestsByReceiver = liveSessions.reduce<
+      Record<string, Array<{ code: string; receiverSessionId: string }>>
+    >((groups, session) => {
+      const assigned = nextCodesBySession[session.receiverSessionId];
+      if (!assigned) return groups;
+      return {
+        ...groups,
+        [session.receiverId]: [
+          ...(groups[session.receiverId] ?? []),
+          {
+            code: assigned.code,
+            receiverSessionId: session.receiverSessionId,
+          },
+        ],
+      };
+    }, {});
+
+    await Promise.all(
+      Object.entries(requestsByReceiver).map(([receiverId, requests]) =>
+        fetch(receiverGuideEndpoint, {
+          body: JSON.stringify({ action: "identify", receiverId, requests }),
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        })
+      )
+    );
+
+    setIdentifyCodesBySession(nextCodesBySession);
+    setIdentifyCodeStatus("Codes are showing on live Receiver windows.");
+  }
+
+  function chooseReceiverByIdentifyCode(code: string) {
+    const normalizedCode = code.replace(/\D/g, "").slice(0, 2);
+    setIdentifyCodeInput(normalizedCode);
+
+    if (normalizedCode.length < 2) {
+      setIdentifyCodeStatus("");
+      return;
+    }
+
+    const matchedEntry = Object.entries(identifyCodesBySession).find(
+      ([, value]) => value.code === normalizedCode
+    );
+
+    if (!matchedEntry) {
+      setIdentifyCodeStatus("No live Receiver is showing that code.");
+      return;
+    }
+
+    const [receiverSessionId, value] = matchedEntry;
+    setSelectedReceiverKey(value.receiverId);
+    setTargetReceiverSessionId(receiverSessionId);
+    setIdentifyCodeStatus(`Selected Receiver window ${normalizedCode}.`);
+  }
+
+  useEffect(() => {
+    if (!guideMode) return undefined;
+
+    let cancelled = false;
+
+    async function refreshGuideSessions() {
+      try {
+        const [selectedResponse, allResponse] = await Promise.all([
+          fetch(`${receiverGuideEndpoint}?receiverId=${encodeURIComponent(receiverGuideId)}`, {
+            cache: "no-store",
+          }),
+          fetch(receiverGuideEndpoint, { cache: "no-store" }),
+        ]);
+        const selectedPayload = (await selectedResponse.json().catch(() => ({}))) as {
+          guide?: { activeSessions?: Omit<ReceiverGuideSession, "receiverId">[] };
+        };
+        const allPayload = (await allResponse.json().catch(() => ({}))) as {
+          guides?: ReceiverGuideState[];
+        };
+        const sessions = (selectedPayload.guide?.activeSessions ?? []).map((session) => ({
+          ...session,
+          receiverId: receiverGuideId,
+        }));
+        const allSessions =
+          allPayload.guides?.flatMap((guide) =>
+            (guide.activeSessions ?? []).map((session) => ({
+              ...session,
+              receiverId: guide.receiverId,
+            }))
+          ) ?? [];
+
+        if (cancelled) return;
+        setReceiverGuideSessions(sessions);
+        setAllReceiverGuideSessions(allSessions);
+        setTargetReceiverSessionId((current) =>
+          current && sessions.some((session) => session.receiverSessionId === current)
+            ? current
+            : sessions.length === 1
+              ? sessions[0]?.receiverSessionId ?? ""
+              : ""
+        );
+      } catch {
+        if (!cancelled) {
+          setReceiverGuideSessions([]);
+          setAllReceiverGuideSessions([]);
+        }
+      }
+    }
+
+    void refreshGuideSessions();
+    const timer = window.setInterval(() => {
+      void refreshGuideSessions();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [guideMode, receiverGuideId]);
 
   useEffect(() => {
     const frame = previewFrameRef.current;
@@ -4652,13 +4952,16 @@ function ReceiverTroubleshootingView({
           control instanceof HTMLElement
             ? control.getBoundingClientRect()
             : new DOMRect(event.clientX - 40, event.clientY - 40, 80, 80);
-        chooseGuidePreviewTarget({
-          height: Math.max(16, Math.round(controlRect.height)),
-          label: control instanceof HTMLElement ? readableControlLabel(control) : "that area",
-          width: Math.max(16, Math.round(controlRect.width)),
-          x: Math.round(controlRect.left - shellRect.left),
-          y: Math.round(controlRect.top - shellRect.top),
-        });
+        chooseGuidePreviewTarget(
+          {
+            height: Math.max(16, Math.round(controlRect.height)),
+            label: control instanceof HTMLElement ? readableControlLabel(control) : "that area",
+            width: Math.max(16, Math.round(controlRect.width)),
+            x: Math.round(controlRect.left - shellRect.left),
+            y: Math.round(controlRect.top - shellRect.top),
+          },
+          targetReceiverSessionId || undefined
+        );
       }
 
       frameDocument.addEventListener("click", handlePreviewClick, true);
@@ -4672,7 +4975,7 @@ function ReceiverTroubleshootingView({
       previewFrame.removeEventListener("load", attachGuideClickListener);
       cleanup?.();
     };
-  }, [chooseGuidePreviewTarget, guideMode]);
+  }, [chooseGuidePreviewTarget, guideMode, targetReceiverSessionId]);
 
   return (
     <section className="mx-auto w-full max-w-[1360px] px-6 py-5 sm:px-8">
@@ -4690,6 +4993,7 @@ function ReceiverTroubleshootingView({
             onClick={() => {
               setGuideMode(!guideMode);
               if (guideMode) {
+                clearReceiverGuide();
                 window.localStorage.removeItem(receiverGuideTargetStorageKey);
                 window.localStorage.removeItem(receiverGuideRectStorageKey);
               }
@@ -4732,6 +5036,87 @@ function ReceiverTroubleshootingView({
           {guideText}
         </div>
 
+        {guideMode ? (
+          <div className="mt-4 rounded-lg border border-[#cbd9e7] bg-white px-4 py-3">
+            <div className="grid gap-3 lg:grid-cols-[auto_minmax(160px,220px)_minmax(0,1fr)] lg:items-center">
+              <button
+                className="min-h-11 rounded-lg border border-[#cbd9e7] bg-[#f8fafc] px-4 text-sm font-black text-[#244d73] shadow-sm hover:bg-[#edf5fc]"
+                onClick={() => {
+                  void showReceiverIdentifyCodes();
+                }}
+                type="button"
+              >
+                Show ID codes
+              </button>
+              <label className="grid gap-1 text-xs font-black uppercase text-[#5f6e84]">
+                Enter code
+                <input
+                  className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-2xl font-black tracking-normal text-[#081225]"
+                  inputMode="numeric"
+                  maxLength={2}
+                  onChange={(event) => chooseReceiverByIdentifyCode(event.target.value)}
+                  placeholder="--"
+                  value={identifyCodeInput}
+                />
+              </label>
+              <p className="text-sm font-bold leading-snug text-[#44546a]">
+                {selectedIdentifySession
+                  ? `Targeting ${selectedIdentifySession.deviceProfile === "gxv3370" ? "GXV" : "Receiver"} window ${identifyCodesBySession[selectedIdentifySession.receiverSessionId]?.code || ""}.`
+                  : identifyCodeStatus ||
+                    "Use this when several Receiver windows are open or the selected Receiver is unclear."}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {guideMode && activeGuideSessions.length > 1 ? (
+          <div className="mt-4 rounded-lg border border-[#e5bd63] bg-[#fff8df] px-4 py-3">
+            <p className="text-sm font-black text-[#6a4b00]">
+              More than one live window is using this Receiver. Choose the one you mean before
+              pointing at the screen.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {activeGuideSessions.map((session, index) => (
+                <button
+                  className={`rounded-lg border px-4 py-2 text-sm font-black ${
+                    targetReceiverSessionId === session.receiverSessionId
+                      ? "border-[#b89a38] bg-[#f4dfa2] text-[#172f49]"
+                      : "border-[#e5bd63] bg-white text-[#6a4b00]"
+                  }`}
+                  key={session.receiverSessionId}
+                  onClick={() => setTargetReceiverSessionId(session.receiverSessionId)}
+                  type="button"
+                >
+                  Window {index + 1}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {guideMode && activeGuideSessions.length === 0 ? (
+          <div className="mt-4 rounded-lg border border-[#d8dfe8] bg-white px-4 py-3">
+            <p className="text-sm font-black text-[#44546a]">
+              No live browser window is currently reporting as {selectedReceiverLabel}. The preview
+              below is only a clickable map until a live Receiver window checks in.
+            </p>
+            {allReceiverGuideSessions.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {liveReceiverOptions.map((device) => (
+                  <button
+                    className="rounded-lg border border-[#cbd9e7] bg-[#f8fafc] px-4 py-2 text-sm font-black text-[#244d73]"
+                    key={device.id}
+                    onClick={() => setSelectedReceiverKey(receiverKey(device))}
+                    type="button"
+                  >
+                    Use {device.name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <p className="sr-only" aria-live="polite">
           {status}
         </p>
@@ -4740,13 +5125,37 @@ function ReceiverTroubleshootingView({
           <iframe
             ref={previewFrameRef}
             className="block h-[760px] w-full bg-[#202423] sm:h-[820px] xl:h-[900px]"
-            src="/connect/receiver?preview=1"
+            src={receiverPreviewUrl(
+              activeGuideSessions[0] ??
+                allReceiverGuideSessions.find((session) => session.receiverId === receiverGuideId)
+            )}
             title="CarePland Connect receiver preview"
           />
         </div>
       </div>
     </section>
   );
+}
+
+function receiverPreviewUrl(session?: ReceiverGuideSession) {
+  const params = new URLSearchParams({ preview: "1" });
+  const sessionUrl = session?.pageUrl ?? "";
+
+  if (
+    session?.deviceProfile === "gxv3370" ||
+    sessionUrl.includes("device=gxv3370")
+  ) {
+    params.set("device", "gxv3370");
+  }
+
+  if (
+    session?.uiLayout === "desk_phone_focus_v1" ||
+    sessionUrl.includes("homeLayout=focus_v1")
+  ) {
+    params.set("homeLayout", "focus_v1");
+  }
+
+  return `/connect/receiver?${params.toString()}`;
 }
 
 function RecipientCallPanel({

@@ -27,6 +27,7 @@ export const appContentDefaults = {
     "CarePrep can't be run yet because you have no additional appointments to consider.",
   careprep_auto_success_message:
     "CarePrep generated for {appointmentTitle}.",
+  connect_receiver_undo_seconds: "10",
   health_focus_context_frequency_labels:
     "Once = Once\nA Few Times = A Few Times;Few\nOccasionally = Occasionally\nFairly Often = Fairly Often;Often\nFrequent = Frequent\nMost Visits = Most Visits;Most",
   health_focus_context_recency_labels:
@@ -232,6 +233,13 @@ export const appContentOptions = [
     label: "Automatic CarePrep success message",
   },
   {
+    category: "connect",
+    contentKey: "connect_receiver_undo_seconds",
+    description:
+      "Number of seconds the Receiver shows Undo after a reversible action. Enter a number, such as 10.",
+    label: "Receiver undo seconds",
+  },
+  {
     category: "health_focus",
     contentKey: "health_focus_context_recency_labels",
     description:
@@ -296,5 +304,10 @@ export const appContentCategories = [
       "Editable labels and user-facing text for Health Focus and Health Story.",
     key: "health_focus",
     label: "Health Focus",
+  },
+  {
+    description: "Connect Receiver behavior and user-facing timing controls.",
+    key: "connect",
+    label: "Connect / Receiver",
   },
 ] as const;

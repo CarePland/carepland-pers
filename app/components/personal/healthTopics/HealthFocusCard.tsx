@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { TopicContextLabelOverrides } from "@/app/lib/personal/healthTopics/contextSignatureLabels";
 import type { TopicContextSignature } from "@/app/lib/personal/healthTopics/topicSummary";
 
 const desktopVisibleTopicCount = 3;
 const mobileVisibleTopicCount = 2;
+const healthStoryHelpText =
+  "Your Health Story brings together appointments, provider recommendations, symptoms, conditions, medications, and your own notes to help you see patterns that are easy to miss when looking at each visit separately.";
 
 export type HealthFocusTopicSummary = {
   category: string;
@@ -28,12 +30,14 @@ export type HealthFocusTopicSummary = {
 
 type HealthFocusCardProps = {
   isLoading: boolean;
+  changeControl?: ReactNode;
   contextLabelOverrides?: TopicContextLabelOverrides;
   onCloseTopic?: () => void;
   onExpandTopics?: (hiddenTopics: HealthFocusTopicSummary[]) => void;
   onSelectTopic: (topic: HealthFocusTopicSummary) => void;
   selectedTopicKey?: string | null;
   selectedTopicStory?: ReactNode;
+  title?: string;
   topics: HealthFocusTopicSummary[];
 };
 
@@ -284,15 +288,19 @@ function HealthFocusTopicTile({
 }
 
 export function HealthFocusCard({
+  changeControl = null,
   isLoading,
   onExpandTopics,
   onSelectTopic,
   selectedTopicKey = null,
   selectedTopicStory = null,
+  title = "Your Health Stories",
   topics,
 }: HealthFocusCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isStoryHelpOpen, setIsStoryHelpOpen] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const storyHelpRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 640px)");
@@ -316,6 +324,37 @@ export function HealthFocusCard({
     onSelectTopic(topics[0]);
   }, [onSelectTopic, selectedTopicKey, topics]);
 
+  useEffect(() => {
+    if (!isStoryHelpOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        storyHelpRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+
+      setIsStoryHelpOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsStoryHelpOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isStoryHelpOpen]);
+
   if (isLoading && topics.length === 0) {
     return (
       <section
@@ -324,11 +363,9 @@ export function HealthFocusCard({
         className="px-1 pb-4 pt-1"
       >
         <div>
-          <p className="text-sm font-semibold text-blue-700">
-            Your Health Focus
-          </p>
+          <p className="text-sm font-semibold text-blue-700">{title}</p>
           <h2 className="mt-1 text-xl font-semibold text-slate-950">
-            Creating Your Health Focus
+            Creating Your Health Stories
           </h2>
         </div>
         <div className="mt-5 space-y-3" role="status">
@@ -366,10 +403,33 @@ export function HealthFocusCard({
       style={{ overflowAnchor: "none" }}
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
           <p className="text-sm font-semibold text-blue-700">
-            Your Health Focus
+            {title}
           </p>
+          <div className="relative shrink-0" ref={storyHelpRef}>
+            <button
+              aria-describedby={isStoryHelpOpen ? "health-story-help" : undefined}
+              aria-controls="health-story-help"
+              aria-expanded={isStoryHelpOpen}
+              aria-label="About Your Health Stories"
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-xs font-bold leading-none text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2"
+              onClick={() => setIsStoryHelpOpen((currentValue) => !currentValue)}
+              type="button"
+            >
+              ?
+            </button>
+            {isStoryHelpOpen ? (
+              <div
+                className="absolute left-0 z-30 mt-2 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-blue-100 bg-white p-3 text-sm font-normal leading-5 text-slate-700 shadow-lg"
+                id="health-story-help"
+                role="tooltip"
+              >
+                {healthStoryHelpText}
+              </div>
+            ) : null}
+          </div>
+          {changeControl}
         </div>
         {hasHiddenTopics ? (
           <button

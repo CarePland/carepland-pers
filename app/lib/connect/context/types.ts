@@ -8,6 +8,7 @@ export type ConnectPersPerson = {
   id: string;
   isActive?: boolean;
   isDefault?: boolean;
+  managedByHousehold?: boolean;
   subjectType?: string;
 };
 

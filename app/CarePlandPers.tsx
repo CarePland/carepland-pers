@@ -21,6 +21,10 @@ import {
 } from "./components/admin/AgentKnowledgeProposalsPanel";
 import { createAdminNavigationModel } from "./components/admin/adminNavigationModel";
 import {
+  clearAdminRecommendationsReviewDraftStorage,
+  type AdminRecommendationsReviewDraftSummary,
+} from "./components/admin/AdminRecommendationsReviewPanel";
+import {
   aiWorkflows,
   defaultCarePrepOutputSchema,
   type AiWorkflowKey,
@@ -141,7 +145,11 @@ import { carePlandReturnToFromCurrentLocation } from "./lib/platform/authRedirec
 import { OnboardingGate } from "./components/personal/onboarding/OnboardingGate";
 import { PersonalOverlays } from "./components/personal/PersonalOverlays";
 import { PasswordUpdatePanel } from "./components/shared/auth/PasswordUpdatePanel";
-import { PersonChip } from "./components/shared/PersonAvatar";
+import {
+  ManagedByHouseholdHeart,
+  PersonAvatar,
+  PersonChip,
+} from "./components/shared/PersonAvatar";
 import { ProfilePage } from "./components/personal/profile/ProfilePage";
 import { PublicWebsite } from "./components/public/PublicWebsite";
 import { UserFacingFooter } from "./components/public/UserFacingFooter";
@@ -277,6 +285,7 @@ type CareSubject = {
   id: string;
   care_circle_id: string;
   display_name: string;
+  managed_by_household?: boolean | null;
   subject_type: string;
   is_default: boolean;
   is_active: boolean;
@@ -296,6 +305,51 @@ type CareSubjectRow = CareSubject & {
   avatar_type?: "generated" | "initials" | "uploaded" | string | null;
   avatar_url?: string | null;
 };
+
+type HomeTodayFocusItem = {
+  id: string;
+  title: string;
+};
+
+type HomeTodayFocusGroup = {
+  items: HomeTodayFocusItem[];
+  subjectAvatar: AvatarPerson | null;
+  subjectId: string;
+  subjectLabel: string;
+  subjectName: string;
+};
+
+type HomeAtAGlanceSummary = {
+  historySections: Array<{
+    estimates?: string[];
+    items: string[];
+    title: string;
+  }>;
+  items: string[];
+  subtitle: string;
+  title: string;
+};
+
+type HealthFocusSummaryCache = {
+  localDay: string;
+  subjectId: string;
+  topics: HealthFocusTopicSummary[];
+};
+
+const ellieTestingTodayFocusItems: HomeTodayFocusItem[] = [
+  {
+    id: "ellie-testing-food-requests",
+    title: "5 random requests for food",
+  },
+  {
+    id: "ellie-testing-chase-mouse",
+    title: "Chase mouse but do not dispatch",
+  },
+  {
+    id: "ellie-testing-feign-enthusiasm",
+    title: "Feign lack of enthusiasm",
+  },
+];
 
 type CareCircleEntitlement = {
   max_active_subjects: number;
@@ -464,6 +518,7 @@ type AdminTab =
   | "errors"
   | "intake"
   | "product"
+  | "recommendations"
   | "tickets"
   | "tools"
   | "userAudit"
@@ -667,6 +722,8 @@ const appUiStateStorageKey = carePlandUiStateStorageKey;
 const appDraftStateStorageKey = "carepland-draft-state:v1";
 const appointmentsSessionSnapshotStorageKey =
   "carepland-appointments-session-snapshot:v1";
+const healthFocusSummaryCacheStoragePrefix =
+  "carepland-health-focus-summary-cache:v1";
 const appLastActivityStorageKey = "carepland-last-activity-at:v1";
 const homeAutoCarePrepAttemptStoragePrefix =
   "carepland-home-auto-careprep-attempted:v1";
@@ -690,6 +747,7 @@ function careSubjectAvatarPerson(
     avatarType: subject.avatarType,
     avatarUrl: subject.avatarUrl,
     displayName: subject.display_name,
+    managedByHousehold: isManagedByHouseholdSubject(subject),
   };
 }
 
@@ -711,13 +769,213 @@ function defaultPetAvatarEmoji(subject?: Pick<CareSubject, "display_name" | "sub
   return null;
 }
 
+function isPetSubjectType(subjectType?: string | null) {
+  const normalizedSubjectType = subjectType?.trim().toLowerCase() ?? "";
+
+  return (
+    normalizedSubjectType === "cat" ||
+    normalizedSubjectType === "dog" ||
+    normalizedSubjectType === "pet" ||
+    normalizedSubjectType.startsWith("pet:")
+  );
+}
+
+function isManagedByHouseholdSubject(
+  subject?: Pick<CareSubject, "managed_by_household" | "subject_type"> | null
+) {
+  return Boolean(subject?.managed_by_household) || isPetSubjectType(subject?.subject_type);
+}
+
+function careSubjectDisplayLabel(subject: CareSubject) {
+  return `${subject.display_name}${isManagedByHouseholdSubject(subject) ? " ♥" : ""}`;
+}
+
+function homeTestingTodayFocusItemsForSubject(subject: CareSubject) {
+  return subject.display_name.trim().toLowerCase() === "ellie"
+    ? ellieTestingTodayFocusItems
+    : [];
+}
+
+function possessiveName(name: string) {
+  const trimmedName = name.trim() || "Care VIP";
+  return /s$/i.test(trimmedName) ? `${trimmedName}'` : `${trimmedName}'s`;
+}
+
+function nextAppointmentTitleForSubject(subject?: CareSubject | null) {
+  if (!subject) {
+    return "Next appointment";
+  }
+
+  return subject.is_default
+    ? "Next appointment for you"
+    : `Next appointment for ${subject.display_name}`;
+}
+
+function buildHomeAtAGlanceSummary({
+  appointments,
+  careSubjects,
+  carePrepHistory,
+  hasAnySavedAppointments,
+  healthFocusTopics,
+  homeNextAppointment,
+  homeNextAppointmentsBySubjectId,
+  homeNextGuidance,
+  homeTodayFocusGroups,
+  notesReminderAppointment,
+  selectedSubjectId,
+}: {
+  appointments: Appointment[];
+  careSubjects: CareSubject[];
+  carePrepHistory: CarePrepHistoryRow[];
+  hasAnySavedAppointments: boolean;
+  healthFocusTopics: HealthFocusTopicSummary[];
+  homeNextAppointment: Appointment | null;
+  homeNextAppointmentsBySubjectId: Record<string, Appointment | null>;
+  homeNextGuidance: CarePrepGuidance | null;
+  homeTodayFocusGroups: HomeTodayFocusGroup[];
+  notesReminderAppointment: NotesReminderAppointment | null;
+  selectedSubjectId: string;
+}): HomeAtAGlanceSummary {
+  const isEveryone = selectedSubjectId === ALL_SUBJECTS;
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const focusItemCount = homeTodayFocusGroups.reduce(
+    (total, group) => total + group.items.length,
+    0
+  );
+  const nextAppointmentCount = isEveryone
+    ? careSubjects.filter((subject) => homeNextAppointmentsBySubjectId[subject.id])
+        .length
+    : homeNextAppointment
+      ? 1
+      : 0;
+  const appointmentDate = (appointment: Appointment) =>
+    appointment.starts_at ? new Date(appointment.starts_at) : null;
+  const appointmentsSince = (startDate: Date) =>
+    appointments.filter((appointment) => {
+      const startsAt = appointmentDate(appointment);
+
+      return (
+        startsAt &&
+        Number.isFinite(startsAt.getTime()) &&
+        startsAt >= startDate &&
+        !appointment.archived_at &&
+        !appointment.deleted_at
+      );
+    });
+  const monthAppointments = appointmentsSince(startOfMonth);
+  const yearAppointments = appointmentsSince(startOfYear);
+  const currentCarePrepCount = carePrepHistory.filter(
+    (item) => item.is_current !== false
+  ).length;
+  const estimatedCoordinationAvoided = Math.max(
+    0,
+    Math.min(12, currentCarePrepCount + healthFocusTopics.length + focusItemCount)
+  );
+  const items: string[] = [];
+
+  if (nextAppointmentCount > 1) {
+    items.push(
+      `${nextAppointmentCount} upcoming appointments are visible across your Care VIPs.`
+    );
+  } else if (nextAppointmentCount === 1) {
+    items.push("The next appointment is easy to find from Home.");
+  }
+
+  if (homeNextGuidance) {
+    items.push("CarePrep is ready for the next appointment.");
+  }
+
+  if (healthFocusTopics.length > 0) {
+    items.push(
+      `${healthFocusTopics.length} Health ${
+        healthFocusTopics.length === 1 ? "Story is" : "Stories are"
+      } ready to review from recurring care context.`
+    );
+  }
+
+  if (focusItemCount > 0) {
+    items.push(
+      `${focusItemCount} Today's Focus ${
+        focusItemCount === 1 ? "item is" : "items are"
+      } available for today.`
+    );
+  }
+
+  if (hasAnySavedAppointments && !notesReminderAppointment) {
+    items.push("No visit-note follow-up is waiting right now.");
+  }
+
+  if (items.length === 0) {
+    items.push(
+      "Add appointments, notes, Focus items, or Health Stories to give CarePland real outcomes to summarize."
+    );
+  }
+
+  return {
+    historySections: [
+      {
+        estimates:
+          estimatedCoordinationAvoided > 0
+            ? [
+                `Estimated coordination avoided: roughly ${estimatedCoordinationAvoided} call${
+                  estimatedCoordinationAvoided === 1 ? "" : "s"
+                }, text${
+                  estimatedCoordinationAvoided === 1 ? "" : "s"
+                }, or follow-up conversation${
+                  estimatedCoordinationAvoided === 1 ? "" : "s"
+                }.`,
+              ]
+            : [],
+        items: [
+          `${monthAppointments.length} appointment${
+            monthAppointments.length === 1 ? "" : "s"
+          } tracked this month.`,
+          `${currentCarePrepCount} current CarePrep ${
+            currentCarePrepCount === 1 ? "summary is" : "summaries are"
+          } available.`,
+          `${healthFocusTopics.length} Health ${
+            healthFocusTopics.length === 1 ? "Story is" : "Stories are"
+          } visible for the current Care VIP.`,
+          `${focusItemCount} Today's Focus ${
+            focusItemCount === 1 ? "item is" : "items are"
+          } visible in the current Home view.`,
+        ],
+        title: "This Month",
+      },
+      {
+        estimates:
+          yearAppointments.length > 0
+            ? [
+                `Estimated information lookup avoided: appointment context is organized for ${yearAppointments.length} appointment${
+                  yearAppointments.length === 1 ? "" : "s"
+                } loaded in this view.`,
+              ]
+            : [],
+        items: [
+          `${yearAppointments.length} appointment${
+            yearAppointments.length === 1 ? "" : "s"
+          } organized this year.`,
+          "Connect, Family, Errands, reminders, and completed Focus history will contribute here as those summary signals mature.",
+        ],
+        title: "This Year",
+      },
+    ],
+    items: items.slice(0, 4),
+    subtitle:
+      "Admin test preview. Future versions should appear occasionally and be dismissed after reading.",
+    title: "CarePland at a Glance",
+  };
+}
+
 function isDefaultPetAvatarUrl(avatarUrl?: string | null) {
   return ["/avatar-cat.svg", "/avatar-dog.svg", "/avatar-pet.svg"].includes(
     avatarUrl ?? ""
   );
 }
 
-function isMissingAvatarColumn(error: unknown) {
+function isMissingCareSubjectOptionalColumn(error: unknown) {
   if (!error || typeof error !== "object") {
     return false;
   }
@@ -725,7 +983,11 @@ function isMissingAvatarColumn(error: unknown) {
   const maybeError = error as { code?: unknown; message?: unknown };
   const message = String(maybeError.message || "").toLowerCase();
 
-  return maybeError.code === "42703" || message.includes("avatar_");
+  return (
+    maybeError.code === "42703" ||
+    message.includes("avatar_") ||
+    message.includes("managed_by_household")
+  );
 }
 
 function authProviderFromUser(
@@ -1136,6 +1398,41 @@ function googleMapsUrl(address: string | null): string | null {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
     address.trim()
   )}`;
+}
+
+function isLikelyPlaceholderAddress(address: string | null) {
+  const normalizedAddress = address?.trim().toLowerCase() ?? "";
+
+  if (!normalizedAddress) {
+    return true;
+  }
+
+  return (
+    normalizedAddress === "123 main st" ||
+    normalizedAddress === "123 main street" ||
+    normalizedAddress === "test" ||
+    normalizedAddress === "demo" ||
+    normalizedAddress === "sample" ||
+    normalizedAddress.includes("placeholder")
+  );
+}
+
+function canShowAppointmentAddress(
+  appointment?: Pick<Appointment, "is_sample_data" | "location_address"> | null
+) {
+  return Boolean(
+    appointment?.location_address?.trim() &&
+      !appointment.is_sample_data &&
+      !isLikelyPlaceholderAddress(appointment.location_address)
+  );
+}
+
+function appointmentGoogleMapsUrl(
+  appointment?: Pick<Appointment, "is_sample_data" | "location_address"> | null
+) {
+  return canShowAppointmentAddress(appointment)
+    ? googleMapsUrl(appointment?.location_address ?? null)
+    : null;
 }
 
 function agicalUrl(appointment: Appointment): string | null {
@@ -1673,6 +1970,63 @@ function removeStoredValue(storage: Storage, key: string) {
   } catch {
     // Storage can be unavailable in private or locked-down browser contexts.
   }
+}
+
+function localDayKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function healthFocusSummaryCacheStorageKey(
+  signedInAccount: string,
+  subjectId: string
+) {
+  return `${healthFocusSummaryCacheStoragePrefix}:${encodeURIComponent(
+    signedInAccount
+  )}:${encodeURIComponent(subjectId || ALL_SUBJECTS)}`;
+}
+
+function readHealthFocusSummaryCache(
+  signedInAccount: string | null,
+  subjectId: string
+) {
+  if (typeof window === "undefined" || !signedInAccount) {
+    return null;
+  }
+
+  const cached = readStoredJson<HealthFocusSummaryCache>(
+    window.localStorage,
+    healthFocusSummaryCacheStorageKey(signedInAccount, subjectId)
+  );
+
+  if (!cached || cached.localDay !== localDayKey()) {
+    return null;
+  }
+
+  return cached;
+}
+
+function writeHealthFocusSummaryCache(
+  signedInAccount: string | null,
+  subjectId: string,
+  topics: HealthFocusTopicSummary[]
+) {
+  if (typeof window === "undefined" || !signedInAccount) {
+    return;
+  }
+
+  writeStoredJson(
+    window.localStorage,
+    healthFocusSummaryCacheStorageKey(signedInAccount, subjectId),
+    {
+      localDay: localDayKey(),
+      subjectId,
+      topics,
+    } satisfies HealthFocusSummaryCache
+  );
 }
 
 function intakeDraftFromResult(value: unknown): IntakeReviewDraftContent {
@@ -2265,6 +2619,10 @@ export function CarePlandPers({
   const [stickySecondaryOffset, setStickySecondaryOffset] = useState(0);
   const [runtimeEnvironmentLabel, setRuntimeEnvironmentLabel] = useState("");
   const [showVersionInfo, setShowVersionInfo] = useState(false);
+  const [
+    adminRecommendationsReviewDraftSummary,
+    setAdminRecommendationsReviewDraftSummary,
+  ] = useState<AdminRecommendationsReviewDraftSummary | null>(null);
   const entryHostMode = useSyncExternalStore(
     subscribeEntryHostMode,
     getEntryHostMode,
@@ -2913,6 +3271,17 @@ export function CarePlandPers({
   const [selectedSubjectId, setSelectedSubjectId] = useState(
     initialAppointmentsPageViewState?.selectedSubjectId ?? ALL_SUBJECTS
   );
+  const [selectedHealthStorySubjectId, setSelectedHealthStorySubjectId] =
+    useState(
+      initialAppointmentsPageViewState?.selectedSubjectId &&
+        initialAppointmentsPageViewState.selectedSubjectId !== ALL_SUBJECTS
+        ? initialAppointmentsPageViewState.selectedSubjectId
+        : ""
+    );
+  const [
+    healthStorySubjectChooserOpen,
+    setHealthStorySubjectChooserOpen,
+  ] = useState(false);
   const newAppointmentTargetSubjectId =
     newAppointmentSubjectId ||
     (selectedSubjectId !== ALL_SUBJECTS ? selectedSubjectId : "");
@@ -3117,6 +3486,8 @@ export function CarePlandPers({
   ] = useState<"firstActions" | "returnHome">("returnHome");
   const [homeNextAppointment, setHomeNextAppointment] =
     useState<Appointment | null>(null);
+  const [homeNextAppointmentsBySubjectId, setHomeNextAppointmentsBySubjectId] =
+    useState<Record<string, Appointment | null>>({});
   const [homeNextGuidance, setHomeNextGuidance] =
     useState<CarePrepGuidance | null>(null);
   const [appointmentDetailsHydrated, setAppointmentDetailsHydrated] =
@@ -3133,6 +3504,12 @@ export function CarePlandPers({
     HealthFocusTopicSummary[]
   >([]);
   const [healthFocusLoading, setHealthFocusLoading] = useState(false);
+  const [homeTodayFocusGroups, setHomeTodayFocusGroups] = useState<
+    HomeTodayFocusGroup[]
+  >([]);
+  const [homeTodayFocusLoading, setHomeTodayFocusLoading] = useState(false);
+  const [showHomeAtAGlanceTest, setShowHomeAtAGlanceTest] = useState(false);
+  const [homeAtAGlanceExpanded, setHomeAtAGlanceExpanded] = useState(false);
   const [selectedHealthFocusTopic, setSelectedHealthFocusTopic] =
     useState<HealthFocusTopicSummary | null>(null);
   const [healthFocusTopicDetail, setHealthFocusTopicDetail] =
@@ -3581,11 +3958,90 @@ export function CarePlandPers({
       })),
     ];
   }, [careSubjects]);
+  const activeHealthStorySubjectId = useMemo(() => {
+    const onlySubject = careSubjects[0] ?? null;
+
+    if (
+      careSubjects.length === 1 &&
+      onlySubject &&
+      !onlySubject.is_default &&
+      selectedSubjectId === ALL_SUBJECTS
+    ) {
+      return "";
+    }
+
+    if (
+      selectedHealthStorySubjectId &&
+      careSubjects.some((subject) => subject.id === selectedHealthStorySubjectId)
+    ) {
+      return selectedHealthStorySubjectId;
+    }
+
+    if (
+      selectedSubjectId &&
+      selectedSubjectId !== ALL_SUBJECTS &&
+      careSubjects.some((subject) => subject.id === selectedSubjectId)
+    ) {
+      return selectedSubjectId;
+    }
+
+    return careSubjects[0]?.id ?? "";
+  }, [careSubjects, selectedHealthStorySubjectId, selectedSubjectId]);
+  const activeHealthStorySubject =
+    activeHealthStorySubjectId
+      ? subjectsById.get(activeHealthStorySubjectId) ?? null
+      : null;
+  const healthStoryTitle =
+    !activeHealthStorySubject || activeHealthStorySubject.is_default
+      ? "Your Health Stories"
+      : `${possessiveName(activeHealthStorySubject.display_name)} Health Stories`;
+  const healthStoryFocusOptions = useMemo(
+    () =>
+      careSubjects.map((subject) => ({
+        avatar: careSubjectAvatarPerson(subject),
+        id: subject.id,
+        label: subject.display_name,
+      })),
+    [careSubjects]
+  );
+  useEffect(() => {
+    if (careSubjects.length === 0) {
+      if (selectedHealthStorySubjectId) {
+        setSelectedHealthStorySubjectId("");
+      }
+      return;
+    }
+
+    if (
+      selectedSubjectId !== ALL_SUBJECTS &&
+      careSubjects.some((subject) => subject.id === selectedSubjectId)
+    ) {
+      if (selectedHealthStorySubjectId !== selectedSubjectId) {
+        setSelectedHealthStorySubjectId(selectedSubjectId);
+      }
+      return;
+    }
+
+    if (careSubjects.length === 1 && !careSubjects[0].is_default) {
+      if (selectedHealthStorySubjectId) {
+        setSelectedHealthStorySubjectId("");
+      }
+      return;
+    }
+
+    if (
+      !selectedHealthStorySubjectId ||
+      !careSubjects.some((subject) => subject.id === selectedHealthStorySubjectId)
+    ) {
+      setSelectedHealthStorySubjectId(careSubjects[0].id);
+    }
+  }, [careSubjects, selectedHealthStorySubjectId, selectedSubjectId]);
 	  const hasUnsavedProfileChanges =
 	    profileDraftKey(profileDraft) !== profileDraftKey(savedProfileDraft);
 	  const hasUnaddedCareVipName = newCareVipName.trim().length > 0;
   const unsavedSignOutChanges = useMemo(() => {
     return buildUnsavedSignOutChanges({
+      adminRecommendationsReviewDraft: adminRecommendationsReviewDraftSummary,
       appointmentDrafts,
       appointmentsById,
       askConversationComplete,
@@ -3622,6 +4078,7 @@ export function CarePlandPers({
       textIntakeValue,
     });
   }, [
+	    adminRecommendationsReviewDraftSummary,
 	    appointmentDrafts,
 	    appointmentsById,
 	    askConversationComplete,
@@ -3722,6 +4179,8 @@ export function CarePlandPers({
     setAskConversationComplete(false);
     setAskPanelError("");
     setAskCloseConfirmOpen(false);
+    setAdminRecommendationsReviewDraftSummary(null);
+    clearAdminRecommendationsReviewDraftStorage();
     resetPlaceLookup();
 
     if (typeof window !== "undefined") {
@@ -4722,34 +5181,15 @@ export function CarePlandPers({
     loadedAppointments: Appointment[],
     view: AppointmentView,
     subjectId: string,
-    loadedGuidance: CarePrepGuidance[] = guidance
+    loadedGuidance: CarePrepGuidance[] = guidance,
+    loadedCareSubjects: CareSubject[] = careSubjects
   ) {
     const upcomingStart = startOfToday();
     const subjectAppointments = loadedAppointments.filter((appointment) =>
       appointmentMatchesSubject(appointment, subjectId)
     );
-    const reminderAppointment =
-      subjectAppointments
-        .filter(
-          (appointment) =>
-            appointment.care_circle_id &&
-            appointment.status !== "archived" &&
-            !appointment.current_note_id &&
-            appointment.starts_at &&
-            new Date(appointment.starts_at) < upcomingStart
-        )
-        .sort((firstAppointment, secondAppointment) => {
-          if (!firstAppointment.starts_at || !secondAppointment.starts_at) {
-            return 0;
-          }
-
-          return (
-            new Date(secondAppointment.starts_at).getTime() -
-            new Date(firstAppointment.starts_at).getTime()
-          );
-        })[0] ?? null;
-    const nextHomeAppointment =
-      subjectAppointments
+    const nextAppointmentFor = (appointmentsForSubject: Appointment[]) =>
+      appointmentsForSubject
         .filter((appointment) => {
           if (appointment.status === "archived") {
             return false;
@@ -4779,6 +5219,37 @@ export function CarePlandPers({
             new Date(secondAppointment.starts_at).getTime()
           );
         })[0] ?? null;
+    const reminderAppointment =
+      subjectAppointments
+        .filter(
+          (appointment) =>
+            appointment.care_circle_id &&
+            appointment.status !== "archived" &&
+            !appointment.current_note_id &&
+            appointment.starts_at &&
+            new Date(appointment.starts_at) < upcomingStart
+        )
+        .sort((firstAppointment, secondAppointment) => {
+          if (!firstAppointment.starts_at || !secondAppointment.starts_at) {
+            return 0;
+          }
+
+          return (
+            new Date(secondAppointment.starts_at).getTime() -
+            new Date(firstAppointment.starts_at).getTime()
+          );
+        })[0] ?? null;
+    const nextHomeAppointment = nextAppointmentFor(subjectAppointments);
+    const nextAppointmentsBySubjectId = loadedCareSubjects.reduce<
+      Record<string, Appointment | null>
+    >((nextBySubject, subject) => {
+      nextBySubject[subject.id] = nextAppointmentFor(
+        loadedAppointments.filter((appointment) =>
+          appointmentMatchesSubject(appointment, subject.id)
+        )
+      );
+      return nextBySubject;
+    }, {});
     const visibleAppointments = subjectAppointments.filter((appointment) =>
       view === "archived"
         ? appointment.status === "archived"
@@ -4802,6 +5273,7 @@ export function CarePlandPers({
         : null
     );
     setHomeNextAppointment(nextHomeAppointment);
+    setHomeNextAppointmentsBySubjectId(nextAppointmentsBySubjectId);
     setAppointments(visibleAppointments);
     setHomeNextGuidance(
       nextHomeAppointment
@@ -4857,7 +5329,13 @@ export function CarePlandPers({
     setSelectedSubjectId(effectiveSubjectId);
     setAppointmentPool(snapshot.appointmentPool);
     setAppointmentDetailsHydrated(false);
-    applyAppointmentSelection(snapshot.appointmentPool, view, effectiveSubjectId);
+    applyAppointmentSelection(
+      snapshot.appointmentPool,
+      view,
+      effectiveSubjectId,
+      guidance,
+      snapshot.careSubjects
+    );
 
     return true;
   }
@@ -4924,7 +5402,10 @@ export function CarePlandPers({
     }
   }
 
-  async function loadHealthFocusSummary(subjectId: string = selectedSubjectId) {
+  async function loadHealthFocusSummary(
+    subjectId: string = selectedSubjectId,
+    options: { forceRefresh?: boolean } = {}
+  ) {
     const { data: sessionData, error: sessionError } =
       await supabase.auth.getSession();
 
@@ -4939,6 +5420,36 @@ export function CarePlandPers({
       setSelectedHealthFocusTopic(null);
       setHealthFocusTopicDetail(null);
       return;
+    }
+
+    if (!options.forceRefresh) {
+      const cachedSummary = readHealthFocusSummaryCache(
+        signedInEmail,
+        subjectId
+      );
+
+      if (cachedSummary) {
+        const nextTopics = cachedSummary.topics;
+
+        setHealthFocusTopics(nextTopics);
+
+        if (selectedHealthFocusTopic) {
+          const refreshedSelectedTopic = nextTopics.find(
+            (topic) =>
+              topic.topicSlug === selectedHealthFocusTopic.topicSlug &&
+              topic.careSubjectId === selectedHealthFocusTopic.careSubjectId
+          );
+
+          if (refreshedSelectedTopic) {
+            setSelectedHealthFocusTopic(refreshedSelectedTopic);
+          } else {
+            setSelectedHealthFocusTopic(null);
+            setHealthFocusTopicDetail(null);
+          }
+        }
+
+        return;
+      }
     }
 
     setHealthFocusLoading(true);
@@ -5029,6 +5540,7 @@ export function CarePlandPers({
         }
       }
 
+      writeHealthFocusSummaryCache(signedInEmail, subjectId, nextTopics);
       setHealthFocusTopics(nextTopics);
 
       if (selectedHealthFocusTopic) {
@@ -5054,6 +5566,124 @@ export function CarePlandPers({
       setHealthFocusLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!signedInEmail || mainTab !== "home") {
+      return;
+    }
+
+    if (!activeHealthStorySubjectId) {
+      setHealthFocusTopics([]);
+      setSelectedHealthFocusTopic(null);
+      setHealthFocusTopicDetail(null);
+      return;
+    }
+
+    void loadHealthFocusSummary(activeHealthStorySubjectId);
+    // loadHealthFocusSummary intentionally uses current auth/session state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeHealthStorySubjectId, mainTab, signedInEmail]);
+
+  async function loadHomeTodayFocus() {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken || careSubjects.length === 0) {
+      setHomeTodayFocusGroups([]);
+      return;
+    }
+
+    const subjectsToLoad =
+      selectedSubjectId === ALL_SUBJECTS
+        ? careSubjects
+        : careSubjects.filter((subject) => subject.id === selectedSubjectId);
+
+    if (subjectsToLoad.length === 0) {
+      setHomeTodayFocusGroups([]);
+      return;
+    }
+
+    setHomeTodayFocusLoading(true);
+
+    try {
+      const results = await Promise.allSettled(
+        subjectsToLoad.map(async (subject) => {
+          const testingItems = homeTestingTodayFocusItemsForSubject(subject);
+          const response = await fetch(
+            `/api/personal/today-focus?personId=${encodeURIComponent(subject.id)}`,
+            {
+              cache: "no-store",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
+            }
+          );
+          const result = (await response.json().catch(() => ({}))) as {
+            focusItems?: HomeTodayFocusItem[];
+            ok?: boolean;
+          };
+
+          if (!response.ok || result.ok === false) {
+            return testingItems.length > 0
+              ? ({
+                  items: testingItems,
+                  subjectAvatar: careSubjectAvatarPerson(subject),
+                  subjectId: subject.id,
+                  subjectLabel: subject.is_default ? "You" : subject.display_name,
+                  subjectName: subject.is_default ? "you" : subject.display_name,
+                } satisfies HomeTodayFocusGroup)
+              : null;
+          }
+
+          const storedItems = (result.focusItems ?? [])
+            .filter((item) => item.id && item.title)
+            .slice(0, 3);
+          const items = storedItems.length > 0 ? storedItems : testingItems;
+
+          if (items.length === 0) {
+            return null;
+          }
+
+          return {
+            items,
+            subjectAvatar: careSubjectAvatarPerson(subject),
+            subjectId: subject.id,
+            subjectLabel: subject.is_default ? "You" : subject.display_name,
+            subjectName: subject.is_default ? "you" : subject.display_name,
+          } satisfies HomeTodayFocusGroup;
+        })
+      );
+
+      setHomeTodayFocusGroups(
+        results
+          .map((result) =>
+            result.status === "fulfilled" ? result.value : null
+          )
+          .filter((group): group is HomeTodayFocusGroup => Boolean(group))
+      );
+    } catch (error) {
+      console.warn("Unable to load Home Today's Focus", error);
+      setHomeTodayFocusGroups([]);
+    } finally {
+      setHomeTodayFocusLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!signedInEmail || mainTab !== "home") {
+      return;
+    }
+
+    void loadHomeTodayFocus();
+    // loadHomeTodayFocus intentionally uses current auth/session and subject state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [careSubjects, mainTab, selectedSubjectId, signedInEmail]);
 
   async function handleHomeContextQuestion(
     question: string,
@@ -5432,7 +6062,9 @@ export function CarePlandPers({
       feedback.feedbackMode === "clarification" ||
       feedback.targetType === "topic_relationship"
     ) {
-      await loadHealthFocusSummary(selectedSubjectId);
+      await loadHealthFocusSummary(activeHealthStorySubjectId, {
+        forceRefresh: true,
+      });
       await loadHealthFocusTopicDetail(selectedHealthFocusTopic);
     }
 
@@ -5482,6 +6114,9 @@ export function CarePlandPers({
     }
 
     if (selectedHealthFocusTopic) {
+      await loadHealthFocusSummary(activeHealthStorySubjectId, {
+        forceRefresh: true,
+      });
       await loadHealthFocusTopicDetail(selectedHealthFocusTopic);
     }
   }
@@ -5682,6 +6317,53 @@ export function CarePlandPers({
         error instanceof Error
           ? error.message
           : "Pet details could not be saved."
+      );
+      throw error;
+    }
+  }
+
+  async function handleUpdateProfilePersonManagedByHousehold(
+    subjectId: string,
+    managedByHousehold: boolean
+  ) {
+    const subject = careSubjects.find((careSubject) => careSubject.id === subjectId);
+
+    if (!subject) {
+      setMessage("Choose a Care VIP before changing managed status.");
+      return;
+    }
+
+    if (isPetSubjectType(subject.subject_type)) {
+      return;
+    }
+
+    setMessage("");
+
+    try {
+      const { error } = await supabase
+        .from("care_subjects")
+        .update({ managed_by_household: managedByHousehold })
+        .eq("id", subjectId);
+
+      if (error) {
+        throw error;
+      }
+
+      setCareSubjects((currentSubjects) =>
+        currentSubjects.map((currentSubject) =>
+          currentSubject.id === subjectId
+            ? {
+                ...currentSubject,
+                managed_by_household: managedByHousehold,
+              }
+            : currentSubject
+        )
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Managed by household could not be saved."
       );
       throw error;
     }
@@ -5892,7 +6574,7 @@ export function CarePlandPers({
       supabase
         .from("care_subjects")
         .select(
-          "id,care_circle_id,display_name,subject_type,is_default,is_active,avatar_url,avatar_type,avatar_alt_text"
+          "id,care_circle_id,display_name,subject_type,is_default,is_active,managed_by_household,avatar_url,avatar_type,avatar_alt_text"
         )
         .in("care_circle_id", circleIds)
         .eq("is_active", true)
@@ -5910,7 +6592,7 @@ export function CarePlandPers({
     let subjectRows = subjectRowsResult.data as CareSubjectRow[] | null;
     let subjectsError = subjectRowsResult.error;
 
-    if (subjectsError && isMissingAvatarColumn(subjectsError)) {
+    if (subjectsError && isMissingCareSubjectOptionalColumn(subjectsError)) {
       const fallbackSubjectsResult = await supabase
         .from("care_subjects")
         .select("id,care_circle_id,display_name,subject_type,is_default,is_active")
@@ -5924,6 +6606,7 @@ export function CarePlandPers({
         avatar_alt_text: null,
         avatar_type: "initials",
         avatar_url: null,
+        managed_by_household: false,
       })) as CareSubjectRow[];
       subjectsError = fallbackSubjectsResult.error;
     }
@@ -6002,6 +6685,18 @@ export function CarePlandPers({
 
     setCareSubjects(subjects);
     setSelectedSubjectId(effectiveSubjectId);
+    const onlyNonDefaultSubject =
+      subjects.length === 1 && !subjects[0].is_default ? subjects[0] : null;
+    const nextHealthStorySubjectId =
+      effectiveSubjectId !== ALL_SUBJECTS
+        ? effectiveSubjectId
+        : onlyNonDefaultSubject
+          ? ""
+          : selectedHealthStorySubjectId &&
+              subjects.some((subject) => subject.id === selectedHealthStorySubjectId)
+            ? selectedHealthStorySubjectId
+            : defaultSubjectId;
+    setSelectedHealthStorySubjectId(nextHealthStorySubjectId);
     setNewAppointmentSubjectId((currentSubjectId) => {
       if (currentSubjectId && subjects.some((subject) => subject.id === currentSubjectId)) {
         return currentSubjectId;
@@ -6039,7 +6734,13 @@ export function CarePlandPers({
       ) ?? [];
     setAppointmentDetailsHydrated(false);
     setAppointmentPool(activeAppointmentRows);
-    applyAppointmentSelection(activeAppointmentRows, view, effectiveSubjectId);
+    applyAppointmentSelection(
+      activeAppointmentRows,
+      view,
+      effectiveSubjectId,
+      guidance,
+      subjects
+    );
     if (typeof window !== "undefined") {
       writeStoredJson(window.sessionStorage, appointmentsSessionSnapshotStorageKey, {
         appointmentPool: activeAppointmentRows,
@@ -6048,7 +6749,9 @@ export function CarePlandPers({
         savedAt: new Date().toISOString(),
       } satisfies AppointmentsSessionSnapshot);
     }
-    void loadHealthFocusSummary(effectiveSubjectId);
+    if (nextHealthStorySubjectId) {
+      void loadHealthFocusSummary(nextHealthStorySubjectId);
+    }
 
     void hydrateAppointmentDetails(activeAppointmentRows);
   }
@@ -6558,8 +7261,24 @@ export function CarePlandPers({
 
 	    if (subjectId !== ALL_SUBJECTS) {
       setNewAppointmentSubjectId(subjectId);
+      setSelectedHealthStorySubjectId(subjectId);
     }
 
+    setMessage("");
+    saveAppointmentsViewState({ selectedSubjectId: subjectId });
+    applyAppointmentSelection(appointmentPool, appointmentView, subjectId);
+  }
+
+  function handleChangeHealthStorySubject(subjectId: string) {
+    if (!subjectId || !careSubjects.some((subject) => subject.id === subjectId)) {
+      return;
+    }
+
+    setSelectedHealthStorySubjectId(subjectId);
+    setHealthStorySubjectChooserOpen(false);
+    setSelectedSubjectId(subjectId);
+    setNewAppointmentSubjectId(subjectId);
+    setPendingModifierSwitch(null);
     setMessage("");
     saveAppointmentsViewState({ selectedSubjectId: subjectId });
     applyAppointmentSelection(appointmentPool, appointmentView, subjectId);
@@ -9876,6 +10595,27 @@ export function CarePlandPers({
   }
 
   async function handleChangeAdminTab(tab: AdminTab) {
+    const adminTabsWithRecommendationsReview = new Set<AdminTab>([
+      "recommendations",
+      "tools",
+    ]);
+    const leavingRecommendationsReview =
+      adminTabsWithRecommendationsReview.has(adminTab) &&
+      !adminTabsWithRecommendationsReview.has(tab);
+
+    if (leavingRecommendationsReview && adminRecommendationsReviewDraftSummary) {
+      const confirmed = window.confirm(
+        "You have unapplied Today's Focus Review work. Discard it and switch Admin areas?"
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      setAdminRecommendationsReviewDraftSummary(null);
+      clearAdminRecommendationsReviewDraftStorage();
+    }
+
     setAdminTab(tab);
     setMessage("");
 
@@ -14230,12 +14970,24 @@ export function CarePlandPers({
     const nextSubjectRecord = homeNextAppointment?.care_subject_id
       ? subjectsById.get(homeNextAppointment.care_subject_id) ?? null
       : null;
-    const nextSubject = nextSubjectRecord?.display_name ?? "";
-    const homeMapsLink = googleMapsUrl(homeNextAppointment?.location_address ?? null);
+    const homeMapsLink = appointmentGoogleMapsUrl(homeNextAppointment);
     const homePracticeLabel =
       homeNextAppointment?.provider_organization ||
       homeNextAppointment?.location_name ||
       "";
+    const activeNextAppointmentSubject =
+      selectedSubjectId !== ALL_SUBJECTS
+        ? subjectsById.get(selectedSubjectId) ?? null
+        : nextSubjectRecord;
+    const everyoneNextAppointmentRows = careSubjects
+      .map((subject) => ({
+        appointment: homeNextAppointmentsBySubjectId[subject.id] ?? null,
+        subject,
+      }))
+      .filter(
+        (row): row is { appointment: Appointment; subject: CareSubject } =>
+          Boolean(row.appointment)
+      );
     const homeCarePrepGenerationError = homeNextAppointment
       ? carePrepGenerationErrors[homeNextAppointment.id]
       : null;
@@ -14280,6 +15032,19 @@ export function CarePlandPers({
           ? currentIndex
           : currentIndex + 1
       );
+    const homeAtAGlanceSummary = buildHomeAtAGlanceSummary({
+      appointments,
+      careSubjects,
+      carePrepHistory,
+      hasAnySavedAppointments,
+      healthFocusTopics,
+      homeNextAppointment,
+      homeNextAppointmentsBySubjectId,
+      homeNextGuidance,
+      homeTodayFocusGroups,
+      notesReminderAppointment,
+      selectedSubjectId,
+    });
 
     return (
       <div className="mt-1 space-y-2">
@@ -14329,203 +15094,454 @@ export function CarePlandPers({
           />
         ) : (
           <>
-            <HomeNextAppointmentPanel
-              addNotesOpen={
-                Boolean(homeNextAppointment) &&
-                textIntakeTargetAppointmentId === homeNextAppointment?.id
-              }
-              appointment={homeNextAppointment}
-              formatDate={formatDate}
-              generationError={homeCarePrepGenerationError}
-              guidance={homeNextGuidance}
-              highlights={homeCarePrepHighlights}
-              isGenerating={
-                generatingCarePrepForId === homeNextAppointment?.id
-              }
-              isCarePrepEligible={isHomeCarePrepEligible}
-              mapsLink={homeMapsLink}
-              nextSubject={isEveryoneFocus ? nextSubject ?? "" : ""}
-              nextSubjectAvatar={
-                isEveryoneFocus ? careSubjectAvatarPerson(nextSubjectRecord) : null
-              }
-              onAddAppointment={() => startAppointmentPanel("add")}
-              onAddNotes={
-                homeNextAppointment
-                  ? () => {
-                      if (
-                        textIntakeTargetAppointmentId === homeNextAppointment.id
-                      ) {
-                        requestCloseTextIntake(homeNextAppointment);
-                        return;
-                      }
-
-                      startContextualTextIntake(homeNextAppointment);
+            {isAdmin ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2 text-sm text-slate-700">
+                <label className="inline-flex cursor-pointer items-center gap-2 font-semibold text-blue-900">
+                  <input
+                    checked={showHomeAtAGlanceTest}
+                    className="h-4 w-4 rounded border-blue-200 text-blue-700 focus:ring-blue-300"
+                    onChange={(event) =>
+                      setShowHomeAtAGlanceTest(event.target.checked)
                     }
-                  : undefined
-              }
-              practiceLabel={homePracticeLabel}
-            >
-
-            {showNotesEntrySection &&
-            notesEntryAppointment &&
-            notesEntryAppointment.id === homeNextAppointment?.id ? (
-              <section>
-                {pendingModifierSwitch?.appointmentId ===
-                notesEntryAppointment.id ? (
-                  <InlineConfirmation
-                    cancelLabel="Return to editing"
-                    className="mt-3"
-                    confirmLabel="Discard and close"
-                    message="Closing will discard your unsaved changes. Proceed?"
-                    onCancel={() => setPendingModifierSwitch(null)}
-                    onConfirm={() =>
-                      discardAndSwitchAppointmentModifier(notesEntryAppointment)
-                    }
+                    type="checkbox"
                   />
-                ) : null}
-                {textIntakeTargetAppointmentId === notesEntryAppointment.id ? (
-                  <form
-                    className="mt-2"
-                    onSubmit={
-                      textIntakeDraft
-                        ? handleSaveTextIntakeDraft
-                        : handleInterpretTextIntake
-                    }
-                  >
-	                    {!textIntakeDraft ? (
-	                      <>
-                          <div
-                            className={`mt-2 rounded-lg border transition ${
-                              appointmentNotesDragActive
-                                ? "border-blue-300 bg-blue-50"
-                                : "border-slate-300 bg-white"
-                            }`}
-                            onDragEnter={handleAppointmentNotesDrag}
-                            onDragLeave={handleAppointmentNotesDrag}
-                            onDragOver={handleAppointmentNotesDrag}
-                            onDrop={handleAppointmentNotesDrop}
-                          >
-	                        <label className="block text-sm font-medium text-slate-700">
-	                          <span className="flex flex-wrap items-center justify-between gap-3">
-	                            <span>Visit notes</span>
-	                            <span className="inline-flex cursor-pointer items-center rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50">
-                              Add Files
-                              <input
-                                accept=".pdf,.txt,.md,.csv,.log,text/plain,text/csv,text/markdown,application/pdf,image/gif,image/jpeg,image/png,image/webp"
-                                className="sr-only"
-                                disabled={extractingImageText}
-                                multiple
-                                onChange={(event) => {
-                                  void handleAppointmentNotesFiles(
-                                    event.target.files
-                                  );
-                                  event.target.value = "";
-                                }}
-                                type="file"
-                              />
-                            </span>
-                          </span>
-                          <textarea
-                            className="mt-2 min-h-32 w-full rounded-lg bg-transparent px-3 py-2 text-base outline-none"
-                            onChange={(event) =>
-                              setContextualTextIntakeValue(event.target.value)
-                            }
-                            placeholder="Type, paste, add or drag anything related to this visit"
-                            value={contextualTextIntakeValue}
-                          />
-                        </label>
-                          </div>
-                          {fileImportStatus ? (
-                            <p className="mt-2 text-xs text-slate-500">
-                              {fileImportStatus}
-                            </p>
-                          ) : null}
-                        <button
-                          className="mt-4 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
-                          disabled={processingTextIntake}
-                          type="submit"
-                        >
-                          {processingTextIntake
-                            ? "Interpreting..."
-                            : "Review notes"}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <AppointmentDetailUpdateOption
-                          checked={applyTextIntakeAppointmentDetails}
-                          changes={appointmentDetailChanges(
-                            notesEntryAppointment,
-                            textIntakeDraft
-                          )}
-                          onChange={setApplyTextIntakeAppointmentDetails}
-                        />
-                        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                          <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
-                            Visit summary
-                            <textarea
-                              className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                              onChange={(event) =>
-                                updateTextIntakeDraft(
-                                  "notesSummary",
-                                  event.target.value
-                                )
-                              }
-                              value={textIntakeDraft.notesSummary}
-                            />
-                          </label>
-                          <label className="block text-sm font-medium text-slate-700">
-                            Takeaways
-                            <textarea
-                              className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                              onChange={(event) =>
-                                updateTextIntakeDraft(
-                                  "takeaways",
-                                  event.target.value
-                                )
-                              }
-                              value={textIntakeDraft.takeaways}
-                            />
-                          </label>
-                          <label className="block text-sm font-medium text-slate-700">
-                            Follow-ups
-                            <textarea
-                              className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                              onChange={(event) =>
-                                updateTextIntakeDraft(
-                                  "followups",
-                                  event.target.value
-                                )
-                              }
-                              value={textIntakeDraft.followups}
-                            />
-                          </label>
-                          <div className="flex items-end">
+                  Show CarePland at a Glance test
+                </label>
+                <span className="text-xs font-medium text-slate-500">
+                  Admin only
+                </span>
+              </div>
+            ) : null}
+
+            {isEveryoneFocus ? (
+              everyoneNextAppointmentRows.length > 0 ? (
+                <div className="space-y-2">
+                  {everyoneNextAppointmentRows.map(({ appointment, subject }) => {
+                    const rowPracticeLabel =
+                      appointment.provider_organization ||
+                      appointment.location_name ||
+                      "";
+
+                    return (
+                      <HomeNextAppointmentPanel
+                        appointment={appointment}
+                        formatDate={formatDate}
+                        generationError={null}
+                        guidance={null}
+                        highlights={[]}
+                        isGenerating={false}
+                        isCarePrepEligible={false}
+                        key={subject.id}
+                        mapsLink={appointmentGoogleMapsUrl(appointment)}
+                        nextSubject=""
+                        onAddAppointment={() => startAppointmentPanel("add")}
+                        practiceLabel={rowPracticeLabel}
+                        title={nextAppointmentTitleForSubject(subject)}
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <HomeNextAppointmentPanel
+                  appointment={null}
+                  formatDate={formatDate}
+                  generationError={null}
+                  guidance={null}
+                  highlights={[]}
+                  isGenerating={false}
+                  isCarePrepEligible={false}
+                  mapsLink={null}
+                  nextSubject=""
+                  onAddAppointment={() => startAppointmentPanel("add")}
+                  practiceLabel=""
+                  title="Next appointments"
+                />
+              )
+            ) : (
+              <HomeNextAppointmentPanel
+                addNotesOpen={
+                  Boolean(homeNextAppointment) &&
+                  textIntakeTargetAppointmentId === homeNextAppointment?.id
+                }
+                appointment={homeNextAppointment}
+                formatDate={formatDate}
+                generationError={homeCarePrepGenerationError}
+                guidance={homeNextGuidance}
+                highlights={homeCarePrepHighlights}
+                isGenerating={
+                  generatingCarePrepForId === homeNextAppointment?.id
+                }
+                isCarePrepEligible={isHomeCarePrepEligible}
+                mapsLink={homeMapsLink}
+                nextSubject=""
+                onAddAppointment={() => startAppointmentPanel("add")}
+                onAddNotes={
+                  homeNextAppointment
+                    ? () => {
+                        if (
+                          textIntakeTargetAppointmentId === homeNextAppointment.id
+                        ) {
+                          requestCloseTextIntake(homeNextAppointment);
+                          return;
+                        }
+
+                        startContextualTextIntake(homeNextAppointment);
+                      }
+                    : undefined
+                }
+                practiceLabel={homePracticeLabel}
+                title={nextAppointmentTitleForSubject(
+                  activeNextAppointmentSubject
+                )}
+              >
+                {showNotesEntrySection &&
+                notesEntryAppointment &&
+                notesEntryAppointment.id === homeNextAppointment?.id ? (
+                  <section>
+                    {pendingModifierSwitch?.appointmentId ===
+                    notesEntryAppointment.id ? (
+                      <InlineConfirmation
+                        cancelLabel="Return to editing"
+                        className="mt-3"
+                        confirmLabel="Discard and close"
+                        message="Closing will discard your unsaved changes. Proceed?"
+                        onCancel={() => setPendingModifierSwitch(null)}
+                        onConfirm={() =>
+                          discardAndSwitchAppointmentModifier(notesEntryAppointment)
+                        }
+                      />
+                    ) : null}
+                    {textIntakeTargetAppointmentId === notesEntryAppointment.id ? (
+                      <form
+                        className="mt-2"
+                        onSubmit={
+                          textIntakeDraft
+                            ? handleSaveTextIntakeDraft
+                            : handleInterpretTextIntake
+                        }
+                      >
+                        {!textIntakeDraft ? (
+                          <>
+                            <div
+                              className={`mt-2 rounded-lg border transition ${
+                                appointmentNotesDragActive
+                                  ? "border-blue-300 bg-blue-50"
+                                  : "border-slate-300 bg-white"
+                              }`}
+                              onDragEnter={handleAppointmentNotesDrag}
+                              onDragLeave={handleAppointmentNotesDrag}
+                              onDragOver={handleAppointmentNotesDrag}
+                              onDrop={handleAppointmentNotesDrop}
+                            >
+                              <label className="block text-sm font-medium text-slate-700">
+                                <span className="flex flex-wrap items-center justify-between gap-3">
+                                  <span>Visit notes</span>
+                                  <span className="inline-flex cursor-pointer items-center rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50">
+                                    Add Files
+                                    <input
+                                      accept=".pdf,.txt,.md,.csv,.log,text/plain,text/csv,text/markdown,application/pdf,image/gif,image/jpeg,image/png,image/webp"
+                                      className="sr-only"
+                                      disabled={extractingImageText}
+                                      multiple
+                                      onChange={(event) => {
+                                        void handleAppointmentNotesFiles(
+                                          event.target.files
+                                        );
+                                        event.target.value = "";
+                                      }}
+                                      type="file"
+                                    />
+                                  </span>
+                                </span>
+                                <textarea
+                                  className="mt-2 min-h-32 w-full rounded-lg bg-transparent px-3 py-2 text-base outline-none"
+                                  onChange={(event) =>
+                                    setContextualTextIntakeValue(
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder="Type, paste, add or drag anything related to this visit"
+                                  value={contextualTextIntakeValue}
+                                />
+                              </label>
+                            </div>
+                            {fileImportStatus ? (
+                              <p className="mt-2 text-xs text-slate-500">
+                                {fileImportStatus}
+                              </p>
+                            ) : null}
                             <button
-                              className={
-                                intakeDraftHasSaveableNotes(textIntakeDraft)
-                                  ? gentlePrimaryButtonClass
-                                  : gentleSecondaryButtonClass
-                              }
-                              disabled={
-                                savingTextIntake ||
-                                !intakeDraftHasSaveableNotes(textIntakeDraft)
-                              }
+                              className="mt-4 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
+                              disabled={processingTextIntake}
                               type="submit"
                             >
-                              {savingTextIntake ? "Saving..." : "Save notes"}
+                              {processingTextIntake
+                                ? "Interpreting..."
+                                : "Review notes"}
                             </button>
+                          </>
+                        ) : (
+                          <>
+                            <AppointmentDetailUpdateOption
+                              checked={applyTextIntakeAppointmentDetails}
+                              changes={appointmentDetailChanges(
+                                notesEntryAppointment,
+                                textIntakeDraft
+                              )}
+                              onChange={setApplyTextIntakeAppointmentDetails}
+                            />
+                            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                              <label className="block text-sm font-medium text-slate-700 lg:col-span-3">
+                                Visit summary
+                                <textarea
+                                  className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateTextIntakeDraft(
+                                      "notesSummary",
+                                      event.target.value
+                                    )
+                                  }
+                                  value={textIntakeDraft.notesSummary}
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Takeaways
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateTextIntakeDraft(
+                                      "takeaways",
+                                      event.target.value
+                                    )
+                                  }
+                                  value={textIntakeDraft.takeaways}
+                                />
+                              </label>
+                              <label className="block text-sm font-medium text-slate-700">
+                                Follow-ups
+                                <textarea
+                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                  onChange={(event) =>
+                                    updateTextIntakeDraft(
+                                      "followups",
+                                      event.target.value
+                                    )
+                                  }
+                                  value={textIntakeDraft.followups}
+                                />
+                              </label>
+                              <div className="flex items-end">
+                                <button
+                                  className={
+                                    intakeDraftHasSaveableNotes(textIntakeDraft)
+                                      ? gentlePrimaryButtonClass
+                                      : gentleSecondaryButtonClass
+                                  }
+                                  disabled={
+                                    savingTextIntake ||
+                                    !intakeDraftHasSaveableNotes(textIntakeDraft)
+                                  }
+                                  type="submit"
+                                >
+                                  {savingTextIntake ? "Saving..." : "Save notes"}
+                                </button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </form>
+                    ) : null}
+                  </section>
+                ) : null}
+              </HomeNextAppointmentPanel>
+            )}
+
+            {isAdmin && showHomeAtAGlanceTest ? (
+              <section className="rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-3 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-blue-700">
+                      {homeAtAGlanceSummary.title}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {homeAtAGlanceSummary.subtitle}
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                    onClick={() => {
+                      setShowHomeAtAGlanceTest(false);
+                      setHomeAtAGlanceExpanded(false);
+                    }}
+                    type="button"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+                <ul className="mt-3 space-y-2">
+                  {homeAtAGlanceSummary.items.map((item) => (
+                    <li
+                      className="flex gap-2 text-sm font-medium text-slate-800"
+                      key={item}
+                    >
+                      <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  className="mt-3 text-sm font-semibold text-blue-700 underline-offset-2 hover:text-blue-900 hover:underline"
+                  onClick={() =>
+                    setHomeAtAGlanceExpanded((currentValue) => !currentValue)
+                  }
+                  type="button"
+                >
+                  {homeAtAGlanceExpanded ? "Show less" : "More..."}
+                </button>
+                {homeAtAGlanceExpanded ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {homeAtAGlanceSummary.historySections.map((section) => (
+                      <div
+                        className="rounded-lg border border-blue-100 bg-white/70 p-3"
+                        key={section.title}
+                      >
+                        <h3 className="text-sm font-semibold text-slate-900">
+                          {section.title}
+                        </h3>
+                        <ul className="mt-2 space-y-1.5">
+                          {section.items.map((item) => (
+                            <li
+                              className="text-sm text-slate-700"
+                              key={item}
+                            >
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                        {section.estimates?.length ? (
+                          <div className="mt-3 border-t border-blue-100 pt-2">
+                            {section.estimates.map((estimate) => (
+                              <p
+                                className="text-xs font-medium text-slate-500"
+                                key={estimate}
+                              >
+                                {estimate}
+                              </p>
+                            ))}
                           </div>
-                        </div>
-                      </>
-                    )}
-                  </form>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
                 ) : null}
               </section>
             ) : null}
-            </HomeNextAppointmentPanel>
+
+            {homeTodayFocusGroups.length > 0 ? (
+              <section className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-blue-700">
+                    {isEveryoneFocus
+                      ? "Today's Focus"
+                      : homeTodayFocusGroups[0]?.subjectName === "you"
+                        ? "Today's Focus for you"
+                        : `Today's Focus for ${homeTodayFocusGroups[0]?.subjectName ?? "this Care VIP"}`}
+                  </h2>
+                  {homeTodayFocusLoading ? (
+                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                      Refreshing
+                    </span>
+                  ) : null}
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {homeTodayFocusGroups.map((group) => (
+                    <div
+                      className="space-y-2"
+                      key={group.subjectId}
+                    >
+                      {isEveryoneFocus ? (
+                        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                          <PersonAvatar person={group.subjectAvatar} size="xs" />
+                          <span>
+                            {group.subjectLabel}
+                            {group.subjectAvatar?.managedByHousehold ? (
+                              <ManagedByHouseholdHeart className="ml-1" />
+                            ) : null}
+                          </span>
+                        </h3>
+                      ) : null}
+                      <ul className="space-y-2">
+                        {group.items.map((item) => (
+                          <li
+                            className="flex items-start gap-2 text-sm font-medium text-slate-800"
+                            key={item.id}
+                          >
+                            <span
+                              className="mt-0.5 text-base leading-none text-blue-700"
+                              aria-hidden="true"
+                            >
+                              ✓
+                            </span>
+                            <span>{item.title}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             <HealthFocusCard
+              changeControl={
+                healthFocusTopics.length > 0 && healthStoryFocusOptions.length > 1 ? (
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <button
+                      className="text-xs font-semibold text-blue-700 underline-offset-2 hover:text-blue-900 hover:underline"
+                      onClick={() =>
+                        setHealthStorySubjectChooserOpen(
+                          (currentValue) => !currentValue
+                        )
+                      }
+                      type="button"
+                    >
+                      Change
+                    </button>
+                    {healthStorySubjectChooserOpen ? (
+                      <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-1">
+                        {healthStoryFocusOptions.map((option) => {
+                          const selected =
+                            option.id === activeHealthStorySubjectId;
+
+                          return (
+                            <button
+                              aria-pressed={selected}
+                              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold transition ${
+                                selected
+                                  ? "border-blue-300 bg-blue-50 text-blue-900"
+                                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800"
+                              }`}
+                              key={option.id}
+                              onClick={() =>
+                                handleChangeHealthStorySubject(option.id)
+                              }
+                              type="button"
+                            >
+                              <PersonAvatar person={option.avatar} size="xs" />
+                              <span>
+                                {option.label}
+                                {option.avatar?.managedByHousehold ? (
+                                  <ManagedByHouseholdHeart className="ml-1" />
+                                ) : null}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null
+              }
               contextLabelOverrides={healthFocusContextLabelOverrides}
               isLoading={healthFocusLoading}
               onExpandTopics={(hiddenTopics) => {
@@ -14575,6 +15591,7 @@ export function CarePlandPers({
                   variant="inline"
                 />
               }
+              title={healthFocusTopics.length > 0 ? healthStoryTitle : "Your Health Stories"}
               topics={healthFocusTopics}
             />
 
@@ -14870,9 +15887,13 @@ export function CarePlandPers({
       locationSheetAppointment.location_name ||
       ""
     : "";
-  const locationSheetMapsLink = locationSheetAppointment
-    ? googleMapsUrl(locationSheetAppointment.location_address)
-    : null;
+  const locationSheetMapsLink = appointmentGoogleMapsUrl(
+    locationSheetAppointment
+  );
+  const locationSheetDisplayAppointment =
+    locationSheetAppointment && !canShowAppointmentAddress(locationSheetAppointment)
+      ? { ...locationSheetAppointment, location_address: null }
+      : locationSheetAppointment;
   const locationSheetPhoneHref = locationSheetAppointment?.location_phone
     ? `tel:${locationSheetAppointment.location_phone.replace(/[^\d+]/g, "")}`
     : null;
@@ -14924,6 +15945,7 @@ export function CarePlandPers({
     adminDashboardNewCount, adminEmailUpdateCurrentEmail, adminEmailUpdateNewEmail, adminEmailUpdateReason,
     adminEmailUpdateResult, adminIntegrationErrorRowKey, adminIntegrationErrorStats, adminIntegrationErrors,
     adminLastViewedAt, adminReadonlyPanelRef, adminReadonlySnapshot, adminRevealedSensitiveData,
+    setAdminRecommendationsReviewDraftSummary,
     adminSampleEmail, adminSampleForceDeclined, adminSampleStatus, adminSupportTickets,
     adminTab, adminTabForTopTab, adminTicketCategory, adminTicketChangeNote,
     adminTicketInternalNote, adminTicketNeedsFollowup, adminTicketPriority, adminTicketReplyBody,
@@ -14943,7 +15965,7 @@ export function CarePlandPers({
     assistantAnalysisRuns, assistantInteractionUserLabel, assistantReviewAdminReviews, assistantReviewConfidenceFilter,
     assistantReviewHasFeedbackOnly, assistantReviewInteractions, assistantReviewNote, assistantReviewOutcomeFilter,
     assistantReviewPromptFilter, assistantReviewPromptVersions, assistantReviewRecommendedAction, assistantReviewStatus,
-    cancelEditingProductMgmtItem, carePrepHistory, closeAdminReadonlyUserView, createProductItemFromAskRecommendation,
+    cancelEditingProductMgmtItem, careSubjects, carePrepHistory, closeAdminReadonlyUserView, createProductItemFromAskRecommendation,
     createSupportTicketFromAskRecommendation, deleteSelectedAdminIntegrationErrors, deletingAdminIntegrationErrors, draftSourceVersion,
     earlyAccessIntakeAdminNotes, earlyAccessIntakeDraft, earlyAccessIntakeFilter, earlyAccessIntakeRows,
     earlyAccessIntakeStats, editingProductMgmtItemId, expandedAdminUserCareVipRows, filteredAdminUserActivity,
@@ -15186,6 +16208,7 @@ export function CarePlandPers({
                 ...subject,
                 avatarEmoji:
                   subject.avatarEmoji ?? defaultPetAvatarEmoji(subject),
+                managed_by_household: isManagedByHouseholdSubject(subject),
               }))}
               disabled={loading}
               hideOlder={Boolean(activeAppointmentPanel)}
@@ -15343,6 +16366,7 @@ export function CarePlandPers({
               onRenamePerson: handleRenameProfilePerson,
               onRemoveAvatar: handleRemoveProfileAvatar,
               onSubmit: handleSaveProfile,
+              onUpdateManagedByHousehold: handleUpdateProfilePersonManagedByHousehold,
               onUpdatePetType: handleUpdateProfilePersonType,
               onUploadAvatar: handleUploadProfileAvatar,
               primaryButtonClassName: gentlePrimaryButtonClass,
@@ -15374,6 +16398,7 @@ export function CarePlandPers({
                     avatarUrl: subject.avatarUrl,
                     displayName: subject.display_name,
                     id: subject.id,
+                    managedByHousehold: isManagedByHouseholdSubject(subject),
                     subjectType: subject.subject_type,
                   };
                 }),
@@ -15447,7 +16472,7 @@ export function CarePlandPers({
                     <option value={ALL_SUBJECTS}>All Care VIPs</option>
                     {careSubjects.map((subject) => (
                       <option key={subject.id} value={subject.id}>
-                        {subject.display_name}
+                        {careSubjectDisplayLabel(subject)}
                       </option>
                     ))}
                   </select>
@@ -15508,7 +16533,7 @@ export function CarePlandPers({
                         ) : null}
                         {careSubjects.map((subject) => (
                           <option key={subject.id} value={subject.id}>
-                            {subject.display_name}
+                            {careSubjectDisplayLabel(subject)}
                           </option>
                         ))}
                       </select>
@@ -15796,7 +16821,7 @@ export function CarePlandPers({
                       ) : null}
                       {careSubjects.map((subject) => (
                         <option key={subject.id} value={subject.id}>
-                          {subject.display_name}
+                          {careSubjectDisplayLabel(subject)}
                         </option>
                       ))}
                     </select>
@@ -16347,7 +17372,7 @@ export function CarePlandPers({
                           ) : null}
                           {careSubjects.map((subject) => (
                             <option key={subject.id} value={subject.id}>
-                              {subject.display_name}
+                              {careSubjectDisplayLabel(subject)}
                             </option>
                           ))}
                         </select>
@@ -17006,7 +18031,7 @@ export function CarePlandPers({
                                                     key={subject.id}
                                                     value={subject.id}
                                                   >
-                                                    {subject.display_name}
+                                                    {careSubjectDisplayLabel(subject)}
                                                   </option>
                                                 ))}
                                               </select>
@@ -17256,7 +18281,7 @@ export function CarePlandPers({
                                             key={subject.id}
                                             value={subject.id}
                                           >
-                                            {subject.display_name}
+                                            {careSubjectDisplayLabel(subject)}
                                           </option>
                                         ))}
                                       </select>
@@ -17310,7 +18335,7 @@ export function CarePlandPers({
                                                 key={subject.id}
                                                 value={subject.id}
                                               >
-                                                {subject.display_name}
+                                                {careSubjectDisplayLabel(subject)}
                                               </option>
                                             ))}
                                           </select>
@@ -17608,7 +18633,7 @@ export function CarePlandPers({
                                           key={subject.id}
                                           value={subject.id}
                                         >
-                                          {subject.display_name}
+                                          {careSubjectDisplayLabel(subject)}
                                         </option>
                                       ))}
                                     </select>
@@ -17840,6 +18865,13 @@ export function CarePlandPers({
 	                  appointment.provider_organization ||
 	                  appointment.location_name ||
 	                  "";
+                const canOpenAppointmentLocation =
+                  canShowAppointmentAddress(appointment);
+                const appointmentLocationLabel =
+                  practiceLabel ||
+                  (canOpenAppointmentLocation
+                    ? appointment.location_address?.trim() ?? ""
+                    : "");
 		                const appointmentSubjectRecord = appointment.care_subject_id
 		                  ? subjectsById.get(appointment.care_subject_id) ?? null
 		                  : null;
@@ -18126,12 +19158,11 @@ export function CarePlandPers({
                           ) : null}
                           </span>
                         </div>
-                        {practiceLabel ||
-                        appointment.location_address ||
-                        appointment.location_phone ||
+                        {appointmentLocationLabel ||
                         (isEveryoneFocus && appointmentSubject) ? (
                           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[#767676] md:justify-end md:pr-12">
-                            {practiceLabel ? (
+                            {appointmentLocationLabel &&
+                            canOpenAppointmentLocation ? (
                               <button
                                 className="inline-flex items-center gap-1 text-left font-medium text-[#767676] hover:text-blue-800 md:justify-end md:text-right"
                                 onClick={() =>
@@ -18140,12 +19171,14 @@ export function CarePlandPers({
                                 type="button"
                               >
                                 <MapPinIcon className="h-4 w-4 shrink-0" />
-                                <span>{practiceLabel}</span>
+                                <span>{appointmentLocationLabel}</span>
                               </button>
                             ) : null}
-                            {!practiceLabel &&
-                            appointment.location_address ? (
-                              <p>{appointment.location_address}</p>
+                            {appointmentLocationLabel &&
+                            !canOpenAppointmentLocation ? (
+                              <span className="font-medium">
+                                {appointmentLocationLabel}
+                              </span>
                             ) : null}
                             {isEveryoneFocus && appointmentSubject ? (
                               <PersonChip
@@ -19212,7 +20245,7 @@ export function CarePlandPers({
         careplandBuildNumber={careplandBuildNumber}
         gentlePrimaryButtonClass={gentlePrimaryButtonClass}
         gentleWarmButtonClass={gentleWarmButtonClass}
-        locationSheetAppointment={locationSheetAppointment}
+        locationSheetAppointment={locationSheetDisplayAppointment}
         locationSheetMapsLink={locationSheetMapsLink}
         locationSheetPhoneHref={locationSheetPhoneHref}
         locationSheetPracticeLabel={locationSheetPracticeLabel ?? ""}

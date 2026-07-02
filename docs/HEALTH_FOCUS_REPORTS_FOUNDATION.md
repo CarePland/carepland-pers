@@ -327,7 +327,7 @@ Extraction strategy:
 
 Read surface:
 
-- The first read surface is a passive Home card labeled `Your Health Focus`.
+- The first read surface is a passive Home card labeled `Your Health Stories`, with a short help popup explaining that stories bring together appointments, provider recommendations, symptoms, conditions, medications, and user notes to reveal patterns across visits.
 - It reads grouped active `topic_mentions` through `app/api/health-topics/summary/route.ts`.
 - It prioritizes human-facing health concerns over supporting extraction categories. Topics such as Blood Pressure, Knee Pain, Asthma / Breathing, Cholesterol, Fatigue, Sleep, Nutrition / Weight, and Medication Changes should outrank supporting topics such as Follow-Up, Lab Results, and Imaging when Home space is limited.
 - It shows topic names, short plain-language narrative summaries, mention counts, latest mention dates, and simple ongoing/follow-up pills.

@@ -100,8 +100,29 @@ export function PersonChip({
     <span
       className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-[#767676] ${className}`}
     >
-      <span>{labelPrefix} {displayName}</span>
+      <span>
+        {labelPrefix} {displayName}
+        {person?.managedByHousehold ? (
+          <ManagedByHouseholdHeart className="ml-1" />
+        ) : null}
+      </span>
       <PersonAvatar person={person} size={size} />
+    </span>
+  );
+}
+
+export function ManagedByHouseholdHeart({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return (
+    <span
+      aria-label="Managed by household"
+      className={`inline-block text-base font-black leading-none text-blue-700 ${className}`}
+      title="Managed by household"
+    >
+      ♥
     </span>
   );
 }

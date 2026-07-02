@@ -123,6 +123,7 @@ export function interpretTalkInput({
       careSubjectId,
       confidence: 0.94,
       eventType: "measurement.weight",
+      intent: "measured_track_event",
       needsReview: false,
       note: null,
       occurredAt,
@@ -156,7 +157,6 @@ export function interpretTalkInput({
     careSubjectId,
     normalizedText,
     occurredAt,
-    text,
   });
   if (walking) {
     return walking;
@@ -168,6 +168,7 @@ export function interpretTalkInput({
       careSubjectId,
       confidence: 0.72,
       eventType: "symptom.check",
+      intent: "track_event_activity",
       needsReview: true,
       note: null,
       occurredAt,
@@ -355,6 +356,7 @@ function medicationResult({
     careSubjectId,
     confidence: 0.84,
     eventType: skipped ? "medication.skipped" : "medication.taken",
+    intent: "track_event_activity",
     needsReview: false,
     note: null,
     occurredAt,
@@ -376,14 +378,12 @@ function walkingActivityResult({
   careSubjectId,
   normalizedText,
   occurredAt,
-  text,
 }: {
   basePayload: Record<string, unknown>;
   careCircleId: string;
   careSubjectId: string;
   normalizedText: string;
   occurredAt: string;
-  text: string;
 }): TalkInterpretationResult | null {
   if (!/\b(walk|walked|walking)\b/.test(normalizedText)) {
     return null;
@@ -399,6 +399,7 @@ function walkingActivityResult({
     careSubjectId,
     confidence: 0.88,
     eventType: "activity.walking",
+    intent: "track_event_activity",
     needsReview: false,
     note: null,
     occurredAt,
@@ -406,7 +407,6 @@ function walkingActivityResult({
       ...basePayload,
       activityKind: "walking",
       destination: destination || undefined,
-      interpretedFrom: compactSnippet(text),
     },
     title,
   });
@@ -417,6 +417,7 @@ function trackEventResult({
   careSubjectId,
   confidence,
   eventType,
+  intent,
   needsReview,
   note,
   occurredAt,
@@ -429,6 +430,7 @@ function trackEventResult({
   careSubjectId: string;
   confidence: number;
   eventType: string;
+  intent: TalkIntent;
   needsReview: boolean;
   note: string | null;
   occurredAt: string;
@@ -459,7 +461,7 @@ function trackEventResult({
   return {
     confidence,
     displayResponse: response,
-    intent: value === undefined ? "track_event_activity" : "measured_track_event",
+    intent,
     needsConfirmation: false,
     needsReview,
     proposedAction: "create_track_event",
@@ -541,10 +543,6 @@ function normalizeTalkText(value: string) {
     .replace(/[.,!?]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function compactSnippet(value: string) {
-  return value.trim().replace(/\s+/g, " ").slice(0, 120);
 }
 
 function formatAppointmentTime(value: string) {

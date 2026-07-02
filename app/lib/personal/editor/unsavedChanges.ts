@@ -34,6 +34,10 @@ type AppointmentSummarySource = {
 };
 
 type BuildUnsavedSignOutChangesInput = {
+  adminRecommendationsReviewDraft?: {
+    hasReviewNote: boolean;
+    selectedCount: number;
+  } | null;
   appointmentDrafts: Record<string, AppointmentDetailsDraft>;
   appointmentsById: Map<string, AppointmentSummarySource>;
   askConversationComplete: boolean;
@@ -64,6 +68,7 @@ type BuildUnsavedSignOutChangesInput = {
 };
 
 export function buildUnsavedSignOutChanges({
+  adminRecommendationsReviewDraft,
   appointmentDrafts,
   appointmentsById,
   askConversationComplete,
@@ -108,6 +113,19 @@ export function buildUnsavedSignOutChanges({
 
   if (hasUnsavedProfileChanges) {
     addChange({ key: "profile", label: "Profile" });
+  }
+
+  if (
+    adminRecommendationsReviewDraft?.selectedCount ||
+    adminRecommendationsReviewDraft?.hasReviewNote
+  ) {
+    addChange({
+      detail: adminRecommendationsReviewDraft.selectedCount
+        ? `${adminRecommendationsReviewDraft.selectedCount} selected`
+        : "Review note drafted",
+      key: "admin-todays-focus-review",
+      label: "Today's Focus Review",
+    });
   }
 
   if (hasUnaddedCareVipName) {

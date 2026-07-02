@@ -50,6 +50,10 @@ export function buildFocusItemDraftFromRecommendation(
     completionEventType
   );
   const rankingDecision = focusItemRankingDecisionFromRecommendation(recommendation);
+  const presentation = focusPresentationFromRecommendation({
+    completionEventType,
+    recommendationTitle: recommendation.title,
+  });
 
   return normalizeFocusItemDraft({
     activeStartDate: new Date().toISOString().slice(0, 10),
@@ -61,13 +65,50 @@ export function buildFocusItemDraftFromRecommendation(
     completionType,
     focusType: "daily_focus",
     importanceScore: rankingDecision.importanceScore,
-    promptText: recommendation.description || recommendation.reason,
+    promptText:
+      presentation.promptText || recommendation.description || recommendation.reason,
     recurrenceRule: "daily",
     schedule: {},
     sortOrder: 100,
     status: "active",
-    title: recommendation.title,
+    title: presentation.title,
   });
+}
+
+export function focusPresentationFromRecommendation({
+  completionEventType,
+  recommendationTitle,
+}: {
+  completionEventType: string;
+  recommendationTitle: string;
+}) {
+  switch (completionEventType) {
+    case "measurement.weight":
+      return {
+        promptText: "Step on the scale and enter the number when you are ready.",
+        title: "Weigh yourself",
+      };
+    case "measurement.blood_pressure":
+      return {
+        promptText: "Take the reading and enter the numbers when you are done.",
+        title: "Take today's blood pressure reading",
+      };
+    case "activity.walking":
+      return {
+        promptText: "Take a short walk when it fits your day.",
+        title: "Take a short walk",
+      };
+    case "note.caregiver":
+      return {
+        promptText: "Add a quick note for the care team to review later.",
+        title: personFacingTitleFromRecommendationTitle(recommendationTitle),
+      };
+    default:
+      return {
+        promptText: "",
+        title: personFacingTitleFromRecommendationTitle(recommendationTitle),
+      };
+  }
 }
 
 export function importanceScoreFromPriority(priority: RecommendationPriority | string) {
@@ -91,12 +132,13 @@ export function focusItemRankingDecisionFromPriority(
   priority: RecommendationPriority | string
 ) {
   switch (priority) {
+    case "strong":
     case "critical":
       return {
         importanceScore: 95,
-        priority,
+        priority: priority === "critical" ? "strong" : priority,
         rationale:
-          "Converted Focus Item importance is 95 because the recommendation priority is critical.",
+          "Converted Focus Item importance is 95 because the recommendation is strongly supported.",
       };
     case "high":
       return {
@@ -180,6 +222,24 @@ function measuredDefaultsForEventType(eventType: string): FocusCompletionConfig 
     default:
       return {};
   }
+}
+
+function personFacingTitleFromRecommendationTitle(title: string) {
+  const normalized = title.trim();
+
+  if (/^record weight$/i.test(normalized)) {
+    return "Weigh yourself";
+  }
+
+  if (/^track home blood pressure readings$/i.test(normalized)) {
+    return "Take today's blood pressure reading";
+  }
+
+  if (/^review medication timing notes$/i.test(normalized)) {
+    return "Make a medication timing note";
+  }
+
+  return normalized;
 }
 
 function stringValue(value: unknown) {

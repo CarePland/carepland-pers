@@ -30,6 +30,7 @@ type CareSubjectRow = {
   id: string;
   is_active: boolean | null;
   is_default: boolean | null;
+  managed_by_household?: boolean | null;
   subject_type: string | null;
 };
 
@@ -228,7 +229,7 @@ export async function listPersPeopleForConnect(
 
   let careSubjectsQuery = supabase
     .from("care_subjects")
-    .select("id,care_circle_id,display_name,subject_type,is_default,is_active,avatar_url,avatar_type,avatar_alt_text")
+    .select("id,care_circle_id,display_name,subject_type,is_default,is_active,managed_by_household,avatar_url,avatar_type,avatar_alt_text")
     .in("care_circle_id", careCircleIds)
     .eq("is_active", true)
     .order("is_default", { ascending: false })
@@ -243,7 +244,7 @@ export async function listPersPeopleForConnect(
   const error = careSubjectsResult.error;
 
   if (error) {
-    if (!isMissingAvatarColumn(error)) {
+    if (!isMissingCareSubjectOptionalColumn(error)) {
       throw error;
     }
 
@@ -270,6 +271,7 @@ export async function listPersPeopleForConnect(
       avatar_alt_text: null,
       avatar_type: null,
       avatar_url: null,
+      managed_by_household: false,
     })) as CareSubjectRow[];
   }
 
@@ -287,6 +289,7 @@ export async function listPersPeopleForConnect(
       id: row.id,
       isActive: row.is_active !== false,
       isDefault: row.is_default === true,
+      managedByHousehold: row.managed_by_household === true,
       subjectType: row.subject_type ?? undefined,
     }));
 
@@ -326,7 +329,7 @@ export async function listPersFocusPeopleForConnect(
 
   const careSubjectsQuery = supabase
     .from("care_subjects")
-    .select("id,care_circle_id,display_name,subject_type,is_default,is_active,avatar_url,avatar_type,avatar_alt_text")
+    .select("id,care_circle_id,display_name,subject_type,is_default,is_active,managed_by_household,avatar_url,avatar_type,avatar_alt_text")
     .in("care_circle_id", careCircleIds)
     .eq("is_active", true)
     .order("is_default", { ascending: false })
@@ -337,7 +340,7 @@ export async function listPersFocusPeopleForConnect(
   const error = careSubjectsResult.error;
 
   if (error) {
-    if (!isMissingAvatarColumn(error)) {
+    if (!isMissingCareSubjectOptionalColumn(error)) {
       throw error;
     }
 
@@ -358,6 +361,7 @@ export async function listPersFocusPeopleForConnect(
       avatar_alt_text: null,
       avatar_type: null,
       avatar_url: null,
+      managed_by_household: false,
     })) as CareSubjectRow[];
   }
 
@@ -373,6 +377,7 @@ export async function listPersFocusPeopleForConnect(
       id: row.id,
       isActive: row.is_active !== false,
       isDefault: row.is_default === true,
+      managedByHousehold: row.managed_by_household === true,
       subjectType: row.subject_type ?? undefined,
     }));
 
@@ -532,7 +537,7 @@ function isMissingTable(error: unknown, tableName: string) {
   );
 }
 
-function isMissingAvatarColumn(error: unknown) {
+function isMissingCareSubjectOptionalColumn(error: unknown) {
   if (!error || typeof error !== "object") {
     return false;
   }
@@ -540,7 +545,11 @@ function isMissingAvatarColumn(error: unknown) {
   const maybeError = error as { code?: string; message?: string };
   const message = maybeError.message ?? "";
 
-  return maybeError.code === "42703" || message.includes("avatar_");
+  return (
+    maybeError.code === "42703" ||
+    message.includes("avatar_") ||
+    message.includes("managed_by_household")
+  );
 }
 
 async function signedAvatarUrl(
