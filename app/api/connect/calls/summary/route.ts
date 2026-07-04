@@ -9,10 +9,12 @@ import {
 } from "@/app/lib/connect/calls/callScoping";
 import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
 import {
+  cleanupExpiredLocalConnectCallTranscripts,
   markStaleLocalConnectCallsMissed,
   readLocalConnectCalls,
 } from "@/app/lib/connect/calls/server/localCalls";
 import {
+  cleanupExpiredSupabaseConnectCallTranscripts,
   markStaleSupabaseConnectCallsMissed,
   readSupabaseConnectCalls,
 } from "@/app/lib/connect/calls/server/supabaseCallStore";
@@ -37,6 +39,8 @@ export async function GET(request: Request) {
     const access = await readConnectCallPersonAccessForRequest(request, personId);
 
     await Promise.all([
+      cleanupExpiredLocalConnectCallTranscripts({ mainConnectUserPersonId: personId }),
+      cleanupExpiredSupabaseConnectCallTranscripts(access),
       markStaleLocalConnectCallsMissed(),
       markStaleSupabaseConnectCallsMissed(access),
     ]);
@@ -63,6 +67,55 @@ export async function GET(request: Request) {
         mainConnectUserPersonId: null,
         ok: false,
         summary: emptyConnectCallSummary(),
+      },
+      { status: 401 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const payload = (await request.json().catch(() => ({}))) as {
+      action?: string;
+      personId?: string;
+    };
+    const personId = payload.personId?.trim() ?? "";
+
+    if (!personId) {
+      return NextResponse.json(
+        {
+          error: "Select a Main Connect User before cleaning up call transcripts.",
+          ok: false,
+        },
+        { status: 400 }
+      );
+    }
+    if (payload.action !== "cleanup_expired_transcripts") {
+      return NextResponse.json(
+        { error: "Unsupported call summary cleanup action.", ok: false },
+        { status: 400 }
+      );
+    }
+
+    const access = await readConnectCallPersonAccessForRequest(request, personId);
+    const [localCount, supabaseCount] = await Promise.all([
+      cleanupExpiredLocalConnectCallTranscripts({ mainConnectUserPersonId: personId }),
+      cleanupExpiredSupabaseConnectCallTranscripts(access),
+    ]);
+
+    return NextResponse.json({
+      cleanedCount: (localCount ?? 0) + (supabaseCount ?? 0),
+      mainConnectUserPersonId: personId,
+      ok: true,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to clean up expired Connect transcripts.",
+        ok: false,
       },
       { status: 401 }
     );

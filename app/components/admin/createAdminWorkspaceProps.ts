@@ -362,7 +362,7 @@ export function createAdminWorkspaceProps({
         id: subject.id,
       })
     ),
-    formatDate: formatAdminDate,
+    formatDate: (value: string | null | undefined) => formatAdminDate(value ?? null),
     onDraftSummaryChange: setAdminRecommendationsReviewDraftSummary,
   };
 

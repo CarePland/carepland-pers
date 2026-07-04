@@ -5,6 +5,7 @@ import { generateConnectCallCareSummary } from "@/app/lib/connect/calls/server/c
 import {
   approveLocalConnectCallSummary,
   readLocalConnectCalls,
+  saveLocalConnectCallSummaryDraft,
   updateLocalConnectCallSummary,
 } from "@/app/lib/connect/calls/server/localCalls";
 import {
@@ -13,6 +14,7 @@ import {
   recordSupabaseConnectCallGeneratedSummary,
   recordSupabaseConnectCallEvent,
   retrySupabaseApprovedCallTranscriptCleanup,
+  saveSupabaseConnectCallSummaryDraft,
 } from "@/app/lib/connect/calls/server/supabaseCallStore";
 
 type RouteContext = {
@@ -26,6 +28,7 @@ export async function POST(request: Request, context: RouteContext) {
       action?: string;
       approvedBy?: string;
       approvedSummaryText?: string;
+      draftText?: string;
       mainConnectUserPersonId?: string;
     };
     const personId = payload.mainConnectUserPersonId?.trim() ?? "";
@@ -43,7 +46,8 @@ export async function POST(request: Request, context: RouteContext) {
     if (
       payload.action !== "approve" &&
       payload.action !== "cleanup_transcript" &&
-      payload.action !== "regenerate"
+      payload.action !== "regenerate" &&
+      payload.action !== "save_draft"
     ) {
       return NextResponse.json(
         { error: "Unsupported call summary action.", ok: false },
@@ -53,6 +57,36 @@ export async function POST(request: Request, context: RouteContext) {
 
     const access = await readConnectCallPersonAccessForRequest(request, personId);
     const approvedSummaryText = payload.approvedSummaryText?.trim() || "";
+
+    if (payload.action === "save_draft") {
+      const call =
+        (await saveSupabaseConnectCallSummaryDraft(callId, access, {
+          draftText: String(payload.draftText ?? ""),
+          updatedBy: payload.approvedBy || "receiver",
+        })) ??
+        (await saveLocalConnectCallSummaryDraft(callId, {
+          draftText: String(payload.draftText ?? ""),
+          mainConnectUserPersonId: personId,
+          updatedBy: payload.approvedBy || "receiver",
+        }));
+
+      if (!call) {
+        return NextResponse.json(
+          {
+            error: "Call summary draft could not be saved.",
+            mainConnectUserPersonId: personId,
+            ok: false,
+          },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json({
+        call,
+        mainConnectUserPersonId: personId,
+        ok: true,
+      });
+    }
 
     if (payload.action === "cleanup_transcript") {
       const call =

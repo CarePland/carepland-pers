@@ -803,12 +803,12 @@
   grid-row: 1;
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  grid-template-rows: 154px 102px 178px 68px;
+  grid-template-rows: 154px 126px 154px 68px;
   grid-template-areas:
     "focus focus focus focus focus focus controls actions actions actions actions actions"
     "upcoming upcoming upcoming upcoming upcoming upcoming upcoming actions actions actions actions actions"
     "talk talk talk talk talk talk talk actions actions actions actions actions"
-    "greeting greeting greeting greeting greeting time time time utilities utilities utilities utilities";
+    "greeting greeting greeting greeting time time time utilities utilities utilities utilities utilities";
   gap: 16px 14px;
   padding: 10px 18px 8px;
 }
@@ -903,12 +903,12 @@
   grid-area: time;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: flex-end;
   gap: 12px;
-  margin-left: -14px;
-  padding: 0 4px;
+  margin-left: 0;
+  padding: 0;
   color: #17231d;
-  text-align: left;
+  text-align: right;
 }
 
 .focusHomeTimePanel > span {
@@ -1136,14 +1136,14 @@
   flex-direction: unset;
   align-items: stretch;
   justify-content: stretch;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   align-content: center;
-  gap: 0;
+  gap: 8px;
   width: 100%;
   min-height: 0;
   height: 100%;
   transform: none;
-  padding: 8px 20px;
+  padding: 18px 28px 20px;
 }
 
 .focusHomeAppointmentPanel:active {
@@ -1161,24 +1161,24 @@
   width: 100%;
   max-width: 100%;
   margin: 0;
-  overflow: hidden;
-  font-size: 1.52rem;
+  overflow: visible;
+  font-size: 2rem;
   line-height: 1.02;
   text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .focusHomeAppointmentMeta {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
+  display: block;
   width: 100%;
   max-width: 100%;
   margin: 0;
   color: #5d675f;
+  font-size: 1.55rem;
   font-weight: 950;
   line-height: 1;
+  text-align: center;
 }
 
 .focusHomeAppointmentPanel .focusHomeAppointmentMeta span {
@@ -1237,9 +1237,10 @@
 .focusHomeUtilityStack {
   grid-area: utilities;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   align-items: center;
+  justify-content: stretch;
   align-self: stretch;
   min-height: 0;
   padding: 0;
@@ -1251,10 +1252,18 @@
   font-size: 1rem;
 }
 
+.focusHomeUtilityStack .focusHomeUtilityAction:first-child:nth-last-child(2) {
+  grid-column: 2;
+}
+
+.focusHomeUtilityStack .focusHomeUtilityAction:nth-child(2):last-child {
+  grid-column: 3;
+}
+
 .cleaningFooterRow {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(220px, 270px) minmax(0, 1fr) 124px;
+  grid-template-columns: minmax(220px, 270px) minmax(0, 1fr) 112px 124px;
   grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 6px 10px;
   align-items: stretch;
@@ -1342,13 +1351,25 @@
 }
 
 .soundsFooterAction {
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 1;
 }
 
 .cleanFooterAction {
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 2;
+}
+
+.reviewFooterAction {
+  background: #345d83;
+  color: #fff;
+}
+
+.cleaningFooterRow .reviewFooterAction {
+  grid-column: 3;
+  grid-row: 1 / -1;
+  width: 112px;
+  font-size: 0.9rem;
 }
 
 .talkFooterAction:active,
@@ -3391,6 +3412,20 @@
   background: #fbfcfa;
 }
 
+.callTextModal {
+  place-items: stretch;
+  padding: 0;
+}
+
+.callTextModal .incomingCallModal {
+  display: grid;
+  width: 100%;
+  max-height: none;
+  border-width: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
 .incomingCallPrompt {
   width: min(760px, calc(100% - 36px));
   gap: 18px;
@@ -3401,6 +3436,10 @@
 
 .deskPhoneMode .modal {
   padding: 10px;
+}
+
+.deskPhoneMode .callTextModal {
+  padding: 0;
 }
 
 .deskPhoneMode .incomingCallPrompt {
@@ -3495,8 +3534,7 @@
     font-size: 1.1rem;
   }
 
-  .mutedNotice,
-  .summaryClarificationNotice {
+  .mutedNotice {
     font-size: 1.3rem;
   }
 
@@ -3699,12 +3737,20 @@
 
 .callTextView {
   display: grid;
-  gap: 18px;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 12px;
   min-height: 430px;
   border: 4px solid #17440f;
   border-radius: 8px;
   background: #fdfbf4;
   padding: 18px;
+}
+
+.callTextModal .callTextView {
+  min-height: 100%;
+  border-width: 0;
+  border-radius: 0;
+  padding: clamp(16px, 2.6vw, 26px);
 }
 
 .callTextToolbar {
@@ -3714,29 +3760,79 @@
   align-items: start;
 }
 
-.callTextToolbar span {
-  color: #5d675f;
-  font-size: 1rem;
-  font-weight: 950;
-  text-transform: uppercase;
-}
-
 .callTextToolbar h3 {
   margin: 0;
-  font-size: 2.35rem;
-  line-height: 1;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.04;
 }
 
 .callTextToolbarActions {
-  display: grid;
+  display: flex;
+  align-items: start;
   gap: 10px;
-  justify-items: end;
+  justify-content: end;
+}
+
+.callTextToolbarActions .readerSizeRow {
+  grid-template-columns: repeat(3, 170px);
+  gap: 10px;
+  margin: 0;
+}
+
+.callTextToolbarActions .readerSizeButton {
+  min-height: 58px;
+  font-size: 1.18rem;
+}
+
+.callTextToolbarActions > .modalButton {
+  min-width: 154px;
+  min-height: 58px;
+  white-space: nowrap;
 }
 
 .callSummaryActions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
+  align-items: stretch;
+}
+
+.callSummaryActions .modalButton {
+  font-size: 1.45rem;
+}
+
+.callSummaryInstruction {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #4f5b53;
+  font-size: 1.28rem;
+  font-weight: 900;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.callSummaryPageControls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 64px;
+}
+
+.callSummaryPageControls .modalButton {
+  width: 74px;
+  min-width: 74px;
+  min-height: 52px;
+  padding: 6px 12px;
+}
+
+.callSummaryPageControls span {
+  min-width: 92px;
+  color: #17231d;
+  font-size: 1.45rem;
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
 }
 
 .callSummaryPolicyNotice {
@@ -3765,19 +3861,23 @@
 
 .callSummaryEditBox {
   display: grid;
-  gap: 10px;
+  gap: 0;
+  min-height: 0;
 }
 
 .callSummaryEditBox span {
-  color: #5d675f;
-  font-size: 1rem;
-  font-weight: 950;
-  text-transform: uppercase;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
 }
 
 .callSummaryEditBox textarea {
-  min-height: 260px;
-  resize: vertical;
+  min-height: 220px;
+  height: 100%;
+  overflow: hidden;
+  resize: none;
   border: 4px solid #17440f;
   border-radius: 8px;
   background: white;
@@ -3789,17 +3889,87 @@
   line-height: 1.2;
 }
 
-.summaryClarificationNotice {
-  grid-column: 1 / -1;
-  margin: 0;
-  border: 3px solid #d8c48b;
+.callSummaryEditBox.readerTextStandard textarea {
+  font-size: 1.75rem;
+}
+
+.callSummaryEditBox.readerTextLarge textarea {
+  font-size: 2.35rem;
+}
+
+.callSummaryEditBox.readerTextExtra textarea {
+  font-size: 3rem;
+}
+
+.callSummaryEditBox textarea::placeholder {
+  color: #79857e;
+  font-weight: 800;
+}
+
+.pendingCallReviewStrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+  border: 4px solid #d8c48b;
   border-radius: 8px;
   background: #fff9e8;
-  padding: 14px;
+  padding: 16px;
+}
+
+.pendingCallReviewStrip div {
+  display: grid;
+  gap: 4px;
+}
+
+.pendingCallReviewStrip span {
   color: #5a4b1e;
-  font-size: 1.55rem;
-  font-weight: 900;
-  line-height: 1.15;
+  font-size: 0.9rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pendingCallReviewStrip strong {
+  color: #173150;
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+
+.pendingCallReviewStrip button {
+  min-width: 132px;
+  min-height: 58px;
+  border: 0;
+  border-radius: 8px;
+  background: #345d83;
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 950;
+}
+
+.deskPhoneMode .pendingCallReviewStrip {
+  position: absolute;
+  z-index: 35;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+  margin: 0;
+  padding: 12px 14px;
+  box-shadow: 0 7px 0 rgba(42, 31, 21, 0.22);
+}
+
+.gxvFocusHomeMode .pendingCallReviewStrip {
+  right: auto;
+  width: min(640px, calc(100% - 36px));
+}
+
+.deskPhoneMode .pendingCallReviewStrip strong {
+  font-size: 1.15rem;
+}
+
+.deskPhoneMode .pendingCallReviewStrip button {
+  min-height: 50px;
 }
 
 .incomingCallPanel {

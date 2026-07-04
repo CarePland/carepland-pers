@@ -23,6 +23,9 @@ type LocalCallsIndex = {
 
 const defaultIndexPath = path.join(process.cwd(), "tmp", "connect-calls", "calls.json");
 const defaultRingingTimeoutMs = 45_000;
+const defaultTranscriptRetentionMs = 7 * 24 * 60 * 60 * 1000;
+const expiredUnreviewedNote =
+  "Transcript expired before formal approval. Generated summary retained as unapproved.";
 
 const connectCallStates = new Set<string>([
   "answered",
@@ -106,14 +109,22 @@ export async function recordLocalConnectCall(
     callerName: input.callerName || "Andrew",
     mainConnectUserPersonId: personId,
     modelSummaryText: input.modelSummaryText,
+    generatedSummaryText: input.generatedSummaryText,
     recipientName: input.recipientName || "",
     recipientPersonId: personId,
     state: isConnectCallState(input.state) ? input.state : "ringing",
     summaryApprovedAt: input.summaryApprovedAt,
     summaryApprovedBy: input.summaryApprovedBy,
+    summaryApprovalDraftText: input.summaryApprovalDraftText,
+    summaryApprovalDraftUpdatedAt: input.summaryApprovalDraftUpdatedAt,
+    summaryApprovalDraftUpdatedBy: input.summaryApprovalDraftUpdatedBy,
+    summaryReviewNote: input.summaryReviewNote,
+    summaryReviewStatus: input.summaryReviewStatus,
     summaryStatus: input.summaryStatus || "not_requested",
     summaryText: input.summaryText,
     transcriptDeletedAt: input.transcriptDeletedAt,
+    transcriptExpiresAt: input.transcriptExpiresAt,
+    transcriptSegments: input.transcriptSegments,
     transcriptStatus: input.transcriptStatus || "not_started",
     transcriptText: input.transcriptText,
     updatedAt: input.updatedAt || now,
@@ -195,18 +206,30 @@ export async function approveLocalConnectCallSummary(
     }
 
     const approvedSummaryText =
-      options.approvedSummaryText?.trim() || call.summaryText || "";
+      options.approvedSummaryText?.trim() ||
+      call.summaryApprovalDraftText?.trim() ||
+      call.generatedSummaryText ||
+      call.modelSummaryText ||
+      call.summaryText ||
+      "";
     updated = {
       ...call,
       approvedSummaryText,
-      modelSummaryText: call.modelSummaryText || call.summaryText || "",
+      generatedSummaryText:
+        call.generatedSummaryText || call.modelSummaryText || call.summaryText || "",
+      modelSummaryText: call.modelSummaryText || call.generatedSummaryText || call.summaryText || "",
       summaryApprovedAt: now,
       summaryApprovedBy: options.approvedBy || "receiver",
+      summaryApprovalDraftText: approvedSummaryText,
+      summaryApprovalDraftUpdatedAt: call.summaryApprovalDraftUpdatedAt,
+      summaryApprovalDraftUpdatedBy: call.summaryApprovalDraftUpdatedBy,
+      summaryReviewStatus: "approved",
       summaryStatus: "approved",
       summaryText: approvedSummaryText,
       transcriptDeletedAt: now,
       transcriptCleanupStatus: "completed",
       transcriptStatus: "deleted",
+      transcriptSegments: undefined,
       transcriptText: undefined,
       updatedAt: now,
     };
@@ -249,7 +272,6 @@ export async function recordLocalConnectCallTranscriptSegment(
       return call;
     }
 
-    const previousTranscript = call.transcriptText?.trim();
     const segment: ConnectCallTranscriptSegment = {
       chunkEndedMs: input.chunkEndedMs,
       chunkIndex: input.chunkIndex,
@@ -259,19 +281,12 @@ export async function recordLocalConnectCallTranscriptSegment(
       transcriptText: input.transcriptText,
     };
     storedSegment = segment;
-    const nextTranscriptText = assembleConnectCallTranscript([
-      previousTranscript
-        ? {
-            chunkEndedMs: Math.max(0, input.chunkStartedMs - 1),
-            chunkIndex: input.chunkIndex - 1,
-            chunkStartedMs: 0,
-            overlapStartedMs: 0,
-            transcriptStatus: "completed",
-            transcriptText: previousTranscript,
-          }
-        : null,
+    const existingSegments = call.transcriptSegments || [];
+    const transcriptSegments = [
+      ...existingSegments.filter((item) => item.chunkIndex !== segment.chunkIndex),
       segment,
-    ].filter((item): item is ConnectCallTranscriptSegment => Boolean(item)));
+    ].sort((a, b) => a.chunkIndex - b.chunkIndex);
+    const nextTranscriptText = assembleConnectCallTranscript(transcriptSegments);
     const transcriptStatus = nextTranscriptText
       ? "capturing"
       : input.transcriptStatus === "failed" || input.transcriptStatus === "not_configured"
@@ -281,6 +296,7 @@ export async function recordLocalConnectCallTranscriptSegment(
     updated = {
       ...call,
       transcriptStatus,
+      transcriptSegments,
       transcriptText: nextTranscriptText || call.transcriptText,
       updatedAt: now,
     };
@@ -326,14 +342,25 @@ export async function updateLocalConnectCallSummary(
       return call;
     }
 
+    const nextStatus = normalizeLocalSummaryStatus(input.summaryStatus);
+    const generatedSummaryText = nextStatus === "pending_review" ? input.summaryText : call.generatedSummaryText;
     updated = {
       ...call,
+      generatedSummaryText,
       modelSummaryText:
-        input.summaryStatus === "completed"
+        nextStatus === "pending_review"
           ? input.summaryText
           : call.modelSummaryText,
-      summaryStatus: input.summaryStatus,
+      summaryApprovalDraftText:
+        nextStatus === "pending_review" ? call.summaryApprovalDraftText || input.summaryText : call.summaryApprovalDraftText,
+      summaryReviewStatus:
+        nextStatus === "pending_review" ? "pending_review" : call.summaryReviewStatus,
+      summaryStatus: nextStatus,
       summaryText: input.summaryText,
+      transcriptExpiresAt:
+        nextStatus === "pending_review"
+          ? call.transcriptExpiresAt || new Date(Date.parse(now) + defaultTranscriptRetentionMs).toISOString()
+          : call.transcriptExpiresAt,
       updatedAt: now,
     };
     return updated;
@@ -346,8 +373,104 @@ export async function updateLocalConnectCallSummary(
   return updated;
 }
 
+export async function saveLocalConnectCallSummaryDraft(
+  callId: string,
+  input: {
+    draftText: string;
+    mainConnectUserPersonId?: string;
+    updatedBy?: string;
+  },
+  options: { indexPath?: string } = {}
+): Promise<ConnectCallRecord | null> {
+  const indexPath = options.indexPath ?? defaultIndexPath;
+  const index = await readLocalCallsIndex(indexPath);
+  const now = new Date().toISOString();
+  let updated: ConnectCallRecord | null = null;
+
+  index.calls = index.calls.map((call) => {
+    if (call.callId !== callId) return call;
+    if (
+      input.mainConnectUserPersonId &&
+      call.mainConnectUserPersonId !== input.mainConnectUserPersonId &&
+      call.recipientPersonId !== input.mainConnectUserPersonId
+    ) {
+      return call;
+    }
+
+    updated = {
+      ...call,
+      summaryApprovalDraftText: input.draftText,
+      summaryApprovalDraftUpdatedAt: now,
+      summaryApprovalDraftUpdatedBy: input.updatedBy || "receiver",
+      updatedAt: now,
+    };
+    return updated;
+  });
+
+  if (updated) await writeLocalCallsIndex(index, indexPath);
+  return updated;
+}
+
+export async function cleanupExpiredLocalConnectCallTranscripts(
+  options: { indexPath?: string; mainConnectUserPersonId?: string; now?: Date } = {}
+) {
+  const indexPath = options.indexPath ?? defaultIndexPath;
+  const index = await readLocalCallsIndex(indexPath);
+  const now = options.now ?? new Date();
+  const nowIso = now.toISOString();
+  let changed = 0;
+
+  index.calls = index.calls.map((call) => {
+    if (
+      options.mainConnectUserPersonId &&
+      call.mainConnectUserPersonId !== options.mainConnectUserPersonId &&
+      call.recipientPersonId !== options.mainConnectUserPersonId
+    ) {
+      return call;
+    }
+    if (call.summaryStatus === "approved") return call;
+    const expiresAtMs = Date.parse(String(call.transcriptExpiresAt || ""));
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs > now.getTime()) return call;
+    if (!call.transcriptText && call.transcriptStatus === "deleted") return call;
+
+    changed += 1;
+    return {
+      ...call,
+      generatedSummaryText: call.generatedSummaryText || call.modelSummaryText || call.summaryText || "",
+      summaryReviewNote: expiredUnreviewedNote,
+      summaryReviewStatus: "expired_unreviewed",
+      summaryStatus: call.summaryStatus === "not_needed" ? "not_needed" : "expired_unreviewed",
+      transcriptCleanupStatus: "completed",
+      transcriptDeletedAt: nowIso,
+      transcriptStatus: "deleted",
+      transcriptSegments: undefined,
+      transcriptText: undefined,
+      updatedAt: nowIso,
+    };
+  });
+
+  if (changed > 0) await writeLocalCallsIndex(index, indexPath);
+  return changed;
+}
+
 export function isConnectCallState(value: unknown): value is ConnectCallState {
   return connectCallStates.has(String(value || ""));
+}
+
+function normalizeLocalSummaryStatus(value: unknown) {
+  const status = String(value || "");
+  if (status === "completed" || status === "pending") return "pending_review";
+  if (status === "failed") return "summary_failed";
+  return [
+    "approved",
+    "cleanup_pending",
+    "expired_unreviewed",
+    "not_needed",
+    "pending_review",
+    "summary_failed",
+  ].includes(status)
+    ? status
+    : "summary_failed";
 }
 
 async function readLocalCallsIndex(indexPath: string) {

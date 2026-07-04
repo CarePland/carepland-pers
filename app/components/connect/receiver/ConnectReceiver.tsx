@@ -115,9 +115,12 @@ type Message = {
 };
 
 type ReceiverCall = {
+  approvedSummaryText?: string;
   callId: string;
   callerName: string;
+  generatedSummaryText?: string;
   state: string;
+  summaryApprovalDraftText?: string;
   summaryStatus?: string;
   summaryText?: string;
   transcriptCleanupStatus?: string;
@@ -140,6 +143,20 @@ type SoundHelp = {
   steps: string[];
   actions?: Array<"enable_sounds" | "set_volume_high">;
 };
+
+type ReceiverAttentionItem =
+  | {
+      kind: "call_summary_review";
+      label: "Review";
+      priority: 100;
+      call: Partial<ReceiverCall>;
+    }
+  | {
+      kind: "new_message";
+      label: "Message";
+      priority: 80;
+      message: Message;
+    };
 
 const RECEIVER_CANVAS_WIDTH = 900;
 const RECEIVER_CANVAS_HEIGHT = 1047;
@@ -354,9 +371,11 @@ type ModalState =
       callStartedAt?: string;
       callState: Exclude<ReceiverCallUiState, "idle">;
       summaryApproval?: "approved";
-      summaryClarificationOpen?: boolean;
       approvedSummaryText?: string;
+      generatedSummaryText?: string;
       summaryDraft?: string;
+      summaryDraftSavedText?: string;
+      summaryPage?: number;
       summaryAutoOpened?: boolean;
       summaryStatus?: string;
       summaryText?: string;
@@ -1097,6 +1116,10 @@ function greetingFor(date: Date) {
   return "Good night";
 }
 
+function firstDisplayName(displayName: string) {
+  return displayName.trim().split(/\s+/)[0] || displayName;
+}
+
 function contactCanCallNow(contact: Contact) {
   return contact.canCall && contact.availability === "free";
 }
@@ -1107,6 +1130,10 @@ function formatTime(date: Date) {
 
 function formatDate(date: Date) {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function stripCareSummaryHeading(text: string) {
+  return text.replace(/^\s*care summary\s*:?\s*/i, "").trimStart();
 }
 
 function formatReceiverCallDuration(
@@ -1467,6 +1494,16 @@ function paginateReaderText(text: string, size: ReaderTextSize) {
   return pages;
 }
 
+function replacePaginatedTextPage(
+  pages: string[],
+  pageIndex: number,
+  nextPageText: string
+) {
+  const nextPages = pages.length ? [...pages] : [""];
+  nextPages[Math.max(0, Math.min(pageIndex, nextPages.length - 1))] = nextPageText;
+  return nextPages.join("\n\n").trim();
+}
+
 function normalizeServerMessage(
   message: Partial<Message> & { id?: string },
   fallback?: Partial<Message>
@@ -1490,6 +1527,37 @@ function normalizeServerMessage(
     transcript: String(message.transcript || fallback?.transcript || ""),
     transcriptStatus: String(message.transcriptStatus || fallback?.transcriptStatus || ""),
   };
+}
+
+function resolveReceiverAttentionItem(input: {
+  messages: Message[];
+  pendingCallSummaryReviews: Array<Partial<ReceiverCall>>;
+}): ReceiverAttentionItem | null {
+  const items: ReceiverAttentionItem[] = [];
+  const pendingCallSummary = input.pendingCallSummaryReviews[0];
+  const unreadMessage = input.messages.find((message) => !message.readAt);
+
+  if (pendingCallSummary) {
+    items.push({
+      call: pendingCallSummary,
+      kind: "call_summary_review",
+      label: "Review",
+      priority: 100,
+    });
+  }
+
+  if (unreadMessage) {
+    items.push({
+      kind: "new_message",
+      label: "Message",
+      message: unreadMessage,
+      priority: 80,
+    });
+  }
+
+  // Future inputs should plug in here: reminder due -> "Reminder",
+  // receiver update available -> "Update", and device/audio issue -> "Help".
+  return items.sort((a, b) => b.priority - a.priority)[0] ?? null;
 }
 
 function isLowConfidenceAsk(rawText: string) {
@@ -1588,6 +1656,11 @@ export function ConnectReceiver() {
     "idle" | "loading" | "ready" | "empty" | "error"
   >("idle");
   const [todayFocusStatus, setTodayFocusStatus] = useState("");
+  const [pendingCallSummaryReviews, setPendingCallSummaryReviews] = useState<
+    Array<Partial<ReceiverCall>>
+  >([]);
+  const [interruptedReviewIncomingCall, setInterruptedReviewIncomingCall] =
+    useState<Partial<ReceiverCall> | null>(null);
   const [todayFocusPreferenceItem, setTodayFocusPreferenceItem] =
     useState<ReceiverTodayFocusHomeItem | null>(null);
   const [todayFocusPreferenceStep, setTodayFocusPreferenceStep] =
@@ -1596,6 +1669,7 @@ export function ConnectReceiver() {
   const [focusedMessageIndex, setFocusedMessageIndex] = useState(0);
   const [, setStatus] = useState("Ready.");
   const [modal, setModal] = useState<ModalState>(readInitialModal);
+  const modalRef = useRef<ModalState>(modal);
   const [screenCleaningSecondsRemaining, setScreenCleaningSecondsRemaining] =
     useState<number | null>(null);
   const [screenCleaningSession, setScreenCleaningSession] =
@@ -1629,6 +1703,10 @@ export function ConnectReceiver() {
   const [callMuted, setCallMuted] = useState(false);
   const audioRef = useRef<ReceiverPlaybackHandle | null>(null);
   const liveCallAudioRef = useRef<ConnectCallAudioController | null>(null);
+  const callStartedAtByCallIdRef = useRef<Record<string, string>>({});
+  const locallyEndedCallIdsRef = useRef<Set<string>>(new Set());
+  const pendingCallSummaryReviewsRef = useRef<Array<Partial<ReceiverCall>>>([]);
+  const summaryApprovalAdvanceTimerRef = useRef<number | null>(null);
   const playingEnhancementProfileRef = useRef<ReceiverAudioEnhancementProfile | null>(null);
   const playingMessageRef = useRef<Message | null>(null);
   const cueAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -1840,11 +1918,53 @@ export function ConnectReceiver() {
       };
 
       if (!response.ok || !Array.isArray(payload.calls)) return;
+      const pendingReviews = payload.calls.filter((call) => {
+        const status = String(call.summaryStatus || "");
+        return (
+          ["pending_review", "pending", "completed"].includes(status) &&
+          Boolean(String(call.summaryText || call.generatedSummaryText || "").trim())
+        );
+      });
+      setPendingCallSummaryReviews(pendingReviews);
 
       const activeCall = payload.calls.find((call) =>
         receiverCallRecordStateIsActive(String(call.state || ""))
       );
+      if (activeCall?.callId && locallyEndedCallIdsRef.current.has(String(activeCall.callId))) {
+        setInterruptedReviewIncomingCall((current) =>
+          current?.callId === activeCall.callId ? null : current
+        );
+        setModal((current) => {
+          if (
+            current?.type !== "incomingCall" ||
+            current.callId !== activeCall.callId ||
+            current.callState !== "ended"
+          ) {
+            return current;
+          }
+
+          return {
+            ...current,
+            summaryStatus: String(activeCall.summaryStatus || current.summaryStatus || ""),
+            summaryText: String(activeCall.summaryText || current.summaryText || ""),
+            generatedSummaryText: String(
+              activeCall.generatedSummaryText || current.generatedSummaryText || ""
+            ),
+            transcriptStatus: String(activeCall.transcriptStatus || current.transcriptStatus || ""),
+            transcriptText: String(activeCall.transcriptText || current.transcriptText || ""),
+            transcriptCleanupStatus: String(
+              activeCall.transcriptCleanupStatus || current.transcriptCleanupStatus || ""
+            ),
+          };
+        });
+        logReceiverCallEvent(String(activeCall.callId), "call_receiver_poll_ignored_locally_ended_call", {
+          source: "refreshCalls",
+          serverState: String(activeCall.state || ""),
+        });
+        return;
+      }
       if (!activeCall?.callId) {
+        setInterruptedReviewIncomingCall(null);
         setModal((current) => {
           if (current?.type !== "incomingCall") return current;
           if (current.callState === "ended") {
@@ -1858,18 +1978,31 @@ export function ConnectReceiver() {
             const nextSummaryText = String(
               endedCall.summaryText || current.summaryText || ""
             );
+            const nextDraftText = String(
+              endedCall.summaryApprovalDraftText ||
+                current.summaryDraft ||
+                endedCall.summaryText ||
+                current.summaryText ||
+                ""
+            );
             const summaryReadyForReview =
               Boolean(nextSummaryText.trim()) ||
-              ["failed", "not_needed", "approved"].includes(nextSummaryStatus);
+              ["failed", "summary_failed", "not_needed", "approved", "pending_review", "expired_unreviewed"].includes(nextSummaryStatus);
 
             return {
               ...current,
+              approvedSummaryText: String(
+                endedCall.approvedSummaryText || current.approvedSummaryText || ""
+              ),
+              generatedSummaryText: String(
+                endedCall.generatedSummaryText || current.generatedSummaryText || nextSummaryText
+              ),
               summaryAutoOpened: current.summaryAutoOpened || summaryReadyForReview,
               summaryStatus: nextSummaryStatus,
               summaryText: nextSummaryText,
-              summaryDraft:
-                current.summaryDraft ??
-                nextSummaryText,
+              summaryDraft: stripCareSummaryHeading(nextDraftText),
+              summaryDraftSavedText:
+                endedCall.summaryApprovalDraftText || current.summaryDraftSavedText,
               transcriptStatus: String(
                 endedCall.transcriptStatus || current.transcriptStatus || ""
               ),
@@ -1905,47 +2038,98 @@ export function ConnectReceiver() {
       const callerName = String(activeCall.callerName || "Andrew");
       const summaryStatus = String(activeCall.summaryStatus || "");
       const summaryText = String(activeCall.summaryText || "");
+      const generatedSummaryText = String(activeCall.generatedSummaryText || summaryText || "");
+      const summaryDraftText = stripCareSummaryHeading(
+        String(activeCall.summaryApprovalDraftText || summaryText || "")
+      );
       const transcriptStatus = String(activeCall.transcriptStatus || "");
       const transcriptText = String(activeCall.transcriptText || "");
+      const activeCallId = String(activeCall.callId);
+      const visibleModal = modalRef.current;
+      const activeCallWouldInterruptSummaryReview =
+        visibleModal?.type === "incomingCall" &&
+        visibleModal.callId !== activeCall.callId &&
+        visibleModal.textView === "summary" &&
+        visibleModal.summaryApproval !== "approved";
+      setInterruptedReviewIncomingCall(
+        activeCallWouldInterruptSummaryReview && receiverCallState === "incoming"
+          ? activeCall
+          : null
+      );
+      if (receiverCallState !== "incoming" && !callStartedAtByCallIdRef.current[activeCallId]) {
+        callStartedAtByCallIdRef.current[activeCallId] = new Date().toISOString();
+      }
       setModal((current) => {
+        const currentIsSameCall =
+          current?.type === "incomingCall" && current.callId === activeCall.callId;
+        const stableCallStartedAt =
+          callStartedAtByCallIdRef.current[activeCallId] ||
+          (currentIsSameCall ? current.callStartedAt : undefined) ||
+          (receiverCallState === "incoming" ? undefined : new Date().toISOString());
+        if (stableCallStartedAt && !callStartedAtByCallIdRef.current[activeCallId]) {
+          callStartedAtByCallIdRef.current[activeCallId] = stableCallStartedAt;
+        }
+        const shouldPreserveLocalAnsweredState =
+          currentIsSameCall &&
+          (current.callState === "connecting" || current.callState === "connected") &&
+          (receiverCallState === "incoming" || receiverCallState === "connecting");
         if (
-          current?.type === "incomingCall" &&
-          current.callId === activeCall.callId &&
+          currentIsSameCall &&
           current.callState !== receiverCallState
         ) {
           logReceiverCallEvent(String(activeCall.callId), "call_receiver_poll_state_changed", {
             nextCallState: callState,
             previousCallState: current.callState,
             source: "refreshCalls",
+            preservedLocalAnsweredState: shouldPreserveLocalAnsweredState,
           });
         }
         if (
-          current?.type === "incomingCall" &&
-          current.callId === activeCall.callId &&
-          current.callState === receiverCallState
+          currentIsSameCall &&
+          (current.callState === receiverCallState || shouldPreserveLocalAnsweredState)
         ) {
+          if (!receiverCallRecordStateIsActive(String(activeCall.state || ""))) {
+            locallyEndedCallIdsRef.current.delete(String(activeCall.callId));
+          }
           return {
             ...current,
+            callState: shouldPreserveLocalAnsweredState
+              ? current.callState
+              : receiverCallState,
+            callStartedAt: stableCallStartedAt,
+            approvedSummaryText: String(
+              activeCall.approvedSummaryText || current.approvedSummaryText || ""
+            ),
+            generatedSummaryText,
             summaryStatus,
             summaryText,
+            summaryDraft: current.summaryDraft?.trim()
+              ? stripCareSummaryHeading(current.summaryDraft)
+              : summaryDraftText || current.summaryDraft,
+            summaryDraftSavedText:
+              activeCall.summaryApprovalDraftText || current.summaryDraftSavedText,
             transcriptStatus,
             transcriptText,
           };
+        }
+        if (
+          activeCallWouldInterruptSummaryReview
+        ) {
+          return current;
         }
 
         return {
           callId: String(activeCall.callId),
           callerName,
           callState: receiverCallState === "idle" ? "incoming" : receiverCallState,
-          callStartedAt:
-            receiverCallState === "incoming"
-              ? undefined
-              : current?.type === "incomingCall" && current.callId === activeCall.callId
-                ? current.callStartedAt || new Date().toISOString()
-                : new Date().toISOString(),
+          callStartedAt: stableCallStartedAt,
+          approvedSummaryText: String(activeCall.approvedSummaryText || ""),
+          generatedSummaryText,
           transcriptText,
           transcriptStatus,
           summaryStatus,
+          summaryDraft: summaryDraftText,
+          summaryDraftSavedText: activeCall.summaryApprovalDraftText,
           summaryText,
           type: "incomingCall",
         };
@@ -1961,6 +2145,81 @@ export function ConnectReceiver() {
       // Keep the receiver usable if the Connect local server is unavailable.
     }
   }, [selectedReceiverUserId]);
+
+  function openPendingCallSummaryReview(call: Partial<ReceiverCall>) {
+    if (!call.callId) return;
+    const summaryText = String(call.summaryText || call.generatedSummaryText || "");
+    setModal({
+      approvedSummaryText: String(call.approvedSummaryText || ""),
+      callId: String(call.callId),
+      callerName: String(call.callerName || "Andrew"),
+      callState: "ended",
+      generatedSummaryText: String(call.generatedSummaryText || summaryText),
+      summaryDraft: stripCareSummaryHeading(String(call.summaryApprovalDraftText || summaryText)),
+      summaryDraftSavedText: String(call.summaryApprovalDraftText || ""),
+      summaryStatus: String(call.summaryStatus || "pending_review"),
+      summaryText,
+      textView: "summary",
+      transcriptStatus: String(call.transcriptStatus || ""),
+      transcriptText: String(call.transcriptText || ""),
+      type: "incomingCall",
+    });
+  }
+
+  function openAttentionItem(item: ReceiverAttentionItem | null) {
+    if (!item) return;
+    if (item.kind === "call_summary_review") {
+      openPendingCallSummaryReview(item.call);
+      return;
+    }
+    if (item.kind === "new_message") {
+      openMessage(item.message);
+    }
+  }
+
+  function advanceAfterCallSummaryApproval(callId: string | undefined) {
+    if (summaryApprovalAdvanceTimerRef.current) {
+      window.clearTimeout(summaryApprovalAdvanceTimerRef.current);
+    }
+
+    const remainingReviews = pendingCallSummaryReviewsRef.current.filter(
+      (call) => String(call.callId || "") !== String(callId || "")
+    );
+    pendingCallSummaryReviewsRef.current = remainingReviews;
+    setPendingCallSummaryReviews(remainingReviews);
+
+    summaryApprovalAdvanceTimerRef.current = window.setTimeout(() => {
+      summaryApprovalAdvanceTimerRef.current = null;
+      const nextReview = pendingCallSummaryReviewsRef.current[0];
+      if (nextReview?.callId) {
+        openPendingCallSummaryReview(nextReview);
+        return;
+      }
+      setModal((current) =>
+        current?.type === "incomingCall" &&
+        current.callId === callId &&
+        current.summaryApproval === "approved"
+          ? null
+          : current
+      );
+    }, 1800);
+  }
+
+  useEffect(() => {
+    modalRef.current = modal;
+  }, [modal]);
+
+  useEffect(() => {
+    pendingCallSummaryReviewsRef.current = pendingCallSummaryReviews;
+  }, [pendingCallSummaryReviews]);
+
+  useEffect(() => {
+    return () => {
+      if (summaryApprovalAdvanceTimerRef.current) {
+        window.clearTimeout(summaryApprovalAdvanceTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!started && readInitialStarted()) {
@@ -2344,7 +2603,10 @@ export function ConnectReceiver() {
   }, [refreshCalls, started]);
 
   useEffect(() => {
-    if (!started || modal?.type !== "incomingCall" || modal.callState !== "incoming") {
+    const modalIncoming =
+      modal?.type === "incomingCall" && modal.callState === "incoming";
+    const interruptedIncoming = Boolean(interruptedReviewIncomingCall?.callId);
+    if (!started || (!modalIncoming && !interruptedIncoming)) {
       stopReceiverCue();
       return undefined;
     }
@@ -2355,7 +2617,7 @@ export function ConnectReceiver() {
     return () => {
       stopReceiverCue();
     };
-  }, [modal, soundSettings, started]);
+  }, [interruptedReviewIncomingCall, modal, soundSettings, started]);
 
   useEffect(() => {
     function applyGuideTarget(value: string | null) {
@@ -2468,6 +2730,10 @@ export function ConnectReceiver() {
     .filter((item) => !isAppointmentReminderFocusItem(item))
     .filter((item) => !todayFocusCompletedIds.includes(item.id))
     .slice(0, 3);
+  const attentionItem = resolveReceiverAttentionItem({
+    messages,
+    pendingCallSummaryReviews,
+  });
   const todayFocusDisplayMode =
     visibleTodayFocusItems.length > 0
       ? "items"
@@ -3852,11 +4118,62 @@ export function ConnectReceiver() {
     }
   }
 
-  async function approveCallSummary(callId: string | undefined) {
+  async function saveCallSummaryDraft(callId: string | undefined, draftText: string) {
+    if (!callId || !selectedReceiverUser.id) return;
+
+    try {
+      const response = await fetch(`${connectCallsEndpoint}/${encodeURIComponent(callId)}/summary`, {
+        body: JSON.stringify({
+          action: "save_draft",
+          approvedBy: "receiver",
+          draftText,
+          mainConnectUserPersonId: selectedReceiverUser.id,
+        }),
+        headers: {
+          ...(await connectAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      if (!response.ok) return;
+      setModal((current) =>
+        current?.type === "incomingCall" && current.callId === callId
+          ? { ...current, summaryDraftSavedText: draftText }
+          : current
+      );
+    } catch {
+      // Draft save is retried by the next edit/close path.
+    }
+  }
+
+  useEffect(() => {
+    if (modal?.type !== "incomingCall") return undefined;
+    if (modal.summaryApproval === "approved") return undefined;
+    if (modal.textView !== "summary") return undefined;
+    if (!modal.callId) return undefined;
+    const draftText = String(modal.summaryDraft ?? "");
+    if (draftText === String(modal.summaryDraftSavedText ?? "")) return undefined;
+
+    const timer = window.setTimeout(() => {
+      void saveCallSummaryDraft(modal.callId, draftText);
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [modal, selectedReceiverUser.id]);
+
+  async function approveCallSummary(
+    callId: string | undefined,
+    approvedSummaryOverride?: string
+  ) {
+    const approvalTextExplicitlyProvided = approvedSummaryOverride !== undefined;
     const approvedSummaryText =
-      modal?.type === "incomingCall"
-        ? String(modal.summaryDraft ?? modal.summaryText ?? "").trim()
-        : "";
+      stripCareSummaryHeading(
+        approvalTextExplicitlyProvided
+          ? approvedSummaryOverride.trim()
+          : modal?.type === "incomingCall"
+            ? String(modal.summaryDraft || modal.summaryText || "").trim()
+            : ""
+      );
     if (!callId || !selectedReceiverUser.id) {
       setModal((current) =>
         current?.type === "incomingCall"
@@ -3864,7 +4181,6 @@ export function ConnectReceiver() {
               ...current,
               approvedSummaryText,
               summaryApproval: "approved",
-              summaryClarificationOpen: false,
             }
           : current
       );
@@ -3895,18 +4211,29 @@ export function ConnectReceiver() {
 
       setModal((current) =>
         current?.type === "incomingCall"
-          ? {
-              ...current,
-              approvedSummaryText,
-              summaryApproval: "approved",
-              summaryClarificationOpen: false,
-              summaryText: approvedSummaryText || current.summaryText,
-              transcriptCleanupStatus: String(
-                payload.call?.transcriptCleanupStatus ||
-                  current.transcriptCleanupStatus ||
-                  ""
-              ),
-            }
+          ? (() => {
+              const acceptedSummaryText =
+                approvalTextExplicitlyProvided
+                  ? approvedSummaryText
+                  : approvedSummaryText ||
+                    String(payload.call?.approvedSummaryText || "").trim() ||
+                    String(payload.call?.summaryText || "").trim() ||
+                    String(current.summaryText || "").trim() ||
+                    String(current.summaryDraft || "").trim();
+
+              return {
+                ...current,
+                approvedSummaryText: acceptedSummaryText,
+                summaryApproval: "approved",
+                summaryDraft: acceptedSummaryText,
+                summaryText: acceptedSummaryText || current.summaryText,
+                transcriptCleanupStatus: String(
+                  payload.call?.transcriptCleanupStatus ||
+                    current.transcriptCleanupStatus ||
+                    ""
+                ),
+              };
+            })()
           : current
       );
       setStatus(
@@ -3914,115 +4241,9 @@ export function ConnectReceiver() {
           ? "Call summary approved. Transcript cleanup is pending."
           : "Call summary approved."
       );
+      advanceAfterCallSummaryApproval(callId);
     } catch {
       setStatus("Could not approve the call summary on the local server.");
-    }
-  }
-
-  async function regenerateCallSummary(callId: string | undefined) {
-    if (!callId || !selectedReceiverUser.id) {
-      setStatus("A call transcript is required before recreating the summary.");
-      return;
-    }
-
-    setStatus("Recreating call summary.");
-    try {
-      const response = await fetch(`${connectCallsEndpoint}/${encodeURIComponent(callId)}/summary`, {
-        body: JSON.stringify({
-          action: "regenerate",
-          approvedBy: "receiver",
-          mainConnectUserPersonId: selectedReceiverUser.id,
-        }),
-        headers: {
-          ...(await connectAuthHeaders()),
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
-      const payload = (await response.json().catch(() => ({}))) as {
-        call?: ReceiverCall;
-        error?: string;
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Summary could not be recreated.");
-      }
-
-      const nextSummaryText = String(payload.call?.summaryText || "");
-      const nextSummaryStatus = String(payload.call?.summaryStatus || "");
-      setModal((current) =>
-        current?.type === "incomingCall"
-          ? {
-              ...current,
-              summaryDraft: nextSummaryText,
-              summaryStatus: nextSummaryStatus || current.summaryStatus,
-              summaryText: nextSummaryText || current.summaryText,
-            }
-          : current
-      );
-      setStatus(
-        nextSummaryText
-          ? "Call summary recreated."
-          : "Call summary could not be recreated yet."
-      );
-    } catch (error) {
-      setStatus(
-        error instanceof Error
-          ? error.message
-          : "Could not recreate the call summary on the local server."
-      );
-    }
-  }
-
-  async function retryCallTranscriptCleanup(callId: string | undefined) {
-    if (!callId || !selectedReceiverUser.id) {
-      setStatus("A call record is required before retrying transcript cleanup.");
-      return;
-    }
-
-    setStatus("Retrying transcript cleanup.");
-    try {
-      const response = await fetch(`${connectCallsEndpoint}/${encodeURIComponent(callId)}/summary`, {
-        body: JSON.stringify({
-          action: "cleanup_transcript",
-          approvedBy: "receiver",
-          mainConnectUserPersonId: selectedReceiverUser.id,
-        }),
-        headers: {
-          ...(await connectAuthHeaders()),
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-      });
-      const payload = (await response.json().catch(() => ({}))) as {
-        call?: ReceiverCall;
-        error?: string;
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error || "Transcript cleanup could not be retried.");
-      }
-
-      const cleanupStatus = String(payload.call?.transcriptCleanupStatus || "completed");
-      setModal((current) =>
-        current?.type === "incomingCall"
-          ? {
-              ...current,
-              transcriptCleanupStatus: cleanupStatus,
-            }
-          : current
-      );
-      setStatus(
-        cleanupStatus === "pending"
-          ? "Transcript cleanup is still pending."
-          : "Transcript cleanup completed."
-      );
-    } catch (error) {
-      setStatus(
-        error instanceof Error
-          ? error.message
-          : "Could not retry transcript cleanup on the local server."
-      );
     }
   }
 
@@ -4058,6 +4279,24 @@ export function ConnectReceiver() {
 
   function answerIncomingCall(callerName: string, callId?: string) {
     stopReceiverCue();
+    if (
+      modal?.type === "incomingCall" &&
+      modal.textView === "summary" &&
+      modal.summaryApproval !== "approved" &&
+      modal.callId &&
+      modal.callId !== callId
+    ) {
+      const draftText = String(modal.summaryDraft ?? "");
+      if (draftText !== String(modal.summaryDraftSavedText ?? "")) {
+        void saveCallSummaryDraft(modal.callId, draftText);
+      }
+    }
+    setInterruptedReviewIncomingCall(null);
+    if (callId) {
+      locallyEndedCallIdsRef.current.delete(callId);
+      callStartedAtByCallIdRef.current[callId] =
+        callStartedAtByCallIdRef.current[callId] || new Date().toISOString();
+    }
     logReceiverCallEvent(callId, "call_receiver_answer_clicked", {
       source: "answerIncomingCall",
     });
@@ -4074,6 +4313,7 @@ export function ConnectReceiver() {
           logReceiverCallEvent(callId, "call_receiver_peer_ended_received", {
             source: "audio_controller_onPeerEnded",
           });
+          locallyEndedCallIdsRef.current.add(callId);
           liveCallAudioRef.current = null;
           setCallAudioStatus("ended");
           setCallMuted(false);
@@ -4123,7 +4363,9 @@ export function ConnectReceiver() {
     setModal({
       callId,
       callerName,
-      callStartedAt: new Date().toISOString(),
+      callStartedAt: callId
+        ? callStartedAtByCallIdRef.current[callId] || new Date().toISOString()
+        : new Date().toISOString(),
       callState: "connecting",
       type: "incomingCall",
     });
@@ -4132,12 +4374,18 @@ export function ConnectReceiver() {
 
   function declineIncomingCall(callerName: string, callId?: string) {
     stopReceiverCue();
+    if (callId) locallyEndedCallIdsRef.current.add(callId);
+    setInterruptedReviewIncomingCall((current) =>
+      current?.callId === callId ? null : current
+    );
     logReceiverCallEvent(callId, "call_receiver_decline_clicked", {
       source: "declineIncomingCall",
     });
     stopLiveCallAudio();
     void reportCallState(callId, "declined");
-    closeModal();
+    setModal((current) =>
+      current?.type === "incomingCall" && current.callId === callId ? null : current
+    );
     playCallFailedAudio();
     setStatus(`Call from ${callerName} was not answered.`);
   }
@@ -4147,6 +4395,7 @@ export function ConnectReceiver() {
     logReceiverCallEvent(callId, "call_receiver_hangup_clicked", {
       source: "hangUpIncomingCall",
     });
+    if (callId) locallyEndedCallIdsRef.current.add(callId);
     stopLiveCallAudio();
     void reportCallState(callId, "hung_up");
     setModal((current) =>
@@ -4480,6 +4729,28 @@ export function ConnectReceiver() {
             </section>
           ) : null}
 
+          {pendingCallSummaryReviews.length > 0 && modal?.type !== "incomingCall" && !deskPhoneMode ? (
+            <section className={styles.pendingCallReviewStrip} aria-live="polite">
+              <div>
+                <span>Call note needs review</span>
+                <strong>
+                  {pendingCallSummaryReviews.length === 1
+                    ? "1 pending summary"
+                    : `${pendingCallSummaryReviews.length} pending summaries`}
+                </strong>
+              </div>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openPendingCallSummaryReview(pendingCallSummaryReviews[0] ?? {});
+                }}
+              >
+                Review
+              </button>
+            </section>
+          ) : null}
+
           <section className={styles.actionZone} aria-label="Primary actions">
             {deskPhoneMode ? (
               gxvFocusHomeEnabled ? (
@@ -4521,7 +4792,7 @@ export function ConnectReceiver() {
                       <img src="/carepland-loop-mark.png" alt="" />
                     </a>
                     <span>{greetingFor(now)}</span>
-                    <strong>{selectedReceiverUser.displayName}</strong>
+                    <strong>{firstDisplayName(selectedReceiverUser.displayName)}</strong>
                   </section>
                   <button
                     className={`${styles.talkFooterAction} ${styles.focusHomeTalkAction}`}
@@ -4537,10 +4808,10 @@ export function ConnectReceiver() {
                     <span>Talk</span>
                   </button>
                   <section className={styles.focusHomeTimePanel} aria-label="Current time">
-                    <strong>{formatTime(now)}</strong>
                     <div className={styles.dateControlRow}>
                       <span>{formatDate(now)}</span>
                     </div>
+                    <strong>{formatTime(now)}</strong>
                     <span>{receiver.locationLabel}</span>
                   </section>
                   <section className={styles.todayFocusPanel} aria-label="Today's Focus">
@@ -4589,10 +4860,10 @@ export function ConnectReceiver() {
                       openHeaderAppointment();
                     }}
                   >
-                    <strong>
-                      {nextAppointment.dayLabel} {nextAppointment.timeLabel.replace(/\s+/g, "").toLowerCase()}:{" "}
-                      {nextAppointment.title}
-                    </strong>
+                    <span className={styles.focusHomeAppointmentMeta}>
+                      {nextAppointment.dayLabel} {nextAppointment.timeLabel.replace(/\s+/g, "").toLowerCase()}
+                    </span>
+                    <strong>{nextAppointment.title}</strong>
                   </button>
                   <div className={styles.focusHomeActionStack}>
                     <button
@@ -4649,6 +4920,19 @@ export function ConnectReceiver() {
                     </button>
                   </div>
                   <div className={styles.focusHomeUtilityStack}>
+                    {attentionItem ? (
+                      <button
+                        className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction} ${styles.reviewFooterAction}`}
+                        type="button"
+                        aria-label={attentionItem.label}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openAttentionItem(attentionItem);
+                        }}
+                      >
+                        {attentionItem.label}
+                      </button>
+                    ) : null}
                     <button
                       className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
                       type="button"
@@ -4745,6 +5029,19 @@ export function ConnectReceiver() {
                     <span className={styles.talkFooterIcon} aria-hidden="true" />
                     <span>Talk</span>
                   </button>
+                  {attentionItem ? (
+                    <button
+                      className={`${styles.footerUtilityAction} ${styles.reviewFooterAction}`}
+                      type="button"
+                      aria-label={attentionItem.label}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openAttentionItem(attentionItem);
+                      }}
+                    >
+                      {attentionItem.label}
+                    </button>
+                  ) : null}
                   <button
                     className={`${styles.footerUtilityAction} ${styles.soundsFooterAction}`}
                     type="button"
@@ -4976,11 +5273,10 @@ export function ConnectReceiver() {
               onRecordRequest={startReceiverRecording}
               onReportSoundProblem={reportSoundProblem}
               onRecordHearingFeedback={recordHearingFeedback}
-              onRegenerateCallSummary={regenerateCallSummary}
-              onRetryCallTranscriptCleanup={retryCallTranscriptCleanup}
               onResolveSoundHelp={markSoundHelpResolved}
               onResetSoundTestState={resetSoundTestState}
               onSendContact={sendMessage}
+              onSaveCallSummaryDraft={saveCallSummaryDraft}
               onSetModal={setModal}
               onStartScreenCleaning={startScreenCleaning}
               onSubmitAsk={submitAsk}
@@ -4989,7 +5285,14 @@ export function ConnectReceiver() {
               onUpdateSoundSetting={updateSoundSetting}
             />
           ) : null}
-          {modal?.type === "incomingCall" && modal.callState === "incoming" && !modal.textView ? (
+          {interruptedReviewIncomingCall?.callId ? (
+            <IncomingCallPrompt
+              callerName={String(interruptedReviewIncomingCall.callerName || "Andrew")}
+              callId={String(interruptedReviewIncomingCall.callId)}
+              onAnswerIncomingCall={answerIncomingCall}
+              onDeclineIncomingCall={declineIncomingCall}
+            />
+          ) : modal?.type === "incomingCall" && modal.callState === "incoming" && !modal.textView ? (
             <IncomingCallPrompt
               callerName={modal.callerName}
               callId={modal.callId}
@@ -5102,6 +5405,7 @@ function CallTextView({
   actions,
   closeLabel = "Close Text View",
   editableLabel,
+  editablePlaceholder,
   editableStatusText,
   editableText,
   messageTextSize,
@@ -5115,6 +5419,7 @@ function CallTextView({
   actions?: ReactNode;
   closeLabel?: string;
   editableLabel?: string;
+  editablePlaceholder?: string;
   editableStatusText?: string;
   editableText?: string;
   messageTextSize: ReaderTextSize;
@@ -5136,7 +5441,6 @@ function CallTextView({
     <section className={styles.callTextView}>
       <div className={styles.callTextToolbar}>
         <div>
-          <span>{title}</span>
           <h3>{title}</h3>
         </div>
         <div className={styles.callTextToolbarActions}>
@@ -5170,9 +5474,10 @@ function CallTextView({
           {editableStatusText ? (
             <p className={styles.callSummaryStatusNotice}>{editableStatusText}</p>
           ) : null}
-          <label className={styles.callSummaryEditBox}>
+          <label className={`${styles.callSummaryEditBox} ${textSizeClass}`}>
             <span>{editableLabel || "Review summary"}</span>
             <textarea
+              placeholder={editablePlaceholder}
               value={editableText ?? text}
               onChange={(event) => onEditableTextChange(event.target.value)}
             />
@@ -5232,7 +5537,7 @@ function ReceiverCallStatusPanel({
   const endedSummaryStatus = callEndedSummaryStatusLabel(modal);
   const endedSummaryActionLabel = modal.summaryText?.trim()
     ? "Review Call Summary"
-    : modal.summaryStatus === "failed"
+    : modal.summaryStatus === "failed" || modal.summaryStatus === "summary_failed"
       ? "Review Call Notes"
       : modal.summaryStatus === "not_needed"
         ? "Review Call Notes"
@@ -5366,11 +5671,14 @@ function callEndedSummaryStatusLabel(
   if (summaryText) {
     return "Care summary is ready to review.";
   }
-  if (summaryStatus === "pending") {
+  if (summaryStatus === "pending" || summaryStatus === "pending_review") {
     return "Care summary is being prepared.";
   }
-  if (summaryStatus === "failed") {
+  if (summaryStatus === "failed" || summaryStatus === "summary_failed") {
     return "Care summary needs review.";
+  }
+  if (summaryStatus === "expired_unreviewed") {
+    return "Care summary expired before approval.";
   }
   if (summaryStatus === "not_needed") {
     return "No care details were captured for a summary.";
@@ -5456,12 +5764,11 @@ function ReceiverModal({
   onRecordRequest,
   onRecordHearingFeedback,
   onReportSoundProblem,
-  onRegenerateCallSummary,
   onResolveSoundHelp,
   onResetSoundTestState,
-  onRetryCallTranscriptCleanup,
   onRetryAsk,
   onSendContact,
+  onSaveCallSummaryDraft,
   onSetModal,
   onStartScreenCleaning,
   onSubmitAsk,
@@ -5488,7 +5795,7 @@ function ReceiverModal({
   soundSettings: SoundSettings;
   selectedSoundProblem: SoundProblem | null;
   onApplySoundHelpAction: (action: NonNullable<SoundHelp["actions"]>[number]) => void;
-  onApproveCallSummary: (callId?: string) => Promise<void>;
+  onApproveCallSummary: (callId?: string, approvedSummaryOverride?: string) => Promise<void>;
   onAskDraftChange: (value: string) => void;
   onCallBackForMessage: (message: Message) => void;
   onCallContact: (contact: Contact) => void;
@@ -5506,12 +5813,11 @@ function ReceiverModal({
   onRecordRequest: () => Promise<void>;
   onRecordHearingFeedback: (message: Message, choice: string) => void;
   onReportSoundProblem: (problem: SoundProblem) => void;
-  onRegenerateCallSummary: (callId?: string) => Promise<void>;
   onResolveSoundHelp: () => void;
   onResetSoundTestState: () => void;
-  onRetryCallTranscriptCleanup: (callId?: string) => Promise<void>;
   onRetryAsk: (question: string) => void;
   onSendContact: (contact: Contact, body: string, recording?: PendingContactRecording | null) => void;
+  onSaveCallSummaryDraft: (callId: string | undefined, draftText: string) => Promise<void>;
   onSetModal: (modal: ModalState) => void;
   onStartScreenCleaning: () => void;
   onSubmitAsk: () => void | Promise<void>;
@@ -6231,122 +6537,147 @@ function ReceiverModal({
     const callTranscriptText =
       modal.transcriptText?.trim() ||
       receiverTranscriptStatusLabel(modal.transcriptStatus || "");
-    const generatedSummaryText = modal.summaryText?.trim() || "";
+    const generatedSummaryText =
+      modal.generatedSummaryText?.trim() || modal.summaryText?.trim() || "";
+    const noCareSummaryNeeded = modal.summaryStatus === "not_needed";
     const callSummaryText =
       modal.summaryApproval === "approved"
-        ? modal.transcriptCleanupStatus === "pending"
-          ? "Summary approved. Transcript cleanup is still pending; use Retry Cleanup to delete the temporary transcript."
-          : "Summary approved. The temporary transcript was deleted while the approved care summary remains attached to this call."
-        : generatedSummaryText
-          ? generatedSummaryText
-          : modal.summaryStatus === "pending"
+        ? "Thank you - update submitted."
+        : noCareSummaryNeeded
+          ? "Nothing was transcribed that appears related to health, caregiving, appointments, or follow-up. If something important was missed, type only the care-relevant details below."
+          : generatedSummaryText
+            ? generatedSummaryText
+            : modal.summaryStatus === "pending" || modal.summaryStatus === "pending_review"
             ? "CarePland is preparing the call summary. Keep this open for a moment, or close it and check again after the call record refreshes."
-            : modal.summaryStatus === "failed"
+            : modal.summaryStatus === "expired_unreviewed"
+              ? "This generated summary was not formally approved before the temporary transcript expired."
+            : modal.summaryStatus === "failed" || modal.summaryStatus === "summary_failed"
               ? "A care summary could not be created yet. You can write one here if needed, or use Try Again when a temporary transcript is available."
-              : modal.summaryStatus === "not_needed"
-                ? "No care-relevant details were captured for the call summary. You can still add a brief care note if something important was discussed."
-                : "No care summary has been created yet. You can write one here if needed, using only care-relevant details from the call.";
-    const summaryDraftText = modal.summaryDraft ?? generatedSummaryText;
+              : "No care summary has been created yet. You can write one here if needed, using only care-relevant details from the call.";
+    const summaryDraftText = noCareSummaryNeeded
+      ? modal.summaryDraft || ""
+      : stripCareSummaryHeading(modal.summaryDraft || generatedSummaryText);
+    const summaryDraftPages = paginateReaderText(summaryDraftText, messageTextSize);
+    const currentSummaryPage = Math.min(
+      Math.max(0, modal.summaryPage ?? 0),
+      Math.max(0, summaryDraftPages.length - 1)
+    );
+    const visibleSummaryDraftText =
+      summaryDraftPages[currentSummaryPage] ?? summaryDraftText;
     const summaryStatusNotice =
-      summaryOpen && modal.summaryApproval !== "approved" && !generatedSummaryText
+      summaryOpen &&
+      modal.summaryApproval !== "approved" &&
+      (noCareSummaryNeeded || !generatedSummaryText)
         ? callSummaryText
         : undefined;
     const approvedDraftReady = summaryDraftText.trim().length > 0;
-    const canRegenerateSummary =
-      summaryOpen &&
-      modal.summaryApproval !== "approved" &&
-      Boolean(modal.transcriptText?.trim()) &&
-      (modal.summaryStatus === "failed" || !modal.summaryText?.trim());
-    const canRetryTranscriptCleanup =
-      summaryOpen &&
-      modal.summaryApproval === "approved" &&
-      modal.transcriptCleanupStatus === "pending";
-
     if (!captionsOpen && !summaryOpen) {
       return null;
     }
 
     return (
-      <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby={summaryOpen ? "call-summary-title" : "call-captions-title"}>
+      <div
+        className={`${styles.modal} ${summaryOpen ? styles.callTextModal : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={summaryOpen ? "call-summary-title" : "call-captions-title"}
+      >
         <section className={`${styles.modalPanel} ${styles.incomingCallModal}`}>
           <CallTextView
             actions={
               summaryOpen ? (
                 <>
-                  {modal.summaryClarificationOpen ? (
-                    <p className={styles.summaryClarificationNotice}>
-                      Add or change only details that belong in a care or appointment record.
-                    </p>
-                  ) : null}
+                  <p className={styles.callSummaryInstruction}>
+                    Please make any optional changes and approve the Call Summary.
+                  </p>
+                  <div className={styles.callSummaryPageControls} aria-label="Care summary page navigation">
+                    <button
+                      className={`${styles.modalButton} ${styles.secondary}`}
+                      disabled={currentSummaryPage <= 0}
+                      type="button"
+                      onClick={() =>
+                        onSetModal({
+                          ...modal,
+                          summaryPage: Math.max(0, currentSummaryPage - 1),
+                        })
+                      }
+                    >
+                      &lt;
+                    </button>
+                    <span>{currentSummaryPage + 1} / {summaryDraftPages.length}</span>
+                    <button
+                      className={`${styles.modalButton} ${styles.secondary}`}
+                      disabled={currentSummaryPage >= summaryDraftPages.length - 1}
+                      type="button"
+                      onClick={() =>
+                        onSetModal({
+                          ...modal,
+                          summaryPage: Math.min(
+                            summaryDraftPages.length - 1,
+                            currentSummaryPage + 1
+                          ),
+                        })
+                      }
+                    >
+                      &gt;
+                    </button>
+                  </div>
                   <button
                     className={styles.modalButton}
-                    disabled={modal.summaryApproval === "approved" || !approvedDraftReady}
+                    disabled={
+                      modal.summaryApproval === "approved" ||
+                      (!approvedDraftReady && !noCareSummaryNeeded)
+                    }
                     type="button"
                     onClick={() => {
                       void onApproveCallSummary(modal.callId);
                     }}
                   >
-                    {modal.summaryApproval === "approved" ? "Approved" : "Approve"}
+                    {modal.summaryApproval === "approved"
+                      ? "Approved"
+                      : "Approve this version"}
                   </button>
-                  <button
-                    className={`${styles.modalButton} ${styles.secondary}`}
-                    disabled={modal.summaryApproval === "approved"}
-                    type="button"
-                    onClick={() =>
-                      onSetModal({
-                        ...modal,
-                        summaryClarificationOpen: true,
-                      })
-                    }
-                  >
-                    Not Quite
-                  </button>
-                  {canRegenerateSummary ? (
-                    <button
-                      className={`${styles.modalButton} ${styles.secondary}`}
-                      type="button"
-                      onClick={() => {
-                        void onRegenerateCallSummary(modal.callId);
-                      }}
-                    >
-                      Try Again
-                    </button>
-                  ) : null}
-                  {canRetryTranscriptCleanup ? (
-                    <button
-                      className={`${styles.modalButton} ${styles.secondary}`}
-                      type="button"
-                      onClick={() => {
-                        void onRetryCallTranscriptCleanup(modal.callId);
-                      }}
-                    >
-                      Retry Cleanup
-                    </button>
-                  ) : null}
                 </>
               ) : null
             }
             closeLabel="Close Call"
-            editableLabel={summaryOpen ? "Approved care summary" : undefined}
+            editableLabel={summaryOpen ? "Care Summary" : undefined}
+            editablePlaceholder={
+              summaryOpen && noCareSummaryNeeded ? "Add details about this call" : undefined
+            }
             editableStatusText={summaryStatusNotice}
-            editableText={summaryOpen && modal.summaryApproval !== "approved" ? summaryDraftText : undefined}
+            editableText={
+              summaryOpen && modal.summaryApproval !== "approved"
+                ? visibleSummaryDraftText
+                : undefined
+            }
             messageTextSize={messageTextSize}
-            onClose={() => onSetModal(summaryOpen ? null : { ...modal, textView: undefined })}
+            onClose={() => {
+              if (
+                summaryOpen &&
+                modal.summaryApproval !== "approved" &&
+                modal.callId &&
+                summaryDraftText !== String(modal.summaryDraftSavedText || "")
+              ) {
+                void onSaveCallSummaryDraft(modal.callId, summaryDraftText);
+              }
+              onSetModal(summaryOpen ? null : { ...modal, textView: undefined });
+            }}
             onEditableTextChange={
               summaryOpen && modal.summaryApproval !== "approved"
                 ? (value) =>
                     onSetModal({
                       ...modal,
-                      summaryDraft: value,
+                      summaryDraft: replacePaginatedTextPage(
+                        summaryDraftPages,
+                        currentSummaryPage,
+                        value
+                      ),
                     })
                 : undefined
             }
             onMessageTextSizeChange={onMessageTextSizeChange}
-            policyNotice={
-              summaryOpen && modal.summaryApproval !== "approved"
-                ? "Review this care summary before approving. Include only information relevant to care, appointments, health, caregiving, or follow-up. When uncertain, omit."
-                : undefined
-            }
+            policyNotice={undefined}
             text={summaryOpen ? callSummaryText : callTranscriptText}
             title={summaryOpen ? "Call Summary" : "Closed Captioning"}
           />

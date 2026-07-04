@@ -105,18 +105,21 @@ export function filterLocalConnectCallSignals(
     notSender?: string;
   }
 ) {
-  const matchingSignals = signals
+  let matchingSignals = signals
     .filter((signal) => signal.callId === options.callId)
     .filter((signal) => signal.mainConnectUserPersonId === options.mainConnectUserPersonId)
-    .filter((signal) => !options.notSender || signal.sender !== options.notSender)
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 
-  if (!options.afterSignalId) return matchingSignals;
+  if (options.afterSignalId) {
+    const afterIndex = matchingSignals.findIndex(
+      (signal) => signal.signalId === options.afterSignalId
+    );
+    matchingSignals = afterIndex >= 0 ? matchingSignals.slice(afterIndex + 1) : matchingSignals;
+  }
 
-  const afterIndex = matchingSignals.findIndex(
-    (signal) => signal.signalId === options.afterSignalId
+  return matchingSignals.filter(
+    (signal) => !options.notSender || signal.sender !== options.notSender
   );
-  return afterIndex >= 0 ? matchingSignals.slice(afterIndex + 1) : matchingSignals;
 }
 
 function normalizeSignalSender(value: unknown): ConnectCallSignalSender | null {

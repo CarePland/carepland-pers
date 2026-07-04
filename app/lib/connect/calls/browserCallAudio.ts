@@ -66,7 +66,9 @@ export function createConnectCallAudioController(
   let lastSignalId = "";
   let muted = false;
   let stopped = false;
+  let pollInFlight = false;
   const pendingCandidates: RTCIceCandidateInit[] = [];
+  const processedSignalIds = new Set<string>();
 
   function logLifecycle(eventType: string, details: Record<string, unknown> = {}) {
     recordConnectCallLifecycleEvent({
@@ -155,6 +157,7 @@ export function createConnectCallAudioController(
   }
 
   async function ensurePeerConnection() {
+    if (stopped) throw new Error("Call audio has already stopped.");
     if (peerConnection) return peerConnection;
 
     logLifecycle("call_peer_connection_creating");
@@ -173,6 +176,13 @@ export function createConnectCallAudioController(
       },
       video: false,
     });
+    if (stopped) {
+      for (const track of localStream.getTracks()) track.stop();
+      localStream = null;
+      connection.close();
+      peerConnection = null;
+      throw new Error("Call audio stopped before microphone setup completed.");
+    }
     logLifecycle("call_get_user_media_completed", {
       audioTrackCount: localStream.getAudioTracks().length,
     });
@@ -282,6 +292,15 @@ export function createConnectCallAudioController(
   }
 
   async function handleSignal(signal: ConnectCallSignal) {
+    if (stopped) return;
+    if (processedSignalIds.has(signal.signalId)) {
+      logLifecycle("call_signal_duplicate_ignored", {
+        signalId: signal.signalId,
+        signalType: signal.type,
+      });
+      return;
+    }
+    processedSignalIds.add(signal.signalId);
     lastSignalId = signal.signalId;
     logLifecycle("call_signal_received", {
       sender: signal.sender,
@@ -293,13 +312,16 @@ export function createConnectCallAudioController(
     }
 
     const connection = await ensurePeerConnection();
+    if (stopped) return;
 
     if (signal.type === "offer" && options.role === "receiver") {
       await connection.setRemoteDescription(sessionDescriptionPayload(signal.payload));
+      if (stopped) return;
       logLifecycle("call_remote_description_set", { signalType: "offer" });
       await flushPendingCandidates();
       const answer = await connection.createAnswer();
       await connection.setLocalDescription(answer);
+      if (stopped) return;
       logLifecycle("call_local_description_set", { signalType: "answer" });
       await postSignal("answer", sessionDescriptionPayload(answer));
       return;
@@ -307,6 +329,7 @@ export function createConnectCallAudioController(
 
     if (signal.type === "answer" && options.role === "dashboard") {
       await connection.setRemoteDescription(sessionDescriptionPayload(signal.payload));
+      if (stopped) return;
       logLifecycle("call_remote_description_set", { signalType: "answer" });
       await flushPendingCandidates();
       return;
@@ -334,17 +357,26 @@ export function createConnectCallAudioController(
 
   async function pollSignals() {
     if (stopped) return;
+    if (pollInFlight) {
+      logLifecycle("call_signal_poll_skipped_in_flight");
+      return;
+    }
+    pollInFlight = true;
     try {
       const signals = await fetchSignals();
+      if (stopped) return;
       if (signals.length > 0) {
         logLifecycle("call_signal_poll_received", { signalCount: signals.length });
       }
       for (const signal of signals) {
+        if (stopped) break;
         await handleSignal(signal);
       }
     } catch {
       logLifecycle("call_signal_poll_failed");
       // Polling should keep retrying while the call is active.
+    } finally {
+      pollInFlight = false;
     }
   }
 

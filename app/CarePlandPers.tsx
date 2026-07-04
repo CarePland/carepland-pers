@@ -838,7 +838,8 @@ function buildHomeAtAGlanceSummary({
 }): HomeAtAGlanceSummary {
   const isEveryone = selectedSubjectId === ALL_SUBJECTS;
   const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfPast30Days = new Date(now);
+  startOfPast30Days.setDate(startOfPast30Days.getDate() - 30);
   const startOfYear = new Date(now.getFullYear(), 0, 1);
   const focusItemCount = homeTodayFocusGroups.reduce(
     (total, group) => total + group.items.length,
@@ -864,7 +865,7 @@ function buildHomeAtAGlanceSummary({
         !appointment.deleted_at
       );
     });
-  const monthAppointments = appointmentsSince(startOfMonth);
+  const past30DayAppointments = appointmentsSince(startOfPast30Days);
   const yearAppointments = appointmentsSince(startOfYear);
   const currentCarePrepCount = carePrepHistory.filter(
     (item) => item.is_current !== false
@@ -873,38 +874,39 @@ function buildHomeAtAGlanceSummary({
     0,
     Math.min(12, currentCarePrepCount + healthFocusTopics.length + focusItemCount)
   );
+  const testOnlyPrefix = (count: number) => (count > 0 ? "" : "(test) ");
   const items: string[] = [];
 
   if (nextAppointmentCount > 1) {
     items.push(
-      `${nextAppointmentCount} upcoming appointments are visible across your Care VIPs.`
+      `CarePland organized the next appointment context for ${nextAppointmentCount} Care VIPs.`
     );
   } else if (nextAppointmentCount === 1) {
-    items.push("The next appointment is easy to find from Home.");
+    items.push("CarePland organized the next appointment before it was needed.");
   }
 
   if (homeNextGuidance) {
-    items.push("CarePrep is ready for the next appointment.");
+    items.push("CarePrep identified visit context before the next appointment.");
   }
 
   if (healthFocusTopics.length > 0) {
     items.push(
-      `${healthFocusTopics.length} Health ${
-        healthFocusTopics.length === 1 ? "Story is" : "Stories are"
-      } ready to review from recurring care context.`
+      `Health Stories made ${healthFocusTopics.length} recurring care ${
+        healthFocusTopics.length === 1 ? "theme" : "themes"
+      } easier to recognize.`
     );
   }
 
   if (focusItemCount > 0) {
     items.push(
-      `${focusItemCount} Today's Focus ${
-        focusItemCount === 1 ? "item is" : "items are"
-      } available for today.`
+      `Today's Focus kept ${focusItemCount} care ${
+        focusItemCount === 1 ? "prompt" : "prompts"
+      } in view without extra searching.`
     );
   }
 
   if (hasAnySavedAppointments && !notesReminderAppointment) {
-    items.push("No visit-note follow-up is waiting right now.");
+    items.push("No visit-note follow-up is waiting for the current appointment history.");
   }
 
   if (items.length === 0) {
@@ -912,6 +914,26 @@ function buildHomeAtAGlanceSummary({
       "Add appointments, notes, Focus items, or Health Stories to give CarePland real outcomes to summarize."
     );
   }
+  const monthItems = [
+    `${testOnlyPrefix(past30DayAppointments.length)}CarePland kept appointment context organized for ${past30DayAppointments.length} appointment${
+      past30DayAppointments.length === 1 ? "" : "s"
+    } in the past 30 days.`,
+    `${testOnlyPrefix(currentCarePrepCount)}CarePrep prepared context for ${currentCarePrepCount} appointment${
+      currentCarePrepCount === 1 ? "" : "s"
+    } without rebuilding the visit history by hand.`,
+    `${testOnlyPrefix(healthFocusTopics.length)}Health Stories helped connect ${healthFocusTopics.length} recurring care ${
+      healthFocusTopics.length === 1 ? "theme" : "themes"
+    } for the current Care VIP.`,
+    `${testOnlyPrefix(focusItemCount)}Today's Focus kept ${focusItemCount} care ${
+      focusItemCount === 1 ? "prompt" : "prompts"
+    } surfaced for the current Home view.`,
+  ];
+  const yearItems = [
+    `${testOnlyPrefix(yearAppointments.length)}CarePland organized appointment information for ${yearAppointments.length} appointment${
+      yearAppointments.length === 1 ? "" : "s"
+    } this year.`,
+    "(test) Connect, Family, Errands, reminders, and completed Focus history will contribute here as those summary signals mature.",
+  ];
 
   return {
     historySections: [
@@ -928,21 +950,8 @@ function buildHomeAtAGlanceSummary({
                 }.`,
               ]
             : [],
-        items: [
-          `${monthAppointments.length} appointment${
-            monthAppointments.length === 1 ? "" : "s"
-          } tracked this month.`,
-          `${currentCarePrepCount} current CarePrep ${
-            currentCarePrepCount === 1 ? "summary is" : "summaries are"
-          } available.`,
-          `${healthFocusTopics.length} Health ${
-            healthFocusTopics.length === 1 ? "Story is" : "Stories are"
-          } visible for the current Care VIP.`,
-          `${focusItemCount} Today's Focus ${
-            focusItemCount === 1 ? "item is" : "items are"
-          } visible in the current Home view.`,
-        ],
-        title: "This Month",
+        items: monthItems,
+        title: "Past 30 Days",
       },
       {
         estimates:
@@ -953,12 +962,7 @@ function buildHomeAtAGlanceSummary({
                 } loaded in this view.`,
               ]
             : [],
-        items: [
-          `${yearAppointments.length} appointment${
-            yearAppointments.length === 1 ? "" : "s"
-          } organized this year.`,
-          "Connect, Family, Errands, reminders, and completed Focus history will contribute here as those summary signals mature.",
-        ],
+        items: yearItems,
         title: "This Year",
       },
     ],
@@ -15357,7 +15361,7 @@ export function CarePlandPers({
             )}
 
             {isAdmin && showHomeAtAGlanceTest ? (
-              <section className="rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-3 shadow-sm">
+              <section className="space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-blue-700">
@@ -15368,7 +15372,7 @@ export function CarePlandPers({
                     </p>
                   </div>
                   <button
-                    className="rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                    className="text-xs font-semibold text-blue-700 underline-offset-2 hover:text-blue-900 hover:underline"
                     onClick={() => {
                       setShowHomeAtAGlanceTest(false);
                       setHomeAtAGlanceExpanded(false);
@@ -15390,7 +15394,7 @@ export function CarePlandPers({
                   ))}
                 </ul>
                 <button
-                  className="mt-3 text-sm font-semibold text-blue-700 underline-offset-2 hover:text-blue-900 hover:underline"
+                  className="text-sm font-semibold text-blue-700 underline-offset-2 hover:text-blue-900 hover:underline"
                   onClick={() =>
                     setHomeAtAGlanceExpanded((currentValue) => !currentValue)
                   }
@@ -15399,10 +15403,10 @@ export function CarePlandPers({
                   {homeAtAGlanceExpanded ? "Show less" : "More..."}
                 </button>
                 {homeAtAGlanceExpanded ? (
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-5 border-t border-blue-100 pt-3 md:grid-cols-2">
                     {homeAtAGlanceSummary.historySections.map((section) => (
                       <div
-                        className="rounded-lg border border-blue-100 bg-white/70 p-3"
+                        className="space-y-2"
                         key={section.title}
                       >
                         <h3 className="text-sm font-semibold text-slate-900">
@@ -15419,7 +15423,7 @@ export function CarePlandPers({
                           ))}
                         </ul>
                         {section.estimates?.length ? (
-                          <div className="mt-3 border-t border-blue-100 pt-2">
+                          <div className="space-y-1 pt-1">
                             {section.estimates.map((estimate) => (
                               <p
                                 className="text-xs font-medium text-slate-500"

@@ -52,6 +52,12 @@ export type RecommendationCandidate = {
     generationRule: string;
     recommendationTrace?: RecommendationDecisionTrace;
     relatedTopics?: string[];
+    snoozeReturn?: {
+      dismissedRecommendationId: string;
+      newEvidenceCount: number;
+      rationale: string;
+      returnedAt: string;
+    };
   };
   title: string;
 };

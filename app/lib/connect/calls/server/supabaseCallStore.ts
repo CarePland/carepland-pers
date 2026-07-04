@@ -24,13 +24,23 @@ type ConnectCallRow = {
   approved_summary_text?: string | null;
   connected_at?: string | null;
   ended_at?: string | null;
+  generated_summary_text?: string | null;
   id: string;
   main_connect_user_person_id: string;
   caller_display_name: string | null;
   receiver_display_name: string | null;
+  summary_approval_draft_text?: string | null;
+  summary_approval_draft_updated_at?: string | null;
+  summary_approval_draft_updated_by?: string | null;
+  summary_approved_at?: string | null;
+  summary_approved_by?: string | null;
+  summary_review_note?: string | null;
+  summary_review_status?: string | null;
   state: string;
   summary_status?: string | null;
+  transcript_cleanup_status?: string | null;
   transcript_deleted_at?: string | null;
+  transcript_expires_at?: string | null;
   transcript_status?: string | null;
   transcript_text?: string | null;
   updated_at: string;
@@ -60,13 +70,17 @@ type ConnectCallSummaryRow = {
   summary_text: string | null;
 };
 
+const connectCallSelectColumns =
+  "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,summary_review_status,summary_review_note,generated_summary_text,approved_summary_text,summary_approved_at,summary_approved_by,summary_approval_draft_text,summary_approval_draft_updated_at,summary_approval_draft_updated_by,transcript_cleanup_status,transcript_deleted_at,transcript_expires_at,transcript_status,transcript_text,updated_at";
+const defaultTranscriptRetentionMs = 7 * 24 * 60 * 60 * 1000;
+const expiredUnreviewedNote =
+  "Transcript expired before formal approval. Generated summary retained as unapproved.";
+
 export async function readSupabaseConnectCalls(access: ConnectCallAccess) {
   return trySupabaseCallStore(async (supabase) => {
     const { data, error } = await supabase
       .from("connect_calls")
-      .select(
-        "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,transcript_deleted_at,transcript_status,transcript_text,updated_at"
-      )
+      .select(connectCallSelectColumns)
       .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
       .order("updated_at", { ascending: false })
       .limit(300);
@@ -81,7 +95,7 @@ export async function readSupabaseConnectCalls(access: ConnectCallAccess) {
       .from("connect_call_summaries")
       .select("call_id,summary_text")
       .in("call_id", callIds)
-      .in("summary_status", ["approved", "completed"])
+      .in("summary_status", ["approved", "completed", "pending_review", "expired_unreviewed"])
       .order("created_at", { ascending: false });
     const summaryByCallId = new Map<string, string>();
 
@@ -154,9 +168,7 @@ export async function recordSupabaseConnectCall(
         transcript_status: input.transcriptStatus || "not_started",
         transcript_text: input.transcriptText || "",
       })
-      .select(
-        "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,transcript_deleted_at,transcript_status,transcript_text,updated_at"
-      )
+      .select(connectCallSelectColumns)
       .single();
 
     if (error) throw error;
@@ -187,9 +199,7 @@ export async function updateSupabaseConnectCallState(
       .update(update)
       .eq("id", callId)
       .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
-      .select(
-        "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,transcript_deleted_at,transcript_status,transcript_text,updated_at"
-      )
+      .select(connectCallSelectColumns)
       .maybeSingle();
 
     if (error) throw error;
@@ -231,7 +241,19 @@ export async function approveSupabaseConnectCallSummary(
 ) {
   return trySupabaseCallStore(async (supabase) => {
     const now = new Date().toISOString();
-    const approvedSummaryText = input.approvedSummaryText?.trim() || "";
+    const { data: existingCall, error: readError } = await supabase
+      .from("connect_calls")
+      .select(connectCallSelectColumns)
+      .eq("id", callId)
+      .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
+      .maybeSingle();
+    if (readError) throw readError;
+    const existing = existingCall as ConnectCallRow | null;
+    const approvedSummaryText =
+      input.approvedSummaryText?.trim() ||
+      existing?.summary_approval_draft_text?.trim() ||
+      existing?.generated_summary_text ||
+      "";
     if (approvedSummaryText) {
       const { error: summaryError } = await supabase.from("connect_call_summaries").insert({
         approved_at: now,
@@ -251,7 +273,12 @@ export async function approveSupabaseConnectCallSummary(
       if (summaryError) throw summaryError;
     }
 
-    const cleanupCall = await cleanupSupabaseApprovedCallTranscript(callId, access, now);
+    const cleanupCall = await cleanupSupabaseApprovedCallTranscript(
+      callId,
+      access,
+      now,
+      approvedSummaryText
+    );
     return cleanupCall
       ? {
           ...cleanupCall,
@@ -274,12 +301,19 @@ export async function retrySupabaseApprovedCallTranscriptCleanup(
 async function cleanupSupabaseApprovedCallTranscript(
   callId: string,
   access: ConnectCallAccess,
-  now: string
+  now: string,
+  approvedSummaryText?: string
 ) {
   const supabase = createSupabaseUserClient(access.accessToken);
     const { data, error } = await supabase
       .from("connect_calls")
       .update({
+        approved_summary_text: approvedSummaryText,
+        summary_approved_at: now,
+        summary_approved_by: access.mainConnectUserPersonId,
+        summary_review_status: "approved",
+        summary_status: "approved",
+        transcript_cleanup_status: "completed",
         transcript_deleted_at: now,
         transcript_status: "deleted",
         transcript_text: "",
@@ -287,9 +321,7 @@ async function cleanupSupabaseApprovedCallTranscript(
       })
       .eq("id", callId)
       .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
-      .select(
-        "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,transcript_deleted_at,transcript_status,transcript_text,updated_at"
-      )
+      .select(connectCallSelectColumns)
       .maybeSingle();
 
     if (error) throw error;
@@ -377,9 +409,7 @@ export async function recordSupabaseConnectCallTranscriptSegment(
       })
       .eq("id", input.callId)
       .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
-      .select(
-        "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,transcript_deleted_at,transcript_status,transcript_text,updated_at"
-      )
+      .select(connectCallSelectColumns)
       .maybeSingle();
 
     return {
@@ -426,18 +456,105 @@ export async function recordSupabaseConnectCallGeneratedSummary(
     const { data, error: updateError } = await supabase
       .from("connect_calls")
       .update({
+        generated_summary_text: input.summaryText,
+        summary_approval_draft_text: input.summaryText,
+        summary_approval_draft_updated_at: now,
+        summary_approval_draft_updated_by: "system",
+        summary_review_status: summaryStatus === "pending_review" ? "pending_review" : summaryStatus,
         summary_status: summaryStatus,
+        transcript_expires_at: new Date(Date.parse(now) + defaultTranscriptRetentionMs).toISOString(),
         updated_at: now,
       })
       .eq("id", callId)
       .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
-      .select(
-        "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,transcript_deleted_at,transcript_status,transcript_text,updated_at"
-      )
+      .select(connectCallSelectColumns)
       .maybeSingle();
 
     if (updateError) throw updateError;
     return data ? connectCallRecordFromRow(data as ConnectCallRow) : null;
+  }, access);
+}
+
+export async function saveSupabaseConnectCallSummaryDraft(
+  callId: string,
+  access: ConnectCallAccess,
+  input: {
+    draftText: string;
+    updatedBy?: string;
+  }
+) {
+  return trySupabaseCallStore(async (supabase) => {
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("connect_calls")
+      .update({
+        summary_approval_draft_text: input.draftText,
+        summary_approval_draft_updated_at: now,
+        summary_approval_draft_updated_by: normalizeActorRole(input.updatedBy || "receiver"),
+        updated_at: now,
+      })
+      .eq("id", callId)
+      .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
+      .select(connectCallSelectColumns)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data ? connectCallRecordFromRow(data as ConnectCallRow) : null;
+  }, access);
+}
+
+export async function cleanupExpiredSupabaseConnectCallTranscripts(
+  access: ConnectCallAccess,
+  options: { now?: Date } = {}
+) {
+  return trySupabaseCallStore(async (supabase) => {
+    const now = options.now ?? new Date();
+    const nowIso = now.toISOString();
+    const { data: expiredRows, error: readError } = await supabase
+      .from("connect_calls")
+      .select("id")
+      .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
+      .neq("summary_status", "approved")
+      .lte("transcript_expires_at", nowIso)
+      .neq("transcript_status", "deleted");
+    if (readError) throw readError;
+
+    const callIds = ((expiredRows ?? []) as Array<{ id?: string }>)
+      .map((row) => row.id)
+      .filter((id): id is string => Boolean(id));
+    if (callIds.length === 0) return 0;
+
+    const { error: updateError } = await supabase
+      .from("connect_calls")
+      .update({
+        summary_review_note: expiredUnreviewedNote,
+        summary_review_status: "expired_unreviewed",
+        summary_status: "expired_unreviewed",
+        transcript_cleanup_status: "completed",
+        transcript_deleted_at: nowIso,
+        transcript_status: "deleted",
+        transcript_text: "",
+        updated_at: nowIso,
+      })
+      .in("id", callIds)
+      .eq("main_connect_user_person_id", access.mainConnectUserPersonId);
+    if (updateError) throw updateError;
+
+    const { error: segmentError } = await supabase
+      .from("connect_call_transcript_segments")
+      .delete()
+      .in("call_id", callIds)
+      .eq("main_connect_user_person_id", access.mainConnectUserPersonId);
+
+    if (segmentError) {
+      await supabase
+        .from("connect_calls")
+        .update({ transcript_cleanup_status: "pending", updated_at: nowIso })
+        .in("id", callIds)
+        .eq("main_connect_user_person_id", access.mainConnectUserPersonId);
+    }
+
+    return callIds.length;
   }, access);
 }
 
@@ -450,7 +567,7 @@ export async function readSupabaseConnectCallSignals(
   access: ConnectCallAccess
 ) {
   return trySupabaseCallStore(async (supabase) => {
-    let query = supabase
+    const query = supabase
       .from("connect_call_signals")
       .select("id,call_id,main_connect_user_person_id,sender,signal_type,payload,created_at")
       .eq("call_id", options.callId)
@@ -459,22 +576,23 @@ export async function readSupabaseConnectCallSignals(
       .order("created_at", { ascending: true })
       .limit(200);
 
-    if (options.notSender) {
-      query = query.neq("sender", options.notSender);
-    }
-
     const { data, error } = await query;
     if (error) throw error;
 
-    const signals = ((data ?? []) as ConnectCallSignalRow[]).map(
+    let signals = ((data ?? []) as ConnectCallSignalRow[]).map(
       connectCallSignalFromRow
     );
 
-    if (!options.afterSignalId) return signals;
-    const afterIndex = signals.findIndex(
-      (signal) => signal.signalId === options.afterSignalId
+    if (options.afterSignalId) {
+      const afterIndex = signals.findIndex(
+        (signal) => signal.signalId === options.afterSignalId
+      );
+      signals = afterIndex >= 0 ? signals.slice(afterIndex + 1) : signals;
+    }
+
+    return signals.filter(
+      (signal) => !options.notSender || signal.sender !== options.notSender
     );
-    return afterIndex >= 0 ? signals.slice(afterIndex + 1) : signals;
   }, access);
 }
 
@@ -525,12 +643,29 @@ function connectCallRecordFromRow(row: ConnectCallRow): ConnectCallRecord {
   return {
     callId: row.id,
     callerName: row.caller_display_name || "Andrew",
+    approvedSummaryText: row.approved_summary_text || undefined,
+    generatedSummaryText: row.generated_summary_text || undefined,
     mainConnectUserPersonId: row.main_connect_user_person_id,
     recipientName: row.receiver_display_name || "",
     recipientPersonId: row.main_connect_user_person_id,
     state: row.state,
+    modelSummaryText: row.generated_summary_text || undefined,
+    summaryApprovalDraftText: row.summary_approval_draft_text || undefined,
+    summaryApprovalDraftUpdatedAt: row.summary_approval_draft_updated_at || undefined,
+    summaryApprovalDraftUpdatedBy: row.summary_approval_draft_updated_by || undefined,
+    summaryApprovedAt: row.summary_approved_at || undefined,
+    summaryApprovedBy: row.summary_approved_by || undefined,
+    summaryReviewNote: row.summary_review_note || undefined,
+    summaryReviewStatus: row.summary_review_status || undefined,
     summaryStatus: row.summary_status || undefined,
+    summaryText:
+      row.summary_status === "approved"
+        ? row.approved_summary_text || row.generated_summary_text || undefined
+        : row.generated_summary_text || undefined,
+    transcriptCleanupStatus:
+      row.transcript_cleanup_status === "pending" ? "pending" : row.transcript_cleanup_status === "completed" ? "completed" : undefined,
     transcriptDeletedAt: row.transcript_deleted_at || undefined,
+    transcriptExpiresAt: row.transcript_expires_at || undefined,
     transcriptStatus: row.transcript_status || undefined,
     transcriptText: row.transcript_text || undefined,
     updatedAt: row.updated_at,
@@ -596,9 +731,18 @@ function normalizeTranscriptSegmentStatus(value: unknown) {
 
 function normalizeSummaryStatus(value: unknown) {
   const status = String(value || "");
-  return ["approved", "completed", "failed", "not_needed", "pending"].includes(status)
+  if (status === "completed" || status === "pending") return "pending_review";
+  if (status === "failed") return "summary_failed";
+  return [
+    "approved",
+    "cleanup_pending",
+    "expired_unreviewed",
+    "not_needed",
+    "pending_review",
+    "summary_failed",
+  ].includes(status)
     ? status
-    : "failed";
+    : "summary_failed";
 }
 
 function sanitizeSignalPayload(payload: unknown) {

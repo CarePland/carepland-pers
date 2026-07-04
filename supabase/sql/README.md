@@ -50,6 +50,9 @@ Supabase SQL editor history.
 - `2026-06-25_connect_call_summary_prompt.sql`
   Migration/admin prompt seed: adds an Admin-managed `connect_call_care_summary` prompt path for brief care-only call summaries. The prompt explicitly omits general conversation and tells the model to omit when uncertain.
 
+- `2026-07-03_connect_call_pending_summary_review.sql`
+  Migration patch: adds durable pending-review fields, approval drafts, transcript expiration/cleanup status, and honest `expired_unreviewed` lifecycle handling for Connect call summaries. Generated summaries are retained for review/audit, approved summaries are stored separately, and temporary transcripts expire by default after about seven days if not approved.
+
 - `2026-06-22_care_subject_pet_types_text.sql`
   Migration patch: converts `care_subjects.subject_type` from the older enum to constrained text so Profile can save cat, dog, generic pet, and `pet:<label>` values.
 

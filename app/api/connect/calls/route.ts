@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import {
   readConnectCallPersonAccessForRequest,
-  verifyConnectCallPersonAccess,
 } from "@/app/lib/connect/calls/server/callAccess";
 import {
   filterCallsForMainConnectUser,
@@ -10,11 +9,13 @@ import {
   type ConnectCallRecord,
 } from "@/app/lib/connect/calls/callScoping";
 import {
+  cleanupExpiredLocalConnectCallTranscripts,
   markStaleLocalConnectCallsMissed,
   readLocalConnectCalls,
   recordLocalConnectCall,
 } from "@/app/lib/connect/calls/server/localCalls";
 import {
+  cleanupExpiredSupabaseConnectCallTranscripts,
   markStaleSupabaseConnectCallsMissed,
   readSupabaseConnectCalls,
   recordSupabaseConnectCallEvent,
@@ -36,6 +37,8 @@ export async function GET(request: Request) {
     const access = await readConnectCallPersonAccessForRequest(request, personId);
 
     await Promise.all([
+      cleanupExpiredLocalConnectCallTranscripts({ mainConnectUserPersonId: personId }),
+      cleanupExpiredSupabaseConnectCallTranscripts(access),
       markStaleLocalConnectCallsMissed(),
       markStaleSupabaseConnectCallsMissed(access),
     ]);

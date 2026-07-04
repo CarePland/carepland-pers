@@ -94,10 +94,19 @@ type ConnectCallSummary = {
     state?: string;
     summaryStatus?: string;
     summaryText?: string;
+    generatedSummaryText?: string;
+    summaryApprovalDraftText?: string;
     transcriptStatus?: string;
     transcriptText?: string;
     updatedAt?: string;
   } | null;
+  pendingSummaryReviewCount?: number;
+  pendingSummaryReviews?: Array<{
+    callId?: string;
+    summaryStatus?: string;
+    summaryText?: string;
+    updatedAt?: string;
+  }>;
   total?: number;
 };
 
@@ -2168,6 +2177,7 @@ export function ConnectDashboard() {
             setStatus={setStatus}
             summaryStatus={state.callSummary?.latestCall?.summaryStatus || ""}
             summaryText={state.callSummary?.latestCall?.summaryText || ""}
+            pendingSummaryReviewCount={state.callSummary?.pendingSummaryReviewCount || 0}
             transcriptRuntimeStatus={callTranscriptRuntimeStatus}
             transcriptStatus={state.callSummary?.latestCall?.transcriptStatus || ""}
             transcriptText={state.callSummary?.latestCall?.transcriptText || ""}
@@ -5178,6 +5188,7 @@ function RecipientCallPanel({
   setStatus,
   summaryStatus,
   summaryText,
+  pendingSummaryReviewCount,
   transcriptRuntimeStatus,
   transcriptStatus,
   transcriptText,
@@ -5201,6 +5212,7 @@ function RecipientCallPanel({
   setStatus: (value: string) => void;
   summaryStatus: string;
   summaryText: string;
+  pendingSummaryReviewCount: number;
   transcriptRuntimeStatus: string;
   transcriptStatus: string;
   transcriptText: string;
@@ -5406,12 +5418,29 @@ function RecipientCallPanel({
                 </p>
               ) : null}
               {transcriptText.trim() ? (
-                <p className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded border border-[#d6e3f2] bg-white p-3 text-sm font-semibold leading-relaxed text-[#173150]">
-                  {transcriptText}
-                </p>
+                <div className="mt-3">
+                  <p className="text-xs font-black uppercase tracking-normal text-[#5f6e84]">
+                    Raw temporary transcript
+                  </p>
+                  <p className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded border border-[#d6e3f2] bg-white p-3 text-sm font-semibold leading-relaxed text-[#173150]">
+                    {transcriptText}
+                  </p>
+                </div>
               ) : null}
             </details>
           ) : null}
+        </div>
+      ) : null}
+      {pendingSummaryReviewCount > 0 ? (
+        <div className="mt-3 rounded-lg border border-[#d8c48b] bg-[#fff9e8] p-4">
+          <p className="text-sm font-black uppercase tracking-normal text-[#5a4b1e]">
+            Call note needs review
+          </p>
+          <p className="mt-2 text-base font-semibold leading-relaxed text-[#173150]">
+            {pendingSummaryReviewCount === 1
+              ? "1 call summary is waiting for review on the Receiver."
+              : `${pendingSummaryReviewCount} call summaries are waiting for review on the Receiver.`}
+          </p>
         </div>
       ) : null}
       {summaryText.trim() ? (

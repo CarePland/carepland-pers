@@ -64,7 +64,7 @@ export async function POST(request: Request, context: RouteContext) {
           String(call.state || "")
         ) &&
         call.transcriptText?.trim() &&
-        !["approved", "completed"].includes(String(call.summaryStatus || ""))
+        !["approved", "pending_review"].includes(String(call.summaryStatus || ""))
       ) {
         const generatedSummary = await generateConnectCallCareSummary({
           transcriptText: call.transcriptText,

@@ -1375,8 +1375,11 @@ function uniqueSubjects(subjects: AdminRecommendationsCareSubject[]) {
   );
 }
 
-function sumBy<T extends Record<string, number>>(items: T[], key: keyof T) {
-  return items.reduce((total, item) => total + item[key], 0);
+function sumBy<T, K extends keyof T>(items: T[], key: K) {
+  return items.reduce((total, item) => {
+    const value = item[key];
+    return total + (typeof value === "number" ? value : 0);
+  }, 0);
 }
 
 function formatScanStatus(

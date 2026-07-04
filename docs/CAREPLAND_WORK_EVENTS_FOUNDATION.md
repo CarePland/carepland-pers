@@ -9,6 +9,23 @@ They are distinct from:
 
 Work Events are the bridge. They make it possible for future `CarePland at a Glance` summaries to say CarePland quietly handled something without guessing.
 
+North star: CarePland should measure the work the user no longer had to do because the platform quietly handled it.
+
+The point is not to report feature usage. Prefer:
+
+- `Through CarePland, you had appointment context before 6 appointments.`
+- `CarePrep identified follow-up questions before your visits.`
+- `Import Anything prepared information for 5 appointments without manual typing.`
+- `Health Stories identified recurring patterns across multiple appointments.`
+- `Connect delivered messages that avoided additional phone calls.`
+
+Avoid:
+
+- `6 appointments tracked.`
+- `8 Health Stories available.`
+- `5 Today's Focus items available.`
+- `AI generated 18 summaries.`
+
 ## Table
 
 `carepland_work_events`

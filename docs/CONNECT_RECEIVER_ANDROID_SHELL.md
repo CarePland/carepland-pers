@@ -263,7 +263,9 @@ APK updates should be reserved for native behavior:
 
 ## Kiosk And Reboot Notes
 
-The current scaffold supports best-effort relaunch after normal boot and app update. It also supports owner-mode lock-task behavior after the device has been provisioned with the CarePland receiver admin component. True kiosk reliability should be handled through Android Enterprise dedicated-device setup, managed Play, or another device-owner/MDM path.
+The current scaffold supports best-effort relaunch after normal boot, app update, and power connection when the local Receiver mode is `dedicated`. Recovery launches take a short wake lock so the Receiver has time to reopen after a charger is connected or the device finishes booting. Personal Device mode remains a normal Android app and should not auto-launch.
+
+The shell also supports owner-mode lock-task behavior after the device has been provisioned with the CarePland receiver admin component. True kiosk reliability should be handled through Android Enterprise dedicated-device setup, managed Play, or another device-owner/MDM path.
 
 Sideloaded demo installs can still be useful, but they should be treated as soft appliance mode rather than guaranteed locked-down kiosk mode.
 

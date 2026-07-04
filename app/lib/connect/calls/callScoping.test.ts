@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   emptyConnectCallSummary,
+  filterPendingConnectCallSummaryReviews,
   filterCallsForMainConnectUser,
   mergeConnectCalls,
   summarizeConnectCalls,
@@ -88,7 +89,50 @@ describe("Connect call scoping", () => {
       active: 0,
       byState: {},
       latestCall: null,
+      pendingSummaryReviewCount: 0,
+      pendingSummaryReviews: [],
       total: 0,
     });
+  });
+
+  it("returns only pending non-expired call summary reviews", () => {
+    const pending = filterPendingConnectCallSummaryReviews(
+      [
+        {
+          callId: "needs-review",
+          generatedSummaryText: "Medication timing discussed.",
+          state: "hung_up",
+          summaryStatus: "pending_review",
+          transcriptExpiresAt: "2026-07-10T12:00:00.000Z",
+        },
+        {
+          callId: "approved",
+          generatedSummaryText: "Approved.",
+          state: "hung_up",
+          summaryStatus: "approved",
+          transcriptExpiresAt: "2026-07-10T12:00:00.000Z",
+        },
+        {
+          callId: "expired",
+          generatedSummaryText: "Expired.",
+          state: "hung_up",
+          summaryStatus: "pending_review",
+          transcriptExpiresAt: "2026-07-01T12:00:00.000Z",
+        },
+        {
+          callId: "active",
+          generatedSummaryText: "Still active.",
+          state: "connected",
+          summaryStatus: "pending_review",
+          transcriptExpiresAt: "2026-07-10T12:00:00.000Z",
+        },
+      ],
+      { now: new Date("2026-07-03T12:00:00.000Z") }
+    );
+
+    assert.deepEqual(
+      pending.map((call) => call.callId),
+      ["needs-review"]
+    );
   });
 });
