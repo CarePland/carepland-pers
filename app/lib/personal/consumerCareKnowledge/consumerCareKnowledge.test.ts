@@ -26,6 +26,29 @@ describe("consumer care knowledge", () => {
     assert.deepEqual(terms, ["MyChart", "Prior authorization"]);
   });
 
+  it("recognizes pharmacy benefit and prescription plan brand identities", () => {
+    const matches = findConsumerCareKnowledgeMatches(
+      "Caremark said Silver Script needs the refill approved first."
+    );
+    const terms = matches.map((match) => match.entry.canonicalTerm).sort();
+
+    assert.deepEqual(terms, ["CVS Caremark", "SilverScript"]);
+  });
+
+  it("recognizes phonetic GEHA references when users say it aloud", () => {
+    const context = buildConsumerCareKnowledgeContext(
+      "Ghee hah said the specialist is in network.",
+      { useCase: "transcript_interpretation" }
+    );
+
+    assert.equal(context.hasMatches, true);
+    assert.deepEqual(context.conceptIds, ["insurance_access.geha"]);
+    assert.deepEqual(context.matchedTerms, ["G.E.H.A"]);
+    assert.match(context.promptContext, /ghee hah -> G\.E\.H\.A/);
+    assert.match(context.promptContext, /Concept ID: insurance_access\.geha/);
+    assert.match(context.promptContext, /Do not infer plan type/);
+  });
+
   it("recognizes mobility and monitoring equipment without diagnosis inference", () => {
     const matches = findConsumerCareKnowledgeMatches(
       "Bring the rollator and the glucose meter to the appointment."

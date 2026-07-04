@@ -1,0 +1,11 @@
+workflow_key: consumer_care_knowledge_layer
+runtime_status: proposed prompt export; not yet wired as a runtime AI route
+recommended_model: low-latency structured-output model
+temperature: 0.0
+route: future shared CCKL normalization service
+notes:
+- CCKL normalizes language only.
+- Downstream services decide intent, routing, urgency, storage, and user-facing action.
+- Use deterministic catalog matches before model work when possible.
+- Inject only source-specific, ephemeral context.
+- Do not retain transcripts or raw source text as part of CCKL output.

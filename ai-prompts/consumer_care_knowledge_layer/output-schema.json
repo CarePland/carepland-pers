@@ -1,0 +1,117 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "concepts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "ambiguity": {
+            "enum": ["low", "medium", "high"],
+            "type": "string"
+          },
+          "candidateKind": {
+            "enum": [
+              "known_term",
+              "possible_brand_or_wordmark",
+              "possible_acronym_or_initialism",
+              "system_fragment",
+              "expert_jargon",
+              "naive_description",
+              "generic_term",
+              "household_candidate",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "careRelevance": { "type": "string" },
+          "conceptId": { "type": ["string", "null"] },
+          "confidence": { "type": "number" },
+          "displayName": { "type": "string" },
+          "doNotInfer": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "domain": {
+            "enum": [
+              "insurance_access",
+              "medication_access",
+              "medication_adherence",
+              "appointments_portals",
+              "mobility_equipment",
+              "monitoring_supplies",
+              "home_health_rehab",
+              "caregiving_support",
+              "care_logistics",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "heardPhrase": { "type": "string" },
+          "interpretationGuidance": { "type": "string" },
+          "normalizationHints": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "summaryGuidance": { "type": "string" },
+          "usePolicy": {
+            "enum": [
+              "safe_to_use_for_interpretation",
+              "interpretation_only",
+              "omit"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "conceptId",
+          "displayName",
+          "heardPhrase",
+          "candidateKind",
+          "domain",
+          "confidence",
+          "ambiguity",
+          "careRelevance",
+          "interpretationGuidance",
+          "normalizationHints",
+          "summaryGuidance",
+          "doNotInfer",
+          "usePolicy"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "decisionTrace": {
+      "additionalProperties": false,
+      "properties": {
+        "confidenceReason": { "type": "string" },
+        "criticalFactors": {
+          "items": { "type": "string" },
+          "type": "array"
+        },
+        "matchedAliases": {
+          "items": { "type": "string" },
+          "type": "array"
+        },
+        "matchedContext": {
+          "items": { "type": "string" },
+          "type": "array"
+        },
+        "matchedRules": {
+          "items": { "type": "string" },
+          "type": "array"
+        }
+      },
+      "required": [
+        "matchedRules",
+        "matchedAliases",
+        "matchedContext",
+        "criticalFactors",
+        "confidenceReason"
+      ],
+      "type": "object"
+    }
+  },
+  "required": ["concepts", "decisionTrace"],
+  "type": "object"
+}

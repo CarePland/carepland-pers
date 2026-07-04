@@ -11,6 +11,7 @@ The app does not load these files at runtime yet. Current runtime behavior is:
 - `support_assistant`: loads a dynamic instruction version when present; otherwise uses the fallback system prompt in code.
 - `ocr_image_text_extraction`: uses a hardcoded user prompt and image inputs.
 - `support_assistant_analysis`: uses hardcoded system and user prompt composition for admin QA analysis.
+- `consumer_care_knowledge_layer`: proposed shared normalization prompt; not yet wired as a runtime AI route.
 
 Recommended file meanings:
 

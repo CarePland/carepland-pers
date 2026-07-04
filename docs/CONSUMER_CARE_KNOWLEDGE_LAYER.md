@@ -14,6 +14,7 @@ The first implementation is intentionally small and code-native:
 - `findConsumerCareKnowledgeMatches()` finds relevant entries in transient text.
 - `buildConsumerCareKnowledgeContext()` returns reusable matched terms, match details, and prompt context for any workflow.
 - `buildConsumerCareKnowledgePromptContext()` creates a bounded prompt block with privacy and non-clinical guardrails.
+- The proposed platform normalization prompt lives in `ai-prompts/consumer_care_knowledge_layer/`.
 - Connect call care summaries now inject only matched CCKL entries at summary time.
 
 This avoids creating an admin workflow or new database table before the model, taxonomy, review needs, and prompt behavior stabilize.
@@ -23,6 +24,7 @@ This avoids creating an admin workflow or new database table before the model, t
 Each entry should have:
 
 - `canonicalTerm`: preferred internal label.
+- `conceptId`: stable platform identifier for downstream systems.
 - `aliases`: common spellings, brand variants, shorthand, and likely transcript variants.
 - `consumerPhrases`: natural phrases a caregiver might say.
 - `category`: broad consumer-care taxonomy.
@@ -35,6 +37,10 @@ Each entry should have:
 - `sourceUrls`: reputable sources used to ground the entry.
 
 Do not add diagnosis criteria, treatment instructions, medication dosing guidance, or exhaustive clinical facts.
+
+For branded services, plans, PBMs, portals, and acronyms, include spoken or phonetic aliases when they are common or user-observed. Example: `G.E.H.A` should include `GEHA`, `G E H A`, `gee ha`, and `ghee hah` so transcript interpretation can recognize the likely branded identity without storing a new fact.
+
+Concept IDs should be stable and domain-scoped, such as `insurance_access.geha`, `medication_access.goodrx`, or `mobility_equipment.walker`. Downstream modules should prefer concept IDs over display strings.
 
 ## Taxonomy
 
@@ -113,6 +119,9 @@ Phase 1 used small, reputable public sources and avoided scraping large glossari
 - [CDC blood sugar monitoring](https://www.cdc.gov/diabetes/treatment/index.html)
 - [GoodRx how it works](https://www.goodrx.com/how-goodrx-works)
 - [Amazon Pharmacy PillPack](https://www.amazon.com/pharmacy/pillpack)
+- [CVS Caremark](https://www.caremark.com/)
+- [Aetna SilverScript prescription drug plans](https://www.silverscript.com/)
+- [G.E.H.A](https://www.geha.com/)
 - [MedlinePlus rehabilitation](https://medlineplus.gov/rehabilitation.html)
 - [Medicare home health services](https://www.medicare.gov/coverage/home-health-services)
 - [NHLBI lymphedema treatment](https://www.nhlbi.nih.gov/health/lymphedema/treatment)

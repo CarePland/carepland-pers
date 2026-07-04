@@ -1,0 +1,5 @@
+{
+  "workflow_key": "consumer_care_knowledge_layer",
+  "role": "user",
+  "content": "Normalize the supplied healthcare or caregiving language into CCKL concepts.\n\nUse case: {{use_case}}\n\nKnown CCKL matches, if supplied:\n{{known_matches}}\n\nText to normalize:\n{{source_text}}\n\nReturn structured JSON only. Use short heardPhrase values. Do not include raw transcript or source text beyond the short phrase needed for normalization."
+}

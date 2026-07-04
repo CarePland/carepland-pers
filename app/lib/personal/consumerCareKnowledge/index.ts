@@ -13,6 +13,7 @@ export type ConsumerCareKnowledgeEntry = {
   canonicalTerm: string;
   careRelevance: string;
   category: ConsumerCareKnowledgeCategory;
+  conceptId: string;
   confidenceNotes: string;
   consumerPhrases: string[];
   examples?: string[];
@@ -38,6 +39,7 @@ export type ConsumerCareKnowledgeUseCase =
   | "user_question";
 
 export type ConsumerCareKnowledgeContext = {
+  conceptIds: string[];
   hasMatches: boolean;
   matchedTerms: string[];
   matches: ConsumerCareKnowledgeMatch[];
@@ -69,6 +71,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate medication packaging, delivery, refill coordination, pharmacy transfer, or adherence support.",
     category: "medication_adherence",
+    conceptId: "medication_adherence.pillpack",
     confidenceNotes:
       "High confidence when used near medications, packets, refills, pharmacy, delivery, or Amazon Pharmacy.",
     consumerPhrases: [
@@ -96,6 +99,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate medication organization, adherence support, pharmacy packaging, or caregiver oversight.",
     category: "medication_adherence",
+    conceptId: "medication_adherence.blister_packs",
     confidenceNotes:
       "High confidence when paired with pills, meds, pharmacy, morning/evening doses, or refill timing.",
     consumerPhrases: ["blister packs from the pharmacy", "bubble packs", "med packs"],
@@ -112,6 +116,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate medication schedule management, caregiver setup tasks, or concern about missed/double doses.",
     category: "medication_adherence",
+    conceptId: "medication_adherence.pill_organizer",
     confidenceNotes:
       "Common consumer phrase; interpret cautiously because it can be ordinary organization without a care issue.",
     consumerPhrases: ["filled the pill box", "weekly pill organizer", "mom's med box"],
@@ -128,6 +133,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate medication affordability, cash pricing, coupon use, pharmacy selection, or insurance-workaround logistics.",
     category: "medication_access",
+    conceptId: "medication_access.goodrx",
     confidenceNotes:
       "High confidence when near prescriptions, pharmacy prices, coupons, cash pay, or insurance.",
     consumerPhrases: ["used GoodRx", "coupon price", "discount card"],
@@ -144,6 +150,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate an insurance approval step that can delay medications, equipment, tests, procedures, or referrals.",
     category: "insurance_access",
+    conceptId: "insurance_access.prior_authorization",
     confidenceNotes:
       "High confidence in insurance, pharmacy, referral, procedure, DME, or medication contexts.",
     consumerPhrases: ["needs a prior auth", "waiting on preauth", "insurance approval"],
@@ -155,11 +162,100 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     transcriptNormalizationHints: ["pre auth -> prior authorization", "PA -> prior authorization only when insurance context is clear"],
   },
   {
+    aliases: [
+      "caremark",
+      "care mark",
+      "cvs caremark",
+      "cvs care mark",
+      "caremark pbm",
+      "cvs pharmacy benefits",
+    ],
+    canonicalTerm: "CVS Caremark",
+    careRelevance:
+      "May indicate pharmacy-benefit management, mail-order pharmacy, formulary coverage, refill access, prior authorization, or prescription cost/coverage logistics.",
+    category: "insurance_access",
+    conceptId: "insurance_access.cvs_caremark",
+    confidenceNotes:
+      "High confidence when near prescriptions, pharmacy benefits, mail order, formulary, refills, insurance, copays, prior authorization, or CVS.",
+    consumerPhrases: ["Caremark said it was denied", "CVS Caremark mail order", "Caremark needs approval"],
+    interpretationGuidance:
+      "Understand as a CVS Health pharmacy-benefit/pharmacy service identity. Do not infer coverage, denial, plan enrollment, or medication specifics unless discussed.",
+    sourceUrls: ["https://www.caremark.com/"],
+    summaryGuidance:
+      "Mention only concrete prescription-access, refill, mail-order, coverage, or follow-up details actually discussed.",
+    transcriptNormalizationHints: [
+      "care mark -> Caremark",
+      "CVS care mark -> CVS Caremark",
+      "Caremark -> CVS Caremark when prescription/insurance context is clear",
+    ],
+  },
+  {
+    aliases: [
+      "silverscript",
+      "silver script",
+      "silver scripts",
+      "aetna silverscript",
+      "silverscript part d",
+      "silver script part d",
+    ],
+    canonicalTerm: "SilverScript",
+    careRelevance:
+      "May indicate a Medicare Part D prescription drug plan, drug coverage, formulary, pharmacy network, copays, or prescription-plan paperwork.",
+    category: "insurance_access",
+    conceptId: "insurance_access.silverscript",
+    confidenceNotes:
+      "High confidence when near Medicare, Part D, prescriptions, drug plan, formulary, pharmacy, copays, coverage, or Aetna.",
+    consumerPhrases: ["SilverScript covers it", "Silver Script Part D", "Aetna SilverScript plan"],
+    interpretationGuidance:
+      "Understand as an Aetna/CVS-associated Medicare prescription drug plan identity. Do not infer active enrollment, covered medications, or coverage decisions unless stated.",
+    sourceUrls: ["https://www.silverscript.com/"],
+    summaryGuidance:
+      "Include only if prescription coverage, cost, pharmacy access, paperwork, or caregiver follow-up was actually discussed.",
+    transcriptNormalizationHints: [
+      "silver script -> SilverScript",
+      "silver scripts -> SilverScript",
+      "SilverScript -> Medicare Part D prescription plan context when prescriptions or coverage are discussed",
+    ],
+  },
+  {
+    aliases: [
+      "geha",
+      "g e h a",
+      "g.e.h.a",
+      "gee ha",
+      "gee hah",
+      "ghee ha",
+      "ghee hah",
+      "ghee-hah",
+      "government employees health association",
+    ],
+    canonicalTerm: "G.E.H.A",
+    careRelevance:
+      "May indicate health, dental, prescription, provider-network, portal, claims, benefits, or federal employee/retiree coverage logistics.",
+    category: "insurance_access",
+    conceptId: "insurance_access.geha",
+    confidenceNotes:
+      "High confidence for GEHA/G.E.H.A in insurance, benefits, provider, claim, prescription, dental, FEHB, PSHB, or federal employee context. Phonetic forms like 'ghee hah' are user-specific/high-value but need surrounding coverage context.",
+    consumerPhrases: ["G.E.H.A said the provider is in network", "ghee hah covers it", "GEHA claim"],
+    interpretationGuidance:
+      "Understand as Government Employees Health Association, a health/dental benefits organization for federal employees, retirees, and families. Do not infer plan type, eligibility, coverage, or claim status unless discussed.",
+    sourceUrls: ["https://www.geha.com/"],
+    summaryGuidance:
+      "Mention only concrete insurance, claim, provider-network, prescription, dental, portal, or benefits details actually discussed.",
+    transcriptNormalizationHints: [
+      "ghee hah -> G.E.H.A when insurance/benefits context is clear",
+      "gee ha -> G.E.H.A when insurance/benefits context is clear",
+      "GEHA -> G.E.H.A",
+      "G E H A -> G.E.H.A",
+    ],
+  },
+  {
     aliases: ["my chart", "mychart", "patient portal", "portal message", "portal"],
     canonicalTerm: "MyChart",
     careRelevance:
       "May indicate appointment scheduling, test results, medication lists, provider messages, pre-visit tasks, or shared records.",
     category: "appointments_portals",
+    conceptId: "appointments_portals.mychart",
     confidenceNotes:
       "High confidence for MyChart/My Chart. Generic portal needs healthcare context.",
     consumerPhrases: ["sent a MyChart message", "check the portal", "results are in MyChart"],
@@ -176,6 +272,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate equipment needed at home, supplier coordination, coverage requirements, rentals, repairs, or replacement.",
     category: "mobility_equipment",
+    conceptId: "mobility_equipment.durable_medical_equipment",
     confidenceNotes:
       "High confidence for DME phrase; generic equipment needs care context.",
     consumerPhrases: ["DME supplier", "medical equipment for home", "Medicare equipment"],
@@ -192,6 +289,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate mobility support, fall-risk context, rehab, home safety, transport planning, or equipment needs.",
     category: "mobility_equipment",
+    conceptId: "mobility_equipment.walker",
     confidenceNotes:
       "High confidence when used with walking, balance, falls, PT, rehab, home, or DME.",
     consumerPhrases: ["uses a walker", "needs the walker", "bring the walker"],
@@ -208,6 +306,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate a wheeled mobility aid with brakes and often a seat, relevant to walking tolerance, fatigue, transport, and safety.",
     category: "mobility_equipment",
+    conceptId: "mobility_equipment.rollator",
     confidenceNotes:
       "High confidence for rollator; 'walker with seat' should be interpreted as rollator-like, not a standard walker.",
     consumerPhrases: ["walker with a seat", "rolling walker", "rollator brakes"],
@@ -224,6 +323,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate leg swelling, circulation support, lymphedema, post-procedure instructions, or equipment/sizing tasks.",
     category: "mobility_equipment",
+    conceptId: "mobility_equipment.compression_socks",
     confidenceNotes:
       "Care relevance depends on context; avoid treating casual travel/athletic use as a medical issue unless stated.",
     consumerPhrases: ["wearing compression socks", "support hose", "stockings for swelling"],
@@ -240,6 +340,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate diabetes monitoring, supplies, readings to bring to appointments, refill needs, or caregiver tracking.",
     category: "monitoring_supplies",
+    conceptId: "monitoring_supplies.blood_sugar_meter",
     confidenceNotes:
       "High confidence when paired with diabetes, sugar readings, strips, lancets, or finger sticks.",
     consumerPhrases: ["check sugar", "finger stick", "out of test strips"],
@@ -256,6 +357,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate ongoing glucose monitoring, sensors, alerts, device supplies, data sharing, or appointment review.",
     category: "monitoring_supplies",
+    conceptId: "monitoring_supplies.continuous_glucose_monitor",
     confidenceNotes:
       "High confidence for CGM and common brand names in diabetes context.",
     consumerPhrases: ["CGM alarm", "Libre sensor", "Dexcom readings"],
@@ -272,6 +374,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate rehabilitation, mobility/function goals, home exercises, appointment follow-up, or caregiver transport.",
     category: "home_health_rehab",
+    conceptId: "home_health_rehab.physical_therapy",
     confidenceNotes:
       "PT is ambiguous; use only when healthcare, rehab, exercise, mobility, surgery, injury, or appointment context is present.",
     consumerPhrases: ["going to PT", "doing rehab exercises", "physical therapy appointment"],
@@ -288,6 +391,7 @@ export const consumerCareKnowledgeSeed: ConsumerCareKnowledgeEntry[] = [
     careRelevance:
       "May indicate in-home skilled care, nursing visits, therapy, aide support, eligibility/coverage logistics, or caregiver coordination.",
     category: "home_health_rehab",
+    conceptId: "home_health_rehab.home_health",
     confidenceNotes:
       "Home care can mean non-medical support; use the surrounding context to avoid overstating skilled services.",
     consumerPhrases: ["home health is coming", "visiting nurse", "home nurse checked"],
@@ -369,6 +473,7 @@ export function buildConsumerCareKnowledgeContext(
   if (matches.length === 0) {
     return {
       hasMatches: false,
+      conceptIds: [],
       matchedTerms: [],
       matches: [],
       promptContext: "",
@@ -385,6 +490,7 @@ export function buildConsumerCareKnowledgeContext(
 
       return [
         `- ${entry.canonicalTerm} (${entry.category}; matched "${match.matchedText}")`,
+        `  Concept ID: ${entry.conceptId}`,
         `  Interpretation: ${entry.interpretationGuidance}`,
         `  Care relevance: ${entry.careRelevance}`,
         `  Transcript normalization: ${entry.transcriptNormalizationHints.join("; ")}`,
@@ -395,6 +501,7 @@ export function buildConsumerCareKnowledgeContext(
   ];
 
   return {
+    conceptIds: matches.map((match) => match.entry.conceptId),
     hasMatches: true,
     matchedTerms: matches.map((match) => match.entry.canonicalTerm),
     matches,
