@@ -226,6 +226,7 @@ type TalkApiResult = {
   completed_focus_item_id?: string;
   confidence?: number;
   created_track_event_id?: string;
+  decision_trace?: Record<string, unknown>;
   display_response?: string;
   intent?: string;
   needs_confirmation?: boolean;

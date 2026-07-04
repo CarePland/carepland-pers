@@ -127,7 +127,7 @@ The resulting Track Event stores:
 
 ## Future Connections
 
-- **Talk**: Talk button interpretation can create `track_events` with `source = talk_voice`, a care-relevant `structured_payload`, and review flags when confidence is low. V1 is deterministic and supports walking/activity, broad medication completion, weight measurement, Connect call requests, next-appointment questions, and safe unknown handling. See `docs/TALK_INTENT_FOUNDATION.md`.
+- **Talk**: Talk button interpretation can create `track_events` with `source = talk_voice`, a care-relevant `structured_payload`, review flags when confidence is low, and `structured_payload.talkDecisionTrace` explaining the primary intent, matched rules/phrases, detected entities, context used, candidate intents, confidence, write policy, and critical deciding factors. V1 is deterministic and supports walking/activity, broad medication completion, weight measurement, Connect call requests, next-appointment questions, and safe unknown handling. See `docs/TALK_INTENT_FOUNDATION.md` and `docs/DECISION_TRACE_ARCHITECTURE.md`.
 - **Reminders**: reminder responses can create `track_events` with `source = reminder`; reminders may also be generated from active `focus_items`.
 - **Receiver Today’s Focus**: Receiver should read active `focus_items` for the active `care_subject_id` and create `track_events` when something is recorded. It should not store checkbox state as the source of truth.
 - **Appointment Notes / Connect Call Summaries**: approved summaries can create source-linked events when they contain concrete observations or actions.

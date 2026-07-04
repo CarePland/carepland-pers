@@ -19,6 +19,25 @@ describe("Talk intent interpretation", () => {
     assert.equal(result.trackEventDraft?.title, "Walked to mailbox");
     assert.equal(result.structuredPayload.destination, "mailbox");
     assert.equal("interpretedFrom" in result.structuredPayload, false);
+    assert.deepEqual(result.decisionTrace.matched_rules, ["talk.activity.walking.v1"]);
+    assert.equal(
+      result.decisionTrace.critical_deciding_factors[0],
+      "Walking activity rule matched a walk/walked/walking keyword."
+    );
+    assert.deepEqual(result.decisionTrace.matched_phrases, ["walked", "mailbox"]);
+    assert.equal(result.decisionTrace.write_policy, "write_allowed");
+    assert.equal(result.decisionTrace.primary_intent, "track_event_activity");
+    assert.equal(result.decisionTrace.context_used.active_person_id, "person-1");
+    assert.equal(
+      result.decisionTrace.candidate_intents.some(
+        (candidate) => candidate.intent === "focus_item_completion"
+      ),
+      true
+    );
+    assert.deepEqual(
+      result.trackEventDraft?.structuredPayload?.talkDecisionTrace,
+      result.decisionTrace
+    );
     assert.equal(talkResultShouldWrite(result), true);
   });
 
@@ -46,6 +65,18 @@ describe("Talk intent interpretation", () => {
     assert.equal(result.trackEventDraft?.eventType, "medication.taken");
     assert.equal(result.structuredPayload.medicationScope, "broad");
     assert.equal(result.structuredPayload.medicationWindow, "Morning");
+    assert.deepEqual(result.decisionTrace.matched_rules, [
+      "talk.focus.medication_completion.v1",
+    ]);
+    assert.equal(result.decisionTrace.write_policy, "write_allowed");
+    assert.equal(
+      result.decisionTrace.entities_detected.focus_item_id,
+      "focus-med-morning"
+    );
+    assert.deepEqual(
+      result.trackEventDraft?.structuredPayload?.talkDecisionTrace,
+      result.decisionTrace
+    );
     assert.equal(talkResultShouldWrite(result), true);
   });
 
@@ -58,6 +89,11 @@ describe("Talk intent interpretation", () => {
     assert.equal(result.trackEventDraft?.eventType, "measurement.weight");
     assert.equal(result.trackEventDraft?.value, 185);
     assert.equal(result.trackEventDraft?.unit, "lb");
+    assert.deepEqual(result.decisionTrace.matched_rules, [
+      "talk.measurement.weight.v1",
+    ]);
+    assert.equal(result.decisionTrace.entities_detected.value, 185);
+    assert.equal(result.decisionTrace.entities_detected.unit, "lb");
     assert.equal(talkResultShouldWrite(result), true);
   });
 
@@ -72,6 +108,13 @@ describe("Talk intent interpretation", () => {
     assert.equal(result.intent, "connect_call_request");
     assert.equal(result.proposedAction, "request_call");
     assert.equal(result.structuredPayload.contactId, "contact-andrew");
+    assert.deepEqual(result.decisionTrace.matched_rules, [
+      "talk.connect.call_request.v1",
+    ]);
+    assert.equal(
+      result.decisionTrace.critical_deciding_factors[0],
+      "Call request rule matched a call verb and a known contact name."
+    );
     assert.equal(result.trackEventDraft, undefined);
   });
 
@@ -97,6 +140,9 @@ describe("Talk intent interpretation", () => {
     assert.equal(result.intent, "appointment_question");
     assert.equal(result.proposedAction, "answer_appointment_question");
     assert.equal(result.structuredPayload.appointmentId, "appt-1");
+    assert.deepEqual(result.decisionTrace.matched_rules, [
+      "talk.appointment.next_question.v1",
+    ]);
     assert.match(result.displayResponse, /Cardiology Follow-Up/);
     assert.equal(result.trackEventDraft, undefined);
   });
@@ -108,6 +154,10 @@ describe("Talk intent interpretation", () => {
 
     assert.equal(result.intent, "unknown");
     assert.equal(result.needsReview, true);
+    assert.deepEqual(result.decisionTrace.matched_rules, [
+      "talk.unknown.no_rule_match.v1",
+    ]);
+    assert.equal(result.decisionTrace.write_policy, "review_required");
     assert.equal(result.trackEventDraft, undefined);
     assert.equal(talkResultShouldWrite(result), false);
   });

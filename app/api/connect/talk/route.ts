@@ -240,6 +240,7 @@ function publicTalkResult(result: TalkInterpretationResult) {
     completed_focus_item_id: result.completedFocusItemId,
     confidence: result.confidence,
     created_track_event_id: result.createdTrackEventId,
+    decision_trace: result.decisionTrace,
     display_response: result.displayResponse,
     intent: result.intent,
     needs_confirmation: result.needsConfirmation,
