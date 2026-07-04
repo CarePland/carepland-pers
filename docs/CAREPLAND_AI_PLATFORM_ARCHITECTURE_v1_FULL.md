@@ -510,6 +510,32 @@ These extend the platform rather than replacing existing layers.
 
 ---
 
+# Current Implementation Notes
+
+The initial platform extraction exposes shared contracts and small adapters under `app/lib/platform/ai`.
+
+Current implemented pieces:
+
+- `contracts.ts` defines platform shapes for observations, concepts, resolved concepts, intent results, workflow selections, and decision traces.
+- `ccklService.ts` wraps the existing Consumer Care Knowledge seed matcher and emits platform `Concept[]` plus a `consumer_care_knowledge` Decision Trace without changing existing CCKL helper behavior.
+- `hklService.ts` is a no-op Household Knowledge Layer scaffold that reuses `HouseholdConcept` and `DecisionTrace<"household_knowledge">`, emits an empty `HouseholdConcept[]`, and uses a `no_write` execution policy. It is not consumed by workflows and does not resolve household aliases yet.
+- `knowledgeResolutionService.ts` is a no-op Knowledge Resolution scaffold that accepts platform `Concept[]` and `HouseholdConcept[]`, reuses `ResolvedConcept` and `DecisionTrace<"knowledge_resolution">`, emits an empty `ResolvedConcept[]`, and uses a `no_write` execution policy. It is not consumed by workflows and does not merge universal or household concepts yet.
+- Platform tests prove the current layers compose in memory as CCKL → HKL → Knowledge Resolution while all three traces remain `no_write`; this composition is not wired into product runtime behavior.
+- `traceComposition.ts` collects CCKL, HKL, and Knowledge Resolution `DecisionTrace` objects in deterministic platform order without reinterpreting traces or changing execution policy. It is a platform utility only and is not wired into workflows or persistence.
+- `normalizationResult.ts` is a passive platform container for carrying `Concept[]`, `HouseholdConcept[]`, `ResolvedConcept[]`, and composed `DecisionTrace[]` together. It does not invoke platform layers, reinterpret outputs, or mutate supplied values.
+- Connect call-summary prompt construction consumes `ccklService.ts` while preserving the exact legacy prompt-context string. Platform concepts and the CCKL Decision Trace are available at the internal boundary but are not persisted by call summary v1.
+- `talkAdapter.ts` maps existing Talk interpretation results into platform `IntentResult` and `DecisionTrace` shapes while preserving the existing persisted snake_case Talk trace.
+- `index.ts` is the platform AI import boundary for future platform callers.
+
+Not yet implemented:
+
+- Household Knowledge Layer workflow consumption, alias resolution, or persistence.
+- Knowledge Resolution workflow consumption, merge behavior, or persistence.
+- Knowledge bundles.
+- New vocabulary, aliases, routing behavior, or product automation from this extraction.
+
+---
+
 # Closing
 
 CarePland is building a conversational operating system for care information.

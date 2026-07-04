@@ -11,6 +11,10 @@ import {
   loadHomeContextInstructionVersion,
 } from "@/app/lib/personal/homeContext/prompts";
 import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+import {
+  openAiResponseText,
+  runOpenAiResponse,
+} from "@/app/lib/platform/ai/responses";
 import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 type JsonObject = Record<string, unknown>;
@@ -215,33 +219,7 @@ function cleanText(value: string | null | undefined, maxLength = 280) {
 }
 
 function responseText(response: JsonObject): string {
-  if (typeof response.output_text === "string") {
-    return response.output_text;
-  }
-
-  const output = Array.isArray(response.output) ? response.output : [];
-
-  return output
-    .flatMap((item) => {
-      if (!item || typeof item !== "object" || !("content" in item)) {
-        return [];
-      }
-
-      const content = Array.isArray(item.content) ? item.content : [];
-      return content.map((contentItem: unknown) => {
-        if (
-          contentItem &&
-          typeof contentItem === "object" &&
-          "text" in contentItem
-        ) {
-          return String(contentItem.text);
-        }
-
-        return "";
-      });
-    })
-    .join("")
-    .trim();
+  return openAiResponseText(response);
 }
 
 function parseOpenAiJson(response: JsonObject): JsonObject {
@@ -938,50 +916,45 @@ export async function POST(request: NextRequest) {
     const classifierPromptTemplate =
       classifierInstructionVersion?.user_prompt_template?.trim() ||
       homeContextClassifierDefaultUserPrompt;
-    const classifierResponse = await fetch("https://api.openai.com/v1/responses", {
-      body: JSON.stringify({
-        input: [
-          {
-            content: classifierSystemPrompt,
-            role: "system",
-          },
-          {
-            content: [
-              `Instruction template:\n${classifierPromptTemplate}`,
-              `Ask context:\n${JSON.stringify(askContext, null, 2)}`,
-              `Query interpretation:\n${JSON.stringify(
-                queryInterpretation,
-                null,
-                2
-              )}`,
-              `Question:\n${question}`,
-            ].join("\n\n"),
-            role: "user",
-          },
-        ],
-        model: classifierInstructionVersion?.model ?? "gpt-4.1-mini",
-        temperature: classifierInstructionVersion?.temperature ?? 0,
-        text: {
-          format: {
-            name: "home_context_intent_classifier",
-            schema: classifierSchema,
-            strict: false,
-            type: "json_schema",
-          },
+    const classifierModel = classifierInstructionVersion?.model ?? "gpt-4.1-mini";
+    const classifierResponse = await runOpenAiResponse({
+      apiKey: openAiApiKey,
+      input: [
+        {
+          content: classifierSystemPrompt,
+          role: "system",
         },
-      }),
-      headers: {
-        Authorization: `Bearer ${openAiApiKey}`,
-        "Content-Type": "application/json",
+        {
+          content: [
+            `Instruction template:\n${classifierPromptTemplate}`,
+            `Ask context:\n${JSON.stringify(askContext, null, 2)}`,
+            `Query interpretation:\n${JSON.stringify(
+              queryInterpretation,
+              null,
+              2
+            )}`,
+            `Question:\n${question}`,
+          ].join("\n\n"),
+          role: "user",
+        },
+      ],
+      model: classifierModel,
+      temperature: classifierInstructionVersion?.temperature ?? 0,
+      text: {
+        format: {
+          name: "home_context_intent_classifier",
+          schema: classifierSchema,
+          strict: false,
+          type: "json_schema",
+        },
       },
-      method: "POST",
     });
-    const classifierJson = (await classifierResponse.json()) as JsonObject;
+    const classifierJson = classifierResponse.json;
     if (classifierResponse.ok) {
       await logOpenAiOperationCost({
         careCircleId,
         metadata: { context_level: askContext.level },
-        model: classifierInstructionVersion?.model ?? "gpt-4.1-mini",
+        model: classifierModel,
         openAiJson: classifierJson,
         operationKey: "home_context_intent_classifier",
         operationLabel: "Home context intent classifier",
@@ -989,9 +962,7 @@ export async function POST(request: NextRequest) {
           "home_context_intent_classifier",
           classifierInstructionVersion
         ),
-        providerRequestId:
-          classifierResponse.headers.get("x-request-id") ??
-          classifierResponse.headers.get("openai-request-id"),
+        providerRequestId: classifierResponse.requestId,
         supabase: userClient,
         userId: userData.user.id,
       });
@@ -1323,36 +1294,31 @@ export async function POST(request: NextRequest) {
       `Query interpretation:\n${JSON.stringify(queryInterpretation, null, 2)}`,
       `CarePland context:\n${JSON.stringify(context, null, 2)}`,
     ].join("\n\n");
-    const openAiResponse = await fetch("https://api.openai.com/v1/responses", {
-      body: JSON.stringify({
-        input: [
-          {
-            content: systemPrompt,
-            role: "system",
-          },
-          {
-            content: userPrompt,
-            role: "user",
-          },
-        ],
-        model: answerInstructionVersion?.model ?? "gpt-4.1-mini",
-        temperature: answerInstructionVersion?.temperature ?? 0.2,
-        text: {
-          format: {
-            name: "home_context_answer",
-            schema,
-            strict: false,
-            type: "json_schema",
-          },
+    const answerModel = answerInstructionVersion?.model ?? "gpt-4.1-mini";
+    const openAiResponse = await runOpenAiResponse({
+      apiKey: openAiApiKey,
+      input: [
+        {
+          content: systemPrompt,
+          role: "system",
         },
-      }),
-      headers: {
-        Authorization: `Bearer ${openAiApiKey}`,
-        "Content-Type": "application/json",
+        {
+          content: userPrompt,
+          role: "user",
+        },
+      ],
+      model: answerModel,
+      temperature: answerInstructionVersion?.temperature ?? 0.2,
+      text: {
+        format: {
+          name: "home_context_answer",
+          schema,
+          strict: false,
+          type: "json_schema",
+        },
       },
-      method: "POST",
     });
-    const openAiJson = (await openAiResponse.json()) as JsonObject;
+    const openAiJson = openAiResponse.json;
 
     if (!openAiResponse.ok) {
       const apiError =
@@ -1375,7 +1341,7 @@ export async function POST(request: NextRequest) {
         context_level: askContext.level,
         intent_category: intent.category,
       },
-      model: answerInstructionVersion?.model ?? "gpt-4.1-mini",
+      model: answerModel,
       openAiJson,
       operationKey: "home_context_answer",
       operationLabel: "Home context answer",
@@ -1383,9 +1349,7 @@ export async function POST(request: NextRequest) {
         "home_context_answer",
         answerInstructionVersion
       ),
-      providerRequestId:
-        openAiResponse.headers.get("x-request-id") ??
-        openAiResponse.headers.get("openai-request-id"),
+      providerRequestId: openAiResponse.requestId,
       supabase: userClient,
       userId: userData.user.id,
     });
