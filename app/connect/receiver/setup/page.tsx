@@ -5,6 +5,25 @@ import path from "node:path";
 
 import { ReceiverSetupClient } from "./ReceiverSetupClient";
 
+const staticReceiverApkPublicPath = "/downloads/carepland-receiver-debug.apk";
+const staticReceiverApkPath = path.join(
+  process.cwd(),
+  "public",
+  "downloads",
+  "carepland-receiver-debug.apk"
+);
+const debugReceiverApkPath = path.join(
+  process.cwd(),
+  "android",
+  "connect-receiver",
+  "app",
+  "build",
+  "outputs",
+  "apk",
+  "debug",
+  "app-debug.apk"
+);
+
 export const metadata: Metadata = {
   title: "Receiver Setup | CarePland Connect",
   description: "Approve and open a CarePland Connect Receiver install.",
@@ -47,6 +66,10 @@ function receiverApkDownloadUrl() {
     return process.env.CONNECT_RECEIVER_APK_URL;
   }
 
+  if (existsSync(staticReceiverApkPath)) {
+    return staticReceiverApkPublicPath;
+  }
+
   if (
     process.env.CONNECT_RECEIVER_DEBUG_APK_ENABLED === "1" ||
     process.env.NODE_ENV !== "production"
@@ -62,27 +85,21 @@ function receiverApkChecksum(apkDownloadUrl: string) {
     return process.env.CONNECT_RECEIVER_APK_SHA256_CHECKSUM;
   }
 
+  if (apkDownloadUrl === staticReceiverApkPublicPath && existsSync(staticReceiverApkPath)) {
+    return createHash("sha256")
+      .update(readFileSync(staticReceiverApkPath))
+      .digest("base64url");
+  }
+
   if (process.env.NODE_ENV === "production" || apkDownloadUrl !== "/api/connect/receiver-shell/apk/debug") {
     return "";
   }
 
-  const apkPath = path.join(
-    process.cwd(),
-    "android",
-    "connect-receiver",
-    "app",
-    "build",
-    "outputs",
-    "apk",
-    "debug",
-    "app-debug.apk"
-  );
-
-  if (!existsSync(apkPath)) {
+  if (!existsSync(debugReceiverApkPath)) {
     return "";
   }
 
   return createHash("sha256")
-    .update(readFileSync(apkPath))
+    .update(readFileSync(debugReceiverApkPath))
     .digest("base64url");
 }
