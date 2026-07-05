@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
-} from "@/app/lib/platform/server/supabase";
+} from "../../../platform/server/supabase";
 import { connectAvatarAltText } from "../../avatar";
 import {
   uniqueConnectParticipantPersonIds,

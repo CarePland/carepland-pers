@@ -18,6 +18,10 @@ import {
   markStaleSupabaseConnectCallsMissed,
   readSupabaseConnectCalls,
 } from "@/app/lib/connect/calls/server/supabaseCallStore";
+import {
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
 import { connectPrototypeEndpoints } from "@/app/lib/connect/prototypeClient";
 
 export async function GET(request: Request) {
@@ -60,6 +64,17 @@ export async function GET(request: Request) {
       summary: summarizeConnectCalls(calls),
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(
+        {
+          mainConnectUserPersonId: null,
+          summary: emptyConnectCallSummary(),
+          ...receiverDeviceSetupRequiredBody(error),
+        },
+        { status: error.status }
+      );
+    }
+
     return NextResponse.json(
       {
         error:
@@ -97,7 +112,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const access = await readConnectCallPersonAccessForRequest(request, personId);
+    const access = await readConnectCallPersonAccessForRequest(request, personId, payload);
     const [localCount, supabaseCount] = await Promise.all([
       cleanupExpiredLocalConnectCallTranscripts({ mainConnectUserPersonId: personId }),
       cleanupExpiredSupabaseConnectCallTranscripts(access),
@@ -109,6 +124,12 @@ export async function POST(request: Request) {
       ok: true,
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
+
     return NextResponse.json(
       {
         error:

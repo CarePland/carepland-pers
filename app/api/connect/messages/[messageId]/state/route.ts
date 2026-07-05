@@ -27,7 +27,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       );
     }
 
-    const deniedResponse = await verifyConnectMessagePersonAccess(personId, request);
+    const deniedResponse = await verifyConnectMessagePersonAccess(
+      personId,
+      request,
+      {},
+      { body: payload as unknown as Record<string, unknown> }
+    );
     if (deniedResponse) return deniedResponse;
 
     const state = resolveConnectMessageState(payload);

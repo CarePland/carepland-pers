@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
+import {
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
 import { recordLocalConnectCallEvent } from "@/app/lib/connect/calls/server/localCallEvents";
 import { recordSupabaseConnectCallEvent } from "@/app/lib/connect/calls/server/supabaseCallStore";
 
@@ -30,7 +34,7 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const access = await readConnectCallPersonAccessForRequest(request, personId);
+    const access = await readConnectCallPersonAccessForRequest(request, personId, payload);
     const loggedInSupabase = await recordSupabaseConnectCallEvent(
       {
         actorRole: payload.actorRole,
@@ -57,6 +61,12 @@ export async function POST(request: Request, context: RouteContext) {
       source: loggedInSupabase ? "supabase" : "local",
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
+
     return NextResponse.json(
       {
         error:

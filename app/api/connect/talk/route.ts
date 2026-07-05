@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   ConnectPersonAccessDeniedError,
-  verifyConnectPersonAccessForRequest,
 } from "@/app/lib/connect/context/server/mainConnectUserContext";
+import {
+  readConnectPersonScopedAccess,
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
 import {
   interpretTalkInput,
   talkResultShouldWrite,
@@ -16,7 +21,6 @@ import {
   type FocusCompletionType,
   focusCompletionTypes,
 } from "@/app/lib/personal/track";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 type FocusItemRow = {
   care_circle_id: string;
@@ -56,9 +60,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const { accessToken, careCircleId, userContext } =
-      await verifyConnectPersonAccessForRequest(personId, request);
-    const supabase = createSupabaseUserClient(accessToken);
+    const access = await readConnectPersonScopedAccess(request, personId, { body });
+    const { careCircleId } = access;
+    const supabase = access.supabase;
     const now = new Date();
     const [focusItems, appointments] = await Promise.all([
       loadTalkFocusItems(supabase, personId, now),
@@ -97,7 +101,7 @@ export async function POST(request: Request) {
         care_circle_id: eventDraft.careCircleId,
         care_subject_id: eventDraft.careSubjectId,
         confidence: eventDraft.confidence ?? result.confidence,
-        created_by_user_id: userContext.userId,
+        created_by_user_id: access.createdByUserId,
         event_type: eventDraft.eventType,
         focus_item_id: eventDraft.focusItemId ?? null,
         needs_review: eventDraft.needsReview ?? false,
@@ -147,6 +151,11 @@ export async function POST(request: Request) {
         { status: 403 }
       );
     }
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
 
     return NextResponse.json(
       {
@@ -159,7 +168,7 @@ export async function POST(request: Request) {
 }
 
 async function loadTalkFocusItems(
-  supabase: ReturnType<typeof createSupabaseUserClient>,
+  supabase: SupabaseClient,
   personId: string,
   now: Date
 ): Promise<TalkFocusItem[]> {
@@ -207,7 +216,7 @@ async function loadTalkFocusItems(
 }
 
 async function loadUpcomingAppointments(
-  supabase: ReturnType<typeof createSupabaseUserClient>,
+  supabase: SupabaseClient,
   personId: string,
   now: Date
 ): Promise<TalkAppointment[]> {

@@ -336,6 +336,7 @@ declare global {
       reloadReceiver?: () => void;
       reportReceiverError?: (message: string) => void;
       receiverReady?: () => void;
+      receiverSetupRequired?: (message: string) => void;
       saveBinding?: (
         receiverDeviceId: string,
         bindingStatus: string,
@@ -827,6 +828,26 @@ function readReceiverDeviceId() {
   ).trim();
 }
 
+async function connectReceiverRequestHeaders() {
+  return {
+    ...(await connectAuthHeaders()),
+    ...receiverDeviceAuthHeaders(),
+  };
+}
+
+function receiverDeviceAuthHeaders() {
+  const receiverDeviceId = readReceiverDeviceId();
+  const receiverInstallId = readReceiverInstallId();
+  const headers: Record<string, string> = {};
+  if (receiverDeviceId) {
+    headers["x-carepland-receiver-device-id"] = receiverDeviceId;
+  }
+  if (receiverInstallId) {
+    headers["x-carepland-receiver-install-id"] = receiverInstallId;
+  }
+  return headers;
+}
+
 function readReceiverGuideId() {
   if (typeof window === "undefined") return connectPrototypeReceiverId;
   const params = new URLSearchParams(window.location.search);
@@ -955,6 +976,17 @@ function clearReceiverBinding() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(receiverBindingStorageKey);
   window.localStorage.removeItem(receiverRegistrationStorageKey);
+  window.CarePlandReceiver?.receiverSetupRequired?.("Receiver setup is required.");
+}
+
+function isReceiverSetupRequiredMessage(message: string) {
+  return (
+    message.includes("expired") ||
+    message.includes("revoked") ||
+    message.includes("not found") ||
+    message.includes("does not match") ||
+    message.includes("not complete")
+  );
 }
 
 async function verifyReceiverBindingHeartbeat() {
@@ -1756,7 +1788,7 @@ export function ConnectReceiver() {
       const messagesUrl = `${connectMessagesEndpoint}?personId=${encodeURIComponent(selectedReceiverUserId)}`;
       const response = await fetch(messagesUrl, {
         cache: "no-store",
-        headers: await connectAuthHeaders(),
+        headers: await connectReceiverRequestHeaders(),
       });
       const payload = (await response.json().catch(() => ({}))) as {
         messages?: Array<Partial<Message> & { id?: string }>;
@@ -1842,7 +1874,7 @@ export function ConnectReceiver() {
         `${connectTodayFocusEndpoint}?personId=${encodeURIComponent(selectedReceiverUserId)}`,
         {
           cache: "no-store",
-          headers: await connectAuthHeaders(),
+          headers: await connectReceiverRequestHeaders(),
         }
       );
       const payload = (await response.json().catch(() => ({}))) as {
@@ -1911,7 +1943,7 @@ export function ConnectReceiver() {
         `${connectCallsEndpoint}?personId=${encodeURIComponent(selectedReceiverUserId)}`,
         {
           cache: "no-store",
-          headers: await connectAuthHeaders(),
+          headers: await connectReceiverRequestHeaders(),
         }
       );
       const payload = (await response.json().catch(() => ({}))) as {
@@ -2317,7 +2349,7 @@ export function ConnectReceiver() {
         const profileUrl = `${connectAudioProfileEndpoint}?personId=${encodeURIComponent(selectedReceiverUserId)}`;
         const response = await fetch(profileUrl, {
           cache: "no-store",
-          headers: await connectAuthHeaders(),
+          headers: await connectReceiverRequestHeaders(),
         });
         const payload = (await response.json().catch(() => ({}))) as {
           localPlaybackEvents?: Array<Record<string, unknown>>;
@@ -2426,12 +2458,7 @@ export function ConnectReceiver() {
         if (cancelled) return;
         const message =
           error instanceof Error ? error.message : "Receiver setup could not be confirmed.";
-        if (
-          message.includes("revoked") ||
-          message.includes("not found") ||
-          message.includes("does not match") ||
-          message.includes("not complete")
-        ) {
+        if (isReceiverSetupRequiredMessage(message)) {
           clearReceiverBinding();
           setReceiverRegistered(false);
           setActiveReceiverUsers(receiverUsers);
@@ -2509,9 +2536,13 @@ export function ConnectReceiver() {
         );
       } catch (error) {
         if (cancelled) return;
-        setRegistrationError(
-          error instanceof Error ? error.message : "Receiver setup link could not be verified."
-        );
+        const message =
+          error instanceof Error ? error.message : "Receiver setup link could not be verified.";
+        if (isReceiverSetupRequiredMessage(message)) {
+          clearReceiverBinding();
+          setReceiverRegistered(false);
+        }
+        setRegistrationError(message);
       }
     }
 
@@ -2839,7 +2870,7 @@ export function ConnectReceiver() {
         cache: "no-store",
         headers: {
           "Content-Type": "application/json",
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
         },
         method: "POST",
       });
@@ -2913,7 +2944,7 @@ export function ConnectReceiver() {
         cache: "no-store",
         headers: {
           "Content-Type": "application/json",
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
         },
         method: "DELETE",
       });
@@ -2982,7 +3013,7 @@ export function ConnectReceiver() {
         cache: "no-store",
         headers: {
           "Content-Type": "application/json",
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
         },
         method: "POST",
       });
@@ -3129,7 +3160,7 @@ export function ConnectReceiver() {
               }
         ),
         headers: {
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
           "Content-Type": "application/json",
         },
         method: "POST",
@@ -3173,7 +3204,7 @@ export function ConnectReceiver() {
         `/api/connect/appointments?personId=${encodeURIComponent(selectedReceiverUser.id)}`,
         {
           cache: "no-store",
-          headers: await connectAuthHeaders(),
+          headers: await connectReceiverRequestHeaders(),
         }
       );
       const payload = (await response.json().catch(() => ({}))) as {
@@ -3703,7 +3734,7 @@ export function ConnectReceiver() {
           receiverId: connectPrototypeReceiverId,
         }),
         headers: {
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
           "Content-Type": "application/json",
         },
         method: "PATCH",
@@ -3755,7 +3786,7 @@ export function ConnectReceiver() {
           surface: "web_receiver",
         }),
         headers: {
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
           "Content-Type": "application/json",
         },
         method: "POST",
@@ -3937,10 +3968,11 @@ export function ConnectReceiver() {
           inputText: question,
           personId: selectedReceiverUser.id,
           receiverDeviceId: readReceiverDeviceId(),
+          receiverInstallId: readReceiverInstallId(),
           source: "receiver_talk",
         }),
         headers: {
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
           "Content-Type": "application/json",
         },
         method: "POST",
@@ -4109,7 +4141,7 @@ export function ConnectReceiver() {
           state,
         }),
         headers: {
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
           "Content-Type": "application/json",
         },
         method: "POST",
@@ -4131,7 +4163,7 @@ export function ConnectReceiver() {
           mainConnectUserPersonId: selectedReceiverUser.id,
         }),
         headers: {
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
           "Content-Type": "application/json",
         },
         method: "POST",
@@ -4197,7 +4229,7 @@ export function ConnectReceiver() {
           mainConnectUserPersonId: selectedReceiverUser.id,
         }),
         headers: {
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
           "Content-Type": "application/json",
         },
         method: "POST",
@@ -4487,7 +4519,7 @@ export function ConnectReceiver() {
         }),
         cache: "no-store",
         headers: {
-          ...(await connectAuthHeaders()),
+          ...(await connectReceiverRequestHeaders()),
           "Content-Type": "application/json",
         },
         keepalive: true,

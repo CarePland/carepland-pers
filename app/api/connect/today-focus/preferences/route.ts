@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { ConnectPersonAccessDeniedError } from "@/app/lib/connect/context/server/mainConnectUserContext";
 import {
-  ConnectPersonAccessDeniedError,
-  verifyConnectPersonAccessForRequest,
-} from "@/app/lib/connect/context/server/mainConnectUserContext";
+  readConnectPersonScopedAccess,
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
 import {
   focusCadenceTargetFromMetadata,
   normalizeFocusCadence,
   normalizeFocusCadenceAction,
   snoozedUntilForFocusCadenceAction,
 } from "@/app/lib/personal/track/focusCadencePreferences";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 export async function POST(request: Request) {
   try {
@@ -40,9 +42,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const { accessToken, careCircleId, userContext } =
-      await verifyConnectPersonAccessForRequest(personId, request);
-    const supabase = createSupabaseUserClient(accessToken);
+    const access = await readConnectPersonScopedAccess(request, personId, { body });
+    const supabase = access.supabase;
 
     const { data: focusItem, error: focusError } = await supabase
       .from("focus_items")
@@ -76,9 +77,9 @@ export async function POST(request: Request) {
       .upsert(
         {
           cadence,
-          care_circle_id: careCircleId,
+          care_circle_id: access.careCircleId,
           care_subject_id: personId,
-          created_by_user_id: userContext.userId,
+          created_by_user_id: access.createdByUserId,
           evidence_signature: target.evidenceSignature,
           focus_item_id: focusItemId,
           metadata: {
@@ -128,6 +129,11 @@ export async function POST(request: Request) {
         { status: 403 }
       );
     }
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
 
     return NextResponse.json(
       {
@@ -143,7 +149,7 @@ export async function POST(request: Request) {
 }
 
 async function nextAppointmentDate(
-  supabase: ReturnType<typeof createSupabaseUserClient>,
+  supabase: SupabaseClient,
   personId: string
 ) {
   const { data, error } = await supabase

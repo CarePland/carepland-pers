@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
+import {
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
 import { generateConnectCallCareSummary } from "@/app/lib/connect/calls/server/callSummaryGeneration";
 import {
   approveLocalConnectCallSummary,
@@ -55,7 +59,7 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const access = await readConnectCallPersonAccessForRequest(request, personId);
+    const access = await readConnectCallPersonAccessForRequest(request, personId, payload);
     const approvedSummaryText = payload.approvedSummaryText?.trim() || "";
 
     if (payload.action === "save_draft") {
@@ -233,6 +237,12 @@ export async function POST(request: Request, context: RouteContext) {
       ok: true,
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
+
     return NextResponse.json(
       {
         error:

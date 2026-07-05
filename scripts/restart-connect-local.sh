@@ -193,12 +193,14 @@ start_next_app() {
     cd "$ROOT_DIR"
     if [[ "$NEXT_APP_MODE" == "production" ]]; then
       nohup env \
+        CONNECT_LAN_HOST="$LAN_HOST" \
         CONNECT_RECEIVER_SETUP_BASE_URL="$MAIN_RECEIVER_BASE_URL" \
         CONNECT_RECEIVER_APK_URL="$MAIN_RECEIVER_APK_URL" \
         CONNECT_RECEIVER_DEBUG_APK_ENABLED="$DEBUG_APK_ENABLED" \
         npm start -- --hostname 0.0.0.0 --port "$NEXT_PORT" < /dev/null > "$LOG_DIR/next-app.log" 2>&1 &
     else
       nohup env \
+        CONNECT_LAN_HOST="$LAN_HOST" \
         CONNECT_RECEIVER_SETUP_BASE_URL="$MAIN_RECEIVER_BASE_URL" \
         CONNECT_RECEIVER_APK_URL="$MAIN_RECEIVER_APK_URL" \
         CONNECT_RECEIVER_DEBUG_APK_ENABLED="$DEBUG_APK_ENABLED" \
@@ -225,6 +227,7 @@ start_receiver_dev_app() {
   (
     cd "$ROOT_DIR"
     nohup env \
+      CONNECT_LAN_HOST="$LAN_HOST" \
       CONNECT_RECEIVER_SETUP_BASE_URL="$RECEIVER_DEV_BASE_URL" \
       CONNECT_RECEIVER_APK_URL="$RECEIVER_DEV_APK_URL" \
       CONNECT_RECEIVER_DEBUG_APK_ENABLED=1 \

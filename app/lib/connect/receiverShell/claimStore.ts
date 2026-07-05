@@ -6,9 +6,11 @@ import { isMissingServerEnvError } from "../../platform/server/env";
 import { createSupabaseServiceClient } from "../../platform/server/supabase";
 
 export type ReceiverShellClaimStatus = "available" | "expired" | "revoked" | "used";
+export type ReceiverShellPairingStatus = "pending" | "paired" | "expired" | "revoked" | "used";
 
 export type ReceiverShellClaimRecord = {
   capabilityStatuses?: ReceiverShellCapabilityStatuses;
+  careCircleId?: string;
   claim: string;
   createdAt: string;
   deviceOwner?: boolean;
@@ -19,6 +21,7 @@ export type ReceiverShellClaimRecord = {
   lastRecoveryAt?: string;
   lockTaskActive?: boolean;
   lockTaskPermitted?: boolean;
+  mainConnectUserPersonId?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -40,6 +43,7 @@ export type ReceiverShellClaimRecord = {
 export type ReceiverShellBindingRecord = {
   bindingStatus: "bound";
   capabilityStatuses?: ReceiverShellCapabilityStatuses;
+  careCircleId?: string;
   deviceOwner?: boolean;
   deviceProfile: string;
   hardwareProfile: string;
@@ -48,6 +52,7 @@ export type ReceiverShellBindingRecord = {
   lastRecoveryAt?: string;
   lockTaskActive?: boolean;
   lockTaskPermitted?: boolean;
+  mainConnectUserPersonId?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -108,10 +113,18 @@ const defaultClaimTtlMs = 15 * 60 * 1000;
 const prototypeSetupCode = "12345";
 const prototypeReceiverDeviceId = "local-dev-rob-gxv3370";
 
+const setupCodeWords = {
+  adjectives: ["calm", "kind", "bright", "steady", "sunny", "gentle", "clear", "ready"],
+  nouns: ["maple", "porch", "harbor", "garden", "pillow", "lamp", "cedar", "window"],
+  closers: ["home", "care", "hello", "anchor", "signal", "button", "morning", "circle"],
+} as const;
+
 export async function issueReceiverShellClaim(
   input: {
+    careCircleId?: string;
     deviceProfile?: string;
     hardwareProfile?: string;
+    mainConnectUserPersonId?: string;
     receiverUrl?: string;
     setupCode?: string;
     uiLayout?: string;
@@ -119,13 +132,21 @@ export async function issueReceiverShellClaim(
   options: { indexPath?: string; now?: Date; ttlMs?: number } = {}
 ) {
   const setupCode = input.setupCode?.trim() || "";
-  if (setupCode !== prototypeSetupCode) {
-    throw new ReceiverShellClaimError("Setup code not recognized.", 404);
+
+  if (!setupCode) {
+    throw new ReceiverShellClaimError("Missing receiver setup code.", 400);
   }
 
   if (!options.indexPath) {
     const supabaseClaim = await tryIssueSupabaseReceiverShellClaim(input, options);
     if (supabaseClaim) return supabaseClaim;
+  }
+
+  const localSetupClaim = await tryIssueLocalReceiverShellClaim(input, options);
+  if (localSetupClaim) return localSetupClaim;
+
+  if (setupCode !== prototypeSetupCode || !prototypeSetupCodeAllowed()) {
+    throw new ReceiverShellClaimError("Setup code not recognized.", 404);
   }
 
   const indexPath = options.indexPath ?? defaultIndexPath;
@@ -134,10 +155,12 @@ export async function issueReceiverShellClaim(
   const expiresAt = new Date(now.getTime() + (options.ttlMs ?? defaultClaimTtlMs));
   const claim: ReceiverShellClaimRecord = {
     claim: `cpclaim_${randomUUID().replace(/-/g, "")}`,
+    careCircleId: input.careCircleId?.trim() || undefined,
     createdAt: now.toISOString(),
     deviceProfile: input.deviceProfile?.trim() || "gxv3370",
     expiresAt: expiresAt.toISOString(),
     hardwareProfile: input.hardwareProfile?.trim() || "studio_gxv3370_1024x600",
+    mainConnectUserPersonId: input.mainConnectUserPersonId?.trim() || undefined,
     receiverDeviceId: prototypeReceiverDeviceId,
     receiverUrl: input.receiverUrl?.trim() || "",
     setupCode,
@@ -149,6 +172,229 @@ export async function issueReceiverShellClaim(
   index.claims = [claim, ...compactClaims(index.claims, now)];
   await writeReceiverShellClaimIndex(index, indexPath);
   return claim;
+}
+
+async function tryIssueLocalReceiverShellClaim(
+  input: {
+    deviceProfile?: string;
+    hardwareProfile?: string;
+    receiverUrl?: string;
+    setupCode?: string;
+    uiLayout?: string;
+  },
+  options: { indexPath?: string; now?: Date }
+) {
+  const setupCode = normalizeSetupCode(input.setupCode || "");
+  if (!setupCode) return null;
+
+  const indexPath = options.indexPath ?? defaultIndexPath;
+  const index = await readReceiverShellClaimIndex(indexPath);
+  const now = options.now ?? new Date();
+  index.claims = index.claims.map((record) => expireClaimIfNeeded(record, now));
+  const claimIndex = index.claims.findIndex(
+    (record) =>
+      record.status === "available" && normalizeSetupCode(record.setupCode) === setupCode
+  );
+  if (claimIndex < 0) {
+    await writeReceiverShellClaimIndex(index, indexPath);
+    return null;
+  }
+
+  const current = index.claims[claimIndex];
+  if (Date.parse(current.expiresAt) <= now.getTime()) {
+    index.claims[claimIndex] = { ...current, status: "expired" };
+    await writeReceiverShellClaimIndex(index, indexPath);
+    throw new ReceiverShellClaimError("Receiver setup code expired.", 410);
+  }
+
+  const updated: ReceiverShellClaimRecord = {
+    ...current,
+    deviceProfile: input.deviceProfile?.trim() || current.deviceProfile,
+    hardwareProfile: input.hardwareProfile?.trim() || current.hardwareProfile,
+    receiverUrl: input.receiverUrl?.trim() || current.receiverUrl,
+    uiLayout: input.uiLayout?.trim() || current.uiLayout,
+  };
+  index.claims[claimIndex] = updated;
+  await writeReceiverShellClaimIndex(index, indexPath);
+  return updated;
+}
+
+export async function createReceiverShellSetupClaim(
+  input: {
+    careCircleId?: string;
+    createdByUserId?: string;
+    deviceProfile?: string;
+    expiresInMinutes?: number;
+    hardwareProfile?: string;
+    mainConnectUserPersonId?: string;
+    receiverDeviceId?: string;
+    receiverUrl?: string;
+    setupCode?: string;
+    uiLayout?: string;
+  },
+  options: { indexPath?: string; now?: Date } = {}
+) {
+  const now = options.now ?? new Date();
+  const ttlMs = Math.max(1, Math.min(input.expiresInMinutes ?? 30, 240)) * 60 * 1000;
+  const setupCode = normalizeSetupCode(input.setupCode || createTypeableSetupCode());
+
+  if (!options.indexPath) {
+    const supabaseClaim = await tryCreateSupabaseReceiverShellSetupClaim(
+      { ...input, setupCode },
+      { now, ttlMs }
+    );
+    if (supabaseClaim) return supabaseClaim;
+  }
+
+  const receiverDeviceId =
+    input.receiverDeviceId?.trim() || `receiver-${randomUUID().replace(/-/g, "")}`;
+  const indexPath = options.indexPath ?? defaultIndexPath;
+  const index = await readReceiverShellClaimIndex(indexPath);
+  const expiresAt = new Date(now.getTime() + ttlMs);
+  const claim: ReceiverShellClaimRecord = {
+    careCircleId: input.careCircleId?.trim() || undefined,
+    claim: `cpclaim_${randomUUID().replace(/-/g, "")}`,
+    createdAt: now.toISOString(),
+    deviceProfile: input.deviceProfile?.trim() || "gxv3370",
+    expiresAt: expiresAt.toISOString(),
+    hardwareProfile: input.hardwareProfile?.trim() || "studio_gxv3370_1024x600",
+    mainConnectUserPersonId: input.mainConnectUserPersonId?.trim() || undefined,
+    receiverDeviceId,
+    receiverUrl: input.receiverUrl?.trim() || "",
+    setupCode,
+    storageSource: "local_file",
+    status: "available",
+    uiLayout: input.uiLayout?.trim() || "desk_phone_1024x600",
+  };
+
+  index.claims = [claim, ...compactClaims(index.claims, now)];
+  await writeReceiverShellClaimIndex(index, indexPath);
+  return claim;
+}
+
+export async function createReceiverShellPairingSession(
+  input: {
+    deviceProfile?: string;
+    hardwareProfile?: string;
+    receiverDeviceId?: string;
+    receiverInstallId?: string;
+    receiverUrl?: string;
+    uiLayout?: string;
+  },
+  options: { indexPath?: string; now?: Date; ttlMs?: number } = {}
+) {
+  const pairingCode = createNumericPairingCode();
+  const claim = await createReceiverShellSetupClaim(
+    {
+      deviceProfile: input.deviceProfile || "android_receiver",
+      expiresInMinutes: Math.ceil((options.ttlMs ?? 10 * 60 * 1000) / 60_000),
+      hardwareProfile: input.hardwareProfile || "generic_landscape_android",
+      receiverDeviceId: input.receiverDeviceId,
+      receiverUrl: input.receiverUrl,
+      setupCode: pairingCode,
+      uiLayout: input.uiLayout || "default_receiver",
+    },
+    { indexPath: options.indexPath, now: options.now }
+  );
+
+  return {
+    claim: claim.claim,
+    expiresAt: claim.expiresAt,
+    pairingCode: formatReceiverPairingCode(claim.setupCode),
+    receiverDeviceId: claim.receiverDeviceId,
+    status: receiverPairingStatusFromClaim(claim),
+    storageSource: claim.storageSource || "local_file",
+  };
+}
+
+export async function getReceiverShellPairingSession(
+  input: {
+    pairingCode?: string;
+    receiverDeviceId?: string;
+  },
+  options: { indexPath?: string; now?: Date } = {}
+) {
+  const setupCode = normalizeReceiverPairingCode(input.pairingCode || "");
+  if (!setupCode) {
+    throw new ReceiverShellClaimError("Missing receiver pairing code.", 400);
+  }
+
+  if (!options.indexPath) {
+    const supabaseSession = await tryGetSupabaseReceiverShellPairingSession(
+      { ...input, pairingCode: setupCode },
+      options
+    );
+    if (supabaseSession) return supabaseSession;
+  }
+
+  const indexPath = options.indexPath ?? defaultIndexPath;
+  const index = await readReceiverShellClaimIndex(indexPath);
+  const now = options.now ?? new Date();
+  index.claims = index.claims.map((record) => expireClaimIfNeeded(record, now));
+  const claim = findClaimBySetupCode(index, setupCode, input.receiverDeviceId);
+  await writeReceiverShellClaimIndex(index, indexPath);
+
+  if (!claim) {
+    throw new ReceiverShellClaimError("Pairing code not found.", 404);
+  }
+
+  return receiverPairingSessionFromClaim(claim);
+}
+
+export async function pairReceiverShellPairingCode(
+  input: {
+    careCircleId?: string;
+    createdByUserId?: string;
+    deviceProfile?: string;
+    hardwareProfile?: string;
+    mainConnectUserPersonId?: string;
+    pairingCode?: string;
+    receiverUrl?: string;
+    uiLayout?: string;
+  },
+  options: { indexPath?: string; now?: Date } = {}
+) {
+  const setupCode = normalizeReceiverPairingCode(input.pairingCode || "");
+  if (!setupCode) {
+    throw new ReceiverShellClaimError("Enter the Receiver pairing code.", 400);
+  }
+
+  if (!options.indexPath) {
+    const supabaseClaim = await tryPairSupabaseReceiverShellPairingCode(
+      { ...input, pairingCode: setupCode },
+      options
+    );
+    if (supabaseClaim) return supabaseClaim;
+  }
+
+  const indexPath = options.indexPath ?? defaultIndexPath;
+  const index = await readReceiverShellClaimIndex(indexPath);
+  const now = options.now ?? new Date();
+  index.claims = index.claims.map((record) => expireClaimIfNeeded(record, now));
+  const claimIndex = index.claims.findIndex((record) => {
+    return normalizeReceiverPairingCode(record.setupCode) === setupCode;
+  });
+
+  if (claimIndex < 0) {
+    throw new ReceiverShellClaimError("Pairing code not found.", 404);
+  }
+
+  const current = index.claims[claimIndex];
+  assertPairableClaim(current, now);
+
+  const paired: ReceiverShellClaimRecord = {
+    ...current,
+    careCircleId: input.careCircleId?.trim() || current.careCircleId,
+    deviceProfile: input.deviceProfile?.trim() || current.deviceProfile,
+    hardwareProfile: input.hardwareProfile?.trim() || current.hardwareProfile,
+    mainConnectUserPersonId:
+      input.mainConnectUserPersonId?.trim() || current.mainConnectUserPersonId,
+    receiverUrl: input.receiverUrl?.trim() || current.receiverUrl,
+    uiLayout: input.uiLayout?.trim() || current.uiLayout,
+  };
+  index.claims[claimIndex] = paired;
+  await writeReceiverShellClaimIndex(index, indexPath);
+  return paired;
 }
 
 export async function redeemReceiverShellClaim(
@@ -259,6 +505,7 @@ export async function verifyReceiverShellBinding(
   return {
     bindingStatus: "bound",
     capabilityStatuses: claim.capabilityStatuses,
+    careCircleId: claim.careCircleId,
     deviceOwner: claim.deviceOwner,
     deviceProfile: claim.deviceProfile,
     hardwareProfile: claim.hardwareProfile,
@@ -267,6 +514,7 @@ export async function verifyReceiverShellBinding(
     lastRecoveryAt: claim.lastRecoveryAt,
     lockTaskActive: claim.lockTaskActive,
     lockTaskPermitted: claim.lockTaskPermitted,
+    mainConnectUserPersonId: claim.mainConnectUserPersonId,
     nativeManufacturer: claim.nativeManufacturer,
     nativeModel: claim.nativeModel,
     nativeSdk: claim.nativeSdk,
@@ -356,6 +604,54 @@ function expireClaimIfNeeded(record: ReceiverShellClaimRecord, now: Date) {
   return { ...record, status: "expired" as const };
 }
 
+function assertPairableClaim(record: ReceiverShellClaimRecord, now: Date) {
+  if (record.status === "used") {
+    throw new ReceiverShellClaimError("Receiver has already been paired.", 409);
+  }
+  if (record.status === "revoked") {
+    throw new ReceiverShellClaimError("Receiver pairing code was revoked.", 410);
+  }
+  if (record.status === "expired" || Date.parse(record.expiresAt) <= now.getTime()) {
+    throw new ReceiverShellClaimError("Receiver pairing code expired.", 410);
+  }
+}
+
+function findClaimBySetupCode(
+  index: ReceiverShellClaimIndex,
+  setupCode: string,
+  receiverDeviceId?: string
+) {
+  return index.claims.find((record) => {
+    if (normalizeReceiverPairingCode(record.setupCode) !== setupCode) return false;
+    if (receiverDeviceId?.trim() && record.receiverDeviceId !== receiverDeviceId.trim()) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function receiverPairingSessionFromClaim(claim: ReceiverShellClaimRecord) {
+  return {
+    claim: receiverPairingStatusFromClaim(claim) === "paired" ? claim.claim : undefined,
+    expiresAt: claim.expiresAt,
+    pairingCode: formatReceiverPairingCode(claim.setupCode),
+    receiverDeviceId: claim.receiverDeviceId,
+    receiverUrl: claim.receiverUrl,
+    status: receiverPairingStatusFromClaim(claim),
+    storageSource: claim.storageSource || "local_file",
+  };
+}
+
+function receiverPairingStatusFromClaim(
+  claim: ReceiverShellClaimRecord
+): ReceiverShellPairingStatus {
+  if (claim.status === "used") return "used";
+  if (claim.status === "expired") return "expired";
+  if (claim.status === "revoked") return "revoked";
+  if (claim.mainConnectUserPersonId || claim.careCircleId) return "paired";
+  return "pending";
+}
+
 async function readReceiverShellClaimIndex(indexPath: string) {
   try {
     const parsed = JSON.parse(await readFile(indexPath, "utf8")) as Partial<
@@ -392,8 +688,10 @@ async function writeReceiverShellClaimIndex(
 
 async function tryIssueSupabaseReceiverShellClaim(
   input: {
+    careCircleId?: string;
     deviceProfile?: string;
     hardwareProfile?: string;
+    mainConnectUserPersonId?: string;
     receiverUrl?: string;
     setupCode?: string;
     uiLayout?: string;
@@ -403,51 +701,286 @@ async function tryIssueSupabaseReceiverShellClaim(
   try {
     const supabase = createSupabaseServiceClient();
     const now = options.now ?? new Date();
-    const expiresAt = new Date(now.getTime() + (options.ttlMs ?? defaultClaimTtlMs));
-    const receiverDeviceId = prototypeReceiverDeviceId;
-    const claim = `cpclaim_${randomUUID().replace(/-/g, "")}`;
     const deviceProfile = input.deviceProfile?.trim() || "gxv3370";
     const hardwareProfile = input.hardwareProfile?.trim() || "studio_gxv3370_1024x600";
     const receiverUrl = input.receiverUrl?.trim() || "";
-    const setupCode = input.setupCode?.trim() || "";
+    const setupCode = normalizeSetupCode(input.setupCode || "");
     const uiLayout = input.uiLayout?.trim() || "desk_phone_1024x600";
+
+    if (!setupCode) {
+      throw new ReceiverShellClaimError("Missing receiver setup code.", 400);
+    }
+
+    const { data, error } = await supabase
+      .from("connect_receiver_claims")
+      .select("*")
+      .eq("setup_code", setupCode)
+      .eq("status", "available")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      throw new ReceiverShellClaimError("Setup code not recognized.", 404);
+    }
+
+    const current = supabaseClaimRecord(data);
+    if (Date.parse(current.expiresAt) <= now.getTime()) {
+      await supabase
+        .from("connect_receiver_claims")
+        .update({ status: "expired" })
+        .eq("claim", current.claim)
+        .eq("status", "available");
+      throw new ReceiverShellClaimError("Receiver setup code expired.", 410);
+    }
 
     const { error: deviceError } = await supabase
       .from("connect_receiver_devices")
-      .upsert(
-        {
+      .update(
+        definedFields({
           device_profile: deviceProfile,
           hardware_profile: hardwareProfile,
-          id: receiverDeviceId,
           receiver_url: receiverUrl,
           status: "claim_pending",
           ui_layout: uiLayout,
           updated_at: now.toISOString(),
-        },
+        })
+      )
+      .eq("id", current.receiverDeviceId);
+    if (deviceError) throw deviceError;
+
+    const { data: updated, error: updateError } = await supabase
+      .from("connect_receiver_claims")
+      .update(
+        definedFields({
+          device_profile: deviceProfile,
+          hardware_profile: hardwareProfile,
+          receiver_url: receiverUrl,
+          ui_layout: uiLayout,
+        })
+      )
+      .eq("claim", current.claim)
+      .eq("status", "available")
+      .select("*")
+      .single();
+    if (updateError) throw updateError;
+
+    return supabaseClaimRecord(updated);
+  } catch (error) {
+    if (error instanceof ReceiverShellClaimError) throw error;
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function tryCreateSupabaseReceiverShellSetupClaim(
+  input: {
+    careCircleId?: string;
+    createdByUserId?: string;
+    deviceProfile?: string;
+    hardwareProfile?: string;
+    mainConnectUserPersonId?: string;
+    receiverDeviceId?: string;
+    receiverUrl?: string;
+    setupCode?: string;
+    uiLayout?: string;
+  },
+  options: { now: Date; ttlMs: number }
+) {
+  try {
+    const supabase = createSupabaseServiceClient();
+    const now = options.now;
+    const expiresAt = new Date(now.getTime() + options.ttlMs);
+    const receiverDeviceId =
+      input.receiverDeviceId?.trim() || `receiver-${randomUUID().replace(/-/g, "")}`;
+    const claim = `cpclaim_${randomUUID().replace(/-/g, "")}`;
+    const deviceProfile = input.deviceProfile?.trim() || "gxv3370";
+    const hardwareProfile = input.hardwareProfile?.trim() || "studio_gxv3370_1024x600";
+    const receiverUrl = input.receiverUrl?.trim() || "";
+    const setupCode = normalizeSetupCode(input.setupCode || createTypeableSetupCode());
+    const uiLayout = input.uiLayout?.trim() || "desk_phone_1024x600";
+    const careCircleId = input.careCircleId?.trim() || undefined;
+    const mainConnectUserPersonId = input.mainConnectUserPersonId?.trim() || undefined;
+    const createdByUserId = uuidOrUndefined(input.createdByUserId);
+
+    const { error: deviceError } = await supabase
+      .from("connect_receiver_devices")
+      .upsert(
+        definedFields({
+          care_circle_id: careCircleId,
+          device_profile: deviceProfile,
+          hardware_profile: hardwareProfile,
+          id: receiverDeviceId,
+          main_connect_user_person_id: mainConnectUserPersonId,
+          receiver_url: receiverUrl,
+          status: "setup_pending",
+          ui_layout: uiLayout,
+          updated_at: now.toISOString(),
+        }),
         { onConflict: "id" }
       );
     if (deviceError) throw deviceError;
 
     const { data, error } = await supabase
       .from("connect_receiver_claims")
-      .insert({
-        claim,
-        created_at: now.toISOString(),
-        device_profile: deviceProfile,
-        expires_at: expiresAt.toISOString(),
-        hardware_profile: hardwareProfile,
-        receiver_device_id: receiverDeviceId,
-        receiver_url: receiverUrl,
-        setup_code: setupCode,
-        status: "available",
-        ui_layout: uiLayout,
-      })
+      .insert(
+        definedFields({
+          claim,
+          created_at: now.toISOString(),
+          created_by_user_id: createdByUserId,
+          device_profile: deviceProfile,
+          expires_at: expiresAt.toISOString(),
+          hardware_profile: hardwareProfile,
+          receiver_device_id: receiverDeviceId,
+          receiver_url: receiverUrl,
+          setup_code: setupCode,
+          status: "available",
+          ui_layout: uiLayout,
+        })
+      )
       .select("*")
       .single();
     if (error) throw error;
 
     return supabaseClaimRecord(data);
   } catch (error) {
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function tryGetSupabaseReceiverShellPairingSession(
+  input: {
+    pairingCode?: string;
+    receiverDeviceId?: string;
+  },
+  options: { now?: Date }
+) {
+  try {
+    const supabase = createSupabaseServiceClient();
+    const now = options.now ?? new Date();
+    const setupCode = normalizeReceiverPairingCode(input.pairingCode || "");
+
+    const { data, error } = await supabase
+      .from("connect_receiver_claims")
+      .select("*, connect_receiver_devices(*)")
+      .eq("setup_code", setupCode)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      throw new ReceiverShellClaimError("Pairing code not found.", 404);
+    }
+
+    const claim = supabaseClaimRecordWithDevice(data);
+    if (
+      input.receiverDeviceId?.trim() &&
+      claim.receiverDeviceId !== input.receiverDeviceId.trim()
+    ) {
+      throw new ReceiverShellClaimError("Pairing code not found.", 404);
+    }
+    if (claim.status === "available" && Date.parse(claim.expiresAt) <= now.getTime()) {
+      await supabase
+        .from("connect_receiver_claims")
+        .update({ status: "expired" })
+        .eq("claim", claim.claim)
+        .eq("status", "available");
+      return receiverPairingSessionFromClaim({ ...claim, status: "expired" });
+    }
+
+    return receiverPairingSessionFromClaim(claim);
+  } catch (error) {
+    if (error instanceof ReceiverShellClaimError) throw error;
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function tryPairSupabaseReceiverShellPairingCode(
+  input: {
+    careCircleId?: string;
+    createdByUserId?: string;
+    deviceProfile?: string;
+    hardwareProfile?: string;
+    mainConnectUserPersonId?: string;
+    pairingCode?: string;
+    receiverUrl?: string;
+    uiLayout?: string;
+  },
+  options: { now?: Date }
+) {
+  try {
+    const supabase = createSupabaseServiceClient();
+    const now = options.now ?? new Date();
+    const setupCode = normalizeReceiverPairingCode(input.pairingCode || "");
+    const { data, error } = await supabase
+      .from("connect_receiver_claims")
+      .select("*, connect_receiver_devices(*)")
+      .eq("setup_code", setupCode)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      throw new ReceiverShellClaimError("Pairing code not found.", 404);
+    }
+
+    const current = supabaseClaimRecordWithDevice(data);
+    assertPairableClaim(current, now);
+
+    const deviceProfile = input.deviceProfile?.trim() || current.deviceProfile;
+    const hardwareProfile = input.hardwareProfile?.trim() || current.hardwareProfile;
+    const receiverUrl = input.receiverUrl?.trim() || current.receiverUrl;
+    const uiLayout = input.uiLayout?.trim() || current.uiLayout;
+    const careCircleId = input.careCircleId?.trim() || current.careCircleId;
+    const mainConnectUserPersonId =
+      input.mainConnectUserPersonId?.trim() || current.mainConnectUserPersonId;
+
+    const { error: deviceError } = await supabase
+      .from("connect_receiver_devices")
+      .update(
+        definedFields({
+          care_circle_id: careCircleId,
+          device_profile: deviceProfile,
+          hardware_profile: hardwareProfile,
+          main_connect_user_person_id: mainConnectUserPersonId,
+          receiver_url: receiverUrl,
+          status: "claim_pending",
+          ui_layout: uiLayout,
+          updated_at: now.toISOString(),
+        })
+      )
+      .eq("id", current.receiverDeviceId)
+      .neq("status", "revoked");
+    if (deviceError) throw deviceError;
+
+    const { data: updated, error: updateError } = await supabase
+      .from("connect_receiver_claims")
+      .update(
+        definedFields({
+          created_by_user_id: uuidOrUndefined(input.createdByUserId),
+          device_profile: deviceProfile,
+          hardware_profile: hardwareProfile,
+          receiver_url: receiverUrl,
+          ui_layout: uiLayout,
+        })
+      )
+      .eq("claim", current.claim)
+      .eq("status", "available")
+      .select("*, connect_receiver_devices(*)")
+      .single();
+    if (updateError) throw updateError;
+
+    return supabaseClaimRecordWithDevice(updated);
+  } catch (error) {
+    if (error instanceof ReceiverShellClaimError) throw error;
     if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
       return null;
     }
@@ -609,6 +1142,7 @@ async function tryVerifySupabaseReceiverShellBinding(
       capabilityStatuses:
         normalizeCapabilityStatuses(input.capabilityStatuses) ||
         capabilityStatusesFromRow(data.capability_statuses),
+      careCircleId: stringFromRow(data.care_circle_id),
       deviceOwner: booleanOrUndefined(input.deviceOwner ?? data.device_owner),
       deviceProfile: stringFromRow(data.device_profile),
       hardwareProfile: stringFromRow(data.hardware_profile),
@@ -619,6 +1153,7 @@ async function tryVerifySupabaseReceiverShellBinding(
         timestampFromMs(input.lastRecoveryAtMs) || stringFromRow(data.last_recovery_at),
       lockTaskActive: booleanOrUndefined(input.lockTaskActive ?? data.lock_task_active),
       lockTaskPermitted: booleanOrUndefined(input.lockTaskPermitted ?? data.lock_task_permitted),
+      mainConnectUserPersonId: stringFromRow(data.main_connect_user_person_id),
       nativeManufacturer:
         input.nativeManufacturer?.trim() || stringFromRow(data.native_manufacturer),
       nativeModel: input.nativeModel?.trim() || stringFromRow(data.native_model),
@@ -790,11 +1325,13 @@ async function tryRevokeSupabaseReceiverShellDevice(
 
 function supabaseClaimRecord(row: Record<string, unknown>): ReceiverShellClaimRecord {
   return {
+    careCircleId: stringFromRow(row.care_circle_id) || undefined,
     claim: stringFromRow(row.claim),
     createdAt: stringFromRow(row.created_at),
     deviceProfile: stringFromRow(row.device_profile),
     expiresAt: stringFromRow(row.expires_at),
     hardwareProfile: stringFromRow(row.hardware_profile),
+    mainConnectUserPersonId: stringFromRow(row.main_connect_user_person_id) || undefined,
     receiverDeviceId: stringFromRow(row.receiver_device_id),
     receiverInstallId: stringFromRow(row.receiver_install_id),
     receiverUrl: stringFromRow(row.receiver_url),
@@ -803,6 +1340,25 @@ function supabaseClaimRecord(row: Record<string, unknown>): ReceiverShellClaimRe
     storageSource: "supabase",
     status: receiverClaimStatusFromRow(row.status),
     uiLayout: stringFromRow(row.ui_layout),
+  };
+}
+
+function supabaseClaimRecordWithDevice(row: Record<string, unknown>): ReceiverShellClaimRecord {
+  const claim = supabaseClaimRecord(row);
+  const device =
+    row.connect_receiver_devices &&
+    typeof row.connect_receiver_devices === "object" &&
+    !Array.isArray(row.connect_receiver_devices)
+      ? (row.connect_receiver_devices as Record<string, unknown>)
+      : {};
+  return {
+    ...claim,
+    careCircleId: claim.careCircleId || stringFromRow(device.care_circle_id) || undefined,
+    mainConnectUserPersonId:
+      claim.mainConnectUserPersonId ||
+      stringFromRow(device.main_connect_user_person_id) ||
+      undefined,
+    receiverUrl: claim.receiverUrl || stringFromRow(device.receiver_url),
   };
 }
 
@@ -816,6 +1372,57 @@ function receiverClaimStatusFromRow(value: unknown): ReceiverShellClaimStatus {
   return value === "used" || value === "expired" || value === "revoked"
     ? value
     : "available";
+}
+
+function prototypeSetupCodeAllowed() {
+  return (
+    process.env.CONNECT_RECEIVER_ALLOW_PROTOTYPE_SETUP_CODE === "1" ||
+    process.env.NODE_ENV !== "production"
+  );
+}
+
+function createTypeableSetupCode() {
+  return [
+    randomSetupWord(setupCodeWords.adjectives),
+    randomSetupWord(setupCodeWords.nouns),
+    randomSetupWord(setupCodeWords.closers),
+  ].join("-");
+}
+
+function createNumericPairingCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+export function normalizeReceiverPairingCode(value: string) {
+  const compactDigits = value.replace(/\D/g, "");
+  if (compactDigits.length >= 5) return compactDigits;
+  return normalizeSetupCode(value);
+}
+
+export function formatReceiverPairingCode(value: string) {
+  const normalized = normalizeReceiverPairingCode(value);
+  if (/^\d{6}$/.test(normalized)) {
+    return `${normalized.slice(0, 3)} ${normalized.slice(3)}`;
+  }
+  return normalized;
+}
+
+function randomSetupWord(words: readonly string[]) {
+  return words[Math.floor(Math.random() * words.length)] || "ready";
+}
+
+function normalizeSetupCode(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function uuidOrUndefined(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    trimmed
+  )
+    ? trimmed
+    : undefined;
 }
 
 function stringFromRow(value: unknown) {

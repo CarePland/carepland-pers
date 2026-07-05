@@ -3353,6 +3353,9 @@ function SetupPanel({
   const [receiverActionPending, setReceiverActionPending] = useState<string | null>(null);
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [peopleActionPending, setPeopleActionPending] = useState<"household" | null>(null);
+  const setupPerson = state.connectContext?.people.find(
+    (person) => person.id === activeMainConnectUserPersonId
+  );
   const [appearanceTheme, setAppearanceTheme] = useState("Mid-Century");
   const [visualSkin, setVisualSkin] = useState("Modern");
   const [showRevokedDevices, setShowRevokedDevices] = useState(false);
@@ -3737,6 +3740,10 @@ function SetupPanel({
       setSetupStatus("Select a receiver first.");
       return;
     }
+    if (!activeMainConnectUserPersonId) {
+      setSetupStatus("Choose a Main Connect User before creating a receiver setup link.");
+      return;
+    }
 
     setSelectedReceiverKey(receiverKey(targetDevice));
     setSetupActionPending(mode);
@@ -3747,17 +3754,21 @@ function SetupPanel({
         `/api/connect/provisioning/receiver-devices/${encodeURIComponent(targetDevice.id)}/setup-token`,
         {
           body: JSON.stringify({
+            careCircleId: setupPerson?.careCircleId,
             confirmedPrototypeWrite: true,
-            createdByUserId: "andrew",
             expiresInMinutes: 30,
             locationLabel: targetDevice.locationLabel,
+            mainConnectUserPersonId: activeMainConnectUserPersonId,
             name: targetDevice.name,
             operationReason:
               mode === "recover"
                 ? "Coordinator confirmed Connect receiver recovery link."
                 : "Coordinator confirmed Connect receiver setup link.",
           }),
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            ...(await connectAuthHeaders()),
+            "Content-Type": "application/json",
+          },
           method: "POST",
         }
       );
@@ -3773,7 +3784,10 @@ function SetupPanel({
       }
 
       const setupUrl = payload.setupPath
-        ? new URL(payload.setupPath, connectPrototypeEndpoints.dashboard).toString()
+        ? new URL(
+            payload.setupPath,
+            typeof window === "undefined" ? "https://app.carepland.com" : window.location.origin
+          ).toString()
         : "";
       setSetupLink({
         expiresAt: payload.setupToken?.expiresAt,

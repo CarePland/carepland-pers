@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   ConnectPersonAccessDeniedError,
-  verifyConnectPersonAccessForRequest,
 } from "@/app/lib/connect/context/server/mainConnectUserContext";
+import {
+  readConnectPersonScopedAccess,
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
 import { appContentDefaults } from "@/app/lib/platform/content/appContentConfig";
 import {
   buildReceiverTodayFocusCompletionEvent,
@@ -18,7 +23,6 @@ import {
 import { todayFocusCompletionWindow } from "@/app/lib/personal/track/todayFocusDay";
 import {
   createSupabaseServiceClient,
-  createSupabaseUserClient,
 } from "@/app/lib/platform/server/supabase";
 
 export async function GET(request: Request) {
@@ -37,9 +41,11 @@ export async function GET(request: Request) {
       );
     }
 
-    const { accessToken, userContext } = await verifyAccess(personId, request);
-    const supabase = createSupabaseUserClient(accessToken);
-    const timeZone = await loadUserTimeZone(supabase, userContext.userId);
+    const access = await readConnectPersonScopedAccess(request, personId);
+    const supabase = access.supabase;
+    const timeZone = access.createdByUserId
+      ? await loadUserTimeZone(supabase, access.createdByUserId)
+      : null;
     const completionWindow = todayFocusCompletionWindow(new Date(), timeZone);
     const today = new Date().toISOString().slice(0, 10);
 
@@ -138,7 +144,7 @@ export async function GET(request: Request) {
 }
 
 async function loadTodayFocusCadencePreferences(
-  supabase: ReturnType<typeof createSupabaseUserClient>,
+  supabase: SupabaseClient,
   personId: string
 ) {
   const { data, error } = await supabase
@@ -161,7 +167,7 @@ async function loadTodayFocusCadencePreferences(
 }
 
 async function loadReceiverTodayFocusConfig(
-  supabase: ReturnType<typeof createSupabaseUserClient>
+  supabase: SupabaseClient
 ) {
   const fallbackUndoSeconds = receiverUndoSecondsFromText(
     appContentDefaults.connect_receiver_undo_seconds
@@ -215,8 +221,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const { accessToken, userContext } = await verifyAccess(personId, request);
-    const supabase = createSupabaseUserClient(accessToken);
+    const access = await readConnectPersonScopedAccess(request, personId, { body });
+    const supabase = access.supabase;
 
     const { data: focusItemRow, error: focusItemError } = await supabase
       .from("focus_items")
@@ -296,7 +302,7 @@ export async function POST(request: Request) {
         care_circle_id: eventDraft.careCircleId,
         care_subject_id: eventDraft.careSubjectId,
         confidence: eventDraft.confidence ?? 1,
-        created_by_user_id: userContext.userId,
+        created_by_user_id: access.createdByUserId,
         event_type: eventDraft.eventType,
         focus_item_id: eventDraft.focusItemId,
         needs_review: eventDraft.needsReview ?? false,
@@ -360,19 +366,24 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const { userContext } = await verifyAccess(personId, request);
+    const access = await readConnectPersonScopedAccess(request, personId, { body });
     const supabase = createSupabaseServiceClient();
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
-    const { data, error } = await supabase
+    let deleteQuery = supabase
       .from("track_events")
       .delete()
       .eq("id", trackEventId)
       .eq("care_subject_id", personId)
       .eq("focus_item_id", focusItemId)
-      .eq("created_by_user_id", userContext.userId)
       .eq("source", "receiver_today_focus")
-      .gte("created_at", tenMinutesAgo)
+      .gte("created_at", tenMinutesAgo);
+
+    deleteQuery = access.createdByUserId
+      ? deleteQuery.eq("created_by_user_id", access.createdByUserId)
+      : deleteQuery.is("created_by_user_id", null);
+
+    const { data, error } = await deleteQuery
       .select("id")
       .maybeSingle();
 
@@ -411,7 +422,7 @@ export async function DELETE(request: Request) {
 }
 
 async function loadTodayFocusTrackContext(
-  supabase: ReturnType<typeof createSupabaseUserClient>,
+  supabase: SupabaseClient,
   personId: string,
   completedWindowStartUtc: Date,
   completedWindowEndUtc: Date
@@ -491,20 +502,8 @@ function focusItemIds(rows: unknown) {
     .filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
-async function verifyAccess(personId: string, request: Request) {
-  try {
-    return await verifyConnectPersonAccessForRequest(personId, request);
-  } catch (error) {
-    if (!(error instanceof ConnectPersonAccessDeniedError)) {
-      throw error;
-    }
-
-    throw error;
-  }
-}
-
 async function loadUserTimeZone(
-  supabase: ReturnType<typeof createSupabaseUserClient>,
+  supabase: SupabaseClient,
   userId: string
 ) {
   const { data, error } = await supabase
@@ -529,6 +528,11 @@ function focusRouteError(error: unknown, fallbackMessage: string) {
       },
       { status: 403 }
     );
+  }
+  if (error instanceof ReceiverDeviceAccessError) {
+    return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+      status: error.status,
+    });
   }
 
   return NextResponse.json(

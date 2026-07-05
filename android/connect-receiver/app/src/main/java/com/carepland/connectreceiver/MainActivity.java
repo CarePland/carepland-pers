@@ -41,6 +41,14 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -49,6 +57,7 @@ public class MainActivity extends Activity {
     private static final int RECEIVER_LOAD_TIMEOUT_MS = 8000;
     private static final int RECEIVER_AUTO_RETRY_SECONDS = 5;
     private static final int DEDICATED_REOPEN_DELAY_MS = 1500;
+    private static final int PAIRING_POLL_INTERVAL_MS = 3000;
     private static final String SHELL_VERSION = "0.1.9";
 
     private WebView webView;
@@ -59,9 +68,14 @@ public class MainActivity extends Activity {
     private Runnable receiverLoadTimeoutRunnable;
     private Runnable receiverAutoRetryRunnable;
     private Runnable dedicatedReopenRunnable;
+    private Runnable pairingPollRunnable;
     private String lastReceiverUrl = "";
     private String lastPageFinishedUrl = "";
     private String lastConsoleMessage = "";
+    private String currentPairingCode = "";
+    private String currentPairingReceiverDeviceId = "";
+    private String currentPairingStatus = "";
+    private boolean pairingRequestInFlight;
     private PermissionRequest pendingPermissionRequest;
     private boolean provisioningWizardVisible;
     private String provisioningWizardMode = "dedicated";
@@ -76,7 +90,7 @@ public class MainActivity extends Activity {
         configureManagedKioskMode();
         configureWebView();
         if (!ReceiverConfigStore.hasClaimOrBinding(this)) {
-            showClaimRequiredScreen();
+            showPairingRequiredScreen("Requesting pairing code...");
             return;
         }
         if (!ReceiverConfigStore.hasCompletedProvisioningWizard(this)) {
@@ -92,7 +106,7 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         if (!ReceiverConfigStore.hasClaimOrBinding(this)) {
-            showClaimRequiredScreen();
+            showPairingRequiredScreen("Requesting pairing code...");
             return;
         }
         if (!ReceiverConfigStore.hasCompletedProvisioningWizard(this)) {
@@ -110,6 +124,10 @@ public class MainActivity extends Activity {
         externalSettingsInProgress = false;
         configureApplianceWindow();
         configureManagedKioskMode();
+        if (!ReceiverConfigStore.hasClaimOrBinding(this)) {
+            showPairingRequiredScreen(currentPairingStatus);
+            return;
+        }
         if (receiverErrorVisible && ReceiverConfigStore.hasProvisioning(this)) {
             scheduleReceiverAutoRetry(null);
         }
@@ -145,6 +163,10 @@ public class MainActivity extends Activity {
         }
         if ("ready".equals(provisioningWizardScreen)) {
             showProvisioningReadyScreen(provisioningReadyModeLabel);
+            return;
+        }
+        if (pairingPollRunnable != null || !isBlank(currentPairingCode)) {
+            showPairingRequiredScreen(currentPairingStatus);
         }
     }
 
@@ -160,6 +182,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         cancelDedicatedReopen();
+        cancelPairingPoll();
         if (webView != null) {
             webView.destroy();
             webView = null;
@@ -634,8 +657,8 @@ public class MainActivity extends Activity {
         startButton.setOnClickListener(view -> {
             provisioningWizardVisible = false;
             provisioningWizardScreen = "";
-            if (!ReceiverConfigStore.hasProvisioning(this)) {
-                showLocalError("");
+            if (!ReceiverConfigStore.hasClaimOrBinding(this)) {
+                showPairingRequiredScreen("Pair this Receiver before starting CarePland.");
                 return;
             }
             requestAudioPermissionIfNeeded();
@@ -1227,7 +1250,7 @@ public class MainActivity extends Activity {
         return (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
     }
 
-    private void showClaimRequiredScreen() {
+    private void showPairingRequiredScreen(String statusMessage) {
         configureApplianceWindow();
         cancelReceiverRecoveryCallbacks();
         receiverErrorVisible = false;
@@ -1247,10 +1270,10 @@ public class MainActivity extends Activity {
 
         TextView title = new TextView(this);
         title.setTextColor(0xFFFFFFFF);
-        title.setTextSize(34);
+        title.setTextSize(shortWizardScreen() ? 30 : 34);
         title.setGravity(Gravity.CENTER);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        title.setText("Finish setup in browser");
+        title.setText("Set Up Receiver");
         panel.addView(
                 title,
                 new LinearLayout.LayoutParams(
@@ -1265,11 +1288,39 @@ public class MainActivity extends Activity {
         message.setGravity(Gravity.CENTER);
         message.setPadding(0, 22, 0, 28);
         message.setText(
-                "CarePland Receiver needs a setup claim before it can start.\n\n"
-                        + "Return to the setup page in the browser. Create the claim, then tap Open Receiver App."
+                "Enter this code at setup.carepland.com to pair this Receiver."
         );
         panel.addView(
                 message,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        TextView codeView = new TextView(this);
+        codeView.setTextColor(0xFFFFFFFF);
+        codeView.setTextSize(shortWizardScreen() ? 48 : 64);
+        codeView.setGravity(Gravity.CENTER);
+        codeView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        codeView.setPadding(0, 10, 0, 18);
+        codeView.setText(isBlank(currentPairingCode) ? "------" : currentPairingCode);
+        panel.addView(
+                codeView,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        TextView status = new TextView(this);
+        status.setTextColor(0xFFDDEAF8);
+        status.setTextSize(18);
+        status.setGravity(Gravity.CENTER);
+        status.setPadding(0, 0, 0, 22);
+        status.setText(emptyFallback(statusMessage, currentPairingStatus, "Waiting for pairing."));
+        panel.addView(
+                status,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
@@ -1291,14 +1342,18 @@ public class MainActivity extends Activity {
         panel.addView(setupButton, setupButtonParams);
 
         Button checkButton = new Button(this);
-        checkButton.setText("Check Again");
+        checkButton.setText(isBlank(currentPairingCode) ? "Get Pairing Code" : "Check Pairing");
         checkButton.setTextSize(22);
         checkButton.setTextColor(0xFFFFFFFF);
         checkButton.setBackgroundColor(0xFF226D1D);
         checkButton.setAllCaps(false);
         checkButton.setOnClickListener(view -> {
             if (!ReceiverConfigStore.hasClaimOrBinding(this)) {
-                showClaimRequiredScreen();
+                if (isBlank(currentPairingCode)) {
+                    requestPairingSession();
+                } else {
+                    pollPairingStatusOnce();
+                }
                 return;
             }
             if (!ReceiverConfigStore.hasCompletedProvisioningWizard(this)) {
@@ -1329,6 +1384,148 @@ public class MainActivity extends Activity {
                 )
         );
         setContentView(container);
+        if (isBlank(currentPairingCode) && !pairingRequestInFlight) {
+            requestPairingSession();
+        } else if (!isBlank(currentPairingCode)) {
+            schedulePairingPoll();
+        }
+    }
+
+    private void requestPairingSession() {
+        if (pairingRequestInFlight) {
+            return;
+        }
+        pairingRequestInFlight = true;
+        currentPairingStatus = "Requesting pairing code...";
+        ReceiverConfigStore.ReceiverConfig initialConfig = ReceiverConfigStore.load(this);
+        String detectedProfile = detectedHardwareProfile(displayMetrics());
+        new Thread(() -> {
+            try {
+                JSONObject requestBody = new JSONObject();
+                requestBody.put("receiverInstallId", ReceiverConfigStore.installId(MainActivity.this));
+                requestBody.put("receiverUrl", initialConfig.receiverUrl);
+                requestBody.put("deviceProfile", emptyFallback(initialConfig.deviceProfile, "android_receiver"));
+                requestBody.put("hardwareProfile", emptyFallback(initialConfig.hardwareProfile, detectedProfile));
+                requestBody.put("uiLayout", emptyFallback(initialConfig.uiLayout, "default_receiver"));
+
+                JSONObject response = postJson(pairingSessionsUri(initialConfig), requestBody);
+                String pairingCode = response.optString("pairingCode", "");
+                if (isBlank(pairingCode)) {
+                    throw new IllegalStateException("Pairing code missing.");
+                }
+                currentPairingCode = pairingCode;
+                currentPairingReceiverDeviceId = response.optString("receiverDeviceId", "");
+                currentPairingStatus = "Waiting for caregiver to pair this Receiver.";
+                runOnUiThread(() -> {
+                    pairingRequestInFlight = false;
+                    showPairingRequiredScreen(currentPairingStatus);
+                    schedulePairingPoll();
+                });
+            } catch (Exception error) {
+                currentPairingStatus = "Could not get a pairing code. Check network and try again.";
+                runOnUiThread(() -> {
+                    pairingRequestInFlight = false;
+                    showPairingRequiredScreen(currentPairingStatus);
+                });
+            }
+        }).start();
+    }
+
+    private void schedulePairingPoll() {
+        cancelPairingPoll();
+        if (isBlank(currentPairingCode) || ReceiverConfigStore.hasClaimOrBinding(this)) {
+            return;
+        }
+        pairingPollRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (ReceiverConfigStore.hasClaimOrBinding(MainActivity.this) || isBlank(currentPairingCode)) {
+                    return;
+                }
+                pollPairingStatusOnce();
+                mainHandler.postDelayed(this, PAIRING_POLL_INTERVAL_MS);
+            }
+        };
+        mainHandler.postDelayed(pairingPollRunnable, PAIRING_POLL_INTERVAL_MS);
+    }
+
+    private void cancelPairingPoll() {
+        if (pairingPollRunnable != null) {
+            mainHandler.removeCallbacks(pairingPollRunnable);
+            pairingPollRunnable = null;
+        }
+    }
+
+    private void pollPairingStatusOnce() {
+        if (isBlank(currentPairingCode) || pairingRequestInFlight) {
+            return;
+        }
+        pairingRequestInFlight = true;
+        ReceiverConfigStore.ReceiverConfig initialConfig = ReceiverConfigStore.load(this);
+        String detectedProfile = detectedHardwareProfile(displayMetrics());
+        new Thread(() -> {
+            try {
+                Uri uri = pairingSessionsUri(initialConfig)
+                        .buildUpon()
+                        .appendQueryParameter("code", currentPairingCode)
+                        .appendQueryParameter("receiverDeviceId", currentPairingReceiverDeviceId)
+                        .build();
+                JSONObject response = getJson(uri);
+                String status = response.optString("status", "");
+                if ("paired".equals(status)) {
+                    String claim = response.optString("claim", "");
+                    String receiverDeviceId = response.optString("receiverDeviceId", currentPairingReceiverDeviceId);
+                    String receiverUrl = response.optString("receiverUrl", initialConfig.receiverUrl);
+                    if (isBlank(claim)) {
+                        throw new IllegalStateException("Pairing completed without claim.");
+                    }
+                    ReceiverConfigStore.savePairingClaim(
+                            MainActivity.this,
+                            currentPairingCode,
+                            claim,
+                            receiverDeviceId,
+                            receiverUrl,
+                            emptyFallback(initialConfig.deviceProfile, "android_receiver"),
+                            emptyFallback(initialConfig.hardwareProfile, detectedProfile),
+                            emptyFallback(initialConfig.uiLayout, "default_receiver")
+                    );
+                    currentPairingStatus = "Receiver paired. Starting CarePland.";
+                    runOnUiThread(() -> {
+                        pairingRequestInFlight = false;
+                        cancelPairingPoll();
+                        currentPairingCode = "";
+                        currentPairingReceiverDeviceId = "";
+                        continueAfterPairing();
+                    });
+                    return;
+                }
+                if ("expired".equals(status) || "revoked".equals(status) || "used".equals(status)) {
+                    currentPairingStatus = "Pairing code " + status + ". Get a new code.";
+                    currentPairingCode = "";
+                    currentPairingReceiverDeviceId = "";
+                    runOnUiThread(() -> {
+                        pairingRequestInFlight = false;
+                        cancelPairingPoll();
+                        showPairingRequiredScreen(currentPairingStatus);
+                    });
+                    return;
+                }
+                currentPairingStatus = "Waiting for pairing.";
+                runOnUiThread(() -> pairingRequestInFlight = false);
+            } catch (Exception error) {
+                currentPairingStatus = "Waiting for pairing. Network check failed.";
+                runOnUiThread(() -> pairingRequestInFlight = false);
+            }
+        }).start();
+    }
+
+    private void continueAfterPairing() {
+        if (!ReceiverConfigStore.hasCompletedProvisioningWizard(this)) {
+            showProvisioningModeSelection();
+            return;
+        }
+        requestAudioPermissionIfNeeded();
+        loadReceiver();
     }
 
     private void openSetupPage(ReceiverConfigStore.ReceiverConfig config) {
@@ -1344,11 +1541,14 @@ public class MainActivity extends Activity {
 
     private Uri setupPageUri(ReceiverConfigStore.ReceiverConfig config) {
         Uri baseUri = Uri.parse(config.receiverUrl);
+        String setupHost = setupHostFor(baseUri.getHost());
         Uri.Builder builder = new Uri.Builder()
                 .scheme(emptyFallback(baseUri.getScheme(), "https"))
-                .encodedAuthority(emptyFallback(baseUri.getEncodedAuthority(), "carepland.com"))
+                .encodedAuthority(emptyFallback(setupAuthorityFor(baseUri, setupHost), "setup.carepland.com"))
                 .path("/connect/receiver/setup");
-        if (!isBlank(config.setupCode)) {
+        if (!isBlank(currentPairingCode)) {
+            builder.appendQueryParameter("code", currentPairingCode);
+        } else if (!isBlank(config.setupCode)) {
             builder.appendQueryParameter("code", config.setupCode);
         }
         if (!isBlank(config.deviceProfile)) {
@@ -1364,6 +1564,83 @@ public class MainActivity extends Activity {
             builder.appendQueryParameter("receiverUrl", config.receiverUrl);
         }
         return builder.build();
+    }
+
+    private Uri pairingSessionsUri(ReceiverConfigStore.ReceiverConfig config) {
+        Uri baseUri = Uri.parse(config.receiverUrl);
+        return baseUri.buildUpon()
+                .path("/api/connect/receiver-shell/pairing-sessions")
+                .clearQuery()
+                .build();
+    }
+
+    private String setupHostFor(String host) {
+        if ("receiver.carepland.com".equalsIgnoreCase(host)) {
+            return "setup.carepland.com";
+        }
+        return host;
+    }
+
+    private String setupAuthorityFor(Uri baseUri, String setupHost) {
+        if (isBlank(setupHost)) {
+            return "";
+        }
+        int port = baseUri.getPort();
+        return port > 0 ? setupHost + ":" + port : setupHost;
+    }
+
+    private JSONObject postJson(Uri uri, JSONObject body) throws Exception {
+        HttpURLConnection connection = openJsonConnection(uri, "POST");
+        byte[] bytes = body.toString().getBytes("UTF-8");
+        connection.setDoOutput(true);
+        connection.setFixedLengthStreamingMode(bytes.length);
+        OutputStream outputStream = connection.getOutputStream();
+        outputStream.write(bytes);
+        outputStream.close();
+        return readJsonResponse(connection);
+    }
+
+    private JSONObject getJson(Uri uri) throws Exception {
+        HttpURLConnection connection = openJsonConnection(uri, "GET");
+        return readJsonResponse(connection);
+    }
+
+    private HttpURLConnection openJsonConnection(Uri uri, String method) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(uri.toString()).openConnection();
+        connection.setConnectTimeout(8000);
+        connection.setReadTimeout(8000);
+        connection.setRequestMethod(method);
+        connection.setRequestProperty("Accept", "application/json");
+        connection.setRequestProperty("Content-Type", "application/json");
+        return connection;
+    }
+
+    private JSONObject readJsonResponse(HttpURLConnection connection) throws Exception {
+        int status = connection.getResponseCode();
+        InputStream stream = status >= 200 && status < 300
+                ? connection.getInputStream()
+                : connection.getErrorStream();
+        String body = readStream(stream);
+        JSONObject json = body.trim().isEmpty() ? new JSONObject() : new JSONObject(body);
+        if (status < 200 || status >= 300) {
+            String message = json.optString("error", "Receiver pairing request failed.");
+            throw new IllegalStateException(message);
+        }
+        return json;
+    }
+
+    private String readStream(InputStream stream) throws Exception {
+        if (stream == null) {
+            return "";
+        }
+        BufferedReader reader = new BufferedReader(new InputStreamReader(stream, "UTF-8"));
+        StringBuilder builder = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            builder.append(line);
+        }
+        reader.close();
+        return builder.toString();
     }
 
     private boolean isBlank(String value) {
@@ -1631,6 +1908,18 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void reportReceiverError(String message) {
             runOnUiThread(() -> lastConsoleMessage = emptyFallback(message, "Receiver reported an error."));
+        }
+
+        @JavascriptInterface
+        public void receiverSetupRequired(String message) {
+            runOnUiThread(() -> {
+                ReceiverConfigStore.clearBinding(MainActivity.this);
+                currentPairingCode = "";
+                currentPairingReceiverDeviceId = "";
+                currentPairingStatus = emptyFallback(message, "Receiver setup is required.");
+                cancelPairingPoll();
+                showPairingRequiredScreen(currentPairingStatus);
+            });
         }
 
         @JavascriptInterface

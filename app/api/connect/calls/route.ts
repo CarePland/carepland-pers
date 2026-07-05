@@ -4,6 +4,10 @@ import {
   readConnectCallPersonAccessForRequest,
 } from "@/app/lib/connect/calls/server/callAccess";
 import {
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
+import {
   filterCallsForMainConnectUser,
   mergeConnectCalls,
   type ConnectCallRecord,
@@ -58,6 +62,13 @@ export async function GET(request: Request) {
       ok: true,
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(
+        { calls: [], ...receiverDeviceSetupRequiredBody(error) },
+        { status: error.status }
+      );
+    }
+
     return NextResponse.json(
       {
         calls: [],
@@ -86,7 +97,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const access = await readConnectCallPersonAccessForRequest(request, personId);
+    const access = await readConnectCallPersonAccessForRequest(request, personId, payload);
 
     const call =
       (await recordSupabaseConnectCall(
@@ -133,6 +144,12 @@ export async function POST(request: Request) {
       source: prototypeBody.ok === true ? "local_and_prototype" : "local",
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
+
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Unable to start Connect call.",

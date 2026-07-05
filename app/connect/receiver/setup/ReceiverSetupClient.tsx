@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 
+import { connectAuthHeaders } from "@/app/lib/connect/context/client";
+
 import styles from "./ReceiverSetup.module.css";
 
 type ReceiverSetupClientProps = {
@@ -49,7 +51,7 @@ export function ReceiverSetupClient({
   initialUiLayout,
   setupBaseUrl,
 }: ReceiverSetupClientProps) {
-  const [setupCode, setSetupCode] = useState(initialCode || "12345");
+  const [setupCode, setSetupCode] = useState(initialCode || "");
   const [receiverUrl, setReceiverUrl] = useState(initialReceiverUrl);
   const [device, setDevice] = useState(initialDevice);
   const [hardwareProfile, setHardwareProfile] = useState(initialHardwareProfile);
@@ -60,6 +62,8 @@ export function ReceiverSetupClient({
   const [claimPending, setClaimPending] = useState(false);
   const [claimStorageSource, setClaimStorageSource] = useState("");
   const [nativeClaim, setNativeClaim] = useState("");
+  const [pairingStatus, setPairingStatus] = useState("");
+  const [pairingCheckPending, setPairingCheckPending] = useState(false);
   const [openAttempted, setOpenAttempted] = useState(false);
   const [browserOrigin, setBrowserOrigin] = useState("");
   const [setupQrCode, setSetupQrCode] = useState("");
@@ -75,6 +79,13 @@ export function ReceiverSetupClient({
   useEffect(() => {
     setBrowserOrigin(setupBaseUrl || window.location.origin);
   }, [setupBaseUrl]);
+
+  useEffect(() => {
+    if (!initialCode.trim()) return;
+    void checkPairingCode(initialCode);
+    // Run only for URL prefill.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCode]);
 
   const effectiveReceiverUrl = useMemo(() => {
     if (receiverUrl.trim()) return receiverUrl.trim();
@@ -136,13 +147,14 @@ export function ReceiverSetupClient({
     return new URL(apkDownloadUrl, browserOrigin).toString();
   }, [apkDownloadUrl, browserOrigin]);
 
-  const codeReady = setupCode.trim().length >= 4;
+  const cleanPairingCode = setupCode.replace(/\D/g, "");
+  const codeReady = cleanPairingCode.length >= 5 || setupCode.trim().length >= 4;
   const canOpenReceiverApp = codeReady && Boolean(nativeClaim);
   const setupMode = nativeClaim
-    ? "Claim ready"
+    ? "Receiver ready"
     : setupCode.trim() === "12345"
       ? "Local test receiver"
-      : "Short-lived claim pending";
+      : "Waiting for pairing code";
   const adbBinary = browserOrigin
     ? "/Users/agoodloe/Library/Android/sdk/platform-tools/adb"
     : "adb";
@@ -334,13 +346,87 @@ export function ReceiverSetupClient({
     }
   }
 
+  async function checkPairingCode(code = setupCode) {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    setPairingCheckPending(true);
+    setClaimError("");
+    try {
+      const response = await fetch(
+        `/api/connect/receiver-shell/pairing-sessions?code=${encodeURIComponent(trimmed)}`,
+        { cache: "no-store" }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        status?: string;
+      };
+      if (!response.ok) {
+        setPairingStatus(payload.error || "Pairing code not found yet.");
+        return;
+      }
+      setPairingStatus(
+        payload.status === "paired"
+          ? "Receiver detected and ready to connect."
+          : payload.status === "pending"
+            ? "Receiver detected. Pair it when you are ready."
+            : payload.status
+              ? `Receiver code status: ${payload.status}.`
+              : "Receiver detected."
+      );
+    } finally {
+      setPairingCheckPending(false);
+    }
+  }
+
+  async function pairReceiver() {
+    setClaimError("");
+    setClaimPending(true);
+    try {
+      const response = await fetch("/api/connect/receiver-shell/pairing-sessions/pair", {
+        body: JSON.stringify({
+          deviceProfile: device,
+          hardwareProfile,
+          pairingCode: setupCode.trim(),
+          receiverUrl: effectiveReceiverUrl,
+          uiLayout,
+        }),
+        cache: "no-store",
+        headers: {
+          ...(await connectAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        claim?: string;
+        error?: string;
+        receiverName?: string;
+        storageSource?: string;
+      };
+      if (!response.ok || !payload.claim) {
+        throw new Error(payload.error || "Unable to pair Receiver.");
+      }
+      setNativeClaim(payload.claim);
+      setClaimStorageSource(payload.storageSource || "");
+      setPairingStatus(
+        payload.receiverName
+          ? `Receiver ready for ${payload.receiverName}.`
+          : "Receiver ready."
+      );
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : "Unable to pair Receiver.");
+    } finally {
+      setClaimPending(false);
+    }
+  }
+
   return (
     <main className={styles.page}>
       <section className={styles.panel} aria-labelledby="receiver-setup-title">
         <div className={styles.header}>
           <div>
             <p>CarePland Connect</p>
-            <h1 id="receiver-setup-title">Install Receiver</h1>
+            <h1 id="receiver-setup-title">Set Up Receiver</h1>
           </div>
           <span>{apkVersionName ? `APK ${apkVersionName}` : "Setup"}</span>
         </div>
@@ -348,23 +434,8 @@ export function ReceiverSetupClient({
         <div className={styles.installGrid}>
           <div className={styles.installStep}>
             <span>1</span>
-            <strong>Open this page on the Receiver</strong>
-            <p>Scan the QR code with the Android device that will become the Receiver.</p>
-            {setupQrCode ? (
-              <img className={styles.qrImage} src={setupQrCode} alt="Receiver setup QR code" />
-            ) : null}
-            <button className={styles.secondaryAction} type="button" onClick={copySetupPageUrl}>
-              {copied ? "Copied" : "Copy Setup Link"}
-            </button>
-          </div>
-
-          <div className={styles.installStep}>
-            <span>2</span>
-            <strong>Install the app</strong>
-            <p>
-              Download and install the Receiver APK. If Android offers Open, do not open it yet.
-              Return here, create the claim, then tap Open Receiver App.
-            </p>
+            <strong>Install Receiver</strong>
+            <p>Download and install the Receiver app on the Android device.</p>
             {apkDownloadUrl ? (
               <a className={styles.primaryAction} href={apkDownloadUrl}>
                 Download APK
@@ -374,6 +445,12 @@ export function ReceiverSetupClient({
                 APK download URL is not configured yet. Set CONNECT_RECEIVER_APK_URL.
               </p>
             )}
+          </div>
+
+          <div className={styles.installStep}>
+            <span>2</span>
+            <strong>Open Receiver and get code</strong>
+            <p>Open the Receiver app. It will show a short pairing code, like 123 456.</p>
           </div>
         </div>
 
@@ -388,27 +465,56 @@ export function ReceiverSetupClient({
           <span>{setupMode}</span>
           {nativeClaim ? (
             <strong>
-              Claim ready{claimStorageSource ? ` · ${claimStorageSource}` : ""}
+              Receiver ready{claimStorageSource ? ` · ${claimStorageSource}` : ""}
             </strong>
           ) : setupCode.trim() === "12345" ? (
             <strong>Rob Robson test code</strong>
           ) : (
-            <strong>Create claim before opening the app</strong>
+            <strong>Enter the code shown on the Receiver</strong>
           )}
         </div>
 
-        <div className={styles.actionsThree}>
-          <button
-            className={styles.primaryAction}
-            disabled={!codeReady || claimPending}
-            type="button"
-            onClick={createClaim}
-          >
-            {claimPending ? "Creating Claim" : nativeClaim ? "Refresh Claim" : "Create Claim"}
-          </button>
+        <div className={styles.pairingPanel}>
+          <span>3</span>
+          <label className={styles.field}>
+            <span>Enter code to pair</span>
+            <input
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              onChange={(event) => {
+                setSetupCode(event.target.value);
+                setNativeClaim("");
+                setClaimStorageSource("");
+              }}
+              placeholder="123 456"
+              value={setupCode}
+            />
+          </label>
+          <div className={styles.actions}>
+            <button
+              className={styles.primaryAction}
+              disabled={!codeReady || claimPending}
+              type="button"
+              onClick={pairReceiver}
+            >
+              {claimPending ? "Pairing Receiver" : nativeClaim ? "Receiver Ready" : "Pair Receiver"}
+            </button>
+            <button
+              className={styles.secondaryAction}
+              disabled={!codeReady || pairingCheckPending}
+              type="button"
+              onClick={() => checkPairingCode()}
+            >
+              {pairingCheckPending ? "Checking" : "Check Code"}
+            </button>
+          </div>
+          {pairingStatus ? <p className={styles.note}>{pairingStatus}</p> : null}
+        </div>
+
+        {nativeClaim ? (
           <a
             aria-disabled={!canOpenReceiverApp}
-            className={`${styles.primaryAction} ${canOpenReceiverApp ? "" : styles.disabled}`}
+            className={`${styles.primaryAction} ${styles.fullWidthAction} ${canOpenReceiverApp ? "" : styles.disabled}`}
             href={canOpenReceiverApp ? androidOpenReceiverUrl : undefined}
             onClick={(event) => {
               if (!canOpenReceiverApp) {
@@ -420,18 +526,7 @@ export function ReceiverSetupClient({
           >
             Open Receiver App
           </a>
-          <button
-            className={styles.secondaryAction}
-            type="button"
-            onClick={() => {
-              setNativeClaim("");
-              setClaimStorageSource("");
-              setClaimError("");
-            }}
-          >
-            Use Local Code
-          </button>
-        </div>
+        ) : null}
 
         {claimError ? <p className={styles.errorNote}>{claimError}</p> : null}
 
@@ -439,8 +534,7 @@ export function ReceiverSetupClient({
           <div>
             <span>Open-app QR</span>
             <p>
-              Use this after the APK is installed. It opens the Receiver app with the current setup
-              claim.
+              Use this only if the Receiver app does not notice pairing automatically.
             </p>
           </div>
           {canOpenReceiverApp && provisioningQrCode ? (
@@ -534,6 +628,55 @@ export function ReceiverSetupClient({
 
         {showAdvanced ? (
           <>
+            <div className={styles.qrPanel}>
+              <div>
+                <span>Setup page QR</span>
+                <p>Use this if the Android device needs to open this setup page directly.</p>
+              </div>
+              {setupQrCode ? (
+                <img className={styles.smallQrImage} src={setupQrCode} alt="Receiver setup QR code" />
+              ) : null}
+              <button className={styles.secondaryAction} type="button" onClick={copySetupPageUrl}>
+                {copied ? "Copied" : "Copy Setup Link"}
+              </button>
+            </div>
+
+            <div className={styles.actionsThree}>
+              <button
+                className={styles.secondaryAction}
+                disabled={!codeReady || claimPending}
+                type="button"
+                onClick={createClaim}
+              >
+                {claimPending ? "Connecting" : nativeClaim ? "Refresh App Link" : "Create App Claim"}
+              </button>
+              <a
+                aria-disabled={!canOpenReceiverApp}
+                className={`${styles.secondaryAction} ${canOpenReceiverApp ? "" : styles.disabled}`}
+                href={canOpenReceiverApp ? androidOpenReceiverUrl : undefined}
+                onClick={(event) => {
+                  if (!canOpenReceiverApp) {
+                    event.preventDefault();
+                    return;
+                  }
+                  setOpenAttempted(true);
+                }}
+              >
+                Open Receiver App
+              </a>
+              <button
+                className={styles.secondaryAction}
+                type="button"
+                onClick={() => {
+                  setNativeClaim("");
+                  setClaimStorageSource("");
+                  setClaimError("");
+                }}
+              >
+                Use Local Code
+              </button>
+            </div>
+
             <label className={styles.field}>
               <span>Setup code</span>
               <input
@@ -607,8 +750,8 @@ export function ReceiverSetupClient({
 
         <p className={styles.note}>
           {openAttempted
-            ? "If nothing opened, install the APK first, then return to this page and tap Open Receiver App again."
-            : "Create Claim generates a short-lived Receiver app claim. QR setup keeps the install path available without ADB."}
+            ? "If nothing opened, install the app first, then return here and tap Open Receiver App again."
+            : "The normal path is: install the Receiver, type the code it shows, then pair it here."}
         </p>
       </section>
     </main>

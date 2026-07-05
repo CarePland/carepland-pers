@@ -102,7 +102,9 @@ export async function POST(request: Request) {
 
     const deniedResponse = await verifyConnectMessagePersonAccess(
       payload.mainConnectUserPersonId,
-      request
+      request,
+      {},
+      { body: payload as unknown as Record<string, unknown> }
     );
     if (deniedResponse) return deniedResponse;
 

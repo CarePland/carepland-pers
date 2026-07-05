@@ -15,9 +15,10 @@ import type {
 import { isConnectCallState, type ConnectCallState } from "./localCalls";
 
 type ConnectCallAccess = {
-  accessToken: string;
+  accessToken?: string;
   careCircleId: string;
   mainConnectUserPersonId: string;
+  supabase?: SupabaseClient;
 };
 
 type ConnectCallRow = {
@@ -304,7 +305,7 @@ async function cleanupSupabaseApprovedCallTranscript(
   now: string,
   approvedSummaryText?: string
 ) {
-  const supabase = createSupabaseUserClient(access.accessToken);
+  const supabase = access.supabase ?? createSupabaseUserClient(access.accessToken ?? "");
     const { data, error } = await supabase
       .from("connect_calls")
       .update({
@@ -633,7 +634,7 @@ async function trySupabaseCallStore<T>(
   access: ConnectCallAccess
 ): Promise<T | null> {
   try {
-    return await callback(createSupabaseUserClient(access.accessToken));
+    return await callback(access.supabase ?? createSupabaseUserClient(access.accessToken ?? ""));
   } catch {
     return null;
   }

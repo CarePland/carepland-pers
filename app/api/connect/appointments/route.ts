@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 
+import { ConnectPersonAccessDeniedError } from "@/app/lib/connect/context/server/mainConnectUserContext";
 import {
-  ConnectPersonAccessDeniedError,
-  verifyConnectPersonAccessForRequest,
-} from "@/app/lib/connect/context/server/mainConnectUserContext";
+  readConnectPersonScopedAccess,
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
 import {
   normalizeConnectAppointments,
   type ConnectAppointmentRow,
 } from "@/app/lib/connect/appointments/appointmentScoping";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 export async function GET(request: Request) {
   try {
@@ -25,10 +26,16 @@ export async function GET(request: Request) {
       );
     }
 
-    let accessToken = "";
+    let access: Awaited<ReturnType<typeof readConnectPersonScopedAccess>>;
     try {
-      ({ accessToken } = await verifyConnectPersonAccessForRequest(personId, request));
+      access = await readConnectPersonScopedAccess(request, personId);
     } catch (error) {
+      if (error instanceof ReceiverDeviceAccessError) {
+        return NextResponse.json(
+          { appointments: [], ...receiverDeviceSetupRequiredBody(error) },
+          { status: error.status }
+        );
+      }
       if (!(error instanceof ConnectPersonAccessDeniedError)) {
         throw error;
       }
@@ -42,7 +49,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const supabase = createSupabaseUserClient(accessToken);
+    const supabase = access.supabase;
 
     const { data: appointmentRows, error } = await supabase
       .from("appointments")

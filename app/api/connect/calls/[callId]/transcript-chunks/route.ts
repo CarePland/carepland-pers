@@ -5,6 +5,10 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
+import {
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
 import { generateConnectCallCareSummary } from "@/app/lib/connect/calls/server/callSummaryGeneration";
 import {
   recordLocalConnectCallTranscriptSegment,
@@ -60,7 +64,7 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const access = await readConnectCallPersonAccessForRequest(request, personId);
+    const access = await readConnectCallPersonAccessForRequest(request, personId, payload as Record<string, unknown>);
     const chunk = normalizeConnectCallTranscriptChunk(payload);
     tempDir = await mkdtemp(path.join(tmpdir(), "connect-call-chunk-"));
     const audioPath = path.join(tempDir, `chunk-${chunk.chunkIndex}.webm`);
@@ -139,6 +143,12 @@ export async function POST(request: Request, context: RouteContext) {
       transcriptStatus: transcription.status,
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
+
     return NextResponse.json(
       {
         error:

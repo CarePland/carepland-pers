@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
 import {
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
+import {
   compactLocalConnectCallSignals,
   filterLocalConnectCallSignals,
   recordLocalConnectCallSignal,
@@ -66,6 +70,13 @@ export async function GET(request: Request, context: RouteContext) {
       }),
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(
+        { signals: [], ...receiverDeviceSetupRequiredBody(error) },
+        { status: error.status }
+      );
+    }
+
     return NextResponse.json(
       {
         error:
@@ -101,7 +112,7 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const access = await readConnectCallPersonAccessForRequest(request, personId);
+    const access = await readConnectCallPersonAccessForRequest(request, personId, payload);
 
     const signal =
       (await recordSupabaseConnectCallSignal(
@@ -151,6 +162,12 @@ export async function POST(request: Request, context: RouteContext) {
       signal,
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
+
     return NextResponse.json(
       {
         error:

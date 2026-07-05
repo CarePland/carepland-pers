@@ -261,6 +261,55 @@ final class ReceiverConfigStore {
         editor.apply();
     }
 
+    static void savePairingClaim(
+            Context context,
+            String setupCode,
+            String setupClaim,
+            String receiverDeviceId,
+            String receiverUrl,
+            String deviceProfile,
+            String hardwareProfile,
+            String uiLayout
+    ) {
+        SharedPreferences.Editor editor =
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
+        if (isAllowedReceiverUrl(receiverUrl)) {
+            editor.putString(KEY_RECEIVER_URL, receiverUrl.trim());
+        }
+        if (isPresent(setupCode)) {
+            editor.putString(KEY_SETUP_CODE, setupCode.trim());
+        }
+        if (isPresent(setupClaim)) {
+            editor.putString(KEY_SETUP_CLAIM, setupClaim.trim());
+        }
+        if (isPresent(receiverDeviceId)) {
+            editor.putString(KEY_RECEIVER_DEVICE_ID, receiverDeviceId.trim());
+        }
+        if (isPresent(deviceProfile)) {
+            editor.putString(KEY_DEVICE_PROFILE, deviceProfile.trim());
+        }
+        if (isPresent(hardwareProfile)) {
+            editor.putString(KEY_HARDWARE_PROFILE, hardwareProfile.trim());
+        }
+        if (isPresent(uiLayout)) {
+            editor.putString(KEY_UI_LAYOUT, uiLayout.trim());
+        }
+        editor.putString(KEY_BINDING_STATUS, "claim_pending");
+        editor.putLong(KEY_PROVISIONED_AT_MS, System.currentTimeMillis());
+        editor.apply();
+    }
+
+    static void clearBinding(Context context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .remove(KEY_SETUP_CODE)
+                .remove(KEY_SETUP_CLAIM)
+                .remove(KEY_RECEIVER_DEVICE_ID)
+                .putString(KEY_BINDING_STATUS, "setup_required")
+                .putLong(KEY_PROVISIONED_AT_MS, 0L)
+                .apply();
+    }
+
     static void recordRecoveryLaunch(Context context, String action) {
         if (!isPresent(action)) {
             return;
@@ -321,7 +370,10 @@ final class ReceiverConfigStore {
             String receiverDeviceId
     ) {
         if (isPresent(receiverDeviceId)) {
-            return "bound";
+            if (!isPresent(setupClaim)) {
+                return "bound";
+            }
+            return "claim_pending";
         }
         if (isPresent(setupClaim)) {
             return "claim_pending";

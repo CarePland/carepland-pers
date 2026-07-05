@@ -45,7 +45,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const deniedResponse = await verifyConnectAudioPersonAccess(personId, request);
+    const deniedResponse = await verifyConnectAudioPersonAccess(
+      personId,
+      request,
+      {},
+      { body: payload as unknown as Record<string, unknown> }
+    );
     if (deniedResponse) return deniedResponse;
 
     const source = String(payload.source || "audio_capture").trim() || "audio_capture";

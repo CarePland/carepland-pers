@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
 import {
+  readReceiverDeviceScopedAccess,
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
+import {
   recordLocalReceiverCleaningSession,
   recordSupabaseReceiverCleaningSession,
   type ReceiverCleaningSessionInput,
@@ -17,12 +22,23 @@ export async function POST(request: Request) {
       );
     }
 
-    const supabaseSession = await recordSupabaseReceiverCleaningSession(payload).catch(
+    const binding = await readReceiverDeviceScopedAccess(request, {
+      body: payload as unknown as Record<string, unknown>,
+    });
+    const sessionPayload: ReceiverCleaningSessionInput = {
+      ...payload,
+      mainConnectUserPersonId:
+        payload.mainConnectUserPersonId || binding.mainConnectUserPersonId || "",
+      receiverDeviceId: payload.receiverDeviceId || binding.receiverDeviceId,
+      receiverInstallId: payload.receiverInstallId || binding.receiverInstallId,
+    };
+
+    const supabaseSession = await recordSupabaseReceiverCleaningSession(sessionPayload).catch(
       () => null
     );
     const localSession = supabaseSession
       ? null
-      : await recordLocalReceiverCleaningSession(payload);
+      : await recordLocalReceiverCleaningSession(sessionPayload);
 
     return NextResponse.json({
       ok: true,
@@ -30,6 +46,12 @@ export async function POST(request: Request) {
       source: supabaseSession ? "supabase" : "local",
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
+
     return NextResponse.json(
       {
         error:

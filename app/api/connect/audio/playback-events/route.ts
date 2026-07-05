@@ -26,7 +26,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const deniedResponse = await verifyConnectAudioPersonAccess(personId, request);
+    const deniedResponse = await verifyConnectAudioPersonAccess(
+      personId,
+      request,
+      {},
+      { body: payload as unknown as Record<string, unknown> }
+    );
     if (deniedResponse) return deniedResponse;
 
     const event = await recordLocalAudioPlaybackEvent({

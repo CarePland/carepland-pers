@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
+import {
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
 import { generateConnectCallCareSummary } from "@/app/lib/connect/calls/server/callSummaryGeneration";
 import {
   updateLocalConnectCallState,
@@ -34,7 +38,7 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const access = await readConnectCallPersonAccessForRequest(request, personId);
+    const access = await readConnectCallPersonAccessForRequest(request, personId, payload);
 
     const call =
       (await updateSupabaseConnectCallState(callId, payload.state || "", access)) ??
@@ -134,6 +138,12 @@ export async function POST(request: Request, context: RouteContext) {
       source: prototypeBody.ok === true ? "local_and_prototype" : "local",
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
+
     return NextResponse.json(
       {
         error:

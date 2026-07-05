@@ -56,17 +56,19 @@ carepland://receiver/provision?receiver_url=https%3A%2F%2Fcarepland.example%2Fco
 
 Current shell behavior:
 
-1. Refuse to start the Receiver web surface until a native app claim or bound receiver device exists. A plain installer/launcher open shows a local `Finish setup in browser` confirmation screen instead.
-2. The confirmation screen can open the best-known `/connect/receiver/setup` page; it does not auto-send the user out of the app.
-3. After the browser creates a short-lived claim and opens the native app link, show the local Receiver Mode wizard when `provisioning_completed_at` is absent. The wizard is not the pairing/auth flow.
-4. Store `receiver_mode` as `dedicated` or `personal`, `provisioning_completed_at`, and local capability statuses for full screen, microphone, kiosk, keep-awake, boot start, battery optimization, and update checks.
-5. Store `receiver_url`, `claim`, `setupCode`/`code`, `device`, `hardwareProfile`, optional `receiverDeviceId`, and `uiLayout` from the native provisioning link.
-6. Open the receiver URL after the local mode wizard completes.
-7. Maintain a generated app-private `receiverInstallId` for the APK install.
-8. Track a local `bindingStatus`: `unprovisioned`, `local_test`, `setup_pending`, `claim_pending`, or `bound`.
-9. Append `setupCode`, `setupClaim`, `device`, `hardwareProfile`, `uiLayout`, `receiverInstallId`, `receiverDeviceId`, `receiverBindingStatus`, `receiverMode`, `provisioningCompletedAtMs`, and `nativeShell=android` query parameters when absent.
-10. Expose the same non-secret setup values plus native device facts to the hosted Receiver through `window.CarePlandReceiver.getProvisioningJson()`. Device facts include manufacturer, model, SDK version, display width/height, density, kiosk state, APK version, install ID, optional receiver-device ID, binding status, Receiver mode, local capability statuses, and a best-effort detected hardware profile.
-11. If the main Receiver page fails or returns an HTTP error, show a native appliance fallback instead of leaving a raw browser error on screen.
+1. Refuse to start the Receiver web surface until a native app claim or bound receiver device exists. A plain installer/launcher open requests a short-lived pairing session, displays a grouped six-digit code such as `123 456`, and waits for caregiver pairing.
+2. The pairing screen can open the best-known `/connect/receiver/setup` page; it does not auto-send the user out of the app.
+3. The shell polls `/api/connect/receiver-shell/pairing-sessions` while the code is pending. When pairing succeeds, it stores the returned internal app claim and receiver-device id, then continues through the existing claim/redeem path.
+4. After the app has a claim or bound receiver device, show the local Receiver Mode wizard when `provisioning_completed_at` is absent. The wizard is not the pairing/auth flow.
+5. Store `receiver_mode` as `dedicated` or `personal`, `provisioning_completed_at`, and local capability statuses for full screen, microphone, kiosk, keep-awake, boot start, battery optimization, and update checks.
+6. Store `receiver_url`, `claim`, `setupCode`/`code`, `device`, `hardwareProfile`, optional `receiverDeviceId`, and `uiLayout` from the native provisioning link.
+7. Open the receiver URL after the local mode wizard completes.
+8. Maintain a generated app-private `receiverInstallId` for the APK install.
+9. Track a local `bindingStatus`: `unprovisioned`, `local_test`, `setup_pending`, `claim_pending`, or `bound`.
+10. Append `setupCode`, `setupClaim`, `device`, `hardwareProfile`, `uiLayout`, `receiverInstallId`, `receiverDeviceId`, `receiverBindingStatus`, `receiverMode`, `provisioningCompletedAtMs`, and `nativeShell=android` query parameters when absent.
+11. Expose the same non-secret setup values plus native device facts to the hosted Receiver through `window.CarePlandReceiver.getProvisioningJson()`. Device facts include manufacturer, model, SDK version, display width/height, density, kiosk state, APK version, install ID, optional receiver-device ID, binding status, Receiver mode, local capability statuses, and a best-effort detected hardware profile.
+12. If the main Receiver page fails or returns an HTTP error, show a native appliance fallback instead of leaving a raw browser error on screen.
+13. If the hosted Receiver reports a revoked, stale, or missing binding through `window.CarePlandReceiver.receiverSetupRequired`, clear the local claim/binding hints and return to the native pairing screen.
 
 The initial scaffold stores only non-secret setup values and the pseudonymous receiver install ID in app-private preferences. Once the server returns a durable receiver credential, move that credential to Android Keystore-backed storage.
 
@@ -132,11 +134,14 @@ Current local implementation:
 
 - `supabase/sql/2026-06-27_connect_receiver_provisioning.sql` defines `connect_receiver_devices` and `connect_receiver_claims`.
 - `supabase/sql/2026-06-28_connect_receiver_device_profiles.sql` adds the first native device-profile mirror fields to `connect_receiver_devices`.
-- `/api/connect/receiver-shell/claims` issues a short-lived claim for prototype setup code `12345`.
+- `/api/connect/receiver-shell/pairing-sessions` is the near-term demo pairing path: an unpaired Receiver can request a short-lived six-digit code, display it to the caregiver, and poll the same route until pairing completes.
+- `/api/connect/receiver-shell/pairing-sessions/pair` lets a signed-in caregiver/admin pair the visible code to the current Main Connect User context. User-facing setup should say Pair Receiver or Set Up Receiver; claim remains an internal implementation word.
+- `/api/connect/provisioning/receiver-devices/:receiverDeviceId/setup-token` creates a signed-in, short-lived setup code for a selected Receiver device/person. Published setup should use this path rather than a shared default code.
+- `/api/connect/receiver-shell/claims` remains the compatibility layer that exchanges an existing available setup/pairing code for a short-lived native app claim. It does not mint published claims from arbitrary typed codes. The prototype `12345` code is local/dev-only unless `CONNECT_RECEIVER_ALLOW_PROTOTYPE_SETUP_CODE=1` is explicitly set.
 - `/api/connect/receiver-shell/claims/redeem` redeems the claim and returns the prototype `receiverDeviceId`.
 - `/api/connect/receiver-shell/devices/binding` verifies a bound receiver by matching both `receiverDeviceId` and the APK/browser `receiverInstallId`; successful checks update `last_seen_at` and mirror native setup/device profile fields when available.
-- `/connect/receiver/setup` is the first install-from-link page: it can show a setup-page QR code, download the configured APK, create a short-lived app claim, and open the installed Receiver through the `carepland://receiver/provision` deep link.
-- `/r` is the current local short setup shortcut. It redirects to `/connect/receiver/setup?code=12345` by default and exists to make setup-network installs easier to type on older hardware. Future word-phrase setup links should extend this idea without exposing permanent credentials.
+- `/connect/receiver/setup` is the first install-from-link page: its primary flow is now Install Receiver -> open Receiver and get code -> enter code to pair. Advanced setup keeps setup-page QR, dedicated-device QR, local/debug claim creation, and emulator tools available without making them the default demo path.
+- `/r/<setup-code>` is the short typed setup shortcut. It redirects to `/connect/receiver/setup?code=<setup-code>` and exists to make setup-network installs easier to type on older hardware. Bare `/r` defaults to prototype `12345` only in local/dev or when `CONNECT_RECEIVER_ALLOW_PROTOTYPE_SETUP_CODE=1`; published deployments should create a real setup code from the authenticated dashboard flow.
 - `/api/connect/receiver-shell/apk/debug` serves the local debug APK in development, or when `CONNECT_RECEIVER_DEBUG_APK_ENABLED=1`. Production installs should use `CONNECT_RECEIVER_APK_URL` instead.
 - The setup page can also generate an Android dedicated-device provisioning QR payload for factory-reset hardware. It uses `CONNECT_RECEIVER_APK_URL` for production APK download, `CONNECT_RECEIVER_APK_SHA256_CHECKSUM` for the required APK checksum, and includes the current CarePland provisioning link as admin extras. In local development, the page can compute the checksum for the debug APK route when the APK exists, but real hardware still needs an APK URL reachable from that device.
 - `scripts/restart-connect-local.sh` starts the local Receiver setup/APK routes on the main CarePland Next app and prints LAN setup/download URLs when it can detect a LAN IP address. Use `scripts/restart-connect-local.sh --setup-network` for temporary iPhone-hotspot, travel-router, or mini-router installs; it starts only the production Receiver setup/APK server on the LAN, disables the local HTTPS bridge/prototype API/static reference UI, enables the debug APK route for local install, and prints a short setup-network checklist. Override detection with `CONNECT_LAN_HOST=...` when needed. For a public tunnel, use `scripts/restart-connect-local.sh --ngrok-url=https://example.ngrok-free.app` so the setup page and APK button use the public URL instead of localhost or LAN.
