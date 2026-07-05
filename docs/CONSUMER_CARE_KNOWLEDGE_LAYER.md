@@ -1,6 +1,6 @@
 # Consumer Care Knowledge Layer
 
-Last updated: 2026-06-26
+Last updated: 2026-07-04
 
 The Consumer Care Knowledge Layer (CCKL) helps CarePland interpret ordinary consumer and caregiver healthcare language. It is not a medical encyclopedia, diagnosis engine, clinical decision support system, or transcript store.
 
@@ -18,6 +18,42 @@ The first implementation is intentionally small and code-native:
 - Connect call care summaries now inject only matched CCKL entries at summary time.
 
 This avoids creating an admin workflow or new database table before the model, taxonomy, review needs, and prompt behavior stabilize.
+
+## Future Clarification Loop
+
+CCKL should eventually support a lightweight clarification path when CarePland has high confidence that a user mentioned a meaningful consumer-care term, brand, service, acronym, wordmark, nickname, or nonstandard phrase that is not yet well understood.
+
+The clarification should ask the user whether they want to add or clarify the term for future use. This is separate from saving a care record: it should improve interpretation, not preserve raw transcript text or expand what gets stored in summaries.
+
+Clarifications should allow two scopes:
+
+- User-specific knowledge: a meaning, preference, pronunciation, household shorthand, local provider nickname, or personal distinction that applies only to that user/care circle.
+- Global candidate knowledge: a reusable term or definition that may help other CarePland users after review, normalization, and confidence checks.
+
+The system should not force one user's clarification onto another user. A later user may provide better context or a more precise definition; that signal can improve the global candidate. If the original user mentions the term again after the global candidate improves, CarePland may ask whether the refined interpretation seems right for them before applying it to their personal context.
+
+This creates room for individual preference and global accuracy to evolve together. It also keeps CarePland from treating ambiguous consumer language as settled medical knowledge too early.
+
+Clarification candidates should include enough metadata for review and improvement, such as proposed term, possible aliases, why CarePland thinks clarification is useful, source workflow, confidence, user scope, global-candidate status, reviewer notes, and version history. They should not store full transcripts or unrelated conversation.
+
+The first user-facing clarification control should be simple:
+
+- `Yes, and remember this for me`
+- `No, don't remember`
+- `Don't ask again about this`
+
+The clarification surface should also include a checked preference checkbox: `I want to be asked about these`. Because these clarifications are important to interpretation quality, unchecking that box must show an additional confirmation before saving the preference:
+
+`Choosing to not interpret these may impact the quality of your health history`
+
+Actions:
+
+- `I understand`: save the preference to stop asking about CCKL clarifications for that user/care circle.
+- `Nevermind`: hide the confirmation area and re-check `I want to be asked about these`.
+
+This preference should also appear in the user Profile page under a Connect settings area. It is likely the first of many user-configurable Connect interpretation/preferences controls, so implement it in a way that can grow without turning Profile into a troubleshooting surface.
+
+Any AI prompts used to identify, propose, normalize, or review CCKL clarification candidates must be managed through the Admin prompt/instruction workflow before product use. Admin should document both the prompt versions and the user preference state when analyzing data quality, because users who opt out of clarification prompts may have lower interpretation accuracy for ambiguous consumer terms.
 
 ## Knowledge Model
 
@@ -98,6 +134,7 @@ Stay code-native for Phase 1. Once entries, review workflow, and prompt behavior
 
 - Create global Admin-managed instruction/content infrastructure rather than per-user records.
 - Prefer a versioned catalog table similar in spirit to Health Focus catalogs and `ai_instruction_versions`.
+- Store user/care-circle CCKL clarification preferences separately from global catalog entries so personal opt-outs and meanings do not accidentally become global knowledge.
 - Track `slug`, `canonical_term`, `aliases`, `consumer_phrases`, `category`, `care_relevance`, `interpretation_guidance`, `normalization_hints`, `summary_guidance`, `confidence_notes`, `source_urls`, `is_active`, and version metadata.
 - Keep source URLs and review notes admin-facing.
 - Do not store transcript matches as durable records unless there is a specific reviewed feature need; if added later, store only term slugs and source workflow metadata, not raw transcript text.
@@ -106,6 +143,7 @@ Future shared infrastructure should expose a small API such as:
 
 - `matchConsumerCareKnowledge(text, options)`
 - `buildConsumerCareKnowledgeContext(text, options)`
+- `suggestConsumerCareKnowledgeClarification(text, options)`
 - `mapConsumerTermToHealthTopic(termSlug)`
 - `explainConsumerCareMatch(termSlug)` for Admin review
 
