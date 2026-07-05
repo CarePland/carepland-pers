@@ -3353,6 +3353,7 @@ function SetupPanel({
   const [receiverActionPending, setReceiverActionPending] = useState<string | null>(null);
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [peopleActionPending, setPeopleActionPending] = useState<"household" | null>(null);
+  const [receiverSetupModalOpen, setReceiverSetupModalOpen] = useState(false);
   const setupPerson = state.connectContext?.people.find(
     (person) => person.id === activeMainConnectUserPersonId
   );
@@ -3522,6 +3523,32 @@ function SetupPanel({
       .join(", ") || "No Connect participants assigned";
   const receiverLabel =
     selectedDevice?.name || selectedDevice?.receiverId || "No receiver selected";
+  const receiverSetupEmbedUrl = useMemo(() => {
+    const params = new URLSearchParams({
+      device: "gxv3370",
+      embedded: "1",
+      hardwareProfile: "studio_gxv3370_1024x600",
+      uiLayout: "desk_phone_1024x600",
+    });
+    if (activeMainConnectUserPersonId) {
+      params.set("mainConnectUserPersonId", activeMainConnectUserPersonId);
+    }
+    return `/connect/receiver/setup?${params.toString()}`;
+  }, [activeMainConnectUserPersonId]);
+
+  function openReceiverSetupModal() {
+    if (!activeMainConnectUserPersonId) {
+      setSetupStatus("Choose a Main Connect User before adding a Receiver.");
+      return;
+    }
+    setReceiverSetupModalOpen(true);
+    setSetupStatus("Add Receiver opened. Enter the code shown on the device.");
+  }
+
+  function closeReceiverSetupModal() {
+    setReceiverSetupModalOpen(false);
+    void onRefresh();
+  }
 
   async function createHousehold() {
     const displayName = newHouseholdName.trim();
@@ -4022,7 +4049,7 @@ function SetupPanel({
               ))}
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto]">
+            <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto_auto]">
               <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
                 Device name
                 <input
@@ -4040,6 +4067,13 @@ function SetupPanel({
                 />
               </label>
               <button
+                className="self-end min-h-12 rounded-lg border border-[#1c5686] bg-[#2f6f9f] px-5 text-base font-black text-white shadow-sm hover:bg-[#285f89]"
+                onClick={openReceiverSetupModal}
+                type="button"
+              >
+                Add Receiver
+              </button>
+              <button
                 className="self-end min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc] disabled:opacity-55"
                 disabled={!selectedDevice || setupActionPending !== null}
                 onClick={() => void createSetupLink("pair")}
@@ -4055,6 +4089,37 @@ function SetupPanel({
                 Refresh devices
               </button>
             </div>
+
+            {receiverSetupModalOpen ? (
+              <div
+                aria-modal="true"
+                className="fixed inset-0 z-[80] grid place-items-center bg-[#0f172a]/45 p-3"
+                role="dialog"
+              >
+                <section className="flex h-[min(860px,calc(100vh-2rem))] w-[min(980px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-[#cbd9e7] bg-white shadow-2xl">
+                  <div className="flex items-start justify-between gap-3 border-b border-[#d6e3f2] bg-[#f8fbff] px-5 py-4">
+                    <div>
+                      <h3 className="text-xl font-black text-[#172f49]">Add Receiver</h3>
+                      <p className="mt-1 text-sm font-semibold text-[#5f6e84]">
+                        Open the Receiver app, enter the code it shows, then pair it here.
+                      </p>
+                    </div>
+                    <button
+                      className="min-h-10 rounded-lg border border-[#cbd9e7] bg-white px-5 text-sm font-black text-[#0f172a] hover:bg-[#edf5fc]"
+                      onClick={closeReceiverSetupModal}
+                      type="button"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <iframe
+                    className="min-h-0 flex-1 bg-[#eef0eb]"
+                    src={receiverSetupEmbedUrl}
+                    title="Add CarePland Receiver"
+                  />
+                </section>
+              </div>
+            ) : null}
 
             {selectedDevice ? (
               <div className="mt-4 rounded-xl border border-[#b9d5ee] bg-[#f8fbff] p-4">

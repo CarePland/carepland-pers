@@ -11,9 +11,11 @@ type ReceiverSetupClientProps = {
   apkDownloadUrl: string;
   apkSha256Checksum: string;
   apkVersionName: string;
+  embedded: boolean;
   initialCode: string;
   initialDevice: string;
   initialHardwareProfile: string;
+  initialMainConnectUserPersonId: string;
   initialReceiverUrl: string;
   initialUiLayout: string;
   setupBaseUrl: string;
@@ -44,9 +46,11 @@ export function ReceiverSetupClient({
   apkDownloadUrl,
   apkSha256Checksum,
   apkVersionName,
+  embedded,
   initialCode,
   initialDevice,
   initialHardwareProfile,
+  initialMainConnectUserPersonId,
   initialReceiverUrl,
   initialUiLayout,
   setupBaseUrl,
@@ -386,6 +390,7 @@ export function ReceiverSetupClient({
         body: JSON.stringify({
           deviceProfile: device,
           hardwareProfile,
+          mainConnectUserPersonId: initialMainConnectUserPersonId,
           pairingCode: setupCode.trim(),
           receiverUrl: effectiveReceiverUrl,
           uiLayout,
@@ -421,7 +426,7 @@ export function ReceiverSetupClient({
   }
 
   return (
-    <main className={styles.page}>
+    <main className={`${styles.page} ${embedded ? styles.embeddedPage : ""}`}>
       <section className={styles.panel} aria-labelledby="receiver-setup-title">
         <div className={styles.header}>
           <div>

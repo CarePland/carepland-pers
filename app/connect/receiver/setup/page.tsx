@@ -33,8 +33,10 @@ type ReceiverSetupPageProps = {
   searchParams: Promise<{
     code?: string;
     device?: string;
+    embedded?: string;
     hardwareProfile?: string;
     layout?: string;
+    mainConnectUserPersonId?: string;
     receiverUrl?: string;
     uiLayout?: string;
   }>;
@@ -51,9 +53,11 @@ export default async function ReceiverSetupPage({
       apkDownloadUrl={apkDownloadUrl}
       apkSha256Checksum={receiverApkChecksum(apkDownloadUrl)}
       apkVersionName={process.env.CONNECT_RECEIVER_LATEST_VERSION_NAME || ""}
+      embedded={params.embedded === "1" || params.embedded === "true"}
       initialCode={params.code || ""}
       initialDevice={params.device || "gxv3370"}
       initialHardwareProfile={params.hardwareProfile || "studio_gxv3370_1024x600"}
+      initialMainConnectUserPersonId={params.mainConnectUserPersonId || ""}
       initialReceiverUrl={params.receiverUrl || ""}
       initialUiLayout={params.uiLayout || params.layout || "desk_phone_1024x600"}
       setupBaseUrl={process.env.CONNECT_RECEIVER_SETUP_BASE_URL || ""}
