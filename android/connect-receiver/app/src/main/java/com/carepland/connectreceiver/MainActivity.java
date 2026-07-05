@@ -58,7 +58,7 @@ public class MainActivity extends Activity {
     private static final int RECEIVER_AUTO_RETRY_SECONDS = 5;
     private static final int DEDICATED_REOPEN_DELAY_MS = 1500;
     private static final int PAIRING_POLL_INTERVAL_MS = 3000;
-    private static final String SHELL_VERSION = "0.1.9";
+    private static final String SHELL_VERSION = "0.1.10";
 
     private WebView webView;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -1367,7 +1367,21 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 Math.round(72 * getResources().getDisplayMetrics().density)
         );
+        checkButtonParams.setMargins(0, 0, 0, 18);
         panel.addView(checkButton, checkButtonParams);
+
+        Button exitButton = new Button(this);
+        exitButton.setText("Exit");
+        exitButton.setTextSize(20);
+        exitButton.setTextColor(0xFF102019);
+        exitButton.setBackgroundColor(0xFFFFFFFF);
+        exitButton.setAllCaps(false);
+        exitButton.setOnClickListener(view -> finish());
+        LinearLayout.LayoutParams exitButtonParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                Math.round(62 * getResources().getDisplayMetrics().density)
+        );
+        panel.addView(exitButton, exitButtonParams);
 
         scrollView.addView(
                 panel,
