@@ -25,9 +25,7 @@ export default async function ReceiverSetupPage({
   searchParams,
 }: ReceiverSetupPageProps) {
   const params = await searchParams;
-  const apkDownloadUrl =
-    process.env.CONNECT_RECEIVER_APK_URL ||
-    "/api/connect/receiver-shell/apk/debug";
+  const apkDownloadUrl = receiverApkDownloadUrl();
 
   return (
     <ReceiverSetupClient
@@ -42,6 +40,21 @@ export default async function ReceiverSetupPage({
       setupBaseUrl={process.env.CONNECT_RECEIVER_SETUP_BASE_URL || ""}
     />
   );
+}
+
+function receiverApkDownloadUrl() {
+  if (process.env.CONNECT_RECEIVER_APK_URL) {
+    return process.env.CONNECT_RECEIVER_APK_URL;
+  }
+
+  if (
+    process.env.CONNECT_RECEIVER_DEBUG_APK_ENABLED === "1" ||
+    process.env.NODE_ENV !== "production"
+  ) {
+    return "/api/connect/receiver-shell/apk/debug";
+  }
+
+  return "";
 }
 
 function receiverApkChecksum(apkDownloadUrl: string) {
