@@ -51,6 +51,10 @@ import {
   type ConnectReceiverPerson,
 } from "../../../lib/connect/provisioning";
 import {
+  browserReceiverPairingCodeReady,
+  formatBrowserReceiverPairingCode,
+} from "../../../lib/connect/receiverShell/browserPairing";
+import {
   allCarePlandFocusValue,
   readCarePlandFocusId,
   writeCarePlandFocusId,
@@ -3354,6 +3358,8 @@ function SetupPanel({
   const [newHouseholdName, setNewHouseholdName] = useState("");
   const [peopleActionPending, setPeopleActionPending] = useState<"household" | null>(null);
   const [receiverSetupModalOpen, setReceiverSetupModalOpen] = useState(false);
+  const [receiverPairingCode, setReceiverPairingCode] = useState("");
+  const [receiverPairingPending, setReceiverPairingPending] = useState(false);
   const setupPerson = state.connectContext?.people.find(
     (person) => person.id === activeMainConnectUserPersonId
   );
@@ -3523,18 +3529,7 @@ function SetupPanel({
       .join(", ") || "No Connect participants assigned";
   const receiverLabel =
     selectedDevice?.name || selectedDevice?.receiverId || "No receiver selected";
-  const receiverSetupEmbedUrl = useMemo(() => {
-    const params = new URLSearchParams({
-      device: "gxv3370",
-      embedded: "1",
-      hardwareProfile: "studio_gxv3370_1024x600",
-      uiLayout: "desk_phone_1024x600",
-    });
-    if (activeMainConnectUserPersonId) {
-      params.set("mainConnectUserPersonId", activeMainConnectUserPersonId);
-    }
-    return `/connect/receiver/setup?${params.toString()}`;
-  }, [activeMainConnectUserPersonId]);
+  const receiverPairingCodeReady = browserReceiverPairingCodeReady(receiverPairingCode);
 
   function openReceiverSetupModal() {
     if (!activeMainConnectUserPersonId) {
@@ -3542,12 +3537,68 @@ function SetupPanel({
       return;
     }
     setReceiverSetupModalOpen(true);
-    setSetupStatus("Add Receiver opened. Enter the code shown on the device.");
+    setSetupStatus("Pair Receiver opened. Enter the code shown on the Receiver.");
   }
 
   function closeReceiverSetupModal() {
     setReceiverSetupModalOpen(false);
+    setReceiverPairingCode("");
     void onRefresh();
+  }
+
+  async function pairReceiverFromBrowser() {
+    if (!activeMainConnectUserPersonId) {
+      setSetupStatus("Choose a Main Connect User before pairing this Receiver.");
+      return;
+    }
+    if (!receiverPairingCodeReady) {
+      setSetupStatus("Enter the 6-digit code shown on the Receiver.");
+      return;
+    }
+
+    setReceiverPairingPending(true);
+    setSetupStatus("Pairing Receiver...");
+    try {
+      const response = await fetch("/api/connect/receiver-shell/pairing-sessions/pair", {
+        body: JSON.stringify({
+          deviceProfile: "web_receiver",
+          hardwareProfile: "web",
+          mainConnectUserPersonId: activeMainConnectUserPersonId,
+          pairingCode: receiverPairingCode,
+          receiverUrl:
+            typeof window === "undefined"
+              ? "/connect/receiver"
+              : new URL("/connect/receiver", window.location.origin).toString(),
+          uiLayout: "default_receiver",
+        }),
+        cache: "no-store",
+        headers: {
+          ...(await connectAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+        receiverName?: string;
+      };
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || "Unable to pair Receiver.");
+      }
+      setSetupStatus(
+        payload.receiverName
+          ? `Receiver ready for ${payload.receiverName}.`
+          : "Receiver ready."
+      );
+      setReceiverSetupModalOpen(false);
+      setReceiverPairingCode("");
+      await onRefresh();
+    } catch (error) {
+      setSetupStatus(error instanceof Error ? error.message : "Unable to pair Receiver.");
+    } finally {
+      setReceiverPairingPending(false);
+    }
   }
 
   async function createHousehold() {
@@ -4071,7 +4122,7 @@ function SetupPanel({
                 onClick={openReceiverSetupModal}
                 type="button"
               >
-                Add Receiver
+                Pair Receiver
               </button>
               <button
                 className="self-end min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc] disabled:opacity-55"
@@ -4099,9 +4150,9 @@ function SetupPanel({
                 <section className="flex h-[min(860px,calc(100vh-2rem))] w-[min(980px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-[#cbd9e7] bg-white shadow-2xl">
                   <div className="flex items-start justify-between gap-3 border-b border-[#d6e3f2] bg-[#f8fbff] px-5 py-4">
                     <div>
-                      <h3 className="text-xl font-black text-[#172f49]">Add Receiver</h3>
+                      <h3 className="text-xl font-black text-[#172f49]">Pair Receiver</h3>
                       <p className="mt-1 text-sm font-semibold text-[#5f6e84]">
-                        Open the Receiver app, enter the code it shows, then pair it here.
+                        Open the Receiver in a browser, then enter the 6-digit code shown there.
                       </p>
                     </div>
                     <button
@@ -4112,11 +4163,46 @@ function SetupPanel({
                       Close
                     </button>
                   </div>
-                  <iframe
-                    className="min-h-0 flex-1 bg-[#eef0eb]"
-                    src={receiverSetupEmbedUrl}
-                    title="Add CarePland Receiver"
-                  />
+                  <div className="grid flex-1 content-start gap-4 overflow-auto p-5">
+                    <div className="rounded-xl border border-[#d6e3f2] bg-[#f8fbff] p-4">
+                      <p className="text-sm font-black uppercase text-[#5f6e84]">
+                        Receiver Active Person
+                      </p>
+                      <p className="mt-1 text-2xl font-black text-[#172f49]">
+                        {setupPerson?.displayName || "No Main Connect User selected"}
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-[#5f6e84]">
+                        This Receiver will pair to the selected Connect person.
+                      </p>
+                    </div>
+                    <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
+                      6-digit Receiver code
+                      <input
+                        autoComplete="one-time-code"
+                        className="min-h-20 rounded-xl border border-[#172f49] bg-white px-4 text-center text-4xl font-black tracking-normal text-[#0f172a]"
+                        inputMode="numeric"
+                        onChange={(event) =>
+                          setReceiverPairingCode(
+                            formatBrowserReceiverPairingCode(event.target.value)
+                          )
+                        }
+                        placeholder="123 456"
+                        value={receiverPairingCode}
+                      />
+                    </label>
+                    <button
+                      className="min-h-14 rounded-lg border border-[#1c5686] bg-[#2f6f9f] px-5 text-lg font-black text-white shadow-sm hover:bg-[#285f89] disabled:opacity-55"
+                      disabled={!receiverPairingCodeReady || receiverPairingPending}
+                      onClick={() => void pairReceiverFromBrowser()}
+                      type="button"
+                    >
+                      {receiverPairingPending ? "Pairing Receiver" : "Pair Receiver"}
+                    </button>
+                    <p className="rounded-lg border border-[#d6e3f2] bg-white p-3 text-sm font-semibold text-[#5f6e84]">
+                      To get a code, open <strong>CarePland Connect Receiver</strong> in a browser
+                      on the device you want to use as the Receiver.
+                    </p>
+                  </div>
                 </section>
               </div>
             ) : null}

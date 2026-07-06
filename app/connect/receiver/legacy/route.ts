@@ -3,8 +3,8 @@ import type { NextRequest } from "next/server";
 import {
   createReceiverRuntimeContract,
   type ReceiverRuntimeContract,
-  type ReceiverRuntimeInput,
 } from "../../../lib/connect/receiver/receiverRuntimeContract";
+import { classicReceiverRuntimeInput } from "../../../lib/connect/receiver/classicWebviewReceiverRoute";
 
 export const dynamic = "force-dynamic";
 
@@ -35,49 +35,6 @@ export function GET(request: NextRequest) {
       },
     }
   );
-}
-
-export function classicReceiverRuntimeInput(
-  searchParams: URLSearchParams
-): ReceiverRuntimeInput {
-  return {
-    bindingStatus: searchParams.get("receiverBindingStatus") || undefined,
-    brand: searchParams.get("nativeBrand") || undefined,
-    detectedHardwareProfile: searchParams.get("detectedHardwareProfile") || undefined,
-    device: searchParams.get("device") || undefined,
-    deviceProfile: searchParams.get("deviceProfile") || searchParams.get("device") || undefined,
-    displayDensity: numberParam(searchParams, "displayDensity"),
-    displayDensityDpi: numberParam(searchParams, "displayDensityDpi"),
-    displayHeightDp: numberParam(searchParams, "displayHeightDp"),
-    displayHeightPx: numberParam(searchParams, "displayHeightPx"),
-    displayWidthDp: numberParam(searchParams, "displayWidthDp"),
-    displayWidthPx: numberParam(searchParams, "displayWidthPx"),
-    hardware: searchParams.get("nativeHardware") || undefined,
-    hardwareProfile: searchParams.get("hardwareProfile") || undefined,
-    mainConnectUserPersonId: searchParams.get("mainConnectUserPersonId") || undefined,
-    manufacturer: searchParams.get("nativeManufacturer") || undefined,
-    model: searchParams.get("nativeModel") || undefined,
-    nativeOrientation: searchParams.get("nativeOrientation") || undefined,
-    nativeSdk: numberParam(searchParams, "nativeSdk"),
-    product: searchParams.get("nativeProduct") || undefined,
-    provisioningCompletedAtMs: numberParam(searchParams, "provisioningCompletedAtMs"),
-    receiverDeviceId: searchParams.get("receiverDeviceId") || undefined,
-    receiverInstallId: searchParams.get("receiverInstallId") || undefined,
-    receiverMode: searchParams.get("receiverMode") || undefined,
-    receiverRuntime: searchParams.get("receiver_runtime") || "classic_webview",
-    receiverUrl: searchParams.get("receiverUrl") || undefined,
-    shellVersion: searchParams.get("shellVersion") || undefined,
-    uiLayout: searchParams.get("uiLayout") || searchParams.get("layout") || undefined,
-    versionCode: numberParam(searchParams, "nativeVersionCode"),
-    versionName: searchParams.get("nativeVersionName") || undefined,
-  };
-}
-
-function numberParam(searchParams: URLSearchParams, key: string) {
-  const value = searchParams.get(key);
-  if (!value) return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function classicWebViewReceiverHtml({
@@ -135,6 +92,75 @@ function classicWebViewReceiverHtml({
     }
     .screenActive {
       display: block;
+    }
+    .setupPanel {
+      box-sizing: border-box;
+      height: 100%;
+      padding: 38px 56px;
+      text-align: center;
+    }
+    .setupCard {
+      background: #fbfaf5;
+      border: 5px solid #17231d;
+      border-radius: 8px;
+      box-sizing: border-box;
+      height: 100%;
+      padding: 34px 42px;
+    }
+    .setupBrand {
+      color: #5d6961;
+      font-size: 24px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .setupTitle {
+      font-size: 58px;
+      font-weight: 900;
+      line-height: 1;
+      margin-top: 10px;
+    }
+    .setupSub {
+      color: #5d6961;
+      font-size: 28px;
+      font-weight: 900;
+      margin-top: 12px;
+    }
+    .pairingCode {
+      background: white;
+      border: 5px solid #17231d;
+      border-radius: 8px;
+      color: #17231d;
+      font-size: 86px;
+      font-weight: 900;
+      line-height: 1;
+      margin: 28px auto 18px;
+      max-width: 600px;
+      padding: 22px 24px;
+    }
+    .setupHelp {
+      color: #17231d;
+      font-size: 25px;
+      font-weight: 900;
+      line-height: 1.22;
+      margin: 14px auto 0;
+      max-width: 720px;
+    }
+    .setupStatus {
+      color: #5d6961;
+      font-size: 22px;
+      font-weight: 900;
+      margin-top: 18px;
+    }
+    .setupButton {
+      background: #26661a;
+      border: 4px solid #17440f;
+      border-radius: 8px;
+      color: white;
+      font-size: 30px;
+      font-weight: 900;
+      margin-top: 20px;
+      min-height: 64px;
+      padding: 10px 32px;
     }
     .homeTop {
       display: table;
@@ -466,7 +492,24 @@ function classicWebViewReceiverHtml({
   )}" data-scale-mode="${escapeHtml(runtimeContract.layout.scaleMode)}" data-hardware-profile="${escapeHtml(
     runtimeContract.hardware.hardwareProfile
   )}" data-screen-class="${escapeHtml(runtimeContract.hardware.screenClass)}">
-  <div class="screen screenActive" id="homeScreen">
+  <div class="screen screenActive" id="setupScreen">
+    <div class="setupPanel">
+      <div class="setupCard">
+        <div class="setupBrand">CarePland Connect</div>
+        <div class="setupTitle">Set Up Receiver</div>
+        <div class="setupSub">Pair this Receiver from Connect</div>
+        <div class="pairingCode" id="pairingCode">---</div>
+        <div class="setupHelp">
+          Open CarePland Connect in a browser, go to Receiver, choose Pair Receiver,
+          and enter this code.
+        </div>
+        <div class="setupStatus" id="setupStatus">Preparing Receiver setup...</div>
+        <button class="setupButton" id="newPairingCodeButton">New Code</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="homeScreen">
     <div class="homeTop">
       <div class="topCell">
         <div class="time" id="time">--:--</div>
@@ -571,9 +614,14 @@ function classicWebViewReceiverHtml({
       var receiverState = {
         receiverDeviceId: "",
         receiverInstallId: "",
+        pairingCode: "",
+        pairingDeviceId: "",
         personId: "",
         online: false
       };
+      var browserBindingStorageKey = "carepland-connect-receiver-binding";
+      var browserInstallStorageKey = "carepland-connect-classic-receiver-install-id";
+      var pairingPollTimer = null;
 
       function pad(value) {
         return value < 10 ? "0" + value : "" + value;
@@ -674,11 +722,93 @@ function classicWebViewReceiverHtml({
           return null;
         }
       }
+      function readStoredBinding() {
+        try {
+          var raw = window.localStorage ? window.localStorage.getItem(browserBindingStorageKey) : "";
+          if (!raw) return null;
+          var parsed = JSON.parse(raw);
+          return parsed && typeof parsed === "object" ? parsed : null;
+        } catch (error) {
+          return null;
+        }
+      }
+      function writeStoredBinding(payload) {
+        if (!payload || !payload.receiverDeviceId) return;
+        try {
+          if (window.localStorage) {
+            window.localStorage.setItem(browserBindingStorageKey, JSON.stringify({
+              bindingStatus: payload.bindingStatus || "bound",
+              deviceProfile: payload.deviceProfile || "",
+              hardwareProfile: payload.hardwareProfile || "",
+              mainConnectUserPersonId: payload.mainConnectUserPersonId || "",
+              receiverDeviceId: payload.receiverDeviceId || "",
+              receiverInstallId: payload.receiverInstallId || receiverState.receiverInstallId || "",
+              receiverUrl: payload.receiverUrl || "",
+              storageSource: payload.storageSource || "",
+              uiLayout: payload.uiLayout || ""
+            }));
+          }
+        } catch (error) {}
+      }
+      function readOrCreateInstallId(config) {
+        var stored = readStoredBinding();
+        var existing =
+          (config && config.receiverInstallId) ||
+          (stored && stored.receiverInstallId) ||
+          "";
+        if (existing) return existing;
+        try {
+          existing = window.localStorage ? window.localStorage.getItem(browserInstallStorageKey) : "";
+          if (existing) return existing;
+          existing = "classic-web-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000000);
+          if (window.localStorage) window.localStorage.setItem(browserInstallStorageKey, existing);
+          return existing;
+        } catch (error) {
+          return "classic-web-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000000);
+        }
+      }
+      function mergedReceiverConfig(config) {
+        var stored = readStoredBinding();
+        var next = {};
+        var key;
+        if (stored) {
+          for (key in stored) {
+            if (Object.prototype.hasOwnProperty.call(stored, key)) next[key] = stored[key];
+          }
+        }
+        if (config) {
+          for (key in config) {
+            if (Object.prototype.hasOwnProperty.call(config, key) && config[key] !== undefined && config[key] !== null && config[key] !== "") {
+              next[key] = config[key];
+            }
+          }
+        }
+        return next;
+      }
+      function formatPairingCode(value) {
+        var digits = text(value).replace(/\\D/g, "");
+        if (digits.length === 6) return digits.substr(0, 3) + " " + digits.substr(3, 3);
+        return text(value);
+      }
+      function receiverUrlForPairing() {
+        return window.location.protocol + "//" + window.location.host + "/connect/receiver/legacy?receiver_runtime=classic_webview";
+      }
+      function showSetupStatus(message) {
+        setText("setupStatus", message);
+        setText("connectionStatus", "Setup needed");
+        setText("focusStrip", "Receiver setup is needed.");
+      }
+      function saveReceiverBindingPayload(payload) {
+        if (!payload || !payload.receiverDeviceId) return;
+        writeStoredBinding(payload);
+        saveNativeBinding(payload);
+        receiverState.receiverDeviceId = payload.receiverDeviceId || receiverState.receiverDeviceId;
+        receiverState.receiverInstallId = payload.receiverInstallId || receiverState.receiverInstallId;
+        receiverState.personId = payload.mainConnectUserPersonId || receiverState.personId;
+      }
       function postNativeBinding(config, callback) {
         if (!config || !config.receiverDeviceId || !config.receiverInstallId) {
-          setText("connectionStatus", "Setup needed");
-          setText("focusStrip", "Receiver is connecting...");
-          if (callback) callback(null);
+          startClassicPairing(callback);
           return;
         }
         receiverState.receiverDeviceId = config.receiverDeviceId;
@@ -754,9 +884,7 @@ function classicWebViewReceiverHtml({
           receiverInstallId: config.receiverInstallId
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
-            saveNativeBinding(payload);
-            receiverState.receiverDeviceId = payload.receiverDeviceId || receiverState.receiverDeviceId;
-            receiverState.receiverInstallId = payload.receiverInstallId || receiverState.receiverInstallId;
+            saveReceiverBindingPayload(payload);
             if (callback) callback(true);
             return;
           }
@@ -764,14 +892,80 @@ function classicWebViewReceiverHtml({
         });
       }
       function connectNativeReceiver(callback) {
-        var config = readNativeConfig();
+        var config = mergedReceiverConfig(readNativeConfig());
         if (config && config.setupClaim) {
           redeemNativeClaim(config, function () {
-            postNativeBinding(readNativeConfig() || config, callback);
+            postNativeBinding(mergedReceiverConfig(readNativeConfig() || config), callback);
           });
           return;
         }
         postNativeBinding(config, callback);
+      }
+      function redeemClassicPairingClaim(claim, callback) {
+        showSetupStatus("Receiver detected. Finishing setup...");
+        jsonRequest("POST", "/api/connect/receiver-shell/claims/redeem", {
+          claim: claim,
+          receiverInstallId: receiverState.receiverInstallId
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            saveReceiverBindingPayload(payload);
+            showSetupStatus("Receiver ready.");
+            showScreen("homeScreen");
+            if (callback) callback(payload);
+            return;
+          }
+          showSetupStatus(payload.error || "Receiver setup could not be completed.");
+        });
+      }
+      function pollClassicPairing(callback) {
+        if (!receiverState.pairingCode) return;
+        var url = "/api/connect/receiver-shell/pairing-sessions?code=" + encodeURIComponent(receiverState.pairingCode);
+        if (receiverState.pairingDeviceId) {
+          url += "&receiverDeviceId=" + encodeURIComponent(receiverState.pairingDeviceId);
+        }
+        jsonRequest("GET", url, null, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            if (payload.status === "paired" && payload.claim) {
+              redeemClassicPairingClaim(payload.claim, callback);
+              return;
+            }
+            if (payload.status === "expired") {
+              showSetupStatus("This code expired. Tap New Code.");
+              return;
+            }
+            pairingPollTimer = window.setTimeout(function () {
+              pollClassicPairing(callback);
+            }, 2500);
+            return;
+          }
+          showSetupStatus(payload.error || "Receiver pairing could not be checked.");
+          pairingPollTimer = window.setTimeout(function () {
+            pollClassicPairing(callback);
+          }, 5000);
+        });
+      }
+      function startClassicPairing(callback) {
+        showScreen("setupScreen");
+        receiverState.receiverInstallId = readOrCreateInstallId(readNativeConfig());
+        if (pairingPollTimer) window.clearTimeout(pairingPollTimer);
+        showSetupStatus("Preparing Receiver setup...");
+        jsonRequest("POST", "/api/connect/receiver-shell/pairing-sessions", {
+          deviceProfile: "classic_webview",
+          hardwareProfile: document.body.getAttribute("data-hardware-profile") || "classic_webview",
+          receiverInstallId: receiverState.receiverInstallId,
+          receiverUrl: receiverUrlForPairing(),
+          uiLayout: document.body.getAttribute("data-ui-layout") || "desk_phone_1024x600"
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.pairingCode) {
+            receiverState.pairingCode = payload.pairingCode;
+            receiverState.pairingDeviceId = payload.receiverDeviceId || "";
+            setText("pairingCode", formatPairingCode(payload.pairingCode));
+            showSetupStatus("Enter this code in Connect to pair this Receiver.");
+            pollClassicPairing(callback);
+            return;
+          }
+          showSetupStatus(payload.error || "Receiver setup could not start.");
+        });
       }
       function formatAppointmentDate(value) {
         if (!value) return "";
@@ -926,13 +1120,22 @@ function classicWebViewReceiverHtml({
       }
       updateClock();
       bindButtons();
+      document.getElementById("newPairingCodeButton").onclick = function () {
+        startClassicPairing(function () {
+          loadAppointments();
+          loadTodayFocus();
+          loadMessages();
+        });
+      };
       window.setInterval(updateClock, 30000);
       connectNativeReceiver(function () {
+        showScreen("homeScreen");
         loadAppointments();
         loadTodayFocus();
         loadMessages();
       });
       window.setInterval(function () {
+        if (!receiverState.receiverDeviceId) return;
         connectNativeReceiver(function () {
           loadAppointments();
           loadTodayFocus();

@@ -18,6 +18,7 @@ export async function POST(request: Request) {
       bindingStatus: "bound",
       deviceProfile: claim.deviceProfile,
       hardwareProfile: claim.hardwareProfile,
+      mainConnectUserPersonId: claim.mainConnectUserPersonId,
       ok: true,
       receiverDeviceId: claim.receiverDeviceId,
       receiverInstallId: claim.receiverInstallId || stringValue(body.receiverInstallId),

@@ -6,6 +6,7 @@ import {
   createConnectUserContext,
   readConnectMainUserContext,
 } from "@/app/lib/connect/context/server/mainConnectUserContext";
+import { resolveBrowserReceiverPairingPerson } from "@/app/lib/connect/receiverShell/browserPairing";
 import {
   pairReceiverShellPairingCode,
   ReceiverShellClaimError,
@@ -30,23 +31,22 @@ export async function POST(request: Request) {
 
   const connectContext = await readConnectMainUserContext(userContext);
   const requestedPersonId = stringValue(body.mainConnectUserPersonId);
-  const mainConnectUserPersonId =
-    requestedPersonId || connectContext.mainConnectUserPersonId || "";
-  const mainConnectUserPerson = connectContext.people.find(
-    (person) => person.id === mainConnectUserPersonId
+  const personResolution = resolveBrowserReceiverPairingPerson(
+    connectContext,
+    requestedPersonId
   );
 
-  if (!mainConnectUserPersonId || !mainConnectUserPerson) {
+  if (!personResolution.ok) {
     return NextResponse.json(
       {
-        error: "Choose a Main Connect User before pairing this Receiver.",
+        error: personResolution.error,
         ok: false,
       },
-      { status: 400 }
+      { status: personResolution.status }
     );
   }
 
-  if (!(await connectUserCanAccessPerson(mainConnectUserPersonId, userContext))) {
+  if (!(await connectUserCanAccessPerson(personResolution.personId, userContext))) {
     return NextResponse.json(
       {
         error: "Choose a Main Connect User from your CarePland collection.",
@@ -58,11 +58,11 @@ export async function POST(request: Request) {
 
   try {
     const claim = await pairReceiverShellPairingCode({
-      careCircleId: mainConnectUserPerson.careCircleId,
+      careCircleId: personResolution.person.careCircleId,
       createdByUserId: userContext.userId,
       deviceProfile: stringValue(body.deviceProfile) || "android_receiver",
       hardwareProfile: stringValue(body.hardwareProfile) || "generic_landscape_android",
-      mainConnectUserPersonId,
+      mainConnectUserPersonId: personResolution.personId,
       pairingCode: stringValue(body.pairingCode),
       receiverUrl: stringValue(body.receiverUrl),
       uiLayout: stringValue(body.uiLayout) || "default_receiver",
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
       ok: true,
       pairingCode: claim.setupCode,
       receiverDeviceId: claim.receiverDeviceId,
-      receiverName: mainConnectUserPerson.displayName,
+      receiverName: personResolution.person.displayName,
       status: "paired",
       storageSource: claim.storageSource || "local_file",
     });

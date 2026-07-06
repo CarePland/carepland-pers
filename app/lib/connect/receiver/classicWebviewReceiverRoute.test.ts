@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { classicReceiverRuntimeInput } from "../../../connect/receiver/legacy/route";
+import { classicReceiverRuntimeInput } from "./classicWebviewReceiverRoute";
 import { createReceiverRuntimeContract } from "./receiverRuntimeContract";
 
 describe("Classic WebView receiver route runtime input", () => {

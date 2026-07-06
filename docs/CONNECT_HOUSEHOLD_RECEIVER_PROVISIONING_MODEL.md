@@ -251,16 +251,17 @@ Provisioning begins before an APK is installed, continues through claim approval
 
 ### Current Flow
 
-The current Receiver shell path uses two compatible setup paths. The preferred demo path is Receiver-generated pairing:
+The current Receiver path uses compatible setup paths. The normal browser path is Receiver-generated pairing from the web Receiver itself:
 
-1. Unpaired Receiver starts a short-lived pairing session through `/api/connect/receiver-shell/pairing-sessions`.
+1. Unpaired browser Receiver at `/connect/receiver` creates a browser-local receiver install id and starts a short-lived pairing session through `/api/connect/receiver-shell/pairing-sessions`.
 2. Receiver displays a six-digit code such as `123 456`.
-3. Signed-in caregiver/admin enters the code on `/connect/receiver/setup`.
-4. Setup page pairs the code through `/api/connect/receiver-shell/pairing-sessions/pair`, binding it to the current Receiver Active Person context.
-5. Receiver polls pairing status, receives the internal app claim once paired, and continues into the existing native claim/redeem flow.
-6. Receiver web page redeems the claim through `/api/connect/receiver-shell/claims/redeem`.
-7. Server marks the device as bound.
-8. Receiver heartbeats through `/api/connect/receiver-shell/devices/binding`.
+3. Signed-in caregiver/admin opens Connect -> Receiver -> Pair Receiver and enters the code.
+4. The in-app Pair Receiver flow calls `/api/connect/receiver-shell/pairing-sessions/pair`, binding the Receiver to the currently selected Main Connect User / Receiver Active Person.
+5. Receiver polls pairing status, receives the internal app claim once paired, redeems it, stores the bound receiver-device identity locally, and continues as the paired Receiver.
+
+The Android APK uses the same pairing-session API and claim/redeem internals, but the browser Receiver path does not depend on APK behavior. `/connect/receiver/setup` remains available for direct/public setup links and install-oriented flows; it should not be the required path when the caregiver is already in the signed-in Connect app.
+6. Server marks the device as bound.
+7. Receiver heartbeats through `/api/connect/receiver-shell/devices/binding`.
 
 The compatibility/dashboard-created setup path still exists:
 

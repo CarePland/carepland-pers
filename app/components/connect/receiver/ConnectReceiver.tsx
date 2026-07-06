@@ -58,6 +58,15 @@ import {
   connectPrototypeEndpoints,
   connectPrototypeReceiverId,
 } from "../../../lib/connect/prototypeClient";
+import { formatBrowserReceiverPairingCode } from "../../../lib/connect/receiverShell/browserPairing";
+import {
+  formatReceiverCacheTimestamp,
+  readReceiverAppointmentCache,
+  receiverConnectivityStatusLabel,
+  receiverOfflineActionMessage,
+  writeReceiverAppointmentCache,
+  type ReceiverAppointmentCacheEntry,
+} from "../../../lib/connect/receiver/offlineAppointmentCache";
 import styles from "./ConnectReceiver.module.css";
 
 type Contact = {
@@ -249,6 +258,12 @@ type ReceiverAppointment = {
   reason?: string;
 };
 
+type ReceiverAppointmentDisplayState = {
+  appointments: ReceiverAppointment[];
+  cachedAt?: string;
+  source: "cache" | "fallback" | "online";
+};
+
 type GuideTarget = "contact" | "primary" | "ask";
 
 type GuideRect = {
@@ -318,6 +333,7 @@ type StoredReceiverBinding = {
   nativeSdk?: number;
   nativeVersionCode?: number;
   nativeVersionName?: string;
+  mainConnectUserPersonId?: string;
   provisioningCompletedAt?: string;
   receiverDeviceId?: string;
   receiverInstallId?: string;
@@ -350,6 +366,7 @@ declare global {
 
 type ModalState =
   | { type: "contact"; contactId: string }
+  | { type: "offlineNotice" }
   | { type: "ask" }
   | { type: "screenCleaningConfirm" }
   | { type: "askRecordReview"; transcript: string }
@@ -357,9 +374,9 @@ type ModalState =
   | { type: "askRecovery"; question: string; page?: number }
   | { type: "appointmentsLoading" }
   | { type: "appointmentsEmpty" }
-  | { type: "appointmentsList"; appointments: ReceiverAppointment[]; page: number }
-  | { type: "appointmentDetail"; appointment: ReceiverAppointment; appointments: ReceiverAppointment[]; page: number }
-  | { type: "appointmentAddress"; appointment: ReceiverAppointment; appointments: ReceiverAppointment[]; page: number }
+  | { type: "appointmentsList"; appointments: ReceiverAppointment[]; cachedAt?: string; page: number }
+  | { type: "appointmentDetail"; appointment: ReceiverAppointment; appointments: ReceiverAppointment[]; cachedAt?: string; page: number }
+  | { type: "appointmentAddress"; appointment: ReceiverAppointment; appointments: ReceiverAppointment[]; cachedAt?: string; page: number }
   | { type: "todayFocusWeight"; item: ReceiverTodayFocusHomeItem }
   | { type: "sent"; recipientName: string }
   | { type: "reader"; message: Message; returnPage?: number; returnTo?: "allMessages" | "home" }
@@ -446,6 +463,7 @@ const receiverLastPressStorageKey = "carepland-connect-last-press";
 const receiverGuideEndpoint = "/api/connect/receiver-guide";
 const receiverGuideSessionStorageKey = "carepland-connect-receiver-guide-session";
 const receiverBindingStorageKey = "carepland-connect-receiver-binding";
+const receiverBrowserInstallStorageKey = "carepland-connect-web-receiver-install-id";
 const receiverRegistrationStorageKey = "carepland-connect-receiver-registration";
 const receiverSessionStorageKey = "carepland-connect-receiver-session";
 const receiverAutoHearStorageKey = "carepland-connect-auto-hear-messages";
@@ -765,9 +783,24 @@ function readInitialSelectedContactId() {
 }
 
 function readInitialSelectedReceiverUserId() {
-  if (readInitialReceiverRegistration()) return testReceiverUser.id;
+  if (readInitialReceiverRegistration()) {
+    return readStoredReceiverBinding().mainConnectUserPersonId || testReceiverUser.id;
+  }
   // Receiver identity comes from /api/connect/context after real registration.
   return "";
+}
+
+function readInitialReceiverUsers() {
+  if (!readInitialReceiverRegistration()) return receiverUsers;
+  const mainConnectUserPersonId = readStoredReceiverBinding().mainConnectUserPersonId;
+  if (!mainConnectUserPersonId) return [testReceiverUser];
+  return [
+    {
+      displayName: "Receiver Active Person",
+      id: mainConnectUserPersonId,
+      statusLabel: "Receiver ready",
+    },
+  ];
 }
 
 function readInitialReceiverRegistration() {
@@ -811,8 +844,21 @@ function readReceiverInstallId() {
     params.get("receiverInstallId") ||
     nativeConfig.receiverInstallId ||
     storedBinding.receiverInstallId ||
+    readOrCreateBrowserReceiverInstallId() ||
     ""
   ).trim();
+}
+
+function readOrCreateBrowserReceiverInstallId() {
+  if (typeof window === "undefined") return "";
+  const current = window.localStorage.getItem(receiverBrowserInstallStorageKey);
+  if (current) return current;
+  const next =
+    typeof window.crypto?.randomUUID === "function"
+      ? `web-${window.crypto.randomUUID()}`
+      : `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  window.localStorage.setItem(receiverBrowserInstallStorageKey, next);
+  return next;
 }
 
 function readReceiverDeviceId() {
@@ -952,6 +998,7 @@ function saveReceiverBinding(binding: StoredReceiverBinding) {
     nativeSdk: binding.nativeSdk,
     nativeVersionCode: binding.nativeVersionCode,
     nativeVersionName: binding.nativeVersionName?.trim() || "",
+    mainConnectUserPersonId: binding.mainConnectUserPersonId?.trim() || "",
     provisioningCompletedAt: binding.provisioningCompletedAt?.trim() || "",
     receiverDeviceId,
     receiverInstallId,
@@ -1158,6 +1205,12 @@ function contactCanCallNow(contact: Contact) {
 
 function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function formatPairingExpiryTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "soon";
+  return formatTime(date);
 }
 
 function formatDate(date: Date) {
@@ -1668,14 +1721,24 @@ export function ConnectReceiver() {
   const [receiverSessionRestored, setReceiverSessionRestored] = useState(false);
   const [started, setStarted] = useState(readInitialStarted);
   const [selectedContactId] = useState(readInitialSelectedContactId);
-  const [activeReceiverUsers, setActiveReceiverUsers] = useState<ReceiverUser[]>(() =>
-    readInitialReceiverRegistration() ? [testReceiverUser] : receiverUsers
-  );
+  const [activeReceiverUsers, setActiveReceiverUsers] =
+    useState<ReceiverUser[]>(readInitialReceiverUsers);
   const [selectedReceiverUserId, setSelectedReceiverUserId] = useState(readInitialSelectedReceiverUserId);
   const [receiverRegistered, setReceiverRegistered] = useState(readInitialReceiverRegistration);
   const [registrationCode, setRegistrationCode] = useState(testReceiverRegistrationCode);
   const [registrationError, setRegistrationError] = useState("");
+  const [browserPairingCode, setBrowserPairingCode] = useState("");
+  const [browserPairingExpiresAt, setBrowserPairingExpiresAt] = useState("");
+  const [browserPairingStatus, setBrowserPairingStatus] = useState("Preparing Receiver setup...");
   const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [receiverOnline, setReceiverOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine
+  );
+  const [appointmentDisplay, setAppointmentDisplay] =
+    useState<ReceiverAppointmentDisplayState>({
+      appointments: [fallbackNextReceiverAppointment()],
+      source: "fallback",
+    });
   const [todayFocusItems, setTodayFocusItems] = useState<ReceiverTodayFocusHomeItem[]>([]);
   const [todayFocusCompletingId, setTodayFocusCompletingId] = useState("");
   const [todayFocusCompletedIds, setTodayFocusCompletedIds] = useState<string[]>([]);
@@ -1750,6 +1813,7 @@ export function ConnectReceiver() {
   const contactCaptureIdRef = useRef("");
   const screenCleaningSessionRef = useRef<ScreenCleaningSession | null>(null);
   const gxvFocusHomeEnabled = deskPhoneMode && gxvHomeLayout === "focus_v1";
+  const onlineRequiredActionClass = receiverOnline ? "" : styles.offlineDisabledAction;
 
   useEffect(() => {
     window.CarePlandReceiver?.receiverReady?.();
@@ -1780,6 +1844,55 @@ export function ConnectReceiver() {
     };
   }, []);
 
+  useEffect(() => {
+    function syncBrowserConnectivity() {
+      setReceiverOnline(typeof navigator === "undefined" ? true : navigator.onLine);
+    }
+
+    syncBrowserConnectivity();
+    window.addEventListener("online", syncBrowserConnectivity);
+    window.addEventListener("offline", syncBrowserConnectivity);
+
+    return () => {
+      window.removeEventListener("online", syncBrowserConnectivity);
+      window.removeEventListener("offline", syncBrowserConnectivity);
+    };
+  }, []);
+
+  function markReceiverOnline() {
+    setReceiverOnline(true);
+  }
+
+  function markReceiverOffline() {
+    setReceiverOnline(false);
+  }
+
+  function explainOfflineAction() {
+    clearGuideBecauseReceiverActed();
+    setStatus(receiverOfflineActionMessage());
+    setModal({ type: "offlineNotice" });
+  }
+
+  function readCachedAppointmentDisplay(personId: string): ReceiverAppointmentDisplayState | null {
+    const cached = readReceiverAppointmentCache(window.localStorage, personId);
+    if (!cached || cached.appointments.length === 0) return null;
+
+    return {
+      appointments: cached.appointments.map((appointment, index) =>
+        normalizeAppointment(appointment, index)
+      ),
+      cachedAt: cached.cachedAt,
+      source: "cache",
+    };
+  }
+
+  function updateStoredAppointmentCache(
+    personId: string,
+    appointments: ReceiverAppointment[]
+  ): ReceiverAppointmentCacheEntry | null {
+    return writeReceiverAppointmentCache(window.localStorage, personId, appointments);
+  }
+
   const refreshMessages = useCallback(async () => {
     if (!selectedReceiverUserId) return;
 
@@ -1794,6 +1907,7 @@ export function ConnectReceiver() {
       };
 
       if (!response.ok || !Array.isArray(payload.messages)) return;
+      markReceiverOnline();
 
       const nextMessages = payload.messages
         .filter((message): message is Partial<Message> & { id: string } => Boolean(message.id))
@@ -1804,6 +1918,7 @@ export function ConnectReceiver() {
         setFocusedMessageIndex((index) => Math.min(index, nextMessages.length - 1));
       }
     } catch {
+      markReceiverOffline();
       // Keep the local seed messages if the Connect local server is unavailable.
     }
   }, [selectedReceiverUserId]);
@@ -1894,6 +2009,7 @@ export function ConnectReceiver() {
         }
         return;
       }
+      markReceiverOnline();
 
       setTodayFocusUndoWindowMs(
         normalizeTodayFocusUndoWindowMs(payload.receiverConfig?.undoWindowMs)
@@ -1926,6 +2042,7 @@ export function ConnectReceiver() {
       resetTodayFocusList([]);
       setTodayFocusStatus("No Today’s Focus items are ready for this person.");
     } catch {
+      markReceiverOffline();
       // Today's Focus should improve the home screen when available, never block it.
       setTodayFocusLoadState(todayFocusItems.length ? "ready" : "error");
       if (todayFocusItems.length === 0) {
@@ -1950,6 +2067,7 @@ export function ConnectReceiver() {
       };
 
       if (!response.ok || !Array.isArray(payload.calls)) return;
+      markReceiverOnline();
       const pendingReviews = payload.calls.filter((call) => {
         const status = String(call.summaryStatus || "");
         return (
@@ -2174,11 +2292,16 @@ export function ConnectReceiver() {
             : `Connected to ${callerName}.`
       );
     } catch {
+      markReceiverOffline();
       // Keep the receiver usable if the Connect local server is unavailable.
     }
   }, [selectedReceiverUserId]);
 
   function openPendingCallSummaryReview(call: Partial<ReceiverCall>) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     if (!call.callId) return;
     const summaryText = String(call.summaryText || call.generatedSummaryText || "");
     setModal({
@@ -2387,6 +2510,24 @@ export function ConnectReceiver() {
     };
   }, [pendingContactRecording]);
 
+  function applyBoundReceiverActivePerson(personId?: string) {
+    const normalizedPersonId = personId?.trim() || "";
+    if (!normalizedPersonId) return;
+    setActiveReceiverUsers((current) =>
+      current.some((user) => user.id === normalizedPersonId)
+        ? current
+        : [
+            {
+              displayName: "Receiver Active Person",
+              id: normalizedPersonId,
+              statusLabel: "Receiver ready",
+            },
+            ...current,
+          ]
+    );
+    setSelectedReceiverUserId(normalizedPersonId);
+  }
+
   useEffect(() => {
     const restoreTimer = window.setTimeout(() => {
       if (readInitialStarted()) {
@@ -2452,6 +2593,7 @@ export function ConnectReceiver() {
         saveReceiverBinding(payload);
         hasConfirmedBinding = true;
         setReceiverRegistered(true);
+        applyBoundReceiverActivePerson(payload.mainConnectUserPersonId);
         setRegistrationError("");
       } catch (error) {
         if (cancelled) return;
@@ -2503,6 +2645,7 @@ export function ConnectReceiver() {
           deviceProfile?: string;
           error?: string;
           hardwareProfile?: string;
+          mainConnectUserPersonId?: string;
           receiverDeviceId?: string;
           receiverInstallId?: string;
           receiverUrl?: string;
@@ -2518,6 +2661,7 @@ export function ConnectReceiver() {
           bindingStatus: payload.bindingStatus || "bound",
           deviceProfile: payload.deviceProfile,
           hardwareProfile: payload.hardwareProfile,
+          mainConnectUserPersonId: payload.mainConnectUserPersonId,
           receiverDeviceId: payload.receiverDeviceId,
           receiverInstallId: payload.receiverInstallId || readReceiverInstallId(),
           receiverUrl: payload.receiverUrl,
@@ -2526,6 +2670,7 @@ export function ConnectReceiver() {
         });
         window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
         setReceiverRegistered(true);
+        applyBoundReceiverActivePerson(payload.mainConnectUserPersonId);
         setRegistrationCode("");
         setRegistrationError("");
         setStatus(
@@ -2553,9 +2698,126 @@ export function ConnectReceiver() {
   }, [receiverRegistered]);
 
   useEffect(() => {
+    if (!receiverSessionRestored || !started || receiverRegistered || selectedReceiverUserId) {
+      return undefined;
+    }
+    if (readLocalTestReceiverProvisioning() || readReceiverShellClaim()) return undefined;
+
+    let cancelled = false;
+    let pollTimer: number | undefined;
+
+    async function redeemPairedClaim(claim: string) {
+      const response = await fetch("/api/connect/receiver-shell/claims/redeem", {
+        body: JSON.stringify({
+          claim,
+          receiverInstallId: readReceiverInstallId(),
+        }),
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as StoredReceiverBinding & {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Receiver setup could not be completed.");
+      }
+      saveReceiverBinding(payload);
+      setReceiverRegistered(true);
+      applyBoundReceiverActivePerson(payload.mainConnectUserPersonId);
+      setRegistrationError("");
+      setBrowserPairingStatus("Receiver ready.");
+    }
+
+    async function pollPairing(code: string, receiverDeviceId: string) {
+      try {
+        const params = new URLSearchParams({ code });
+        if (receiverDeviceId) params.set("receiverDeviceId", receiverDeviceId);
+        const response = await fetch(
+          `/api/connect/receiver-shell/pairing-sessions?${params.toString()}`,
+          { cache: "no-store" }
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          claim?: string;
+          error?: string;
+          status?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error || "Receiver pairing could not be checked.");
+        }
+        if (cancelled) return;
+        if (payload.status === "paired" && payload.claim) {
+          setBrowserPairingStatus("Receiver detected. Finishing setup...");
+          await redeemPairedClaim(payload.claim);
+          return;
+        }
+        if (payload.status === "expired") {
+          setBrowserPairingStatus("This code expired. Refresh the Receiver for a new code.");
+          return;
+        }
+        pollTimer = window.setTimeout(() => void pollPairing(code, receiverDeviceId), 2500);
+      } catch (error) {
+        if (cancelled) return;
+        setBrowserPairingStatus(
+          error instanceof Error ? error.message : "Receiver pairing could not be checked."
+        );
+        pollTimer = window.setTimeout(() => void pollPairing(code, receiverDeviceId), 5000);
+      }
+    }
+
+    async function startBrowserPairing() {
+      try {
+        setBrowserPairingStatus("Preparing Receiver setup...");
+        const profile = readReceiverProfileSelection();
+        const response = await fetch("/api/connect/receiver-shell/pairing-sessions", {
+          body: JSON.stringify({
+            deviceProfile: "web_receiver",
+            hardwareProfile: profile.hardwareProfile || "web",
+            receiverInstallId: readReceiverInstallId(),
+            receiverUrl: window.location.origin
+              ? new URL("/connect/receiver", window.location.origin).toString()
+              : "/connect/receiver",
+            uiLayout: profile.uiLayout || "default_receiver",
+          }),
+          cache: "no-store",
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          expiresAt?: string;
+          pairingCode?: string;
+          receiverDeviceId?: string;
+        };
+        if (!response.ok || !payload.pairingCode) {
+          throw new Error(payload.error || "Receiver setup could not start.");
+        }
+        if (cancelled) return;
+        setBrowserPairingCode(payload.pairingCode);
+        setBrowserPairingExpiresAt(payload.expiresAt || "");
+        setBrowserPairingStatus("Enter this code in Connect to pair this Receiver.");
+        void pollPairing(payload.pairingCode, payload.receiverDeviceId || "");
+      } catch (error) {
+        if (cancelled) return;
+        setBrowserPairingStatus(
+          error instanceof Error ? error.message : "Receiver setup could not start."
+        );
+      }
+    }
+
+    void startBrowserPairing();
+
+    return () => {
+      cancelled = true;
+      if (pollTimer) window.clearTimeout(pollTimer);
+    };
+  }, [receiverRegistered, receiverSessionRestored, selectedReceiverUserId, started]);
+
+  useEffect(() => {
     let ignore = false;
 
     async function refreshReceiverUsers() {
+      if (!receiverRegistered) return;
       try {
         const context = await fetchConnectMainUserContext();
         const users = context.people.slice(0, 4).map((person) => ({
@@ -2755,6 +3017,18 @@ export function ConnectReceiver() {
   const selectedReceiverUser =
     visibleReceiverUsers.find((user) => user.id === selectedReceiverUserId) ??
     noMainConnectUser;
+  const displayedAppointment =
+    appointmentDisplay.appointments[0] ?? fallbackNextReceiverAppointment();
+  const displayedAppointmentTimeLabel = appointmentDateTimeLabel(displayedAppointment);
+  const cachedAppointmentTimestamp =
+    appointmentDisplay.source === "cache" && appointmentDisplay.cachedAt
+      ? formatReceiverCacheTimestamp(appointmentDisplay.cachedAt)
+      : "";
+  const connectivityStatusLabel = receiverConnectivityStatusLabel({
+    cachedAppointmentCount:
+      appointmentDisplay.source === "cache" ? appointmentDisplay.appointments.length : 0,
+    online: receiverOnline,
+  });
   const focusedMessage = messages[focusedMessageIndex] ?? messages[0] ?? null;
   const hasMessagePaging = messages.length > 1;
   const visibleTodayFocusItems = todayFocusItems
@@ -2822,6 +3096,10 @@ export function ConnectReceiver() {
 
   function completeTodayFocusItem(item: ReceiverTodayFocusHomeItem) {
     clearGuideBecauseReceiverActed();
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     if (
       todayFocusCompletingId ||
       todayFocusCompletedIds.includes(item.id) ||
@@ -2841,6 +3119,10 @@ export function ConnectReceiver() {
     item: ReceiverTodayFocusHomeItem,
     completion: ReceiverTodayFocusCompletionInput = {}
   ) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     if (
       todayFocusCompletingId ||
       todayFocusCompletedIds.includes(item.id) ||
@@ -2919,6 +3201,10 @@ export function ConnectReceiver() {
   }
 
   async function undoTodayFocusCompletion(item: ReceiverTodayFocusHomeItem) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     const pendingCompletion = todayFocusPendingCompletions[item.id];
 
     if (!pendingCompletion || !selectedReceiverUserId) {
@@ -2989,6 +3275,11 @@ export function ConnectReceiver() {
     cadence?: TodayFocusCadencePreferenceCadence
   ) {
     const item = todayFocusPreferenceItem;
+
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
 
     if (!item || !selectedReceiverUserId) {
       return;
@@ -3077,6 +3368,10 @@ export function ConnectReceiver() {
   }
 
   function openContact(contact = selectedContact) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     clearGuideBecauseReceiverActed();
     setContactDraft("");
     setPendingContactRecording(null);
@@ -3084,6 +3379,10 @@ export function ConnectReceiver() {
   }
 
   async function sendMessage(contact: Contact, body: string, recording = pendingContactRecording) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     const trimmed = body.trim();
     if (!trimmed && !recording) {
       setStatus("Type or record your message first.");
@@ -3187,15 +3486,24 @@ export function ConnectReceiver() {
   }
 
   function openAsk() {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     clearGuideBecauseReceiverActed();
     setAskDraft("");
     setPendingAskAudio(null);
     setModal({ type: "ask" });
   }
 
-  async function loadUpcomingAppointments() {
+  async function loadUpcomingAppointments(): Promise<ReceiverAppointmentDisplayState> {
     if (!selectedReceiverUser.id) {
-      return [];
+      return { appointments: [], source: "online" };
+    }
+
+    if (!receiverOnline) {
+      const cached = readCachedAppointmentDisplay(selectedReceiverUser.id);
+      return cached || { appointments: [], source: "cache" };
     }
 
     try {
@@ -3211,16 +3519,54 @@ export function ConnectReceiver() {
       };
 
       if (!response.ok || !Array.isArray(payload.appointments) || !payload.appointments.length) {
-        return [];
+        markReceiverOnline();
+        setAppointmentDisplay({
+          appointments: [fallbackNextReceiverAppointment()],
+          source: "fallback",
+        });
+        return { appointments: [], source: "online" };
       }
 
-      return payload.appointments.map((appointment, index) =>
+      markReceiverOnline();
+      const appointments = payload.appointments.map((appointment, index) =>
         normalizeAppointment(appointment, index)
       );
+      const cached = updateStoredAppointmentCache(selectedReceiverUser.id, appointments);
+      const nextDisplay: ReceiverAppointmentDisplayState = {
+        appointments,
+        cachedAt: cached?.cachedAt,
+        source: "online",
+      };
+      setAppointmentDisplay(nextDisplay);
+      return nextDisplay;
     } catch {
-      return [];
+      markReceiverOffline();
+      const cached = readCachedAppointmentDisplay(selectedReceiverUser.id);
+      if (cached) {
+        setAppointmentDisplay(cached);
+        return cached;
+      }
+      return { appointments: [], source: "cache" };
     }
   }
+
+  useEffect(() => {
+    if (!selectedReceiverUser.id) return;
+
+    const cached = readCachedAppointmentDisplay(selectedReceiverUser.id);
+    if (cached && !receiverOnline) {
+      setAppointmentDisplay(cached);
+      return;
+    }
+
+    if (cached && appointmentDisplay.source !== "online") {
+      setAppointmentDisplay(cached);
+    }
+
+    if (receiverOnline) {
+      void loadUpcomingAppointments();
+    }
+  }, [receiverOnline, selectedReceiverUser.id]);
 
   function askAppointmentQuestion() {
     clearGuideBecauseReceiverActed();
@@ -3228,7 +3574,8 @@ export function ConnectReceiver() {
     setStatus("Looking for upcoming appointments.");
 
     window.setTimeout(() => {
-      void loadUpcomingAppointments().then((appointments) => {
+      void loadUpcomingAppointments().then((display) => {
+        const appointments = display.appointments;
         const visibleAppointments =
           appointments.length || !deskPhoneMode
             ? appointments
@@ -3240,7 +3587,12 @@ export function ConnectReceiver() {
           return;
         }
 
-        setModal({ type: "appointmentsList", appointments: visibleAppointments, page: 0 });
+        setModal({
+          type: "appointmentsList",
+          appointments: visibleAppointments,
+          cachedAt: display.source === "cache" ? display.cachedAt : undefined,
+          page: 0,
+        });
         setStatus(`${visibleAppointments.length} upcoming appointments loaded.`);
       });
     }, 350);
@@ -3252,9 +3604,9 @@ export function ConnectReceiver() {
     setStatus("Opening appointment.");
 
     window.setTimeout(() => {
-      void loadUpcomingAppointments().then((loadedAppointments) => {
-        const appointments = loadedAppointments.length
-          ? loadedAppointments
+      void loadUpcomingAppointments().then((display) => {
+        const appointments = display.appointments.length
+          ? display.appointments
           : [fallbackNextReceiverAppointment()];
         const appointment = appointments[0];
 
@@ -3262,6 +3614,7 @@ export function ConnectReceiver() {
           type: "appointmentDetail",
           appointment,
           appointments,
+          cachedAt: display.source === "cache" ? display.cachedAt : undefined,
           page: 0,
         });
         setStatus(`${appointment.title || "Appointment"} opened.`);
@@ -3271,6 +3624,11 @@ export function ConnectReceiver() {
 
   async function startReceiverRecording() {
     clearGuideBecauseReceiverActed();
+
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
 
     if (receiverRecording) {
       await stopReceiverRecording();
@@ -3405,6 +3763,10 @@ export function ConnectReceiver() {
   }
 
   async function toggleContactRecording(contact: Contact) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     if (contactRecording) {
       await stopContactRecording(contact);
       return;
@@ -3707,6 +4069,7 @@ export function ConnectReceiver() {
   }
 
   async function markMessageState(message: Message, state: { heard?: boolean; read?: boolean }) {
+    if (!receiverOnline) return;
     if (!message.id) return;
     const mainConnectUserPersonId =
       message.mainConnectUserPersonId || selectedReceiverUser.id;
@@ -3739,7 +4102,7 @@ export function ConnectReceiver() {
         method: "PATCH",
       });
     } catch {
-      // State updates are telemetry; HEAR and READ should keep working offline.
+      // State updates are telemetry; a transient online failure should not interrupt reading.
     }
   }
 
@@ -3766,6 +4129,7 @@ export function ConnectReceiver() {
     feedbackChoice = "",
     enhancementProfile = playingEnhancementProfileRef.current
   ) {
+    if (!receiverOnline) return;
     if (!selectedReceiverUser.id) return;
 
     try {
@@ -3877,12 +4241,20 @@ export function ConnectReceiver() {
   }
 
   function openMessage(message: Message) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     clearGuideBecauseReceiverActed();
     void markMessageState(message, { read: true });
     setModal({ type: "reader", message, returnTo: "home" });
   }
 
   function openMessageFromAllMessages(message: Message, page: number) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     clearGuideBecauseReceiverActed();
     void markMessageState(message, { read: true });
     setModal({
@@ -3901,6 +4273,10 @@ export function ConnectReceiver() {
   }
 
   function recordHearingFeedback(message: Message, choice: string) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     const feedbackProfile =
       choice === "original"
         ? null
@@ -3915,6 +4291,10 @@ export function ConnectReceiver() {
   }
 
   function callBackForMessage(message: Message) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     clearGuideBecauseReceiverActed();
     const senderName = message.from === "receiver_user" ? message.to : message.from;
     const contact = contacts.find((item) => item.displayName === senderName) ?? selectedContact;
@@ -3922,12 +4302,20 @@ export function ConnectReceiver() {
   }
 
   function showAllMessages() {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     clearGuideBecauseReceiverActed();
     setModal({ type: "allMessages", page: 0 });
     setStatus("Showing all messages.");
   }
 
   async function submitAsk() {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     const question = askDraft.trim();
     if (!question) {
       setStatus("Type what you want to ask first.");
@@ -3952,6 +4340,10 @@ export function ConnectReceiver() {
   }
 
   async function submitTalkInterpretation(question: string) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return false;
+    }
     if (!selectedReceiverUser.id) {
       setStatus("Choose a Main Connect User before using Talk.");
       return false;
@@ -4035,6 +4427,10 @@ export function ConnectReceiver() {
   }
 
   function escalateAskRecovery(question: string) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     const audioContext = pendingAskAudio
       ? `\n\nAudio artifact: ${pendingAskAudio.artifactId || "saved"}\nTranscript status: ${pendingAskAudio.transcriptStatus}`
       : "";
@@ -4125,6 +4521,7 @@ export function ConnectReceiver() {
   }
 
   async function reportCallState(callId: string | undefined, state: string) {
+    if (!receiverOnline) return;
     if (!callId) return;
     if (!selectedReceiverUser.id) return;
 
@@ -4151,6 +4548,7 @@ export function ConnectReceiver() {
   }
 
   async function saveCallSummaryDraft(callId: string | undefined, draftText: string) {
+    if (!receiverOnline) return;
     if (!callId || !selectedReceiverUser.id) return;
 
     try {
@@ -4197,6 +4595,10 @@ export function ConnectReceiver() {
     callId: string | undefined,
     approvedSummaryOverride?: string
   ) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     const approvalTextExplicitlyProvided = approvedSummaryOverride !== undefined;
     const approvedSummaryText =
       stripCareSummaryHeading(
@@ -4280,6 +4682,10 @@ export function ConnectReceiver() {
   }
 
   function callContact(contact: Contact) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     closeModal();
     if (!contactCanCallNow(contact)) {
       playCallFailedAudio();
@@ -4310,6 +4716,10 @@ export function ConnectReceiver() {
   }
 
   function answerIncomingCall(callerName: string, callId?: string) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     stopReceiverCue();
     if (
       modal?.type === "incomingCall" &&
@@ -4405,6 +4815,10 @@ export function ConnectReceiver() {
   }
 
   function declineIncomingCall(callerName: string, callId?: string) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     stopReceiverCue();
     if (callId) locallyEndedCallIdsRef.current.add(callId);
     setInterruptedReviewIncomingCall((current) =>
@@ -4423,6 +4837,10 @@ export function ConnectReceiver() {
   }
 
   function hangUpIncomingCall(callerName: string, callId?: string) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
     stopReceiverCue();
     logReceiverCallEvent(callId, "call_receiver_hangup_clicked", {
       source: "hangUpIncomingCall",
@@ -4580,27 +4998,53 @@ export function ConnectReceiver() {
   if (!selectedReceiverUser.id) {
     return (
       <main className={styles.registrationScreen}>
-        <form className={styles.registrationPanel} onSubmit={registerReceiverWithCode}>
+        <section className={styles.registrationPanel} aria-live="polite">
           <p>CarePland Connect</p>
-          <h1>Finish Setup</h1>
-          <span>Enter setup code</span>
-          <input
-            autoComplete="one-time-code"
-            inputMode="numeric"
-            maxLength={12}
-            value={registrationCode}
-            onChange={(event) => {
-              setRegistrationCode(event.target.value);
-              setRegistrationError("");
-            }}
-            onFocus={(event) => {
-              event.currentTarget.select();
-            }}
-            aria-label="Receiver setup code"
-          />
-          {registrationError ? <strong>{registrationError}</strong> : null}
-          <button type="submit">Finish Setup</button>
-        </form>
+          <h1>Set Up Receiver</h1>
+          <span>Pair this Receiver from Connect</span>
+          {browserPairingCode ? (
+            <strong className={styles.receiverPairingCode}>
+              {formatBrowserReceiverPairingCode(browserPairingCode)}
+            </strong>
+          ) : (
+            <strong className={styles.receiverPairingCode}>---</strong>
+          )}
+          <small>
+            Open CarePland Connect in a browser, go to Receiver, choose Pair Receiver, and enter
+            this code.
+          </small>
+          {browserPairingExpiresAt ? (
+            <small>Code expires {formatPairingExpiryTime(browserPairingExpiresAt)}.</small>
+          ) : null}
+          <strong>{browserPairingStatus}</strong>
+          <button type="button" onClick={() => window.location.reload()}>
+            New Code
+          </button>
+          <details className={styles.receiverAdvancedSetup}>
+            <summary>Advanced setup</summary>
+            <form onSubmit={registerReceiverWithCode}>
+              <label>
+                Setup code
+                <input
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  maxLength={12}
+                  value={registrationCode}
+                  onChange={(event) => {
+                    setRegistrationCode(event.target.value);
+                    setRegistrationError("");
+                  }}
+                  onFocus={(event) => {
+                    event.currentTarget.select();
+                  }}
+                  aria-label="Receiver setup code"
+                />
+              </label>
+              {registrationError ? <strong>{registrationError}</strong> : null}
+              <button type="submit">Finish Setup</button>
+            </form>
+          </details>
+        </section>
       </main>
     );
   }
@@ -4679,23 +5123,28 @@ export function ConnectReceiver() {
                   </div>
                 </div>
                 {deskPhoneMode ? (
-                  <button
-                    className={`${styles.appointmentPanel} ${styles.applianceAppointmentPanel}`}
-                    type="button"
-                    aria-label={`Open appointment details for ${nextAppointment.title}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openHeaderAppointment();
-                    }}
-                  >
-                    <span className={styles.focusHomeAppointmentMeta}>
-                      <span>{nextAppointment.dayLabel}</span>
-                      <span>{nextAppointment.timeLabel}</span>
-                    </span>
-                    <strong>{nextAppointment.title}</strong>
-                  </button>
+	                  <button
+	                    className={`${styles.appointmentPanel} ${styles.applianceAppointmentPanel}`}
+	                    type="button"
+	                    aria-label={`Open appointment details for ${displayedAppointment.title}`}
+	                    onClick={(event) => {
+	                      event.stopPropagation();
+	                      openHeaderAppointment();
+	                    }}
+	                  >
+	                    <span className={styles.focusHomeAppointmentMeta}>
+	                      <span>Next up</span>
+	                      <span>{displayedAppointmentTimeLabel}</span>
+	                    </span>
+	                    <strong>{displayedAppointment.title}</strong>
+	                    {cachedAppointmentTimestamp ? (
+	                      <span className={styles.cachedAppointmentInline}>
+	                        Last updated {cachedAppointmentTimestamp}
+	                      </span>
+	                    ) : null}
+	                  </button>
                 ) : null}
-                <div className={styles.greetingBlock}>
+	                <div className={styles.greetingBlock}>
                   <strong>
                     {deskPhoneMode ? (
                       <>
@@ -4705,20 +5154,28 @@ export function ConnectReceiver() {
                     ) : (
                       `${greetingFor(now)}, ${selectedReceiverUser.displayName}`
                     )}
-                  </strong>
-                  <span>{receiver.locationLabel}</span>
-                </div>
-                {!deskPhoneMode ? (
-                  <div className={styles.appointmentPanel}>
-                    <div>
-                      <span>{nextAppointment.label}</span>
-                      <strong>{nextAppointment.title}</strong>
-                    </div>
-                    <div>
-                      <span>{nextAppointment.dayLabel}</span>
-                      <strong>{nextAppointment.timeLabel}</strong>
-                    </div>
-                  </div>
+	                  </strong>
+	                  <span>{receiver.locationLabel}</span>
+	                  <span className={receiverOnline ? styles.onlineStatus : styles.offlineStatus}>
+	                    {connectivityStatusLabel}
+	                  </span>
+	                </div>
+	                {!deskPhoneMode ? (
+	                  <div className={styles.appointmentPanel}>
+	                    <div>
+	                      <span>{nextAppointment.label}</span>
+	                      <strong>{displayedAppointment.title}</strong>
+	                      {cachedAppointmentTimestamp ? (
+	                        <span className={styles.cachedAppointmentInline}>
+	                          Last updated {cachedAppointmentTimestamp}
+	                        </span>
+	                      ) : null}
+	                    </div>
+	                    <div>
+	                      <span>Next up</span>
+	                      <strong>{displayedAppointmentTimeLabel}</strong>
+	                    </div>
+	                  </div>
                 ) : null}
               </>
             )}
@@ -4772,7 +5229,9 @@ export function ConnectReceiver() {
                 </strong>
               </div>
               <button
+                className={onlineRequiredActionClass}
                 type="button"
+                aria-disabled={!receiverOnline}
                 onClick={(event) => {
                   event.stopPropagation();
                   openPendingCallSummaryReview(pendingCallSummaryReviews[0] ?? {});
@@ -4826,11 +5285,12 @@ export function ConnectReceiver() {
                     <span>{greetingFor(now)}</span>
                     <strong>{firstDisplayName(selectedReceiverUser.displayName)}</strong>
                   </section>
-                  <button
-                    className={`${styles.talkFooterAction} ${styles.focusHomeTalkAction}`}
-                    type="button"
-                    aria-label="Talk"
-                    disabled={receiverRecordingProcessing}
+	                  <button
+	                    className={`${styles.talkFooterAction} ${styles.focusHomeTalkAction} ${onlineRequiredActionClass}`}
+	                    type="button"
+	                    aria-label="Talk"
+	                    aria-disabled={!receiverOnline}
+	                    disabled={receiverRecordingProcessing}
                     onClick={(event) => {
                       event.stopPropagation();
                       void startReceiverRecording();
@@ -4843,10 +5303,13 @@ export function ConnectReceiver() {
                     <div className={styles.dateControlRow}>
                       <span>{formatDate(now)}</span>
                     </div>
-                    <strong>{formatTime(now)}</strong>
-                    <span>{receiver.locationLabel}</span>
-                  </section>
-                  <section className={styles.todayFocusPanel} aria-label="Today's Focus">
+	                    <strong>{formatTime(now)}</strong>
+	                    <span>{receiver.locationLabel}</span>
+	                    <span className={receiverOnline ? styles.onlineStatus : styles.offlineStatus}>
+	                      {connectivityStatusLabel}
+	                    </span>
+	                  </section>
+	                  <section className={`${styles.todayFocusPanel} ${!receiverOnline ? styles.offlineActionArea : ""}`} aria-label="Today's Focus">
                     {todayFocusDisplayMode === "items" ? (
                       <>
                         <h2>Today&apos;s Focus</h2>
@@ -4883,24 +5346,30 @@ export function ConnectReceiver() {
                       </div>
                     )}
                   </section>
-                  <button
-                    className={`${styles.appointmentPanel} ${styles.applianceAppointmentPanel} ${styles.focusHomeAppointmentPanel}`}
-                    type="button"
-                    aria-label={`Open appointment details for ${nextAppointment.title}`}
+	                  <button
+	                    className={`${styles.appointmentPanel} ${styles.applianceAppointmentPanel} ${styles.focusHomeAppointmentPanel}`}
+	                    type="button"
+	                    aria-label={`Open appointment details for ${displayedAppointment.title}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       openHeaderAppointment();
                     }}
-                  >
-                    <span className={styles.focusHomeAppointmentMeta}>
-                      {nextAppointment.dayLabel} {nextAppointment.timeLabel.replace(/\s+/g, "").toLowerCase()}
-                    </span>
-                    <strong>{nextAppointment.title}</strong>
-                  </button>
+	                  >
+	                    <span className={styles.focusHomeAppointmentMeta}>
+	                      {displayedAppointmentTimeLabel}
+	                    </span>
+	                    <strong>{displayedAppointment.title}</strong>
+	                    {cachedAppointmentTimestamp ? (
+	                      <span className={styles.cachedAppointmentInline}>
+	                        Last updated {cachedAppointmentTimestamp}
+	                      </span>
+	                    ) : null}
+	                  </button>
                   <div className={styles.focusHomeActionStack}>
                     <button
-                      className={`${styles.secondaryAction} ${styles.blue} ${styles.focusHomeMessagesAction}`}
-                      type="button"
+	                      className={`${styles.secondaryAction} ${styles.blue} ${styles.focusHomeMessagesAction} ${onlineRequiredActionClass}`}
+	                      type="button"
+	                      aria-disabled={!receiverOnline}
                       onClick={(event) => {
                         event.stopPropagation();
                         showAllMessages();
@@ -4919,14 +5388,15 @@ export function ConnectReceiver() {
                       Appointment
                     </button>
                     <button
-                      className={`${styles.primaryAction} ${styles.focusHomeAskAction} ${
-                        guideTarget === "ask"
-                          ? styles.guideTarget
-                          : guideTarget
-                            ? styles.guideDim
-                            : ""
-                      }`}
-                      type="button"
+	                      className={`${styles.primaryAction} ${styles.focusHomeAskAction} ${
+	                        guideTarget === "ask"
+	                          ? styles.guideTarget
+	                          : guideTarget
+	                            ? styles.guideDim
+	                            : ""
+	                      } ${onlineRequiredActionClass}`}
+	                      type="button"
+	                      aria-disabled={!receiverOnline}
                       onClick={(event) => {
                         event.stopPropagation();
                         openAsk();
@@ -4935,14 +5405,15 @@ export function ConnectReceiver() {
                       Ask a Question
                     </button>
                     <button
-                      className={`${styles.primaryAction} ${styles.focusHomeCallAction} ${
-                        guideTarget === "primary"
-                          ? styles.guideTarget
-                          : guideTarget
-                            ? styles.guideDim
-                            : ""
-                      }`}
-                      type="button"
+	                      className={`${styles.primaryAction} ${styles.focusHomeCallAction} ${
+	                        guideTarget === "primary"
+	                          ? styles.guideTarget
+	                          : guideTarget
+	                            ? styles.guideDim
+	                            : ""
+	                      } ${onlineRequiredActionClass}`}
+	                      type="button"
+	                      aria-disabled={!receiverOnline}
                       onClick={(event) => {
                         event.stopPropagation();
                         callContact(selectedContact);
@@ -4954,9 +5425,10 @@ export function ConnectReceiver() {
                   <div className={styles.focusHomeUtilityStack}>
                     {attentionItem ? (
                       <button
-                        className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction} ${styles.reviewFooterAction}`}
-                        type="button"
-                        aria-label={attentionItem.label}
+	                        className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction} ${styles.reviewFooterAction} ${onlineRequiredActionClass}`}
+	                        type="button"
+	                        aria-label={attentionItem.label}
+	                        aria-disabled={!receiverOnline}
                         onClick={(event) => {
                           event.stopPropagation();
                           openAttentionItem(attentionItem);
@@ -4989,15 +5461,16 @@ export function ConnectReceiver() {
                 </>
               ) : (
                 <>
-                <button
-                  className={`${styles.primaryAction} ${styles.receiverHomeAction} ${
-                    guideTarget === "ask"
-                      ? styles.guideTarget
-                      : guideTarget
-                        ? styles.guideDim
-                        : ""
-                  }`}
-                  type="button"
+	                <button
+	                  className={`${styles.primaryAction} ${styles.receiverHomeAction} ${
+	                    guideTarget === "ask"
+	                      ? styles.guideTarget
+	                      : guideTarget
+	                        ? styles.guideDim
+	                        : ""
+	                  } ${onlineRequiredActionClass}`}
+	                  type="button"
+	                  aria-disabled={!receiverOnline}
                   onClick={(event) => {
                     event.stopPropagation();
                     openAsk();
@@ -5005,15 +5478,16 @@ export function ConnectReceiver() {
                 >
                   Ask a Question
                 </button>
-                <button
-                  className={`${styles.primaryAction} ${styles.receiverHomeAction} ${
-                    guideTarget === "primary"
-                      ? styles.guideTarget
-                      : guideTarget
-                        ? styles.guideDim
-                        : ""
-                  }`}
-                  type="button"
+	                <button
+	                  className={`${styles.primaryAction} ${styles.receiverHomeAction} ${
+	                    guideTarget === "primary"
+	                      ? styles.guideTarget
+	                      : guideTarget
+	                        ? styles.guideDim
+	                        : ""
+	                  } ${onlineRequiredActionClass}`}
+	                  type="button"
+	                  aria-disabled={!receiverOnline}
                   onClick={(event) => {
                     event.stopPropagation();
                     callContact(selectedContact);
@@ -5037,9 +5511,10 @@ export function ConnectReceiver() {
                 >
                   Appointment
                 </button>
-                <button
-                  className={`${styles.secondaryAction} ${styles.blue} ${styles.wideAction} ${styles.messagesHomeAction}`}
-                  type="button"
+	                <button
+	                  className={`${styles.secondaryAction} ${styles.blue} ${styles.wideAction} ${styles.messagesHomeAction} ${onlineRequiredActionClass}`}
+	                  type="button"
+	                  aria-disabled={!receiverOnline}
                   onClick={(event) => {
                     event.stopPropagation();
                     showAllMessages();
@@ -5048,11 +5523,12 @@ export function ConnectReceiver() {
                   Messages
                 </button>
                 <div className={styles.cleaningFooterRow}>
-                  <button
-                    className={styles.talkFooterAction}
-                    type="button"
-                    aria-label="Talk"
-                    disabled={receiverRecordingProcessing}
+	                  <button
+	                    className={`${styles.talkFooterAction} ${onlineRequiredActionClass}`}
+	                    type="button"
+	                    aria-label="Talk"
+	                    aria-disabled={!receiverOnline}
+	                    disabled={receiverRecordingProcessing}
                     onClick={(event) => {
                       event.stopPropagation();
                       void startReceiverRecording();
@@ -5062,10 +5538,11 @@ export function ConnectReceiver() {
                     <span>Talk</span>
                   </button>
                   {attentionItem ? (
-                    <button
-                      className={`${styles.footerUtilityAction} ${styles.reviewFooterAction}`}
-                      type="button"
-                      aria-label={attentionItem.label}
+	                    <button
+	                      className={`${styles.footerUtilityAction} ${styles.reviewFooterAction} ${onlineRequiredActionClass}`}
+	                      type="button"
+	                      aria-label={attentionItem.label}
+	                      aria-disabled={!receiverOnline}
                       onClick={(event) => {
                         event.stopPropagation();
                         openAttentionItem(attentionItem);
@@ -5099,15 +5576,16 @@ export function ConnectReceiver() {
               )
             ) : (
               <>
-                <button
-                  className={`${styles.primaryAction} ${
-                    guideTarget === "primary"
-                      ? styles.guideTarget
-                      : guideTarget
-                        ? styles.guideDim
-                        : ""
-                  }`}
-                  type="button"
+	                <button
+	                  className={`${styles.primaryAction} ${
+	                    guideTarget === "primary"
+	                      ? styles.guideTarget
+	                      : guideTarget
+	                        ? styles.guideDim
+	                        : ""
+	                  } ${onlineRequiredActionClass}`}
+	                  type="button"
+	                  aria-disabled={!receiverOnline}
                   onClick={(event) => {
                     event.stopPropagation();
                     openContact();
@@ -5116,15 +5594,16 @@ export function ConnectReceiver() {
                   Contact Andrew
                 </button>
                 <div className={styles.receiverActionRow}>
-                  <button
-                    className={`${styles.secondaryAction} ${styles.green} ${
-                      guideTarget === "ask"
-                        ? styles.guideTarget
-                        : guideTarget
-                          ? styles.guideDim
-                          : ""
-                    }`}
-                    type="button"
+	                  <button
+	                    className={`${styles.secondaryAction} ${styles.green} ${
+	                      guideTarget === "ask"
+	                        ? styles.guideTarget
+	                        : guideTarget
+	                          ? styles.guideDim
+	                          : ""
+	                    } ${onlineRequiredActionClass}`}
+	                    type="button"
+	                    aria-disabled={!receiverOnline}
                     onClick={(event) => {
                       event.stopPropagation();
                       openAsk();
@@ -5132,12 +5611,13 @@ export function ConnectReceiver() {
                   >
                     Ask a question
                   </button>
-                  <button
-                    className={`${styles.iconAction} ${styles.recordAction} ${
-                      receiverRecording ? styles.recordingActive : ""
-                    } ${guideTarget ? styles.guideDim : ""}`}
-                    type="button"
-                    aria-label={receiverRecording ? "Stop recording" : "Record a request"}
+	                  <button
+	                    className={`${styles.iconAction} ${styles.recordAction} ${
+	                      receiverRecording ? styles.recordingActive : ""
+	                    } ${guideTarget ? styles.guideDim : ""} ${onlineRequiredActionClass}`}
+	                    type="button"
+	                    aria-label={receiverRecording ? "Stop recording" : "Record a request"}
+	                    aria-disabled={!receiverOnline}
                     disabled={receiverRecordingProcessing}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -5187,9 +5667,10 @@ export function ConnectReceiver() {
             <>
             <div className={styles.workspaceNav}>
               <strong>Messages</strong>
-              <button
-                className={`${styles.messageAction} ${styles.messageNavButton} ${styles.workspaceShowAllButton}`}
-                type="button"
+	              <button
+	                className={`${styles.messageAction} ${styles.messageNavButton} ${styles.workspaceShowAllButton} ${onlineRequiredActionClass}`}
+	                type="button"
+	                aria-disabled={!receiverOnline}
                 onClick={(event) => {
                   event.stopPropagation();
                   showAllMessages();
@@ -5235,8 +5716,9 @@ export function ConnectReceiver() {
                 <p>{messageText(focusedMessage)}</p>
                 <div className={styles.messageButtonRow}>
                   <button
-                    className={`${styles.messageAction} ${styles.blue}`}
-                    type="button"
+	                    className={`${styles.messageAction} ${styles.blue} ${onlineRequiredActionClass}`}
+	                    type="button"
+	                    aria-disabled={!receiverOnline}
                     onClick={(event) => {
                       event.stopPropagation();
                       openMessage(focusedMessage);
@@ -5245,8 +5727,9 @@ export function ConnectReceiver() {
                     OPEN MESSAGE
                   </button>
                   <button
-                    className={`${styles.messageAction} ${styles.callBackAction}`}
-                    type="button"
+	                    className={`${styles.messageAction} ${styles.callBackAction} ${onlineRequiredActionClass}`}
+	                    type="button"
+	                    aria-disabled={!receiverOnline}
                     onClick={(event) => {
                       event.stopPropagation();
                       callBackForMessage(focusedMessage);
@@ -5890,6 +6373,20 @@ function ReceiverModal({
       void onPlayMessage(modal.message, "default", true);
     }
   }, [autoHearPreference, modal, onPlayMessage]);
+
+  if (modal.type === "offlineNotice") {
+    return (
+      <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="offline-notice-title">
+        <section className={`${styles.modalPanel} ${styles.offlineNoticePanel}`}>
+          <h2 id="offline-notice-title">CarePland is offline</h2>
+          <p>{receiverOfflineActionMessage()}</p>
+          <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+            Go Home
+          </button>
+        </section>
+      </div>
+    );
+  }
 
   if (modal.type === "todayFocusWeight") {
     const measurementDigitLimit = measurementDigitLimitForFocusItem(modal.item);
@@ -6802,6 +7299,9 @@ function ReceiverModal({
       0
     );
     const shouldStretchAppointments = pageAppointments.length >= 4 && currentPageCost <= 5;
+    const cacheNotice = modal.cachedAt
+      ? `Last updated ${formatReceiverCacheTimestamp(modal.cachedAt)}`
+      : "";
 
     if (applianceMode) {
       return (
@@ -6813,6 +7313,7 @@ function ReceiverModal({
                 Go Home
               </button>
             </div>
+            {cacheNotice ? <p className={styles.cachedAppointmentNotice}>{cacheNotice}</p> : null}
             <div className={`${styles.appointmentList} ${styles.applianceAppointmentList}`}>
               {pageAppointments.map((appointment) => (
                 <button
@@ -6824,6 +7325,7 @@ function ReceiverModal({
                       type: "appointmentDetail",
                       appointment,
                       appointments: modal.appointments,
+                      cachedAt: modal.cachedAt,
                       page: currentPage,
                     })
                   }
@@ -6842,6 +7344,7 @@ function ReceiverModal({
                   onSetModal({
                     type: "appointmentsList",
                     appointments: modal.appointments,
+                    cachedAt: modal.cachedAt,
                     page: Math.max(0, currentPage - 1),
                   })
                 }
@@ -6859,6 +7362,7 @@ function ReceiverModal({
                   onSetModal({
                     type: "appointmentsList",
                     appointments: modal.appointments,
+                    cachedAt: modal.cachedAt,
                     page: Math.min(pageCount - 1, currentPage + 1),
                   })
                 }
@@ -6880,6 +7384,7 @@ function ReceiverModal({
               Go Home
             </button>
           </div>
+          {cacheNotice ? <p className={styles.cachedAppointmentNotice}>{cacheNotice}</p> : null}
           <div
             className={`${styles.appointmentList} ${
               shouldStretchAppointments ? styles.appointmentListStretch : ""
@@ -6895,6 +7400,7 @@ function ReceiverModal({
                     type: "appointmentDetail",
                     appointment,
                     appointments: modal.appointments,
+                    cachedAt: modal.cachedAt,
                     page: currentPage,
                   })
                 }
@@ -6913,6 +7419,7 @@ function ReceiverModal({
                   onSetModal({
                     type: "appointmentsList",
                     appointments: modal.appointments,
+                    cachedAt: modal.cachedAt,
                     page: Math.max(0, currentPage - 1),
                   })
                 }
@@ -6927,6 +7434,7 @@ function ReceiverModal({
                   onSetModal({
                     type: "appointmentsList",
                     appointments: modal.appointments,
+                    cachedAt: modal.cachedAt,
                     page: Math.min(pageCount - 1, currentPage + 1),
                   })
                 }
@@ -6942,6 +7450,9 @@ function ReceiverModal({
 
   if (modal.type === "appointmentDetail") {
     const hasAddress = Boolean(modal.appointment.locationAddress);
+    const cacheNotice = modal.cachedAt
+      ? `Last updated ${formatReceiverCacheTimestamp(modal.cachedAt)}`
+      : "";
 
     if (applianceMode) {
       return (
@@ -6955,6 +7466,7 @@ function ReceiverModal({
             </div>
             <section className={`${styles.appointmentDetail} ${styles.applianceAppointmentDetail}`}>
               <h3>{modal.appointment.title || "Appointment"}</h3>
+              {cacheNotice ? <p className={styles.cachedAppointmentNotice}>{cacheNotice}</p> : null}
               <p className={styles.appointmentTime}>{appointmentDateTimeLabel(modal.appointment)}</p>
               {appointmentSubtitle(modal.appointment) ? <p>{appointmentSubtitle(modal.appointment)}</p> : null}
               {modal.appointment.locationName ? <p>{modal.appointment.locationName}</p> : null}
@@ -6970,6 +7482,7 @@ function ReceiverModal({
                       type: "appointmentAddress",
                       appointment: modal.appointment,
                       appointments: modal.appointments,
+                      cachedAt: modal.cachedAt,
                       page: modal.page,
                     })
                   }
@@ -6984,6 +7497,7 @@ function ReceiverModal({
                   onSetModal({
                     type: "appointmentsList",
                     appointments: modal.appointments,
+                    cachedAt: modal.cachedAt,
                     page: modal.page,
                   })
                 }
@@ -7004,6 +7518,7 @@ function ReceiverModal({
           </div>
           <section className={styles.appointmentDetail}>
             <h3>{modal.appointment.title || "Appointment"}</h3>
+            {cacheNotice ? <p className={styles.cachedAppointmentNotice}>{cacheNotice}</p> : null}
             <p className={styles.appointmentTime}>{appointmentDateTimeLabel(modal.appointment)}</p>
             {appointmentSubtitle(modal.appointment) ? <p>{appointmentSubtitle(modal.appointment)}</p> : null}
             {modal.appointment.locationName ? <p>{modal.appointment.locationName}</p> : null}
@@ -7018,6 +7533,7 @@ function ReceiverModal({
                   type: "appointmentAddress",
                   appointment: modal.appointment,
                   appointments: modal.appointments,
+                  cachedAt: modal.cachedAt,
                   page: modal.page,
                 })
               }
@@ -7034,6 +7550,10 @@ function ReceiverModal({
   }
 
   if (modal.type === "appointmentAddress") {
+    const cacheNotice = modal.cachedAt
+      ? `Last updated ${formatReceiverCacheTimestamp(modal.cachedAt)}`
+      : "";
+
     return (
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="appointment-address-title">
         <section className={styles.modalPanel}>
@@ -7047,6 +7567,7 @@ function ReceiverModal({
                   type: "appointmentDetail",
                   appointment: modal.appointment,
                   appointments: modal.appointments,
+                  cachedAt: modal.cachedAt,
                   page: modal.page,
                 })
               }
@@ -7054,6 +7575,7 @@ function ReceiverModal({
               Go Back
             </button>
           </div>
+          {cacheNotice ? <p className={styles.cachedAppointmentNotice}>{cacheNotice}</p> : null}
           <p className={styles.readerText}>
             {modal.appointment.locationAddress || "No address is saved for this appointment."}
           </p>
