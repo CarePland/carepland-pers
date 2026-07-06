@@ -58,7 +58,7 @@ public class MainActivity extends Activity {
     private static final int RECEIVER_AUTO_RETRY_SECONDS = 5;
     private static final int DEDICATED_REOPEN_DELAY_MS = 1500;
     private static final int PAIRING_POLL_INTERVAL_MS = 3000;
-    private static final String SHELL_VERSION = "0.1.13";
+    private static final String SHELL_VERSION = "0.1.14";
 
     private WebView webView;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -89,30 +89,16 @@ public class MainActivity extends Activity {
         configureApplianceWindow();
         configureManagedKioskMode();
         configureWebView();
-        if (!ReceiverConfigStore.hasClaimOrBinding(this)) {
-            showPairingRequiredScreen("Requesting pairing code...");
-            return;
-        }
-        if (!ReceiverConfigStore.hasCompletedProvisioningWizard(this)) {
-            showProvisioningModeSelection();
-            return;
-        }
-        startReceiverAfterSetup();
+        handleIncomingProvisioningIntent(getIntent());
+        routeAfterProvisioningStateChanged("Requesting pairing code...");
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (!ReceiverConfigStore.hasClaimOrBinding(this)) {
-            showPairingRequiredScreen("Requesting pairing code...");
-            return;
-        }
-        if (!ReceiverConfigStore.hasCompletedProvisioningWizard(this)) {
-            showProvisioningModeSelection();
-            return;
-        }
-        startReceiverAfterSetup();
+        handleIncomingProvisioningIntent(intent);
+        routeAfterProvisioningStateChanged("Requesting pairing code...");
     }
 
     @Override
@@ -136,6 +122,24 @@ public class MainActivity extends Activity {
         if (webView != null) {
             webView.onResume();
         }
+    }
+
+    private void handleIncomingProvisioningIntent(Intent intent) {
+        if (intent != null && intent.getData() != null) {
+            ReceiverConfigStore.saveProvisioningUri(this, intent.getData());
+        }
+    }
+
+    private void routeAfterProvisioningStateChanged(String setupStatusMessage) {
+        if (!ReceiverConfigStore.hasClaimOrBinding(this)) {
+            showPairingRequiredScreen(setupStatusMessage);
+            return;
+        }
+        if (!ReceiverConfigStore.hasCompletedProvisioningWizard(this)) {
+            showProvisioningModeSelection();
+            return;
+        }
+        startReceiverAfterSetup();
     }
 
     @Override

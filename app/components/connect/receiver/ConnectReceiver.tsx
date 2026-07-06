@@ -984,8 +984,7 @@ function isReceiverSetupRequiredMessage(message: string) {
     message.includes("expired") ||
     message.includes("revoked") ||
     message.includes("not found") ||
-    message.includes("does not match") ||
-    message.includes("not complete")
+    message.includes("does not match")
   );
 }
 

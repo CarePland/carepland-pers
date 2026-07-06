@@ -629,9 +629,14 @@ function classicWebViewReceiverHtml({
               return;
             }
             receiverState.online = false;
-            setText("connectionStatus", "Setup needed");
-            if (window.CarePlandReceiver && window.CarePlandReceiver.receiverSetupRequired) {
-              window.CarePlandReceiver.receiverSetupRequired(payload.error || "Receiver setup is required.");
+            var errorMessage = payload && payload.error ? payload.error : "Receiver setup is required.";
+            if (errorMessage.indexOf("not complete") >= 0) {
+              setText("connectionStatus", "Pairing finishing");
+            } else {
+              setText("connectionStatus", "Setup needed");
+              if (window.CarePlandReceiver && window.CarePlandReceiver.receiverSetupRequired) {
+                window.CarePlandReceiver.receiverSetupRequired(errorMessage);
+              }
             }
             if (callback) callback(null);
           });
