@@ -10,9 +10,14 @@ export const metadata: Metadata = {
 
 type ConnectReceiverPageProps = {
   searchParams: Promise<{
+    code?: string;
     detectedHardwareProfile?: string;
     device?: string;
     nativeSdk?: string;
+    receiverBindingStatus?: string;
+    receiverInstallId?: string;
+    setupClaim?: string;
+    setupCode?: string;
   }>;
 };
 
@@ -34,11 +39,26 @@ export default async function ConnectReceiverPage({
 }
 
 function shouldUseLegacyReceiver(params: {
+  code?: string;
   detectedHardwareProfile?: string;
   device?: string;
   nativeSdk?: string;
+  receiverBindingStatus?: string;
+  receiverInstallId?: string;
+  setupClaim?: string;
+  setupCode?: string;
 }) {
   const nativeSdk = Number.parseInt(params.nativeSdk || "", 10);
   const profile = `${params.device || ""} ${params.detectedHardwareProfile || ""}`.toLowerCase();
-  return (Number.isFinite(nativeSdk) && nativeSdk <= 25) || profile.includes("gxv3370");
+  const legacyAndroidVersion = Number.isFinite(nativeSdk) && nativeSdk <= 25;
+  const knownLegacyHardware = profile.includes("gxv3370");
+  const nativeShellClaimUrl =
+    !params.nativeSdk &&
+    (Boolean(params.setupClaim) ||
+      Boolean(params.receiverInstallId) ||
+      Boolean(params.setupCode) ||
+      Boolean(params.code) ||
+      params.receiverBindingStatus === "claim_pending");
+
+  return legacyAndroidVersion || knownLegacyHardware || nativeShellClaimUrl;
 }

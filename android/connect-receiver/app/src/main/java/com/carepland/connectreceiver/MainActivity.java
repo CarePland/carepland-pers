@@ -58,7 +58,7 @@ public class MainActivity extends Activity {
     private static final int RECEIVER_AUTO_RETRY_SECONDS = 5;
     private static final int DEDICATED_REOPEN_DELAY_MS = 1500;
     private static final int PAIRING_POLL_INTERVAL_MS = 3000;
-    private static final String SHELL_VERSION = "0.1.11";
+    private static final String SHELL_VERSION = "0.1.12";
 
     private WebView webView;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
