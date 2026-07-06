@@ -159,6 +159,7 @@ export function ReceiverSetupClient({
     : setupCode.trim() === "12345"
       ? "Local test receiver"
       : "Waiting for pairing code";
+  const apkBuildLabel = apkVersionName ? `build ${apkVersionName}` : "build not listed";
   const adbBinary = browserOrigin
     ? "/Users/agoodloe/Library/Android/sdk/platform-tools/adb"
     : "adb";
@@ -439,11 +440,11 @@ export function ReceiverSetupClient({
         <div className={styles.installGrid}>
           <div className={styles.installStep}>
             <span>1</span>
-            <strong>Install Receiver</strong>
+            <strong>Install Receiver ({apkBuildLabel})</strong>
             <p>Download and install the Receiver app on the Android device.</p>
             {apkDownloadUrl ? (
               <a className={styles.primaryAction} href={apkDownloadUrl}>
-                Download APK
+                Download APK {apkVersionName ? `(${apkBuildLabel})` : ""}
               </a>
             ) : (
               <p className={styles.errorNote}>

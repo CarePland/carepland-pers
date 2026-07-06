@@ -23,6 +23,13 @@ const debugReceiverApkPath = path.join(
   "debug",
   "app-debug.apk"
 );
+const receiverAndroidBuildGradlePath = path.join(
+  process.cwd(),
+  "android",
+  "connect-receiver",
+  "app",
+  "build.gradle"
+);
 
 export const metadata: Metadata = {
   title: "Receiver Setup | CarePland Connect",
@@ -52,7 +59,7 @@ export default async function ReceiverSetupPage({
     <ReceiverSetupClient
       apkDownloadUrl={apkDownloadUrl}
       apkSha256Checksum={receiverApkChecksum(apkDownloadUrl)}
-      apkVersionName={process.env.CONNECT_RECEIVER_LATEST_VERSION_NAME || ""}
+      apkVersionName={receiverApkVersionName()}
       embedded={params.embedded === "1" || params.embedded === "true"}
       initialCode={params.code || ""}
       initialDevice={params.device || "gxv3370"}
@@ -63,6 +70,19 @@ export default async function ReceiverSetupPage({
       setupBaseUrl={process.env.CONNECT_RECEIVER_SETUP_BASE_URL || ""}
     />
   );
+}
+
+function receiverApkVersionName() {
+  if (process.env.CONNECT_RECEIVER_LATEST_VERSION_NAME) {
+    return process.env.CONNECT_RECEIVER_LATEST_VERSION_NAME;
+  }
+
+  if (!existsSync(receiverAndroidBuildGradlePath)) {
+    return "";
+  }
+
+  const buildGradle = readFileSync(receiverAndroidBuildGradlePath, "utf8");
+  return buildGradle.match(/\bversionName\s+["']([^"']+)["']/)?.[1] || "";
 }
 
 function receiverApkDownloadUrl() {
