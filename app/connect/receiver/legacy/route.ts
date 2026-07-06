@@ -635,6 +635,32 @@ function classicWebViewReceiverHtml({
       margin-top: 18px;
       width: 100%;
     }
+    .talkInput {
+      border: 4px solid #aeb6b0;
+      border-radius: 6px;
+      box-sizing: border-box;
+      color: #101915;
+      display: block;
+      font-size: 36px;
+      font-weight: 900;
+      height: 92px;
+      padding: 16px;
+      width: 100%;
+    }
+    .talkResult {
+      background: #eef2ed;
+      border: 3px solid #aeb6b0;
+      border-radius: 6px;
+      box-sizing: border-box;
+      color: #101915;
+      font-size: 28px;
+      font-weight: 900;
+      line-height: 1.18;
+      margin-top: 16px;
+      min-height: 86px;
+      padding: 18px;
+      text-align: center;
+    }
     .emptyState {
       font-size: 46px;
       font-weight: 900;
@@ -917,7 +943,7 @@ function classicWebViewReceiverHtml({
           <span class="homeAppointmentTime" id="homeAppointmentTime">${escapeHtml(appointmentTime)}</span><span>: </span>
           <span id="homeAppointmentTitle">${escapeHtml(appointmentTitle)}</span>
         </button>
-        <button class="homeTalkButton" data-screen="askScreen">
+        <button class="homeTalkButton" data-screen="talkScreen">
           <span class="talkIconCell"><span class="talkIcon">♪</span></span>
           <span class="talkLabelCell">Talk</span>
         </button>
@@ -938,6 +964,30 @@ function classicWebViewReceiverHtml({
       </div>
       <div class="miniStatus" id="connectionStatus">Starting...</div>
       <div id="receiverLocation" style="display:none">${escapeHtml(locationLabel)}</div>
+    </div>
+  </div>
+
+  <div class="screen" id="talkScreen">
+    <div class="toolbar">
+      <div class="toolbarTitle">Talk</div>
+      <div class="toolbarAction"><button class="homeButton" data-screen="homeScreen">Go Home</button></div>
+    </div>
+    <div class="panelBody">
+      <div class="whiteCard">
+        <input class="talkInput" id="talkInput" value="I took my medicine">
+        <div class="quickGrid">
+          <div class="quickRow">
+            <div class="quickCell"><button class="quickButton" data-talk="I took my medicine">Took medicine</button></div>
+            <div class="quickCell"><button class="quickButton" data-talk="I weighed myself">Weighed myself</button></div>
+          </div>
+          <div class="quickRow">
+            <div class="quickCell"><button class="quickButton" data-talk="What time is my appointment?">Appointment time</button></div>
+            <div class="quickCell"><button class="quickButton" data-talk="Call Andrew">Call Andrew</button></div>
+          </div>
+        </div>
+        <button class="sendButton" id="sendTalkButton">Send</button>
+        <div class="talkResult" id="talkResult">Tap a phrase or send your words.</div>
+      </div>
     </div>
   </div>
 
@@ -1319,6 +1369,15 @@ function classicWebViewReceiverHtml({
         document.getElementById("callAndrewButton").onclick = function () {
           startCallAndrew();
         };
+        document.getElementById("sendTalkButton").onclick = function () {
+          sendTalkInput("");
+        };
+        var talkButtons = document.querySelectorAll("[data-talk]");
+        for (i = 0; i < talkButtons.length; i += 1) {
+          talkButtons[i].onclick = function () {
+            sendTalkInput(this.getAttribute("data-talk"));
+          };
+        }
       }
       function readNativeConfig() {
         try {
@@ -1765,6 +1824,42 @@ function classicWebViewReceiverHtml({
             return;
           }
           setText("askStatus", payload.error || "Could not send yet.");
+        });
+      }
+      function sendTalkInput(value) {
+        var input = document.getElementById("talkInput");
+        var body = value || (input ? input.value.replace(/^\\s+|\\s+$/g, "") : "");
+        if (input && value) input.value = value;
+        if (!body) {
+          setText("talkResult", "Say or tap what happened first.");
+          return;
+        }
+        if (!receiverState.personId) {
+          setText("talkResult", "Receiver is still connecting.");
+          return;
+        }
+        setText("talkResult", "Checking...");
+        jsonRequest("POST", "/api/connect/talk", {
+          contacts: [{ displayName: "Andrew", id: "contact-andrew" }],
+          inputText: body,
+          personId: receiverState.personId,
+          receiverDeviceId: receiverState.receiverDeviceId
+        }, function (status, payload) {
+          var result = payload && payload.result ? payload.result : {};
+          var response = result.display_response || result.spoken_response || payload.error || "";
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            if (String(result.intent || "") === "connect_call_request" || String(result.proposed_action || "") === "request_call") {
+              setText("talkResult", response || "Calling Andrew.");
+              startCallAndrew();
+              return;
+            }
+            setText("talkResult", response || "Done.");
+            loadTodayFocus();
+            loadAppointments();
+            loadMessages();
+            return;
+          }
+          setText("talkResult", response || "Talk could not process that yet.");
         });
       }
       function startCallAndrew() {
