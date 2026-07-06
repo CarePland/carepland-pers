@@ -162,6 +162,17 @@ function classicWebViewReceiverHtml({
       min-height: 64px;
       padding: 10px 32px;
     }
+    .bootCard {
+      display: grid;
+      align-content: center;
+      gap: 16px;
+    }
+    .bootStatus {
+      color: #5d6961;
+      font-size: 30px;
+      font-weight: 900;
+      line-height: 1.15;
+    }
     .homeTop {
       display: table;
       height: 138px;
@@ -579,7 +590,17 @@ function classicWebViewReceiverHtml({
   )}" data-scale-mode="${escapeHtml(runtimeContract.layout.scaleMode)}" data-hardware-profile="${escapeHtml(
     runtimeContract.hardware.hardwareProfile
   )}" data-screen-class="${escapeHtml(runtimeContract.hardware.screenClass)}">
-  <div class="screen screenActive" id="setupScreen">
+  <div class="screen screenActive" id="bootScreen">
+    <div class="setupPanel">
+      <div class="setupCard bootCard">
+        <div class="setupBrand">CarePland Connect</div>
+        <div class="setupTitle">Receiver</div>
+        <div class="bootStatus">Starting Receiver...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="setupScreen">
     <div class="setupPanel">
       <div class="setupCard">
         <div class="setupBrand">CarePland Connect</div>

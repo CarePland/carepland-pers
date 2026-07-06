@@ -612,6 +612,7 @@ function redirectGxvLikeBrowserToClassicReceiver() {
   if (window.location.pathname.includes("/connect/receiver/legacy")) return false;
   const params = new URLSearchParams(window.location.search);
   if (params.get("receiver_runtime") === "classic_webview") return false;
+  if (params.get("receiver_runtime") === "modern_web") return false;
   if (params.get("preview") === "1") return false;
 
   const screenWidth = Number(window.screen?.width || 0);
