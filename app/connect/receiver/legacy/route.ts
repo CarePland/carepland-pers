@@ -1062,7 +1062,7 @@ function classicWebViewReceiverHtml({
       <div class="whiteCard">
         <div class="callTitle">Calling Andrew</div>
         <div class="callSub" id="callStatus">Connecting...</div>
-        <button class="doneButton" data-screen="homeScreen">Close Call</button>
+        <button class="doneButton" id="closeCallButton" type="button">Close Call</button>
       </div>
     </div>
   </div>
@@ -1410,6 +1410,9 @@ function classicWebViewReceiverHtml({
         };
         document.getElementById("callAndrewButton").onclick = function () {
           startCallAndrew();
+        };
+        document.getElementById("closeCallButton").onclick = function () {
+          closeActiveCall();
         };
         document.getElementById("sendTalkButton").onclick = function () {
           sendTalkInput("");
@@ -2007,6 +2010,26 @@ function classicWebViewReceiverHtml({
             return;
           }
           setText("callStatus", payload.error || "Could not start call.");
+        });
+      }
+      function closeActiveCall() {
+        if (!receiverState.activeCallId || !receiverState.personId) {
+          showScreen("homeScreen");
+          return;
+        }
+        setText("callStatus", "Closing call...");
+        jsonRequest("POST", "/api/connect/calls/" + encodeURIComponent(receiverState.activeCallId) + "/state", {
+          mainConnectUserPersonId: receiverState.personId,
+          source: "classic_webview_receiver",
+          state: "hung_up"
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            receiverState.activeCallId = "";
+            setText("connectionStatus", "Call closed");
+            showScreen("homeScreen");
+            return;
+          }
+          setText("callStatus", payload.error || "Could not close call.");
         });
       }
       function recordAudioPlayback(state) {
