@@ -597,6 +597,7 @@ function classicWebViewReceiverHtml({
       function postNativeBinding(config, callback) {
         if (!config || !config.receiverDeviceId || !config.receiverInstallId) {
           setText("connectionStatus", "Setup needed");
+          setText("focusStrip", "Receiver is connecting...");
           if (callback) callback(null);
           return;
         }
@@ -632,8 +633,10 @@ function classicWebViewReceiverHtml({
             var errorMessage = payload && payload.error ? payload.error : "Receiver setup is required.";
             if (errorMessage.indexOf("not complete") >= 0) {
               setText("connectionStatus", "Pairing finishing");
+              setText("focusStrip", "Receiver is connecting...");
             } else {
               setText("connectionStatus", "Setup needed");
+              setText("focusStrip", "Receiver setup is needed.");
               if (window.CarePlandReceiver && window.CarePlandReceiver.receiverSetupRequired) {
                 window.CarePlandReceiver.receiverSetupRequired(errorMessage);
               }
@@ -642,7 +645,53 @@ function classicWebViewReceiverHtml({
           });
         } catch (error) {
           setText("connectionStatus", "Offline");
+          setText("focusStrip", "Receiver is offline.");
         }
+      }
+      function saveNativeBinding(payload) {
+        if (!payload || !payload.receiverDeviceId) return;
+        try {
+          if (window.CarePlandReceiver && window.CarePlandReceiver.saveBinding) {
+            window.CarePlandReceiver.saveBinding(
+              payload.receiverDeviceId || "",
+              payload.bindingStatus || "bound",
+              payload.deviceProfile || "",
+              payload.hardwareProfile || "",
+              payload.uiLayout || ""
+            );
+          }
+        } catch (error) {}
+      }
+      function redeemNativeClaim(config, callback) {
+        if (!config || !config.setupClaim || !config.receiverInstallId) {
+          if (callback) callback(false);
+          return;
+        }
+        setText("connectionStatus", "Pairing finishing");
+        setText("focusStrip", "Receiver is connecting...");
+        jsonRequest("POST", "/api/connect/receiver-shell/claims/redeem", {
+          claim: config.setupClaim,
+          receiverInstallId: config.receiverInstallId
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            saveNativeBinding(payload);
+            receiverState.receiverDeviceId = payload.receiverDeviceId || receiverState.receiverDeviceId;
+            receiverState.receiverInstallId = payload.receiverInstallId || receiverState.receiverInstallId;
+            if (callback) callback(true);
+            return;
+          }
+          if (callback) callback(false);
+        });
+      }
+      function connectNativeReceiver(callback) {
+        var config = readNativeConfig();
+        if (config && config.setupClaim) {
+          redeemNativeClaim(config, function () {
+            postNativeBinding(readNativeConfig() || config, callback);
+          });
+          return;
+        }
+        postNativeBinding(config, callback);
       }
       function formatAppointmentDate(value) {
         if (!value) return "";
@@ -709,7 +758,10 @@ function classicWebViewReceiverHtml({
         );
       }
       function loadTodayFocus() {
-        if (!receiverState.personId) return;
+        if (!receiverState.personId) {
+          setText("focusStrip", "Receiver is connecting...");
+          return;
+        }
         jsonRequest(
           "GET",
           "/api/connect/today-focus?personId=" + encodeURIComponent(receiverState.personId),
@@ -795,13 +847,13 @@ function classicWebViewReceiverHtml({
       updateClock();
       bindButtons();
       window.setInterval(updateClock, 30000);
-      postNativeBinding(readNativeConfig(), function () {
+      connectNativeReceiver(function () {
         loadAppointments();
         loadTodayFocus();
         loadMessages();
       });
       window.setInterval(function () {
-        postNativeBinding(readNativeConfig(), function () {
+        connectNativeReceiver(function () {
           loadAppointments();
           loadTodayFocus();
           loadMessages();
