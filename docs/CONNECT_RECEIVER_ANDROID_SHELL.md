@@ -104,6 +104,56 @@ uiLayout=desk_phone_1024x600
 uiLayout=default_receiver
 ```
 
+## Receiver Runtime Contract
+
+Receiver features should consume a normalized runtime contract rather than
+re-parsing raw URL parameters or native bridge JSON independently.
+
+The contract is the Receiver's runtime passport. It should carry:
+
+- Receiver identity: `receiverDeviceId`, `receiverInstallId`, binding status.
+- Receiver Active Person: currently `mainConnectUserPersonId` when known.
+- Runtime: `classic_webview` or `modern_web`, shell version, APK version.
+- Hardware facts: manufacturer, model, Android SDK, display width/height in px
+  and dp, density, orientation, detected hardware profile, and screen class.
+- Layout decision: selected `uiLayout` plus scale mode.
+- Device mode and capabilities: dedicated/personal mode, kiosk/fullscreen,
+  microphone, keep-awake, boot start, battery optimization, and update checks.
+
+The first shared implementation lives in
+`app/lib/connect/receiver/receiverRuntimeContract.ts`.
+
+Important distinction:
+
+- Hardware facts describe what the device actually is.
+- Hardware profile summarizes those facts for provisioning and diagnostics.
+- UI layout describes the hosted Receiver presentation.
+- Scale mode describes how closely the selected UI layout matches the physical
+  screen.
+
+For example, a 1024x600 GXV-style device can use:
+
+```text
+hardwareProfile=grandstream_gxv3370
+uiLayout=desk_phone_1024x600
+scaleMode=native
+receiver_runtime=classic_webview
+```
+
+An HD Android 7 kiosk display, such as a 1920x1080 iTab-style test device, is
+not the same hardware profile. It should be recognized separately while still
+being allowed to start from the existing appliance layout:
+
+```text
+hardwareProfile=generic_hd_landscape_android
+uiLayout=desk_phone_1024x600
+scaleMode=scale_to_fit
+receiver_runtime=classic_webview
+```
+
+This lets CarePland test the existing robust 1024x600 layout on close-but-not-
+exact displays without pretending the hardware is identical.
+
 Optional URL override for development:
 
 ```text
