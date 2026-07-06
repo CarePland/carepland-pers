@@ -839,6 +839,20 @@ function readInitialStarted() {
   );
 }
 
+function readInitialNativeReceiverShell() {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  const nativeConfig = readNativeReceiverProvisioningConfig();
+
+  return (
+    params.get("nativeShell") === "android" ||
+    Boolean(nativeConfig.receiverUrl) ||
+    Boolean(window.CarePlandReceiver?.getProvisioningJson) ||
+    Boolean(window.CarePlandReceiver?.saveBinding) ||
+    Boolean(window.CarePlandReceiver?.receiverReady)
+  );
+}
+
 function readInitialSelectedContactId() {
   const storedContactId = readStoredReceiverSession().selectedContactId;
   return contacts.some((contact) => contact.id === storedContactId) ? storedContactId : contacts[0].id;
@@ -1774,6 +1788,7 @@ export function ConnectReceiver() {
   const [deskPhoneMode] = useState(readInitialDeskPhoneMode);
   const [gxvHomeLayout, setGxvHomeLayout] = useState<GxvHomeLayout>(readInitialGxvHomeLayout);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+  const [nativeReceiverShell] = useState(readInitialNativeReceiverShell);
   const [kioskManagedFullscreen] = useState(readInitialKioskManagedFullscreen);
   const [applianceStyle, setApplianceStyle] = useState<CSSProperties>(() =>
     receiverApplianceStyle(initialReceiverDevicePixelRatio(), readInitialDeskPhoneMode())
@@ -3167,6 +3182,7 @@ export function ConnectReceiver() {
 
   function openClassicWebReceiverLayout() {
     setLayoutMenuOpen(false);
+    if (nativeReceiverShell) return;
     if (typeof window === "undefined") return;
     const url = new URL("/connect/receiver/legacy", window.location.origin);
     url.searchParams.set("receiver_runtime", "classic_webview");
@@ -3177,6 +3193,7 @@ export function ConnectReceiver() {
   }
 
   function renderReceiverLayoutMenu() {
+    if (nativeReceiverShell) return null;
     if (!layoutMenuOpen) return null;
 
     return (
@@ -4153,7 +4170,7 @@ export function ConnectReceiver() {
 
   function startReceiverFromAction() {
     setStarted(true);
-    if (deskPhoneMode && !kioskManagedFullscreen) {
+    if (deskPhoneMode && !kioskManagedFullscreen && !nativeReceiverShell) {
       void requestReceiverFullscreen();
     }
   }
@@ -5235,7 +5252,7 @@ export function ConnectReceiver() {
                   <strong>{formatTime(now)}</strong>
                   <div className={styles.dateControlRow}>
                     <span>{formatDate(now)}</span>
-                    {deskPhoneMode && !kioskManagedFullscreen ? (
+                    {deskPhoneMode && !kioskManagedFullscreen && !nativeReceiverShell ? (
                       <button
                         className={styles.fullscreenTinyButton}
                         type="button"
@@ -5248,7 +5265,7 @@ export function ConnectReceiver() {
                         {fullscreenActive ? "MIN" : "MAX"}
                       </button>
                     ) : null}
-                    {deskPhoneMode ? (
+                    {deskPhoneMode && !nativeReceiverShell ? (
                       <div className={styles.receiverLayoutControl}>
                         <button
                           className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
@@ -5393,7 +5410,7 @@ export function ConnectReceiver() {
               gxvFocusHomeEnabled ? (
                 <>
                   <div className={styles.focusHomeLayoutControls} aria-label="Layout controls">
-                    {!kioskManagedFullscreen ? (
+                    {!kioskManagedFullscreen && !nativeReceiverShell ? (
                       <button
                         className={styles.fullscreenTinyButton}
                         type="button"
@@ -5406,22 +5423,24 @@ export function ConnectReceiver() {
                         {fullscreenActive ? "MIN" : "MAX"}
                       </button>
                     ) : null}
-                    <div className={styles.receiverLayoutControl}>
-                      <button
-                        className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
-                        type="button"
-                        aria-haspopup="menu"
-                        aria-expanded={layoutMenuOpen}
-                        aria-label="Choose Receiver layout"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setLayoutMenuOpen((open) => !open);
-                        }}
-                      >
-                        LAYOUT
-                      </button>
-                      {renderReceiverLayoutMenu()}
-                    </div>
+                    {!nativeReceiverShell ? (
+                      <div className={styles.receiverLayoutControl}>
+                        <button
+                          className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={layoutMenuOpen}
+                          aria-label="Choose Receiver layout"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setLayoutMenuOpen((open) => !open);
+                          }}
+                        >
+                          LAYOUT
+                        </button>
+                        {renderReceiverLayoutMenu()}
+                      </div>
+                    ) : null}
                   </div>
                   <section className={styles.focusHomeGreetingPanel} aria-label="Receiver">
                     <a

@@ -475,7 +475,7 @@ function classicWebViewReceiverHtml({
       right: 18px;
       z-index: 20;
     }
-    .fullscreenPromptVisible {
+    .browserReceiverControls .fullscreenPromptVisible {
       display: block;
     }
     .fullscreenPrompt:active {
@@ -483,10 +483,14 @@ function classicWebViewReceiverHtml({
       transform: translateY(5px);
     }
     .layoutMenuWrap {
+      display: none;
       position: fixed;
       right: 18px;
       top: 18px;
       z-index: 21;
+    }
+    .browserReceiverControls .layoutMenuWrap {
+      display: block;
     }
     .layoutButton {
       background: #fbfaf5;
@@ -827,10 +831,35 @@ function classicWebViewReceiverHtml({
           element.msRequestFullscreen ||
           null;
       }
+      function nativeReceiverShellPresent() {
+        return Boolean(
+          window.CarePlandReceiver &&
+          (
+            window.CarePlandReceiver.getProvisioningJson ||
+            window.CarePlandReceiver.saveBinding ||
+            window.CarePlandReceiver.receiverReady
+          )
+        );
+      }
+      function updateReceiverChromeControls() {
+        if (nativeReceiverShellPresent()) {
+          document.body.className = document.body.className.replace(" browserReceiverControls", "");
+          document.body.className = document.body.className.indexOf("nativeReceiverShell") >= 0
+            ? document.body.className
+            : document.body.className + " nativeReceiverShell";
+          setLayoutMenuOpen(false);
+          return;
+        }
+        document.body.className = document.body.className.replace(" nativeReceiverShell", "");
+        if (document.body.className.indexOf("browserReceiverControls") < 0) {
+          document.body.className += " browserReceiverControls";
+        }
+      }
       function fullscreenPromptAllowed() {
-        return Boolean(fullscreenRequestMethod(document.documentElement));
+        return !nativeReceiverShellPresent() && Boolean(fullscreenRequestMethod(document.documentElement));
       }
       function updateFullscreenPrompt(message) {
+        updateReceiverChromeControls();
         var prompt = document.getElementById("fullscreenPrompt");
         if (!prompt) return;
         if (message) prompt.innerHTML = escapeHtml(message);
@@ -867,6 +896,7 @@ function classicWebViewReceiverHtml({
         var menu = document.getElementById("layoutMenu");
         var button = document.getElementById("layoutButton");
         if (!menu || !button) return;
+        if (nativeReceiverShellPresent()) open = false;
         menu.className = open ? "layoutMenu layoutMenuOpen" : "layoutMenu";
         button.setAttribute("aria-expanded", open ? "true" : "false");
       }
@@ -881,6 +911,7 @@ function classicWebViewReceiverHtml({
       }
       function chooseReceiverLayout(choice) {
         setLayoutMenuOpen(false);
+        if (nativeReceiverShellPresent()) return;
         if (choice === "classic") {
           window.location.assign(modernReceiverUrl(""));
           return;
@@ -1327,6 +1358,7 @@ function classicWebViewReceiverHtml({
         } catch (error) {}
       }
       updateClock();
+      updateReceiverChromeControls();
       bindButtons();
       document.addEventListener("fullscreenchange", function () {
         updateFullscreenPrompt();
