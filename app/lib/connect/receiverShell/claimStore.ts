@@ -22,6 +22,7 @@ export type ReceiverShellClaimRecord = {
   lockTaskActive?: boolean;
   lockTaskPermitted?: boolean;
   mainConnectUserPersonId?: string;
+  mainConnectUserDisplayName?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -53,6 +54,7 @@ export type ReceiverShellBindingRecord = {
   lockTaskActive?: boolean;
   lockTaskPermitted?: boolean;
   mainConnectUserPersonId?: string;
+  mainConnectUserDisplayName?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -80,21 +82,30 @@ export type ReceiverShellCapabilityStatuses = {
 
 export type ReceiverShellDeviceProfile = {
   capabilityStatuses?: ReceiverShellCapabilityStatuses;
+  careCircleId?: string;
+  deviceProfile?: string;
   deviceOwner?: boolean;
   hardwareProfile?: string;
   lastRecoveryAction?: string;
   lastRecoveryAt?: string;
+  lastSeenAt?: string;
   lockTaskActive?: boolean;
   lockTaskPermitted?: boolean;
+  mainConnectUserPersonId?: string;
+  mainConnectUserDisplayName?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
   nativeVersionCode?: number;
   nativeVersionName?: string;
+  receiverInstallId?: string;
   provisioningCompletedAt?: string;
   receiverDeviceId: string;
   receiverMode?: string;
+  receiverUrl?: string;
   shellVersion?: string;
+  status?: string;
+  uiLayout?: string;
 };
 
 type ReceiverShellClaimIndex = {
@@ -515,6 +526,7 @@ export async function verifyReceiverShellBinding(
     lockTaskActive: claim.lockTaskActive,
     lockTaskPermitted: claim.lockTaskPermitted,
     mainConnectUserPersonId: claim.mainConnectUserPersonId,
+    mainConnectUserDisplayName: claim.mainConnectUserDisplayName,
     nativeManufacturer: claim.nativeManufacturer,
     nativeModel: claim.nativeModel,
     nativeSdk: claim.nativeSdk,
@@ -1001,12 +1013,12 @@ async function tryRedeemSupabaseReceiverShellClaim(
     const claim = input.claim?.trim() || "";
     const { data, error } = await supabase
       .from("connect_receiver_claims")
-      .select("*")
+      .select("*, connect_receiver_devices(*)")
       .eq("claim", claim)
       .single();
     if (error) throw error;
 
-    const current = supabaseClaimRecord(data);
+    const current = supabaseClaimRecordWithDevice(data);
     if (current.status === "available" && Date.parse(current.expiresAt) <= now.getTime()) {
       await supabase
         .from("connect_receiver_claims")
@@ -1052,7 +1064,14 @@ async function tryRedeemSupabaseReceiverShellClaim(
       .eq("id", current.receiverDeviceId);
     if (deviceError) throw deviceError;
 
-    return supabaseClaimRecord(updated);
+    const displayNames = await tryGetSupabaseCareSubjectDisplayNames([
+      current.mainConnectUserPersonId,
+    ]);
+
+    return {
+      ...supabaseClaimRecord(updated),
+      mainConnectUserDisplayName: displayNames.get(current.mainConnectUserPersonId || ""),
+    };
   } catch (error) {
     if (error instanceof ReceiverShellClaimError) throw error;
     if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
@@ -1137,6 +1156,11 @@ async function tryVerifySupabaseReceiverShellBinding(
       if (fallbackUpdateError) throw fallbackUpdateError;
     }
 
+    const mainConnectUserPersonId = stringFromRow(data.main_connect_user_person_id);
+    const displayNames = await tryGetSupabaseCareSubjectDisplayNames([
+      mainConnectUserPersonId,
+    ]);
+
     return {
       bindingStatus: "bound",
       capabilityStatuses:
@@ -1153,7 +1177,8 @@ async function tryVerifySupabaseReceiverShellBinding(
         timestampFromMs(input.lastRecoveryAtMs) || stringFromRow(data.last_recovery_at),
       lockTaskActive: booleanOrUndefined(input.lockTaskActive ?? data.lock_task_active),
       lockTaskPermitted: booleanOrUndefined(input.lockTaskPermitted ?? data.lock_task_permitted),
-      mainConnectUserPersonId: stringFromRow(data.main_connect_user_person_id),
+      mainConnectUserPersonId,
+      mainConnectUserDisplayName: displayNames.get(mainConnectUserPersonId),
       nativeManufacturer:
         input.nativeManufacturer?.trim() || stringFromRow(data.native_manufacturer),
       nativeModel: input.nativeModel?.trim() || stringFromRow(data.native_model),
@@ -1191,6 +1216,14 @@ async function tryListSupabaseReceiverShellDeviceProfiles() {
       .select(
         [
           "id",
+          "care_circle_id",
+          "device_profile",
+          "main_connect_user_person_id",
+          "receiver_install_id",
+          "receiver_url",
+          "status",
+          "ui_layout",
+          "last_seen_at",
           "receiver_mode",
           "provisioning_completed_at",
           "capability_statuses",
@@ -1210,25 +1243,42 @@ async function tryListSupabaseReceiverShellDeviceProfiles() {
       );
     if (error) throw error;
 
-    return (Array.isArray(data) ? data : []).map((rawRow) => {
+    const rows = Array.isArray(data) ? data : [];
+    const displayNames = await tryGetSupabaseCareSubjectDisplayNames(
+      rows.map((rawRow) =>
+        stringFromRow((rawRow as unknown as Record<string, unknown>).main_connect_user_person_id)
+      )
+    );
+
+    return rows.map((rawRow) => {
       const row = rawRow as unknown as Record<string, unknown>;
+      const mainConnectUserPersonId = stringFromRow(row.main_connect_user_person_id);
       return {
       capabilityStatuses: capabilityStatusesFromRow(row.capability_statuses),
+      careCircleId: stringFromRow(row.care_circle_id),
+      deviceProfile: stringFromRow(row.device_profile),
       deviceOwner: booleanOrUndefined(row.device_owner),
       hardwareProfile: stringFromRow(row.hardware_profile),
       lastRecoveryAction: stringFromRow(row.last_recovery_action),
       lastRecoveryAt: stringFromRow(row.last_recovery_at),
+      lastSeenAt: stringFromRow(row.last_seen_at),
       lockTaskActive: booleanOrUndefined(row.lock_task_active),
       lockTaskPermitted: booleanOrUndefined(row.lock_task_permitted),
+      mainConnectUserPersonId,
+      mainConnectUserDisplayName: displayNames.get(mainConnectUserPersonId),
       nativeManufacturer: stringFromRow(row.native_manufacturer),
       nativeModel: stringFromRow(row.native_model),
       nativeSdk: finiteNumberOrUndefined(row.native_sdk),
       nativeVersionCode: finiteNumberOrUndefined(row.native_version_code),
       nativeVersionName: stringFromRow(row.native_version_name),
       provisioningCompletedAt: stringFromRow(row.provisioning_completed_at),
+      receiverInstallId: stringFromRow(row.receiver_install_id),
       receiverDeviceId: stringFromRow(row.id),
       receiverMode: stringFromRow(row.receiver_mode),
+      receiverUrl: stringFromRow(row.receiver_url),
       shellVersion: stringFromRow(row.shell_version),
+      status: stringFromRow(row.status),
+      uiLayout: stringFromRow(row.ui_layout),
       };
     }) satisfies ReceiverShellDeviceProfile[];
   } catch (error) {
@@ -1250,21 +1300,29 @@ async function listLocalReceiverShellDeviceProfiles() {
     if (claim.status !== "used" || !claim.receiverDeviceId) continue;
     profiles.set(claim.receiverDeviceId, {
       capabilityStatuses: claim.capabilityStatuses,
+      careCircleId: claim.careCircleId,
+      deviceProfile: claim.deviceProfile,
       deviceOwner: claim.deviceOwner,
       hardwareProfile: claim.hardwareProfile,
       lastRecoveryAction: claim.lastRecoveryAction,
       lastRecoveryAt: claim.lastRecoveryAt,
       lockTaskActive: claim.lockTaskActive,
       lockTaskPermitted: claim.lockTaskPermitted,
+      mainConnectUserPersonId: claim.mainConnectUserPersonId,
+      mainConnectUserDisplayName: claim.mainConnectUserDisplayName,
       nativeManufacturer: claim.nativeManufacturer,
       nativeModel: claim.nativeModel,
       nativeSdk: claim.nativeSdk,
       nativeVersionCode: claim.nativeVersionCode,
       nativeVersionName: claim.nativeVersionName,
       provisioningCompletedAt: claim.provisioningCompletedAt,
+      receiverInstallId: claim.receiverInstallId,
       receiverDeviceId: claim.receiverDeviceId,
       receiverMode: claim.receiverMode,
+      receiverUrl: claim.receiverUrl,
       shellVersion: claim.shellVersion,
+      status: claim.status === "used" ? "bound" : claim.status,
+      uiLayout: claim.uiLayout,
     });
   }
   return [...profiles.values()];
@@ -1360,6 +1418,35 @@ function supabaseClaimRecordWithDevice(row: Record<string, unknown>): ReceiverSh
       undefined,
     receiverUrl: claim.receiverUrl || stringFromRow(device.receiver_url),
   };
+}
+
+async function tryGetSupabaseCareSubjectDisplayNames(personIds: Array<string | undefined>) {
+  const ids = [...new Set(personIds.map((id) => id?.trim()).filter(Boolean) as string[])];
+  const names = new Map<string, string>();
+  if (!ids.length) return names;
+
+  try {
+    const supabase = createSupabaseServiceClient();
+    const { data, error } = await supabase
+      .from("care_subjects")
+      .select("id, display_name")
+      .in("id", ids);
+    if (error) throw error;
+
+    for (const row of Array.isArray(data) ? data : []) {
+      const record = row as Record<string, unknown>;
+      const id = stringFromRow(record.id);
+      const displayName = stringFromRow(record.display_name);
+      if (id && displayName) names.set(id, displayName);
+    }
+  } catch (error) {
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return names;
+    }
+    throw error;
+  }
+
+  return names;
 }
 
 function supabaseRecordNotFound(error: unknown) {

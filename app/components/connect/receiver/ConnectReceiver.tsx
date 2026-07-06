@@ -333,6 +333,7 @@ type StoredReceiverBinding = {
   nativeSdk?: number;
   nativeVersionCode?: number;
   nativeVersionName?: string;
+  mainConnectUserDisplayName?: string;
   mainConnectUserPersonId?: string;
   provisioningCompletedAt?: string;
   receiverDeviceId?: string;
@@ -872,7 +873,8 @@ function readInitialReceiverUsers() {
   if (!mainConnectUserPersonId) return [testReceiverUser];
   return [
     {
-      displayName: "Receiver Active Person",
+      displayName:
+        readStoredReceiverBinding().mainConnectUserDisplayName || "Receiver Active Person",
       id: mainConnectUserPersonId,
       statusLabel: "Receiver ready",
     },
@@ -1074,6 +1076,7 @@ function saveReceiverBinding(binding: StoredReceiverBinding) {
     nativeSdk: binding.nativeSdk,
     nativeVersionCode: binding.nativeVersionCode,
     nativeVersionName: binding.nativeVersionName?.trim() || "",
+    mainConnectUserDisplayName: binding.mainConnectUserDisplayName?.trim() || "",
     mainConnectUserPersonId: binding.mainConnectUserPersonId?.trim() || "",
     provisioningCompletedAt: binding.provisioningCompletedAt?.trim() || "",
     receiverDeviceId,
@@ -2592,15 +2595,16 @@ export function ConnectReceiver() {
     };
   }, [pendingContactRecording]);
 
-  function applyBoundReceiverActivePerson(personId?: string) {
+  function applyBoundReceiverActivePerson(personId?: string, displayName?: string) {
     const normalizedPersonId = personId?.trim() || "";
     if (!normalizedPersonId) return;
+    const normalizedDisplayName = displayName?.trim() || "Receiver Active Person";
     setActiveReceiverUsers((current) =>
       current.some((user) => user.id === normalizedPersonId)
         ? current
         : [
             {
-              displayName: "Receiver Active Person",
+              displayName: normalizedDisplayName,
               id: normalizedPersonId,
               statusLabel: "Receiver ready",
             },
@@ -2675,7 +2679,10 @@ export function ConnectReceiver() {
         saveReceiverBinding(payload);
         hasConfirmedBinding = true;
         setReceiverRegistered(true);
-        applyBoundReceiverActivePerson(payload.mainConnectUserPersonId);
+        applyBoundReceiverActivePerson(
+          payload.mainConnectUserPersonId,
+          payload.mainConnectUserDisplayName
+        );
         setRegistrationError("");
       } catch (error) {
         if (cancelled) return;
@@ -2728,6 +2735,7 @@ export function ConnectReceiver() {
           error?: string;
           hardwareProfile?: string;
           mainConnectUserPersonId?: string;
+          mainConnectUserDisplayName?: string;
           receiverDeviceId?: string;
           receiverInstallId?: string;
           receiverUrl?: string;
@@ -2743,6 +2751,7 @@ export function ConnectReceiver() {
           bindingStatus: payload.bindingStatus || "bound",
           deviceProfile: payload.deviceProfile,
           hardwareProfile: payload.hardwareProfile,
+          mainConnectUserDisplayName: payload.mainConnectUserDisplayName,
           mainConnectUserPersonId: payload.mainConnectUserPersonId,
           receiverDeviceId: payload.receiverDeviceId,
           receiverInstallId: payload.receiverInstallId || readReceiverInstallId(),
@@ -2752,7 +2761,10 @@ export function ConnectReceiver() {
         });
         window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
         setReceiverRegistered(true);
-        applyBoundReceiverActivePerson(payload.mainConnectUserPersonId);
+        applyBoundReceiverActivePerson(
+          payload.mainConnectUserPersonId,
+          payload.mainConnectUserDisplayName
+        );
         setRegistrationCode("");
         setRegistrationError("");
         setStatus(
@@ -2806,7 +2818,10 @@ export function ConnectReceiver() {
       }
       saveReceiverBinding(payload);
       setReceiverRegistered(true);
-      applyBoundReceiverActivePerson(payload.mainConnectUserPersonId);
+      applyBoundReceiverActivePerson(
+        payload.mainConnectUserPersonId,
+        payload.mainConnectUserDisplayName
+      );
       setRegistrationError("");
       setBrowserPairingStatus("Receiver ready.");
     }
@@ -2916,8 +2931,17 @@ export function ConnectReceiver() {
         setSelectedReceiverUserId(context.mainConnectUserPersonId || "");
       } catch {
         if (!ignore && receiverRegistered) {
-          setActiveReceiverUsers([testReceiverUser]);
-          setSelectedReceiverUserId(testReceiverUser.id);
+          const storedBinding = readStoredReceiverBinding();
+          const boundPersonId = storedBinding.mainConnectUserPersonId?.trim() || "";
+          if (boundPersonId) {
+            applyBoundReceiverActivePerson(
+              boundPersonId,
+              storedBinding.mainConnectUserDisplayName
+            );
+          } else {
+            setActiveReceiverUsers([testReceiverUser]);
+            setSelectedReceiverUserId(testReceiverUser.id);
+          }
         }
       }
     }

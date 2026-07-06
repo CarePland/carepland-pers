@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 
-import type { ConnectProvisioningSnapshot } from "@/app/lib/connect/provisioning/types";
-import { listReceiverShellDeviceProfiles } from "@/app/lib/connect/receiverShell/claimStore";
+import type {
+  ConnectProvisioningSnapshot,
+  ConnectReceiverDevice,
+} from "@/app/lib/connect/provisioning/types";
+import {
+  listReceiverShellDeviceProfiles,
+  type ReceiverShellDeviceProfile,
+} from "@/app/lib/connect/receiverShell/claimStore";
 import { receiverShellUpdatePolicy } from "@/app/lib/connect/receiverShell/updatePolicy";
 import {
   connectProvisioningPrototypeProxyEndpoints,
@@ -47,35 +53,29 @@ function overlayReceiverShellProfiles(
   snapshot: ConnectProvisioningSnapshot,
   receiverShellProfiles: Awaited<ReturnType<typeof listReceiverShellDeviceProfiles>>
 ): ConnectProvisioningSnapshot {
-  if (!snapshot.receiverDevices?.length || !receiverShellProfiles.length) return snapshot;
+  if (!receiverShellProfiles.length) return snapshot;
+
+  const receiverDevices = snapshot.receiverDevices ?? [];
+  const knownDeviceIds = new Set(
+    receiverDevices
+      .flatMap((device) => [device.id, device.receiverId])
+      .filter((value): value is string => Boolean(value))
+  );
+  const shellOnlyDevices = receiverShellProfiles
+    .filter((profile) => profile.receiverDeviceId && !knownDeviceIds.has(profile.receiverDeviceId))
+    .map(shellProfileToReceiverDevice);
 
   return {
     ...snapshot,
-    receiverDevices: snapshot.receiverDevices.map((device) => {
+    receiverDevices: [
+      ...receiverDevices.map((device) => {
       const profile = receiverShellProfiles.find(
         (item) =>
           item.receiverDeviceId &&
           (item.receiverDeviceId === device.id || item.receiverDeviceId === device.receiverId)
       );
       if (!profile) return device;
-      const updatePolicy = receiverShellUpdatePolicy(
-        {
-          hardwareProfile: profile.hardwareProfile,
-          nativeVersionCode: profile.nativeVersionCode,
-          nativeVersionName: profile.nativeVersionName,
-          shellVersion: profile.shellVersion,
-        },
-        {
-          installUrl: process.env.CONNECT_RECEIVER_APK_URL,
-          latestVersionCode: numberFromEnv(process.env.CONNECT_RECEIVER_LATEST_VERSION_CODE),
-          latestVersionName: process.env.CONNECT_RECEIVER_LATEST_VERSION_NAME,
-          minSupportedVersionCode: numberFromEnv(
-            process.env.CONNECT_RECEIVER_MIN_SUPPORTED_VERSION_CODE
-          ),
-          releaseChannel: process.env.CONNECT_RECEIVER_RELEASE_CHANNEL,
-          releaseNotesUrl: process.env.CONNECT_RECEIVER_RELEASE_NOTES_URL,
-        }
-      );
+      const updatePolicy = receiverUpdatePolicy(profile);
 
       return {
         ...device,
@@ -98,8 +98,97 @@ function overlayReceiverShellProfiles(
         updateAvailable: updatePolicy.updateAvailable,
         updateRequired: updatePolicy.updateRequired,
       };
-    }),
+      }),
+      ...shellOnlyDevices,
+    ],
   };
+}
+
+function shellProfileToReceiverDevice(profile: ReceiverShellDeviceProfile): ConnectReceiverDevice {
+  const updatePolicy = receiverUpdatePolicy(profile);
+  const status = profile.status || (profile.receiverInstallId ? "bound" : "setup_pending");
+  const displayName = profile.mainConnectUserDisplayName?.trim() || "";
+  const presence = receiverPresence(profile.lastSeenAt, status);
+
+  return {
+    active: status !== "revoked",
+    capabilityStatuses: profile.capabilityStatuses,
+    careCircleId: profile.careCircleId,
+    deviceOwner: profile.deviceOwner,
+    hardwareProfile: profile.hardwareProfile,
+    id: profile.receiverDeviceId,
+    lastRecoveryAction: profile.lastRecoveryAction,
+    lastRecoveryAt: profile.lastRecoveryAt,
+    lastSeenAt: profile.lastSeenAt,
+    lockTaskActive: profile.lockTaskActive,
+    lockTaskPermitted: profile.lockTaskPermitted,
+    locationLabel: displayName ? `${displayName}'s Receiver` : "Receiver",
+    name: displayName ? `${displayName}'s Receiver` : "Receiver",
+    nativeManufacturer: profile.nativeManufacturer,
+    nativeModel: profile.nativeModel,
+    nativeSdk: profile.nativeSdk,
+    nativeVersionCode: profile.nativeVersionCode,
+    nativeVersionName: profile.nativeVersionName,
+    pairedAt: profile.receiverInstallId ? profile.lastSeenAt : undefined,
+    presence,
+    provisioningCompletedAt: profile.provisioningCompletedAt,
+    receiverId: profile.receiverDeviceId,
+    receiverMode: profile.receiverMode,
+    shellVersion: profile.shellVersion,
+    status,
+    updateAction: updatePolicy.updateAction,
+    updateAvailable: updatePolicy.updateAvailable,
+    updateRequired: updatePolicy.updateRequired,
+  };
+}
+
+function receiverUpdatePolicy(profile: ReceiverShellDeviceProfile) {
+  return receiverShellUpdatePolicy(
+    {
+      hardwareProfile: profile.hardwareProfile,
+      nativeVersionCode: profile.nativeVersionCode,
+      nativeVersionName: profile.nativeVersionName,
+      shellVersion: profile.shellVersion,
+    },
+    {
+      installUrl: process.env.CONNECT_RECEIVER_APK_URL,
+      latestVersionCode: numberFromEnv(process.env.CONNECT_RECEIVER_LATEST_VERSION_CODE),
+      latestVersionName: process.env.CONNECT_RECEIVER_LATEST_VERSION_NAME,
+      minSupportedVersionCode: numberFromEnv(
+        process.env.CONNECT_RECEIVER_MIN_SUPPORTED_VERSION_CODE
+      ),
+      releaseChannel: process.env.CONNECT_RECEIVER_RELEASE_CHANNEL,
+      releaseNotesUrl: process.env.CONNECT_RECEIVER_RELEASE_NOTES_URL,
+    }
+  );
+}
+
+function receiverPresence(lastSeenAt: string | undefined, status: string) {
+  if (status === "revoked") {
+    return { label: "Revoked", online: false, state: "revoked" };
+  }
+  if (!lastSeenAt) {
+    return { label: "No heartbeat yet", online: false, state: "offline" };
+  }
+
+  const lastSeenMs = new Date(lastSeenAt).getTime();
+  if (!Number.isFinite(lastSeenMs)) {
+    return { label: "Heartbeat time unreadable", online: false, state: "stale" };
+  }
+
+  const ageMs = Date.now() - lastSeenMs;
+  if (ageMs <= 2 * 60 * 1000) {
+    return { label: "Online", lastSeenAgeMs: ageMs, online: true, state: "online" };
+  }
+  if (ageMs <= 10 * 60 * 1000) {
+    return {
+      label: "Recently online",
+      lastSeenAgeMs: ageMs,
+      online: false,
+      state: "stale",
+    };
+  }
+  return { label: "Offline", lastSeenAgeMs: ageMs, online: false, state: "offline" };
 }
 
 function numberFromEnv(value: string | undefined) {

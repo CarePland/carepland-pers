@@ -1,6 +1,7 @@
 export type ConnectProvisioningLifecycleStatus =
   | "active"
   | "available"
+  | "bound"
   | "connected"
   | "expired"
   | "inactive"
