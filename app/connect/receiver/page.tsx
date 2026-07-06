@@ -25,20 +25,21 @@ export default async function ConnectReceiverPage({
   searchParams,
 }: ConnectReceiverPageProps) {
   const params = await searchParams;
-  if (shouldUseLegacyReceiver(params)) {
+  if (shouldUseClassicWebViewReceiver(params)) {
     const nextParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
       if (typeof value === "string" && value) {
         nextParams.set(key, value);
       }
     });
+    nextParams.set("receiver_runtime", "classic_webview");
     redirect(`/connect/receiver/legacy?${nextParams.toString()}`);
   }
 
   return <ConnectReceiver />;
 }
 
-function shouldUseLegacyReceiver(params: {
+function shouldUseClassicWebViewReceiver(params: {
   code?: string;
   detectedHardwareProfile?: string;
   device?: string;
@@ -50,8 +51,8 @@ function shouldUseLegacyReceiver(params: {
 }) {
   const nativeSdk = Number.parseInt(params.nativeSdk || "", 10);
   const profile = `${params.device || ""} ${params.detectedHardwareProfile || ""}`.toLowerCase();
-  const legacyAndroidVersion = Number.isFinite(nativeSdk) && nativeSdk <= 25;
-  const knownLegacyHardware = profile.includes("gxv3370");
+  const classicWebViewAndroidVersion = Number.isFinite(nativeSdk) && nativeSdk <= 25;
+  const knownClassicWebViewHardware = profile.includes("gxv3370");
   const nativeShellClaimUrl =
     !params.nativeSdk &&
     (Boolean(params.setupClaim) ||
@@ -60,5 +61,5 @@ function shouldUseLegacyReceiver(params: {
       Boolean(params.code) ||
       params.receiverBindingStatus === "claim_pending");
 
-  return legacyAndroidVersion || knownLegacyHardware || nativeShellClaimUrl;
+  return classicWebViewAndroidVersion || knownClassicWebViewHardware || nativeShellClaimUrl;
 }

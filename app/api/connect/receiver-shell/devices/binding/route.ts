@@ -46,6 +46,7 @@ export async function POST(request: Request) {
       nativeVersionName: binding.nativeVersionName,
       ok: true,
       provisioningCompletedAt: binding.provisioningCompletedAt,
+      mainConnectUserPersonId: binding.mainConnectUserPersonId,
       receiverDeviceId: binding.receiverDeviceId,
       receiverMode: binding.receiverMode,
       receiverUrl: binding.receiverUrl,

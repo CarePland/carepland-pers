@@ -11,7 +11,7 @@ export function GET(request: NextRequest) {
   const appointmentTime = searchParams.get("appointmentTime") || "2 PM";
 
   return new Response(
-    legacyReceiverHtml({
+    classicWebViewReceiverHtml({
       appointmentDay,
       appointmentTime,
       appointmentTitle,
@@ -27,7 +27,7 @@ export function GET(request: NextRequest) {
   );
 }
 
-function legacyReceiverHtml({
+function classicWebViewReceiverHtml({
   appointmentDay,
   appointmentTime,
   appointmentTitle,
@@ -63,7 +63,7 @@ function legacyReceiverHtml({
       box-sizing: border-box;
       display: none;
       height: 100%;
-      padding: 16px 22px;
+      padding: 14px 20px;
       width: 100%;
     }
     .screenActive {
@@ -71,6 +71,7 @@ function legacyReceiverHtml({
     }
     .homeTop {
       display: table;
+      height: 138px;
       table-layout: fixed;
       width: 100%;
     }
@@ -80,13 +81,13 @@ function legacyReceiverHtml({
       width: 33.333%;
     }
     .time {
-      font-size: 56px;
+      font-size: 52px;
       font-weight: 900;
       line-height: 1;
     }
     .date {
       color: #5d6961;
-      font-size: 28px;
+      font-size: 26px;
       font-weight: 900;
       margin-top: 8px;
     }
@@ -97,23 +98,23 @@ function legacyReceiverHtml({
       box-sizing: border-box;
       margin: 0 auto;
       max-width: 430px;
-      padding: 12px 16px;
+      padding: 10px 16px;
       text-align: center;
     }
     .apptDay {
       color: #5d6961;
-      font-size: 28px;
+      font-size: 26px;
       font-weight: 900;
     }
     .apptTitle {
-      font-size: 31px;
+      font-size: 29px;
       font-weight: 900;
       line-height: 1.05;
       margin-top: 4px;
     }
     .apptTime {
       color: #5d6961;
-      font-size: 31px;
+      font-size: 29px;
       font-weight: 900;
       margin-top: 4px;
     }
@@ -140,8 +141,8 @@ function legacyReceiverHtml({
     .grid {
       box-sizing: border-box;
       display: table;
-      height: calc(100% - 166px);
-      margin-top: 24px;
+      height: calc(100% - 154px);
+      margin-top: 16px;
       table-layout: fixed;
       width: 100%;
     }
@@ -152,7 +153,7 @@ function legacyReceiverHtml({
       box-sizing: border-box;
       display: table-cell;
       height: 50%;
-      padding: 12px 16px;
+      padding: 10px 14px;
       vertical-align: middle;
       width: 50%;
     }
@@ -319,6 +320,69 @@ function legacyReceiverHtml({
       margin-top: 18px;
       text-align: center;
     }
+    .miniStatus {
+      color: #5d6961;
+      font-size: 20px;
+      font-weight: 900;
+      margin-top: 8px;
+      text-align: right;
+    }
+    .focusStrip {
+      color: #101915;
+      font-size: 22px;
+      font-weight: 900;
+      margin-top: 8px;
+      min-height: 28px;
+      overflow: hidden;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .messageList {
+      font-size: 32px;
+      font-weight: 900;
+      line-height: 1.2;
+      margin-top: 26px;
+    }
+    .messageItem {
+      border-bottom: 2px solid #d4d9d2;
+      padding: 14px 0;
+    }
+    @media (orientation: portrait) {
+      body {
+        overflow: auto;
+      }
+      .screen {
+        min-height: 100%;
+        overflow: auto;
+        padding: 18px;
+      }
+      .homeTop,
+      .topCell,
+      .grid,
+      .row,
+      .cell {
+        display: block;
+        height: auto;
+        width: 100%;
+      }
+      .topCell {
+        margin-bottom: 14px;
+        text-align: center;
+      }
+      .person,
+      .miniStatus {
+        text-align: center;
+      }
+      .grid {
+        margin-top: 10px;
+      }
+      .cell {
+        padding: 8px 0;
+      }
+      .bigButton {
+        height: 104px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -330,15 +394,17 @@ function legacyReceiverHtml({
       </div>
       <div class="topCell">
         <button class="apptPill" data-screen="appointmentScreen">
-          <div class="apptDay">${escapeHtml(appointmentDay)}</div>
-          <div class="apptTitle">${escapeHtml(appointmentTitle)}</div>
-          <div class="apptTime">${escapeHtml(appointmentTime)}</div>
+          <div class="apptDay" id="homeAppointmentDay">${escapeHtml(appointmentDay)}</div>
+          <div class="apptTitle" id="homeAppointmentTitle">${escapeHtml(appointmentTitle)}</div>
+          <div class="apptTime" id="homeAppointmentTime">${escapeHtml(appointmentTime)}</div>
         </button>
+        <div class="focusStrip" id="focusStrip">Loading Today&apos;s Focus...</div>
       </div>
       <div class="topCell person">
         <div class="greeting" id="greeting">Good afternoon</div>
-        <div class="name">${escapeHtml(displayName)}</div>
-        <div class="room">${escapeHtml(locationLabel)}</div>
+        <div class="name" id="receiverName">${escapeHtml(displayName)}</div>
+        <div class="room" id="receiverLocation">${escapeHtml(locationLabel)}</div>
+        <div class="miniStatus" id="connectionStatus">Starting...</div>
       </div>
     </div>
     <div class="grid">
@@ -398,8 +464,9 @@ function legacyReceiverHtml({
     </div>
     <div class="panelBody">
       <div class="whiteCard">
-        <div class="detailTitle">${escapeHtml(appointmentTitle)}</div>
-        <div class="detailTime">${escapeHtml(appointmentDay)} &bull; ${escapeHtml(appointmentTime)}</div>
+        <div class="detailTitle" id="appointmentDetailTitle">${escapeHtml(appointmentTitle)}</div>
+        <div class="detailTime" id="appointmentDetailTime">${escapeHtml(appointmentDay)} &bull; ${escapeHtml(appointmentTime)}</div>
+        <div class="sent" id="appointmentDetailMeta"></div>
         <button class="doneButton" data-screen="homeScreen">Done</button>
       </div>
     </div>
@@ -412,16 +479,70 @@ function legacyReceiverHtml({
     </div>
     <div class="panelBody">
       <div class="whiteCard">
-        <div class="emptyState">No messages yet.</div>
-        <div class="detailTime">&lt; &nbsp; 1 / 1 &nbsp; &gt;</div>
+        <div class="emptyState" id="messagesEmpty">Loading messages...</div>
+        <div class="messageList" id="messageList"></div>
+        <div class="detailTime" id="messagesPager">&lt; &nbsp; 1 / 1 &nbsp; &gt;</div>
       </div>
     </div>
   </div>
 
   <script>
     (function () {
+      var receiverState = {
+        receiverDeviceId: "",
+        receiverInstallId: "",
+        personId: "",
+        online: false
+      };
+
       function pad(value) {
         return value < 10 ? "0" + value : "" + value;
+      }
+      function text(value) {
+        return value === null || value === undefined ? "" : String(value);
+      }
+      function setText(id, value) {
+        var element = document.getElementById(id);
+        if (element) element.innerHTML = escapeHtml(text(value));
+      }
+      function setHtml(id, value) {
+        var element = document.getElementById(id);
+        if (element) element.innerHTML = value;
+      }
+      function escapeHtml(value) {
+        return text(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+      function jsonRequest(method, url, body, callback) {
+        try {
+          var request = new XMLHttpRequest();
+          request.open(method, url, true);
+          request.setRequestHeader("Accept", "application/json");
+          if (receiverState.receiverDeviceId) {
+            request.setRequestHeader("x-carepland-receiver-device-id", receiverState.receiverDeviceId);
+          }
+          if (receiverState.receiverInstallId) {
+            request.setRequestHeader("x-carepland-receiver-install-id", receiverState.receiverInstallId);
+          }
+          if (body) {
+            request.setRequestHeader("Content-Type", "application/json");
+          }
+          request.onreadystatechange = function () {
+            if (request.readyState !== 4) return;
+            var payload = {};
+            try {
+              payload = JSON.parse(request.responseText || "{}");
+            } catch (error) {}
+            callback(request.status, payload);
+          };
+          request.send(body ? JSON.stringify(body) : null);
+        } catch (error) {
+          callback(0, { error: "Connection failed." });
+        }
       }
       function updateClock() {
         var now = new Date();
@@ -460,7 +581,7 @@ function legacyReceiverHtml({
           };
         }
         document.getElementById("sendQuestionButton").onclick = function () {
-          document.getElementById("askStatus").innerHTML = "Sent to Andrew.";
+          sendQuestion();
         };
       }
       function readNativeConfig() {
@@ -473,15 +594,16 @@ function legacyReceiverHtml({
           return null;
         }
       }
-      function postNativeBinding(config) {
+      function postNativeBinding(config, callback) {
         if (!config || !config.receiverDeviceId || !config.receiverInstallId) {
+          setText("connectionStatus", "Setup needed");
+          if (callback) callback(null);
           return;
         }
+        receiverState.receiverDeviceId = config.receiverDeviceId;
+        receiverState.receiverInstallId = config.receiverInstallId;
         try {
-          var request = new XMLHttpRequest();
-          request.open("POST", "/api/connect/receiver-shell/devices/binding", true);
-          request.setRequestHeader("Content-Type", "application/json");
-          request.send(JSON.stringify({
+          jsonRequest("POST", "/api/connect/receiver-shell/devices/binding", {
             capabilities: config.capabilities || {},
             deviceOwner: config.deviceOwner,
             lastRecoveryAction: config.lastRecoveryAction,
@@ -498,8 +620,165 @@ function legacyReceiverHtml({
             receiverInstallId: config.receiverInstallId,
             receiverMode: config.receiverMode,
             shellVersion: config.shellVersion
-          }));
-        } catch (error) {}
+          }, function (status, payload) {
+            if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+              receiverState.online = true;
+              receiverState.personId = payload.mainConnectUserPersonId || receiverState.personId;
+              setText("connectionStatus", "Online");
+              if (callback) callback(payload);
+              return;
+            }
+            receiverState.online = false;
+            setText("connectionStatus", "Setup needed");
+            if (window.CarePlandReceiver && window.CarePlandReceiver.receiverSetupRequired) {
+              window.CarePlandReceiver.receiverSetupRequired(payload.error || "Receiver setup is required.");
+            }
+            if (callback) callback(null);
+          });
+        } catch (error) {
+          setText("connectionStatus", "Offline");
+        }
+      }
+      function formatAppointmentDate(value) {
+        if (!value) return "";
+        try {
+          var date = new Date(value);
+          var now = new Date();
+          var tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+          var sameTomorrow =
+            date.getFullYear() === tomorrow.getFullYear() &&
+            date.getMonth() === tomorrow.getMonth() &&
+            date.getDate() === tomorrow.getDate();
+          if (sameTomorrow) return "Tomorrow";
+          return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()] + ", " +
+            ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getMonth()] +
+            " " + date.getDate();
+        } catch (error) {
+          return "";
+        }
+      }
+      function formatAppointmentTime(value) {
+        if (!value) return "";
+        try {
+          var date = new Date(value);
+          var hours = date.getHours();
+          var minutes = date.getMinutes();
+          var suffix = hours >= 12 ? "PM" : "AM";
+          var displayHour = hours % 12;
+          if (displayHour === 0) displayHour = 12;
+          return displayHour + (minutes ? ":" + pad(minutes) : "") + " " + suffix;
+        } catch (error) {
+          return "";
+        }
+      }
+      function loadAppointments() {
+        if (!receiverState.personId) return;
+        jsonRequest(
+          "GET",
+          "/api/connect/appointments?personId=" + encodeURIComponent(receiverState.personId),
+          null,
+          function (status, payload) {
+            var appointments = payload && payload.appointments && payload.appointments.length
+              ? payload.appointments
+              : [];
+            if (!appointments.length) {
+              setText("homeAppointmentDay", "No appointment");
+              setText("homeAppointmentTitle", "Nothing scheduled");
+              setText("homeAppointmentTime", "");
+              setText("appointmentDetailTitle", "No upcoming appointments");
+              setText("appointmentDetailTime", "");
+              setText("appointmentDetailMeta", "CarePland will show the next appointment here.");
+              return;
+            }
+            var appt = appointments[0];
+            var title = appt.title || appt.reason || "Appointment";
+            var day = formatAppointmentDate(appt.startsAt);
+            var time = formatAppointmentTime(appt.startsAt);
+            setText("homeAppointmentDay", day || "Upcoming");
+            setText("homeAppointmentTitle", title);
+            setText("homeAppointmentTime", time);
+            setText("appointmentDetailTitle", title);
+            setHtml("appointmentDetailTime", escapeHtml(day || "Upcoming") + " &bull; " + escapeHtml(time));
+            setText("appointmentDetailMeta", appt.providerName || appt.providerOrganization || "");
+          }
+        );
+      }
+      function loadTodayFocus() {
+        if (!receiverState.personId) return;
+        jsonRequest(
+          "GET",
+          "/api/connect/today-focus?personId=" + encodeURIComponent(receiverState.personId),
+          null,
+          function (status, payload) {
+            var items = payload && payload.focusItems && payload.focusItems.length
+              ? payload.focusItems
+              : [];
+            if (!items.length) {
+              setText("focusStrip", "Today's Focus: nothing due");
+              return;
+            }
+            setText("focusStrip", "Today's Focus: " + items[0].title);
+          }
+        );
+      }
+      function loadMessages() {
+        if (!receiverState.personId) return;
+        jsonRequest(
+          "GET",
+          "/api/connect/messages?personId=" + encodeURIComponent(receiverState.personId),
+          null,
+          function (status, payload) {
+            var messages = payload && payload.messages && payload.messages.length
+              ? payload.messages
+              : [];
+            var html = "";
+            var i;
+            if (!messages.length) {
+              setText("messagesEmpty", "No messages yet.");
+              setHtml("messageList", "");
+              setHtml("messagesPager", "&lt; &nbsp; 1 / 1 &nbsp; &gt;");
+              return;
+            }
+            setText("messagesEmpty", "");
+            for (i = 0; i < messages.length && i < 4; i += 1) {
+              html += '<div class="messageItem">' + escapeHtml(messages[i].body || messages[i].transcript || "Message") + "</div>";
+            }
+            setHtml("messageList", html);
+            setText("messagesPager", "1 / " + Math.max(1, messages.length));
+          }
+        );
+      }
+      function sendQuestion() {
+        var input = document.getElementById("questionInput");
+        var body = input ? input.value.replace(/^\\s+|\\s+$/g, "") : "";
+        if (!body || body === "Example: I need milk") {
+          setText("askStatus", "Type or tap a question first.");
+          return;
+        }
+        if (!receiverState.personId) {
+          setText("askStatus", "Receiver is still connecting.");
+          return;
+        }
+        setText("askStatus", "Sending...");
+        jsonRequest("POST", "/api/connect/messages", {
+          body: body,
+          clientMessageId: "classic-webview-receiver-text-" + new Date().getTime(),
+          from: "receiver_user",
+          mainConnectUserPersonId: receiverState.personId,
+          messageType: "text",
+          receiverDeviceId: receiverState.receiverDeviceId,
+          receiverId: receiverState.receiverDeviceId || "classic-webview-receiver",
+          receiverInstallId: receiverState.receiverInstallId,
+          source: "classic_webview_receiver_ask",
+          to: "Andrew"
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            setText("askStatus", "Sent to Andrew.");
+            loadMessages();
+            return;
+          }
+          setText("askStatus", payload.error || "Could not send yet.");
+        });
       }
       function markReady() {
         try {
@@ -511,9 +790,17 @@ function legacyReceiverHtml({
       updateClock();
       bindButtons();
       window.setInterval(updateClock, 30000);
-      postNativeBinding(readNativeConfig());
+      postNativeBinding(readNativeConfig(), function () {
+        loadAppointments();
+        loadTodayFocus();
+        loadMessages();
+      });
       window.setInterval(function () {
-        postNativeBinding(readNativeConfig());
+        postNativeBinding(readNativeConfig(), function () {
+          loadAppointments();
+          loadTodayFocus();
+          loadMessages();
+        });
       }, 60000);
       markReady();
     }());

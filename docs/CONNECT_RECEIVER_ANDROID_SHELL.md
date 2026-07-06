@@ -7,7 +7,7 @@ The standalone Connect Receiver APK should be a generic Android appliance shell 
 - Keep the native shell under `android/connect-receiver`.
 - Keep the product experience in the web app, currently `/connect/receiver`.
 - Use one APK for near-term Receiver installs. The APK should detect native/hardware/WebView capability and choose the appropriate hosted renderer rather than creating separate APKs for old and new devices.
-- Keep Receiver renderers under strict directory separation. Modern React Receiver work belongs under the modern `/connect/receiver` route and supporting React components. Old-WebView appliance work belongs under the legacy `/connect/receiver/legacy` route and must not depend on modern React/Next client chunks.
+- Keep Receiver renderers under strict directory separation. Modern React Receiver work belongs under the `modern_web` runtime at `/connect/receiver` and supporting React components. Android 7-era and lower-capability appliance WebViews belong under the `classic_webview` runtime at `/connect/receiver/legacy` and must not depend on modern React/Next client chunks.
 - Treat the APK as appliance plumbing: launch, provisioning, permissions, screen/wake behavior, reboot recovery, kiosk/device-owner support, and future hardware hooks.
 - Treat the server/web layer as the owner of UI, fixed-resolution layouts, copy, workflows, remote config, and receiver-user changes.
 - Use web-first provisioning links as short-lived claim tickets. Do not bake account identity or permanent credentials into the APK or URL.
@@ -27,12 +27,19 @@ android/connect-receiver/
   recovery, WebView loading, device detection, version reporting.
 
 app/connect/receiver/
-  Modern Receiver route. Owns the modern React/Next Receiver experience for
-  current WebViews and browsers.
+  Modern Receiver route. Owns the modern_web React/Next Receiver experience
+  for current WebViews and browsers.
 
 app/connect/receiver/legacy/
-  Legacy Receiver route. Owns Android 7-era and old appliance WebView surfaces
-  using plain server-rendered HTML/CSS and Android-7-compatible JavaScript.
+  Classic WebView Receiver route. Owns the classic_webview experience for
+  Android 7-era and lower-capability appliance WebViews using plain
+  server-rendered HTML/CSS and Android-7-compatible JavaScript.
+```
+
+Runtime names:
+
+```text
+receiver_runtime = classic_webview | modern_web
 ```
 
 Architectural rules:
@@ -40,25 +47,25 @@ Architectural rules:
 - Do not fork APKs solely for UI/layout differences. Prefer one APK selecting a
   renderer based on device facts, WebView capability, hardware profile, or
   server-side routing.
-- Do not make the legacy route import or depend on modern React Receiver
+- Do not make the Classic WebView route import or depend on modern React Receiver
   components, hooks, hydration behavior, or Next client chunks.
-- Do not hide broad legacy/modern differences behind scattered inline checks in
-  the modern Receiver. If a screen needs old-WebView-safe behavior, implement it
-  in the legacy route.
+- Do not hide broad Classic WebView/modern differences behind scattered inline checks in
+  the modern Receiver. If a screen needs Classic WebView-safe behavior,
+  implement it in the Classic WebView route.
 - Share APIs, authorization, person-scoping, copy/config sources, and product
   rules where practical.
 - Keep display/layout code separate when browser capability is the reason for
   divergence.
-- Legacy should be considered a real appliance renderer, not a temporary error
-  page or mockup.
+- Classic WebView should be considered a real appliance renderer for supported
+  lower-cost and older hardware, not a temporary error page or mockup.
 
 Near-term implementation priority:
 
-- Polish the Android 7 / old-WebView legacy path first because the current
-  primary test hardware includes older appliance devices.
+- Polish the Android 7 / Classic WebView path first because the current primary
+  test hardware includes appliance devices that benefit from this runtime.
 - Build newer React Receiver layouts later against the same backend contracts.
 - When adding new Receiver product behavior, decide explicitly whether it is
-  required in legacy, modern, or both.
+  required in classic_webview, modern_web, or both.
 
 ## Provisioning Contract
 
@@ -85,7 +92,7 @@ carepland://receiver/provision?claim=APP_CLAIM_CODE&device=android_receiver
 https://carepland.com/connect/provision?claim=APP_CLAIM_CODE&device=android_receiver
 ```
 
-Hardware profile and UI layout are separate. `hardwareProfile` describes the installed device or test harness; `uiLayout` describes the hosted Receiver presentation. The legacy `device` parameter remains a compatibility shortcut for early testing.
+Hardware profile, UI layout, and Receiver runtime are separate. `hardwareProfile` describes the installed device or test harness; `uiLayout` describes the hosted Receiver presentation; `receiver_runtime` describes whether the hosted surface uses `classic_webview` or `modern_web`. The existing `device` parameter remains a compatibility shortcut for early testing.
 
 Examples:
 
