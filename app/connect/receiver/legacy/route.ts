@@ -471,6 +471,58 @@ function classicWebViewReceiverHtml({
       box-shadow: 0 2px 0 rgba(70, 64, 56, 0.65);
       transform: translateY(5px);
     }
+    .layoutMenuWrap {
+      position: fixed;
+      right: 18px;
+      top: 18px;
+      z-index: 21;
+    }
+    .layoutButton {
+      background: #fbfaf5;
+      border: 3px solid #17231d;
+      border-radius: 7px;
+      box-shadow: 0 5px 0 rgba(70, 64, 56, 0.65);
+      color: #17231d;
+      font-size: 22px;
+      font-weight: 900;
+      min-height: 54px;
+      min-width: 126px;
+      padding: 8px 14px;
+    }
+    .layoutButton:active {
+      box-shadow: 0 1px 0 rgba(70, 64, 56, 0.65);
+      transform: translateY(4px);
+    }
+    .layoutMenu {
+      background: #fbfaf5;
+      border: 3px solid #17231d;
+      border-radius: 7px;
+      box-shadow: 0 7px 0 rgba(70, 64, 56, 0.5);
+      display: none;
+      gap: 7px;
+      margin-top: 10px;
+      padding: 9px;
+      width: 190px;
+    }
+    .layoutMenuOpen {
+      display: grid;
+    }
+    .layoutMenu button {
+      background: #f1f3ee;
+      border: 3px solid #aeb6b0;
+      border-radius: 6px;
+      color: #17231d;
+      font-size: 22px;
+      font-weight: 900;
+      min-height: 54px;
+      text-align: left;
+      padding: 8px 12px;
+    }
+    .layoutMenu button.activeLayout {
+      background: #26661a;
+      border-color: #17440f;
+      color: #ffffff;
+    }
     @media (orientation: portrait) {
       body {
         overflow: auto;
@@ -512,6 +564,10 @@ function classicWebViewReceiverHtml({
         min-height: 62px;
         min-width: 180px;
         right: 10px;
+      }
+      .layoutMenuWrap {
+        right: 10px;
+        top: 10px;
       }
     }
   </style>
@@ -641,6 +697,14 @@ function classicWebViewReceiverHtml({
   </div>
 
   <button class="fullscreenPrompt" id="fullscreenPrompt" type="button">Fill Screen</button>
+  <div class="layoutMenuWrap">
+    <button class="layoutButton" id="layoutButton" type="button" aria-haspopup="menu" aria-expanded="false">LAYOUT</button>
+    <div class="layoutMenu" id="layoutMenu" role="menu" aria-label="Receiver layout">
+      <button class="activeLayout" type="button" role="menuitemradio" aria-checked="true" data-layout-choice="old">Old Web</button>
+      <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="classic">Classic</button>
+      <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="focus">Focus</button>
+    </div>
+  </div>
 
   <script>
     (function () {
@@ -778,6 +842,32 @@ function classicWebViewReceiverHtml({
           if (prompt) prompt.innerHTML = "Use Chrome Menu";
         }
       }
+      function setLayoutMenuOpen(open) {
+        var menu = document.getElementById("layoutMenu");
+        var button = document.getElementById("layoutButton");
+        if (!menu || !button) return;
+        menu.className = open ? "layoutMenu layoutMenuOpen" : "layoutMenu";
+        button.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+      function modernReceiverUrl(homeLayout) {
+        var url = new URL("/connect/receiver", window.location.origin);
+        url.searchParams.set("receiver_runtime", "modern_web");
+        url.searchParams.set("device", "gxv3370");
+        url.searchParams.set("hardwareProfile", "grandstream_gxv3370");
+        url.searchParams.set("uiLayout", "desk_phone_1024x600");
+        if (homeLayout) url.searchParams.set("homeLayout", homeLayout);
+        return url.toString();
+      }
+      function chooseReceiverLayout(choice) {
+        setLayoutMenuOpen(false);
+        if (choice === "classic") {
+          window.location.assign(modernReceiverUrl(""));
+          return;
+        }
+        if (choice === "focus") {
+          window.location.assign(modernReceiverUrl("focus_v1"));
+        }
+      }
       function bindButtons() {
         var buttons = document.getElementsByTagName("button");
         var i;
@@ -798,6 +888,16 @@ function classicWebViewReceiverHtml({
         document.getElementById("fullscreenPrompt").onclick = function () {
           requestReceiverFullscreen();
         };
+        document.getElementById("layoutButton").onclick = function () {
+          var menu = document.getElementById("layoutMenu");
+          setLayoutMenuOpen(!menu || menu.className.indexOf("layoutMenuOpen") < 0);
+        };
+        var layoutChoices = document.querySelectorAll("[data-layout-choice]");
+        for (i = 0; i < layoutChoices.length; i += 1) {
+          layoutChoices[i].onclick = function () {
+            chooseReceiverLayout(this.getAttribute("data-layout-choice"));
+          };
+        }
       }
       function readNativeConfig() {
         try {

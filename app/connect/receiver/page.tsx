@@ -19,6 +19,7 @@ type ConnectReceiverPageProps = {
     nativeSdk?: string;
     receiverBindingStatus?: string;
     receiverInstallId?: string;
+    receiver_runtime?: string;
     setupClaim?: string;
     setupCode?: string;
     uiLayout?: string;
@@ -36,7 +37,7 @@ export default async function ConnectReceiverPage({
     userAgent: requestHeaders.get("user-agent"),
   });
 
-  if (shouldUseClassicWebViewReceiver(params) || hints.useClassic) {
+  if (params.receiver_runtime !== "modern_web" && (shouldUseClassicWebViewReceiver(params) || hints.useClassic)) {
     const nextParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
       if (typeof value === "string" && value) {
@@ -65,6 +66,7 @@ function shouldUseClassicWebViewReceiver(params: {
   nativeSdk?: string;
   receiverBindingStatus?: string;
   receiverInstallId?: string;
+  receiver_runtime?: string;
   setupClaim?: string;
   setupCode?: string;
   uiLayout?: string;

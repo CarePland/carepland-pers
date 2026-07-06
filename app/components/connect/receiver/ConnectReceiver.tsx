@@ -768,7 +768,7 @@ function readInitialDeskPhoneMode() {
   return readReceiverProfileSelection().uiLayout === "desk_phone_1024x600";
 }
 
-function readInitialGxvHomeLayout() {
+function readInitialGxvHomeLayout(): GxvHomeLayout {
   if (typeof window === "undefined") return "classic";
   const params = new URLSearchParams(window.location.search);
   const value = normalizedProfileValue(
@@ -782,6 +782,8 @@ function readInitialGxvHomeLayout() {
     ? "focus_v1"
     : "classic";
 }
+
+type GxvHomeLayout = "classic" | "focus_v1";
 
 function statusLooksEnabled(value?: string | null) {
   return ["1", "active", "allowed", "available", "enabled", "locked", "on", "permitted", "true"].includes(
@@ -1769,7 +1771,8 @@ function answerForAsk(rawText: string, selectedContact: Contact): AskAnswer {
 export function ConnectReceiver() {
   const initialDevicePixelRatioRef = useRef(initialReceiverDevicePixelRatio());
   const [deskPhoneMode] = useState(readInitialDeskPhoneMode);
-  const [gxvHomeLayout, setGxvHomeLayout] = useState(readInitialGxvHomeLayout);
+  const [gxvHomeLayout, setGxvHomeLayout] = useState<GxvHomeLayout>(readInitialGxvHomeLayout);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [kioskManagedFullscreen] = useState(readInitialKioskManagedFullscreen);
   const [applianceStyle, setApplianceStyle] = useState<CSSProperties>(() =>
     receiverApplianceStyle(initialReceiverDevicePixelRatio(), readInitialDeskPhoneMode())
@@ -3139,11 +3142,15 @@ export function ConnectReceiver() {
     }
   }
 
-  function toggleGxvHomeLayout() {
-    const nextLayout = gxvHomeLayout === "focus_v1" ? "classic" : "focus_v1";
+  function chooseGxvHomeLayout(nextLayout: GxvHomeLayout) {
     setGxvHomeLayout(nextLayout);
+    setLayoutMenuOpen(false);
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
+      url.searchParams.set("receiver_runtime", "modern_web");
+      url.searchParams.set("device", "gxv3370");
+      url.searchParams.set("hardwareProfile", "grandstream_gxv3370");
+      url.searchParams.set("uiLayout", "desk_phone_1024x600");
       if (nextLayout === "focus_v1") {
         url.searchParams.set("homeLayout", "focus_v1");
       } else {
@@ -3155,6 +3162,58 @@ export function ConnectReceiver() {
       resetTodayFocusList(todayFocusItems);
       void refreshTodayFocus();
     }
+  }
+
+  function openClassicWebReceiverLayout() {
+    setLayoutMenuOpen(false);
+    if (typeof window === "undefined") return;
+    const url = new URL("/connect/receiver/legacy", window.location.origin);
+    url.searchParams.set("receiver_runtime", "classic_webview");
+    url.searchParams.set("device", "gxv3370");
+    url.searchParams.set("hardwareProfile", "grandstream_gxv3370");
+    url.searchParams.set("uiLayout", "desk_phone_1024x600");
+    window.location.assign(url.toString());
+  }
+
+  function renderReceiverLayoutMenu() {
+    if (!layoutMenuOpen) return null;
+
+    return (
+      <div className={styles.receiverLayoutMenu} role="menu" aria-label="Receiver layout">
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={gxvHomeLayout === "classic"}
+          onClick={(event) => {
+            event.stopPropagation();
+            chooseGxvHomeLayout("classic");
+          }}
+        >
+          Classic
+        </button>
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={gxvHomeLayout === "focus_v1"}
+          onClick={(event) => {
+            event.stopPropagation();
+            chooseGxvHomeLayout("focus_v1");
+          }}
+        >
+          Focus
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={(event) => {
+            event.stopPropagation();
+            openClassicWebReceiverLayout();
+          }}
+        >
+          Old Web
+        </button>
+      </div>
+    );
   }
 
   function completeTodayFocusItem(item: ReceiverTodayFocusHomeItem) {
@@ -5189,17 +5248,22 @@ export function ConnectReceiver() {
                       </button>
                     ) : null}
                     {deskPhoneMode ? (
-                      <button
-                        className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
-                        type="button"
-                        aria-label={gxvHomeLayout === "focus_v1" ? "Use classic GXV home layout" : "Try GXV focus home layout"}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleGxvHomeLayout();
-                        }}
-                      >
-                        {gxvHomeLayout === "focus_v1" ? "OLD" : "V1"}
-                      </button>
+                      <div className={styles.receiverLayoutControl}>
+                        <button
+                          className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={layoutMenuOpen}
+                          aria-label="Choose Receiver layout"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setLayoutMenuOpen((open) => !open);
+                          }}
+                        >
+                          LAYOUT
+                        </button>
+                        {renderReceiverLayoutMenu()}
+                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -5341,17 +5405,22 @@ export function ConnectReceiver() {
                         {fullscreenActive ? "MIN" : "MAX"}
                       </button>
                     ) : null}
-                    <button
-                      className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
-                      type="button"
-                      aria-label="Use classic GXV home layout"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleGxvHomeLayout();
-                      }}
-                    >
-                      OLD
-                    </button>
+                    <div className={styles.receiverLayoutControl}>
+                      <button
+                        className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
+                        type="button"
+                        aria-haspopup="menu"
+                        aria-expanded={layoutMenuOpen}
+                        aria-label="Choose Receiver layout"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setLayoutMenuOpen((open) => !open);
+                        }}
+                      >
+                        LAYOUT
+                      </button>
+                      {renderReceiverLayoutMenu()}
+                    </div>
                   </div>
                   <section className={styles.focusHomeGreetingPanel} aria-label="Receiver">
                     <a

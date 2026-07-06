@@ -455,7 +455,46 @@
 }
 
 .layoutTinyButton {
-  min-width: 44px;
+  min-width: 78px;
+}
+
+.receiverLayoutControl {
+  position: relative;
+  display: inline-grid;
+}
+
+.receiverLayoutMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 35;
+  display: grid;
+  width: 150px;
+  gap: 5px;
+  padding: 8px;
+  border: 2px solid #454b46;
+  border-radius: 7px;
+  background: #fffdf7;
+  box-shadow: 0 7px 0 rgba(42, 31, 21, 0.26);
+}
+
+.receiverLayoutMenu button {
+  min-height: 40px;
+  border: 2px solid #a8ada7;
+  border-radius: 5px;
+  background: #f3f4ef;
+  color: #17231d;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.receiverLayoutMenu button[aria-checked="true"] {
+  border-color: #17440f;
+  background: #26661a;
+  color: #fff;
 }
 
 .greetingBlock {
@@ -921,6 +960,15 @@
   min-width: 0;
   min-height: 45px;
   font-size: 1rem;
+}
+
+.focusHomeLayoutControls .receiverLayoutControl {
+  width: 100%;
+}
+
+.focusHomeLayoutControls .receiverLayoutMenu {
+  top: 0;
+  right: calc(100% + 10px);
 }
 
 .focusHomeLogo {
