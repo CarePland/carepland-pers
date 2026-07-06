@@ -6,10 +6,59 @@ The standalone Connect Receiver APK should be a generic Android appliance shell 
 
 - Keep the native shell under `android/connect-receiver`.
 - Keep the product experience in the web app, currently `/connect/receiver`.
+- Use one APK for near-term Receiver installs. The APK should detect native/hardware/WebView capability and choose the appropriate hosted renderer rather than creating separate APKs for old and new devices.
+- Keep Receiver renderers under strict directory separation. Modern React Receiver work belongs under the modern `/connect/receiver` route and supporting React components. Old-WebView appliance work belongs under the legacy `/connect/receiver/legacy` route and must not depend on modern React/Next client chunks.
 - Treat the APK as appliance plumbing: launch, provisioning, permissions, screen/wake behavior, reboot recovery, kiosk/device-owner support, and future hardware hooks.
 - Treat the server/web layer as the owner of UI, fixed-resolution layouts, copy, workflows, remote config, and receiver-user changes.
 - Use web-first provisioning links as short-lived claim tickets. Do not bake account identity or permanent credentials into the APK or URL.
 - The preferred setup flow is an authenticated Supabase-backed web approval page first, followed by a native app claim link only after the server has verified the setup code and the approving user.
+
+## Receiver Renderer Hierarchy
+
+The Receiver platform has one native shell and multiple hosted display renderers.
+These renderers should be treated as separate implementation directories, not as
+one shared UI surface with conditional branches scattered through the code.
+
+Current hierarchy:
+
+```text
+android/connect-receiver/
+  Native APK shell: install identity, provisioning, permissions, kiosk/reboot
+  recovery, WebView loading, device detection, version reporting.
+
+app/connect/receiver/
+  Modern Receiver route. Owns the modern React/Next Receiver experience for
+  current WebViews and browsers.
+
+app/connect/receiver/legacy/
+  Legacy Receiver route. Owns Android 7-era and old appliance WebView surfaces
+  using plain server-rendered HTML/CSS and Android-7-compatible JavaScript.
+```
+
+Architectural rules:
+
+- Do not fork APKs solely for UI/layout differences. Prefer one APK selecting a
+  renderer based on device facts, WebView capability, hardware profile, or
+  server-side routing.
+- Do not make the legacy route import or depend on modern React Receiver
+  components, hooks, hydration behavior, or Next client chunks.
+- Do not hide broad legacy/modern differences behind scattered inline checks in
+  the modern Receiver. If a screen needs old-WebView-safe behavior, implement it
+  in the legacy route.
+- Share APIs, authorization, person-scoping, copy/config sources, and product
+  rules where practical.
+- Keep display/layout code separate when browser capability is the reason for
+  divergence.
+- Legacy should be considered a real appliance renderer, not a temporary error
+  page or mockup.
+
+Near-term implementation priority:
+
+- Polish the Android 7 / old-WebView legacy path first because the current
+  primary test hardware includes older appliance devices.
+- Build newer React Receiver layouts later against the same backend contracts.
+- When adding new Receiver product behavior, decide explicitly whether it is
+  required in legacy, modern, or both.
 
 ## Provisioning Contract
 
