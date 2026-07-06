@@ -58,7 +58,7 @@ public class MainActivity extends Activity {
     private static final int RECEIVER_AUTO_RETRY_SECONDS = 5;
     private static final int DEDICATED_REOPEN_DELAY_MS = 1500;
     private static final int PAIRING_POLL_INTERVAL_MS = 3000;
-    private static final String SHELL_VERSION = "0.1.12";
+    private static final String SHELL_VERSION = "0.1.13";
 
     private WebView webView;
     private Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -97,8 +97,7 @@ public class MainActivity extends Activity {
             showProvisioningModeSelection();
             return;
         }
-        requestAudioPermissionIfNeeded();
-        loadReceiver();
+        startReceiverAfterSetup();
     }
 
     @Override
@@ -113,8 +112,7 @@ public class MainActivity extends Activity {
             showProvisioningModeSelection();
             return;
         }
-        requestAudioPermissionIfNeeded();
-        loadReceiver();
+        startReceiverAfterSetup();
     }
 
     @Override
@@ -661,8 +659,7 @@ public class MainActivity extends Activity {
                 showPairingRequiredScreen("Pair this Receiver before starting CarePland.");
                 return;
             }
-            requestAudioPermissionIfNeeded();
-            loadReceiver();
+            startReceiverAfterSetup();
         });
         panel.addView(startButton, wizardPrimaryParams());
 
@@ -1360,8 +1357,7 @@ public class MainActivity extends Activity {
                 showProvisioningModeSelection();
                 return;
             }
-            requestAudioPermissionIfNeeded();
-            loadReceiver();
+            startReceiverAfterSetup();
         });
         LinearLayout.LayoutParams checkButtonParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1538,8 +1534,49 @@ public class MainActivity extends Activity {
             showProvisioningModeSelection();
             return;
         }
+        startReceiverAfterSetup();
+    }
+
+    private void startReceiverAfterSetup() {
+        ReceiverConfigStore.ReceiverConfig config = ReceiverConfigStore.load(this);
+        if (!isBlank(config.setupClaim)) {
+            redeemPendingClaim(config);
+            return;
+        }
         requestAudioPermissionIfNeeded();
         loadReceiver();
+    }
+
+    private void redeemPendingClaim(ReceiverConfigStore.ReceiverConfig config) {
+        Uri receiverUri = receiverUriWithNativeDeviceInfo();
+        showReceiverLoading(receiverUri);
+        new Thread(() -> {
+            try {
+                JSONObject requestBody = new JSONObject();
+                requestBody.put("claim", config.setupClaim);
+                requestBody.put("receiverInstallId", ReceiverConfigStore.installId(MainActivity.this));
+
+                JSONObject response = postJson(claimRedeemUri(config), requestBody);
+                ReceiverConfigStore.saveBinding(
+                        MainActivity.this,
+                        response.optString("receiverDeviceId", config.receiverDeviceId),
+                        response.optString("bindingStatus", "bound"),
+                        response.optString("deviceProfile", config.deviceProfile),
+                        response.optString("hardwareProfile", config.hardwareProfile),
+                        response.optString("uiLayout", config.uiLayout)
+                );
+                runOnUiThread(() -> {
+                    requestAudioPermissionIfNeeded();
+                    loadReceiver();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> showLocalError(
+                        "CarePland paired this Receiver, but could not finish saving it on this device."
+                                + "\n\nTap Retry to try again."
+                                + "\n\nLast message: " + emptyFallback(error.getMessage(), "Unable to pair Receiver.")
+                ));
+            }
+        }).start();
     }
 
     private void openSetupPage(ReceiverConfigStore.ReceiverConfig config) {
@@ -1584,6 +1621,14 @@ public class MainActivity extends Activity {
         Uri baseUri = Uri.parse(config.receiverUrl);
         return baseUri.buildUpon()
                 .path("/api/connect/receiver-shell/pairing-sessions")
+                .clearQuery()
+                .build();
+    }
+
+    private Uri claimRedeemUri(ReceiverConfigStore.ReceiverConfig config) {
+        Uri baseUri = Uri.parse(config.receiverUrl);
+        return baseUri.buildUpon()
+                .path("/api/connect/receiver-shell/claims/redeem")
                 .clearQuery()
                 .build();
     }
@@ -1722,7 +1767,7 @@ public class MainActivity extends Activity {
         retryButton.setAllCaps(false);
         retryButton.setOnClickListener(view -> {
             if (ReceiverConfigStore.hasProvisioning(this)) {
-                loadReceiver();
+                startReceiverAfterSetup();
             } else {
                 showLocalError("");
             }
@@ -1814,7 +1859,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 if (receiverAutoRetrySecondsRemaining <= 0) {
-                    loadReceiver();
+                    startReceiverAfterSetup();
                     return;
                 }
                 if (retryNote != null) {
@@ -1958,7 +2003,7 @@ public class MainActivity extends Activity {
         public void reloadReceiver() {
             runOnUiThread(() -> {
                 if (webView != null) {
-                    loadReceiver();
+                    startReceiverAfterSetup();
                 }
             });
         }
