@@ -72,7 +72,7 @@ function classicWebViewReceiverHtml({
       --receiver-min-touch-target: ${runtimeContract.layout.uiSchemaId === "gxv3370_classic_1024x600_v1" ? "72px" : "56px"};
     }
     html, body {
-      background: #e3e7e1;
+      background: #171a18;
       color: #101915;
       font-family: Arial, Helvetica, sans-serif;
       height: 100%;
@@ -83,6 +83,16 @@ function classicWebViewReceiverHtml({
     button {
       font-family: Arial, Helvetica, sans-serif;
     }
+    .receiverFrame {
+      background: #e3e7e1;
+      height: 600px;
+      left: 0;
+      overflow: hidden;
+      position: absolute;
+      top: 0;
+      transform-origin: top left;
+      width: 1024px;
+    }
     .screen {
       box-sizing: border-box;
       display: none;
@@ -92,6 +102,228 @@ function classicWebViewReceiverHtml({
     }
     .screenActive {
       display: block;
+    }
+    .receiverHome {
+      bottom: 0;
+      left: 0;
+      position: absolute;
+      right: 0;
+      top: 0;
+    }
+    .homeLeftPane {
+      bottom: 96px;
+      left: 28px;
+      position: absolute;
+      top: 18px;
+      width: 565px;
+    }
+    .homeRightPane {
+      bottom: 96px;
+      left: 615px;
+      position: absolute;
+      right: 24px;
+      top: 18px;
+    }
+    .focusPanel {
+      box-sizing: border-box;
+      height: 155px;
+      padding: 2px 18px 0;
+      position: relative;
+    }
+    .focusPanel h1 {
+      font-size: 30px;
+      font-weight: 900;
+      line-height: 1;
+      margin: 0 0 13px;
+    }
+    .focusItem {
+      box-sizing: border-box;
+      color: #101915;
+      font-size: 27px;
+      font-weight: 900;
+      line-height: 1.1;
+      margin: 10px 0;
+      min-height: 34px;
+      overflow: hidden;
+      padding-left: 46px;
+      position: relative;
+      white-space: nowrap;
+    }
+    .focusItem:before {
+      border: 4px solid #6b746c;
+      border-radius: 5px;
+      box-sizing: border-box;
+      content: "";
+      height: 26px;
+      left: 0;
+      position: absolute;
+      top: 1px;
+      width: 26px;
+    }
+    .focusItemSecondary,
+    .focusItemTertiary {
+      display: none;
+    }
+    .homeAppointmentButton {
+      background: #fbfaf5;
+      border: 4px solid #9aa39c;
+      border-radius: 8px;
+      box-shadow: 0 7px 0 #8a867c;
+      box-sizing: border-box;
+      color: #101915;
+      display: block;
+      font-size: 32px;
+      font-weight: 900;
+      height: 108px;
+      line-height: 1.08;
+      margin: 8px 0 18px;
+      overflow: hidden;
+      padding: 0 22px;
+      text-align: left;
+      white-space: nowrap;
+      width: 100%;
+    }
+    .homeAppointmentDay,
+    .homeAppointmentTime {
+      color: #5d6961;
+    }
+    .homeTalkButton {
+      background: #101211;
+      border: 5px solid #2d3430;
+      border-radius: 8px;
+      box-shadow: 0 8px 0 #6f6b61;
+      box-sizing: border-box;
+      color: #ffffff;
+      display: table;
+      height: 190px;
+      width: 100%;
+    }
+    .talkIconCell,
+    .talkLabelCell {
+      display: table-cell;
+      text-align: center;
+      vertical-align: middle;
+    }
+    .talkIconCell {
+      width: 220px;
+    }
+    .talkIcon {
+      background: #ff4148;
+      border-radius: 50%;
+      color: #ffffff;
+      display: inline-block;
+      font-size: 74px;
+      height: 112px;
+      line-height: 112px;
+      width: 112px;
+    }
+    .talkLabelCell {
+      font-size: 58px;
+      font-weight: 900;
+      line-height: 1;
+      text-align: left;
+    }
+    .homeActionButton {
+      background: #1f6d19;
+      border: 5px solid #10470d;
+      border-radius: 7px;
+      box-shadow: 0 8px 0 #6f6b61;
+      box-sizing: border-box;
+      color: #ffffff;
+      display: block;
+      font-size: 36px;
+      font-weight: 900;
+      height: 113px;
+      line-height: 1.05;
+      margin-bottom: 16px;
+      text-align: center;
+      width: 100%;
+    }
+    .homeActionButton.blue {
+      background: #326894;
+      border-color: #1d4c73;
+    }
+    .receiverFooter {
+      bottom: 12px;
+      box-sizing: border-box;
+      display: table;
+      height: 76px;
+      left: 28px;
+      position: absolute;
+      right: 24px;
+      table-layout: fixed;
+    }
+    .footerLogo,
+    .footerGreeting,
+    .footerClock,
+    .footerDate,
+    .footerButtonCell {
+      display: table-cell;
+      vertical-align: middle;
+    }
+    .footerLogo {
+      width: 66px;
+    }
+    .cpLogo {
+      background: #3f8aca;
+      border-radius: 50%;
+      color: #ffffff;
+      display: inline-block;
+      font-size: 34px;
+      font-weight: 900;
+      height: 52px;
+      line-height: 52px;
+      text-align: center;
+      width: 52px;
+    }
+    .footerGreeting {
+      color: #5d6961;
+      font-size: 27px;
+      font-weight: 900;
+      overflow: hidden;
+      white-space: nowrap;
+      width: 420px;
+    }
+    .footerGreeting .name {
+      color: #101915;
+      display: inline;
+      font-size: 31px;
+      line-height: 1;
+      margin-left: 18px;
+    }
+    .footerClock {
+      color: #101915;
+      font-size: 56px;
+      font-weight: 900;
+      line-height: 1;
+      text-align: right;
+      white-space: nowrap;
+      width: 245px;
+    }
+    .footerDate {
+      color: #5d6961;
+      font-size: 29px;
+      font-weight: 900;
+      line-height: 1;
+      padding-left: 16px;
+      white-space: nowrap;
+      width: 76px;
+    }
+    .footerButtonCell {
+      padding-left: 14px;
+      width: 120px;
+    }
+    .footerButton {
+      background: #fbfaf5;
+      border: 4px solid #6f766f;
+      border-radius: 7px;
+      box-shadow: 0 7px 0 #8a867c;
+      box-sizing: border-box;
+      color: #101915;
+      font-size: 24px;
+      font-weight: 900;
+      height: 64px;
+      width: 112px;
     }
     .setupPanel {
       box-sizing: border-box;
@@ -435,8 +667,10 @@ function classicWebViewReceiverHtml({
       color: #5d6961;
       font-size: 20px;
       font-weight: 900;
-      margin-top: 8px;
+      position: absolute;
+      right: 26px;
       text-align: right;
+      top: 570px;
     }
     .focusStrip {
       color: #101915;
@@ -594,6 +828,7 @@ function classicWebViewReceiverHtml({
   )}" data-scale-mode="${escapeHtml(runtimeContract.layout.scaleMode)}" data-hardware-profile="${escapeHtml(
     runtimeContract.hardware.hardwareProfile
   )}" data-screen-class="${escapeHtml(runtimeContract.hardware.screenClass)}">
+  <div class="receiverFrame" id="receiverFrame">
   <div class="screen screenActive" id="bootScreen">
     <div class="setupPanel">
       <div class="setupCard bootCard">
@@ -622,35 +857,40 @@ function classicWebViewReceiverHtml({
   </div>
 
   <div class="screen" id="homeScreen">
-    <div class="homeTop">
-      <div class="topCell">
-        <div class="time" id="time">--:--</div>
-        <div class="date" id="date">--</div>
-      </div>
-      <div class="topCell">
-        <button class="apptPill" data-screen="appointmentScreen">
-          <div class="apptDay" id="homeAppointmentDay">${escapeHtml(appointmentDay)}</div>
-          <div class="apptTitle" id="homeAppointmentTitle">${escapeHtml(appointmentTitle)}</div>
-          <div class="apptTime" id="homeAppointmentTime">${escapeHtml(appointmentTime)}</div>
+    <div class="receiverHome">
+      <div class="homeLeftPane">
+        <div class="focusPanel">
+          <h1>Today&apos;s Focus</h1>
+          <div class="focusItem" id="focusStrip">Loading Today&apos;s Focus...</div>
+          <div class="focusItem focusItemSecondary" id="focusStripSecond"></div>
+          <div class="focusItem focusItemTertiary" id="focusStripThird"></div>
+        </div>
+        <button class="homeAppointmentButton" data-screen="appointmentScreen">
+          <span class="homeAppointmentDay" id="homeAppointmentDay">${escapeHtml(appointmentDay)}</span>
+          <span class="homeAppointmentTime" id="homeAppointmentTime">${escapeHtml(appointmentTime)}</span><span>: </span>
+          <span id="homeAppointmentTitle">${escapeHtml(appointmentTitle)}</span>
         </button>
-        <div class="focusStrip" id="focusStrip">Loading Today&apos;s Focus...</div>
+        <button class="homeTalkButton" data-screen="askScreen">
+          <span class="talkIconCell"><span class="talkIcon">♪</span></span>
+          <span class="talkLabelCell">Talk</span>
+        </button>
       </div>
-      <div class="topCell person">
-        <div class="greeting" id="greeting">Good afternoon</div>
-        <div class="name" id="receiverName">${escapeHtml(displayName)}</div>
-        <div class="room" id="receiverLocation">${escapeHtml(locationLabel)}</div>
-        <div class="miniStatus" id="connectionStatus">Starting...</div>
+      <div class="homeRightPane">
+        <button class="homeActionButton blue" data-screen="messagesScreen">Messages</button>
+        <button class="homeActionButton blue" data-screen="appointmentScreen">Appointment</button>
+        <button class="homeActionButton" data-screen="askScreen">Ask a Question</button>
+        <button class="homeActionButton" data-screen="callScreen">Call Andrew</button>
       </div>
-    </div>
-    <div class="grid">
-      <div class="row">
-        <div class="cell"><button class="bigButton" data-screen="askScreen">Ask a Question</button></div>
-        <div class="cell"><button class="bigButton" data-screen="callScreen">Andrew</button></div>
+      <div class="receiverFooter">
+        <div class="footerLogo"><span class="cpLogo">CP</span></div>
+        <div class="footerGreeting"><span id="greeting">Good afternoon</span><span class="name" id="receiverName">${escapeHtml(displayName)}</span></div>
+        <div class="footerClock" id="time">--:--</div>
+        <div class="footerDate"><span id="date">--</span></div>
+        <div class="footerButtonCell"><button class="footerButton" type="button">Sounds</button></div>
+        <div class="footerButtonCell"><button class="footerButton" type="button">Clean</button></div>
       </div>
-      <div class="row">
-        <div class="cell"><button class="bigButton blue" data-screen="appointmentScreen">Appointment</button></div>
-        <div class="cell"><button class="bigButton blue" data-screen="messagesScreen">Messages</button></div>
-      </div>
+      <div class="miniStatus" id="connectionStatus">Starting...</div>
+      <div id="receiverLocation" style="display:none">${escapeHtml(locationLabel)}</div>
     </div>
   </div>
 
@@ -719,6 +959,7 @@ function classicWebViewReceiverHtml({
         <div class="detailTime" id="messagesPager">&lt; &nbsp; 1 / 1 &nbsp; &gt;</div>
       </div>
     </div>
+  </div>
   </div>
 
   <button class="fullscreenPrompt" id="fullscreenPrompt" type="button">Fill Screen</button>
@@ -815,7 +1056,25 @@ function classicWebViewReceiverHtml({
           screens[i].className = screens[i].className.replace(" screenActive", "");
         }
         document.getElementById(id).className += " screenActive";
+        applyReceiverFrameScale();
         updateFullscreenPrompt();
+      }
+      function applyReceiverFrameScale() {
+        var frame = document.getElementById("receiverFrame");
+        if (!frame) return;
+        var designWidth = 1024;
+        var designHeight = 600;
+        var availableWidth = window.innerWidth || document.documentElement.clientWidth || designWidth;
+        var availableHeight = window.innerHeight || document.documentElement.clientHeight || designHeight;
+        var scale = Math.min(availableWidth / designWidth, availableHeight / designHeight);
+        if (!scale || scale <= 0) scale = 1;
+        var left = Math.max(0, (availableWidth - designWidth * scale) / 2);
+        var top = Math.max(0, (availableHeight - designHeight * scale) / 2);
+        frame.style.width = designWidth + "px";
+        frame.style.height = designHeight + "px";
+        frame.style.left = left + "px";
+        frame.style.top = top + "px";
+        frame.style.transform = "scale(" + scale + ")";
       }
       function fullscreenElement() {
         return document.fullscreenElement ||
@@ -1273,6 +1532,8 @@ function classicWebViewReceiverHtml({
       function loadTodayFocus() {
         if (!receiverState.personId) {
           setText("focusStrip", "Receiver is connecting...");
+          setText("focusStripSecond", "");
+          setText("focusStripThird", "");
           return;
         }
         jsonRequest(
@@ -1284,10 +1545,20 @@ function classicWebViewReceiverHtml({
               ? payload.focusItems
               : [];
             if (!items.length) {
-              setText("focusStrip", "Today's Focus: nothing due");
+              setText("focusStrip", "Nothing due");
+              setText("focusStripSecond", "");
+              setText("focusStripThird", "");
               return;
             }
-            setText("focusStrip", "Today's Focus: " + items[0].title);
+            setText("focusStrip", items[0] && items[0].title ? items[0].title : "");
+            setText("focusStripSecond", items[1] && items[1].title ? items[1].title : "");
+            setText("focusStripThird", items[2] && items[2].title ? items[2].title : "");
+            document.getElementById("focusStripSecond").className = items[1] && items[1].title
+              ? "focusItem"
+              : "focusItem focusItemSecondary";
+            document.getElementById("focusStripThird").className = items[2] && items[2].title
+              ? "focusItem"
+              : "focusItem focusItemTertiary";
           }
         );
       }
@@ -1358,8 +1629,13 @@ function classicWebViewReceiverHtml({
         } catch (error) {}
       }
       updateClock();
+      applyReceiverFrameScale();
       updateReceiverChromeControls();
       bindButtons();
+      window.onresize = function () {
+        applyReceiverFrameScale();
+        updateFullscreenPrompt();
+      };
       document.addEventListener("fullscreenchange", function () {
         updateFullscreenPrompt();
       });
