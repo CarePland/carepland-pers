@@ -165,6 +165,13 @@ full-screen appliance panels, and at least 72px tap targets. Future schemas
 should be added alongside it instead of scattering profile-specific layout rules
 through Receiver components.
 
+The Classic WebView route at `/connect/receiver/legacy` now resolves the
+Receiver Runtime Contract from URL/native shell facts and stamps the selected
+schema id, schema version, UI layout, scale mode, hardware profile, and screen
+class onto the rendered page. This is the bridge from schema data to the actual
+classic renderer; visual changes should progressively consume those schema
+classes and attributes.
+
 Optional URL override for development:
 
 ```text

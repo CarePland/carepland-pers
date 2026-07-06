@@ -1,9 +1,18 @@
 import type { NextRequest } from "next/server";
 
+import {
+  createReceiverRuntimeContract,
+  type ReceiverRuntimeContract,
+  type ReceiverRuntimeInput,
+} from "../../../lib/connect/receiver/receiverRuntimeContract";
+
 export const dynamic = "force-dynamic";
 
 export function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
+  const runtimeContract = createReceiverRuntimeContract(
+    classicReceiverRuntimeInput(searchParams)
+  );
   const displayName = searchParams.get("receiverName") || "Rob Robson";
   const locationLabel = searchParams.get("locationLabel") || "Living Rm";
   const appointmentTitle = searchParams.get("appointmentTitle") || "Cardiology Follow-Up";
@@ -17,6 +26,7 @@ export function GET(request: NextRequest) {
       appointmentTitle,
       displayName,
       locationLabel,
+      runtimeContract,
     }),
     {
       headers: {
@@ -27,19 +37,69 @@ export function GET(request: NextRequest) {
   );
 }
 
+export function classicReceiverRuntimeInput(
+  searchParams: URLSearchParams
+): ReceiverRuntimeInput {
+  return {
+    bindingStatus: searchParams.get("receiverBindingStatus") || undefined,
+    brand: searchParams.get("nativeBrand") || undefined,
+    detectedHardwareProfile: searchParams.get("detectedHardwareProfile") || undefined,
+    device: searchParams.get("device") || undefined,
+    deviceProfile: searchParams.get("deviceProfile") || searchParams.get("device") || undefined,
+    displayDensity: numberParam(searchParams, "displayDensity"),
+    displayDensityDpi: numberParam(searchParams, "displayDensityDpi"),
+    displayHeightDp: numberParam(searchParams, "displayHeightDp"),
+    displayHeightPx: numberParam(searchParams, "displayHeightPx"),
+    displayWidthDp: numberParam(searchParams, "displayWidthDp"),
+    displayWidthPx: numberParam(searchParams, "displayWidthPx"),
+    hardware: searchParams.get("nativeHardware") || undefined,
+    hardwareProfile: searchParams.get("hardwareProfile") || undefined,
+    mainConnectUserPersonId: searchParams.get("mainConnectUserPersonId") || undefined,
+    manufacturer: searchParams.get("nativeManufacturer") || undefined,
+    model: searchParams.get("nativeModel") || undefined,
+    nativeOrientation: searchParams.get("nativeOrientation") || undefined,
+    nativeSdk: numberParam(searchParams, "nativeSdk"),
+    product: searchParams.get("nativeProduct") || undefined,
+    provisioningCompletedAtMs: numberParam(searchParams, "provisioningCompletedAtMs"),
+    receiverDeviceId: searchParams.get("receiverDeviceId") || undefined,
+    receiverInstallId: searchParams.get("receiverInstallId") || undefined,
+    receiverMode: searchParams.get("receiverMode") || undefined,
+    receiverRuntime: searchParams.get("receiver_runtime") || "classic_webview",
+    receiverUrl: searchParams.get("receiverUrl") || undefined,
+    shellVersion: searchParams.get("shellVersion") || undefined,
+    uiLayout: searchParams.get("uiLayout") || searchParams.get("layout") || undefined,
+    versionCode: numberParam(searchParams, "nativeVersionCode"),
+    versionName: searchParams.get("nativeVersionName") || undefined,
+  };
+}
+
+function numberParam(searchParams: URLSearchParams, key: string) {
+  const value = searchParams.get(key);
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function classicWebViewReceiverHtml({
   appointmentDay,
   appointmentTime,
   appointmentTitle,
   displayName,
   locationLabel,
+  runtimeContract,
 }: {
   appointmentDay: string;
   appointmentTime: string;
   appointmentTitle: string;
   displayName: string;
   locationLabel: string;
+  runtimeContract: ReceiverRuntimeContract;
 }) {
+  const schemaClass = safeCssClass(`schema-${runtimeContract.layout.uiSchemaId}`);
+  const scaleClass = safeCssClass(`scale-${runtimeContract.layout.scaleMode}`);
+  const viewportWidth = runtimeContract.hardware.displayWidthPx || runtimeContract.hardware.displayWidthDp || 1024;
+  const viewportHeight = runtimeContract.hardware.displayHeightPx || runtimeContract.hardware.displayHeightDp || 600;
+
   return `<!doctype html>
 <html>
 <head>
@@ -47,6 +107,13 @@ function classicWebViewReceiverHtml({
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>CarePland Receiver</title>
   <style>
+    :root {
+      --receiver-design-width: ${runtimeContract.layout.uiSchemaId === "gxv3370_classic_1024x600_v1" ? "1024" : viewportWidth};
+      --receiver-design-height: ${runtimeContract.layout.uiSchemaId === "gxv3370_classic_1024x600_v1" ? "600" : viewportHeight};
+      --receiver-actual-width: ${viewportWidth};
+      --receiver-actual-height: ${viewportHeight};
+      --receiver-min-touch-target: ${runtimeContract.layout.uiSchemaId === "gxv3370_classic_1024x600_v1" ? "72px" : "56px"};
+    }
     html, body {
       background: #e3e7e1;
       color: #101915;
@@ -171,6 +238,13 @@ function classicWebViewReceiverHtml({
       line-height: 1.05;
       text-align: center;
       width: 100%;
+    }
+    .${schemaClass} .bigButton,
+    .${schemaClass} .homeButton,
+    .${schemaClass} .quickButton,
+    .${schemaClass} .sendButton,
+    .${schemaClass} .doneButton {
+      min-height: var(--receiver-min-touch-target);
     }
     .blue {
       background: #326894;
@@ -385,7 +459,13 @@ function classicWebViewReceiverHtml({
     }
   </style>
 </head>
-<body>
+<body class="${schemaClass} ${scaleClass}" data-ui-schema-id="${escapeHtml(
+    runtimeContract.layout.uiSchemaId
+  )}" data-ui-schema-version="${runtimeContract.layout.uiSchemaVersion}" data-ui-layout="${escapeHtml(
+    runtimeContract.layout.uiLayout
+  )}" data-scale-mode="${escapeHtml(runtimeContract.layout.scaleMode)}" data-hardware-profile="${escapeHtml(
+    runtimeContract.hardware.hardwareProfile
+  )}" data-screen-class="${escapeHtml(runtimeContract.hardware.screenClass)}">
   <div class="screen screenActive" id="homeScreen">
     <div class="homeTop">
       <div class="topCell">
@@ -873,4 +953,8 @@ function escapeHtml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function safeCssClass(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
