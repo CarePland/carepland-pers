@@ -51,8 +51,12 @@ export async function GET(request: Request) {
       readLocalConnectCalls(),
       readSupabaseConnectCalls(access),
     ]);
+    const persistedCalls = mergeConnectCalls(
+      supabaseCalls ?? [],
+      localCallIndex.calls
+    );
     const calls = filterCallsForMainConnectUser(
-      mergeConnectCalls(supabaseCalls ?? localCallIndex.calls, prototypeCalls),
+      mergeConnectCalls(persistedCalls, prototypeCalls),
       personId
     );
 

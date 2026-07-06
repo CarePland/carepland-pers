@@ -84,6 +84,37 @@ describe("Connect call scoping", () => {
     assert.equal(calls[1]?.callId, "prototype-only");
   });
 
+  it("keeps local fallback calls visible when the shared store has no matching call", () => {
+    const persistedCalls = mergeConnectCalls(
+      [
+        {
+          callId: "shared-call",
+          state: "connected",
+          updatedAt: "2026-06-21T12:02:00.000Z",
+        },
+      ],
+      [
+        {
+          callId: "local-fallback-call",
+          state: "ringing",
+          updatedAt: "2026-06-21T12:01:00.000Z",
+        },
+      ]
+    );
+    const calls = mergeConnectCalls(persistedCalls, [
+      {
+        callId: "prototype-call",
+        state: "ringing",
+        updatedAt: "2026-06-21T12:00:00.000Z",
+      },
+    ]);
+
+    assert.deepEqual(
+      calls.map((call) => call.callId),
+      ["shared-call", "local-fallback-call", "prototype-call"]
+    );
+  });
+
   it("returns a stable empty summary shape", () => {
     assert.deepEqual(emptyConnectCallSummary(), {
       active: 0,
