@@ -607,6 +607,65 @@ function readInitialPreviewMode() {
   return new URLSearchParams(window.location.search).get("preview") === "1";
 }
 
+function redirectGxvLikeBrowserToClassicReceiver() {
+  if (typeof window === "undefined") return false;
+  if (window.location.pathname.includes("/connect/receiver/legacy")) return false;
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("receiver_runtime") === "classic_webview") return false;
+  if (params.get("preview") === "1") return false;
+
+  const screenWidth = Number(window.screen?.width || 0);
+  const screenHeight = Number(window.screen?.height || 0);
+  const viewportWidth = Number(window.innerWidth || 0);
+  const viewportHeight = Number(window.innerHeight || 0);
+  const shortSide = Math.min(nonZeroDisplaySide(screenWidth), nonZeroDisplaySide(screenHeight));
+  const longSide = Math.max(nonZeroDisplaySide(screenWidth), nonZeroDisplaySide(screenHeight));
+  const viewportShortSide = Math.min(
+    nonZeroDisplaySide(viewportWidth),
+    nonZeroDisplaySide(viewportHeight)
+  );
+  const viewportLongSide = Math.max(
+    nonZeroDisplaySide(viewportWidth),
+    nonZeroDisplaySide(viewportHeight)
+  );
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  const gxvUserAgent = userAgent.includes("gxv3370") || userAgent.includes("grandstream");
+  const androidGxvSized =
+    userAgent.includes("android") &&
+    (nearDisplaySize(shortSide, longSide, 600, 1024) ||
+      nearDisplaySize(viewportShortSide, viewportLongSide, 600, 1024));
+
+  if (!gxvUserAgent && !androidGxvSized) return false;
+
+  params.set("device", params.get("device") || "gxv3370");
+  params.set("hardwareProfile", params.get("hardwareProfile") || "grandstream_gxv3370");
+  params.set("uiLayout", params.get("uiLayout") || "desk_phone_1024x600");
+  params.set("receiver_runtime", "classic_webview");
+  if (screenWidth) params.set("displayWidthPx", String(screenWidth));
+  if (screenHeight) params.set("displayHeightPx", String(screenHeight));
+  if (window.devicePixelRatio) params.set("displayDensity", String(window.devicePixelRatio));
+  window.location.replace(`/connect/receiver/legacy?${params.toString()}`);
+  return true;
+}
+
+function nearDisplaySize(
+  shortSide: number,
+  longSide: number,
+  expectedShort: number,
+  expectedLong: number
+) {
+  return (
+    Number.isFinite(shortSide) &&
+    Number.isFinite(longSide) &&
+    Math.abs(shortSide - expectedShort) <= 90 &&
+    Math.abs(longSide - expectedLong) <= 140
+  );
+}
+
+function nonZeroDisplaySide(value: number) {
+  return value > 0 ? value : Number.POSITIVE_INFINITY;
+}
+
 function readNativeReceiverProvisioningConfig(): NativeReceiverProvisioningConfig {
   if (typeof window === "undefined") return {};
 
@@ -1814,6 +1873,10 @@ export function ConnectReceiver() {
   const screenCleaningSessionRef = useRef<ScreenCleaningSession | null>(null);
   const gxvFocusHomeEnabled = deskPhoneMode && gxvHomeLayout === "focus_v1";
   const onlineRequiredActionClass = receiverOnline ? "" : styles.offlineDisabledAction;
+
+  useEffect(() => {
+    redirectGxvLikeBrowserToClassicReceiver();
+  }, []);
 
   useEffect(() => {
     window.CarePlandReceiver?.receiverReady?.();
