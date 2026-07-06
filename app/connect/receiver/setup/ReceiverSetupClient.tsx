@@ -160,6 +160,9 @@ export function ReceiverSetupClient({
       ? "Local test receiver"
       : "Waiting for pairing code";
   const apkBuildLabel = apkVersionName ? `build ${apkVersionName}` : "build not listed";
+  const apkDownloadFilename = apkVersionName
+    ? `carepland-receiver-${safeFilenameSegment(apkVersionName)}.apk`
+    : "carepland-receiver.apk";
   const adbBinary = browserOrigin
     ? "/Users/agoodloe/Library/Android/sdk/platform-tools/adb"
     : "adb";
@@ -443,7 +446,11 @@ export function ReceiverSetupClient({
             <strong>Install Receiver ({apkBuildLabel})</strong>
             <p>Download and install the Receiver app on the Android device.</p>
             {apkDownloadUrl ? (
-              <a className={styles.primaryAction} href={apkDownloadUrl}>
+              <a
+                className={styles.primaryAction}
+                download={apkDownloadFilename}
+                href={apkDownloadUrl}
+              >
                 Download APK {apkVersionName ? `(${apkBuildLabel})` : ""}
               </a>
             ) : (
@@ -778,4 +785,8 @@ function qrOptions(width = 280) {
 
 function wifiEscape(value: string) {
   return value.replace(/([\\;,:"])/g, "\\$1");
+}
+
+function safeFilenameSegment(value: string) {
+  return value.trim().replace(/[^0-9A-Za-z._-]+/g, "-").replace(/^-+|-+$/g, "");
 }

@@ -14,6 +14,13 @@ const debugApkPath = path.join(
   "debug",
   "app-debug.apk"
 );
+const receiverAndroidBuildGradlePath = path.join(
+  process.cwd(),
+  "android",
+  "connect-receiver",
+  "app",
+  "build.gradle"
+);
 
 export async function GET() {
   if (!debugApkDownloadEnabled()) {
@@ -28,11 +35,20 @@ export async function GET() {
   }
 
   try {
-    const [apk, info] = await Promise.all([readFile(debugApkPath), stat(debugApkPath)]);
+    const [apk, info, versionName] = await Promise.all([
+      readFile(debugApkPath),
+      stat(debugApkPath),
+      receiverApkVersionName(),
+    ]);
+    const versionSegment = safeFilenameSegment(versionName);
+    const filename = versionSegment
+      ? `carepland-receiver-${versionSegment}-debug.apk`
+      : "carepland-receiver-debug.apk";
+
     return new Response(apk, {
       headers: {
         "Cache-Control": "no-store",
-        "Content-Disposition": 'attachment; filename="carepland-receiver-debug.apk"',
+        "Content-Disposition": `attachment; filename="${filename}"`,
         "Content-Length": String(info.size),
         "Content-Type": "application/vnd.android.package-archive",
       },
@@ -53,4 +69,21 @@ function debugApkDownloadEnabled() {
     process.env.CONNECT_RECEIVER_DEBUG_APK_ENABLED === "1" ||
     process.env.NODE_ENV !== "production"
   );
+}
+
+async function receiverApkVersionName() {
+  if (process.env.CONNECT_RECEIVER_LATEST_VERSION_NAME) {
+    return process.env.CONNECT_RECEIVER_LATEST_VERSION_NAME;
+  }
+
+  try {
+    const buildGradle = await readFile(receiverAndroidBuildGradlePath, "utf8");
+    return buildGradle.match(/\bversionName\s+["']([^"']+)["']/)?.[1] || "";
+  } catch {
+    return "";
+  }
+}
+
+function safeFilenameSegment(value: string) {
+  return value.trim().replace(/[^0-9A-Za-z._-]+/g, "-").replace(/^-+|-+$/g, "");
 }
