@@ -24,6 +24,8 @@ describe("receiver runtime contract", () => {
     assert.equal(contract.hardware.screenClass, "landscape_1024x600");
     assert.equal(contract.hardware.hardwareProfile, "grandstream_gxv3370");
     assert.equal(contract.layout.uiLayout, "desk_phone_1024x600");
+    assert.equal(contract.layout.uiSchemaId, "gxv3370_classic_1024x600_v1");
+    assert.equal(contract.layout.uiSchemaVersion, 1);
     assert.equal(contract.layout.scaleMode, "native");
     assert.equal(contract.mode.receiverMode, "dedicated");
   });
@@ -43,6 +45,7 @@ describe("receiver runtime contract", () => {
     assert.equal(contract.hardware.screenClass, "landscape_hd");
     assert.equal(contract.hardware.hardwareProfile, "generic_hd_landscape_android");
     assert.equal(contract.layout.uiLayout, "desk_phone_1024x600");
+    assert.equal(contract.layout.uiSchemaId, "gxv3370_classic_1024x600_v1");
     assert.equal(contract.layout.scaleMode, "scale_to_fit");
   });
 
@@ -58,6 +61,7 @@ describe("receiver runtime contract", () => {
     assert.equal(contract.hardware.screenClass, "portrait_phone");
     assert.equal(contract.hardware.hardwareProfile, "generic_android_phone");
     assert.equal(contract.layout.uiLayout, "default_receiver");
+    assert.equal(contract.layout.uiSchemaId, "default_receiver_v1");
     assert.equal(contract.layout.scaleMode, "responsive");
   });
 

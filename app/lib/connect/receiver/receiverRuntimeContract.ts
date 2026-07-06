@@ -1,3 +1,5 @@
+import { resolveReceiverUiSchema } from "./receiverUiSchemas";
+
 export type ReceiverRuntimeName = "classic_webview" | "modern_web";
 
 export type ReceiverScreenClass =
@@ -94,6 +96,8 @@ export type ReceiverRuntimeContract = {
   };
   layout: {
     scaleMode: ReceiverLayoutScaleMode;
+    uiSchemaId: string;
+    uiSchemaVersion: number;
     uiLayout: string;
   };
   mode: {
@@ -122,6 +126,7 @@ export function createReceiverRuntimeContract(
   );
   const uiLayout = normalizedToken(input.uiLayout || recommendedUiLayout(hardwareProfile, screenClass));
   const runtime = receiverRuntimeName(input, screenClass);
+  const uiSchema = resolveReceiverUiSchema({ hardwareProfile, runtime, uiLayout });
 
   return {
     activePerson: {
@@ -154,6 +159,8 @@ export function createReceiverRuntimeContract(
     },
     layout: {
       scaleMode: receiverLayoutScaleMode(uiLayout, screenClass),
+      uiSchemaId: uiSchema.id,
+      uiSchemaVersion: uiSchema.version,
       uiLayout,
     },
     mode: {

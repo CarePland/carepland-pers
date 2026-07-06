@@ -128,6 +128,7 @@ Important distinction:
 - Hardware facts describe what the device actually is.
 - Hardware profile summarizes those facts for provisioning and diagnostics.
 - UI layout describes the hosted Receiver presentation.
+- UI schema describes the concrete appliance layout rules and feature slots.
 - Scale mode describes how closely the selected UI layout matches the physical
   screen.
 
@@ -136,6 +137,7 @@ For example, a 1024x600 GXV-style device can use:
 ```text
 hardwareProfile=grandstream_gxv3370
 uiLayout=desk_phone_1024x600
+uiSchemaId=gxv3370_classic_1024x600_v1
 scaleMode=native
 receiver_runtime=classic_webview
 ```
@@ -147,12 +149,21 @@ being allowed to start from the existing appliance layout:
 ```text
 hardwareProfile=generic_hd_landscape_android
 uiLayout=desk_phone_1024x600
+uiSchemaId=gxv3370_classic_1024x600_v1
 scaleMode=scale_to_fit
 receiver_runtime=classic_webview
 ```
 
 This lets CarePland test the existing robust 1024x600 layout on close-but-not-
 exact displays without pretending the hardware is identical.
+
+The first schema lives in `app/lib/connect/receiver/receiverUiSchemas.ts`. It
+records the GXV/Classic WebView appliance assumptions explicitly: landscape
+1024x600 design viewport, single-row footer, Today's Focus in the top-left zone,
+appointment reminders excluded from Focus, large right-side primary actions,
+full-screen appliance panels, and at least 72px tap targets. Future schemas
+should be added alongside it instead of scattering profile-specific layout rules
+through Receiver components.
 
 Optional URL override for development:
 
