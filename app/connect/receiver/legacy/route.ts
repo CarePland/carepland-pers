@@ -762,8 +762,46 @@ function classicWebViewReceiverHtml({
       margin-top: 26px;
     }
     .messageItem {
+      background: transparent;
+      border: 0;
       border-bottom: 2px solid #d4d9d2;
+      box-sizing: border-box;
+      color: #101915;
+      display: block;
+      font-size: 32px;
+      font-weight: 900;
+      line-height: 1.2;
       padding: 14px 0;
+      text-align: left;
+      width: 100%;
+    }
+    .messageItemRead {
+      color: #5d6961;
+      font-weight: 700;
+    }
+    .appointmentList {
+      margin-top: 16px;
+    }
+    .appointmentItem {
+      background: #fbfaf5;
+      border: 3px solid #aeb6b0;
+      border-radius: 6px;
+      box-sizing: border-box;
+      color: #101915;
+      display: block;
+      font-size: 28px;
+      font-weight: 900;
+      height: 66px;
+      margin: 0 0 10px;
+      overflow: hidden;
+      padding: 8px 14px;
+      text-align: left;
+      white-space: nowrap;
+      width: 100%;
+    }
+    .appointmentSelected {
+      border-color: #1d4c73;
+      color: #1d4c73;
     }
     .fullscreenPrompt {
       background: #17231d;
@@ -1067,6 +1105,7 @@ function classicWebViewReceiverHtml({
         <div class="detailTitle" id="appointmentDetailTitle">${escapeHtml(appointmentTitle)}</div>
         <div class="detailTime" id="appointmentDetailTime">${escapeHtml(appointmentDay)} &bull; ${escapeHtml(appointmentTime)}</div>
         <div class="sent" id="appointmentDetailMeta"></div>
+        <div class="appointmentList" id="appointmentList"></div>
         <button class="doneButton" data-screen="homeScreen">Done</button>
       </div>
     </div>
@@ -1081,6 +1120,7 @@ function classicWebViewReceiverHtml({
       <div class="whiteCard">
         <div class="emptyState" id="messagesEmpty">Loading messages...</div>
         <div class="messageList" id="messageList"></div>
+        <div class="sent" id="messageDetail"></div>
         <div class="detailTime" id="messagesPager">&lt; &nbsp; 1 / 1 &nbsp; &gt;</div>
       </div>
     </div>
@@ -1108,6 +1148,8 @@ function classicWebViewReceiverHtml({
         pairingCode: "",
         pairingDeviceId: "",
         personId: "",
+        appointments: [],
+        messages: [],
         todayFocusItems: [],
         online: false
       };
@@ -1676,6 +1718,7 @@ function classicWebViewReceiverHtml({
             var appointments = payload && payload.appointments && payload.appointments.length
               ? payload.appointments
               : [];
+            receiverState.appointments = appointments;
             if (!appointments.length) {
               setText("homeAppointmentDay", "No appointment");
               setText("homeAppointmentTitle", "Nothing scheduled");
@@ -1683,20 +1726,68 @@ function classicWebViewReceiverHtml({
               setText("appointmentDetailTitle", "No upcoming appointments");
               setText("appointmentDetailTime", "");
               setText("appointmentDetailMeta", "CarePland will show the next appointment here.");
+              setHtml("appointmentList", "");
               return;
             }
-            var appt = appointments[0];
-            var title = appt.title || appt.reason || "Appointment";
-            var day = formatAppointmentDate(appt.startsAt);
-            var time = formatAppointmentTime(appt.startsAt);
+            renderSelectedAppointment(0);
+            renderAppointmentList();
+          }
+        );
+      }
+      function appointmentLabel(appt) {
+        var title = appt && (appt.title || appt.reason) ? (appt.title || appt.reason) : "Appointment";
+        var day = formatAppointmentDate(appt ? appt.startsAt : "");
+        var time = formatAppointmentTime(appt ? appt.startsAt : "");
+        return (day || "Upcoming") + " " + (time || "") + ": " + title;
+      }
+      function renderSelectedAppointment(index) {
+        var appt = receiverState.appointments[index];
+        if (!appt) return;
+        var title = appt.title || appt.reason || "Appointment";
+        var day = formatAppointmentDate(appt.startsAt);
+        var time = formatAppointmentTime(appt.startsAt);
+        if (index === 0) {
             setText("homeAppointmentDay", day || "Upcoming");
             setText("homeAppointmentTitle", title);
             setText("homeAppointmentTime", time);
-            setText("appointmentDetailTitle", title);
-            setHtml("appointmentDetailTime", escapeHtml(day || "Upcoming") + " &bull; " + escapeHtml(time));
-            setText("appointmentDetailMeta", appt.providerName || appt.providerOrganization || "");
-          }
+        }
+        setText("appointmentDetailTitle", title);
+        setHtml("appointmentDetailTime", escapeHtml(day || "Upcoming") + " &bull; " + escapeHtml(time));
+        setText(
+          "appointmentDetailMeta",
+          appt.providerName || appt.providerOrganization || appt.locationName || appt.locationAddress || ""
         );
+        highlightSelectedAppointment(index);
+      }
+      function renderAppointmentList() {
+        var html = "";
+        var i;
+        for (i = 0; i < receiverState.appointments.length && i < 4; i += 1) {
+          html += '<button class="appointmentItem" type="button" data-appointment-index="' + i + '">' +
+            escapeHtml(appointmentLabel(receiverState.appointments[i])) +
+            "</button>";
+        }
+        setHtml("appointmentList", html);
+        bindAppointmentItems();
+        highlightSelectedAppointment(0);
+      }
+      function bindAppointmentItems() {
+        var items = document.querySelectorAll("[data-appointment-index]");
+        var i;
+        for (i = 0; i < items.length; i += 1) {
+          items[i].onclick = function () {
+            renderSelectedAppointment(Number(this.getAttribute("data-appointment-index")));
+          }
+        }
+      }
+      function highlightSelectedAppointment(index) {
+        var items = document.querySelectorAll("[data-appointment-index]");
+        var i;
+        for (i = 0; i < items.length; i += 1) {
+          items[i].className = Number(items[i].getAttribute("data-appointment-index")) === index
+            ? "appointmentItem appointmentSelected"
+            : "appointmentItem";
+        }
       }
       function loadTodayFocus() {
         if (!receiverState.personId) {
@@ -1777,22 +1868,56 @@ function classicWebViewReceiverHtml({
             var messages = payload && payload.messages && payload.messages.length
               ? payload.messages
               : [];
+            receiverState.messages = messages;
             var html = "";
             var i;
             if (!messages.length) {
               setText("messagesEmpty", "No messages yet.");
               setHtml("messageList", "");
+              setText("messageDetail", "");
               setHtml("messagesPager", "&lt; &nbsp; 1 / 1 &nbsp; &gt;");
               return;
             }
             setText("messagesEmpty", "");
             for (i = 0; i < messages.length && i < 4; i += 1) {
-              html += '<div class="messageItem">' + escapeHtml(messages[i].body || messages[i].transcript || "Message") + "</div>";
+              html += '<button class="messageItem' + (messages[i].readAt ? " messageItemRead" : "") + '" type="button" data-message-index="' + i + '">' +
+                escapeHtml(messages[i].body || messages[i].transcript || "Message") +
+                "</button>";
             }
             setHtml("messageList", html);
             setText("messagesPager", "1 / " + Math.max(1, messages.length));
+            bindMessageItems();
           }
         );
+      }
+      function bindMessageItems() {
+        var items = document.querySelectorAll("[data-message-index]");
+        var i;
+        for (i = 0; i < items.length; i += 1) {
+          items[i].onclick = function () {
+            openMessage(Number(this.getAttribute("data-message-index")));
+          };
+        }
+      }
+      function openMessage(index) {
+        var message = receiverState.messages[index];
+        if (!message) return;
+        var body = message.body || message.transcript || "Message";
+        setText("messageDetail", body);
+        if (!message.readAt && message.id && receiverState.personId) {
+          jsonRequest("PATCH", "/api/connect/messages/" + encodeURIComponent(message.id) + "/state", {
+            mainConnectUserPersonId: receiverState.personId,
+            state: "read"
+          }, function (status, payload) {
+            if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+              message.readAt = new Date().toISOString();
+              var item = document.querySelector('[data-message-index="' + index + '"]');
+              if (item) item.className = "messageItem messageItemRead";
+              return;
+            }
+            setText("connectionStatus", payload.error || "Message not marked read");
+          });
+        }
       }
       function sendQuestion() {
         var input = document.getElementById("questionInput");
