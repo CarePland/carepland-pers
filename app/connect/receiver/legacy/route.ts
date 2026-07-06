@@ -137,8 +137,11 @@ function classicWebViewReceiverHtml({
       margin: 0 0 13px;
     }
     .focusItem {
+      background: transparent;
+      border: 0;
       box-sizing: border-box;
       color: #101915;
+      display: block;
       font-size: 27px;
       font-weight: 900;
       line-height: 1.1;
@@ -147,7 +150,26 @@ function classicWebViewReceiverHtml({
       overflow: hidden;
       padding-left: 46px;
       position: relative;
+      text-align: left;
       white-space: nowrap;
+      width: 100%;
+    }
+    .focusItem:disabled {
+      color: #101915;
+      opacity: 1;
+    }
+    .focusItemDone {
+      color: #5d6961;
+      text-decoration: line-through;
+    }
+    .focusItemDone:after {
+      color: #1f6d19;
+      content: "✓";
+      font-size: 25px;
+      font-weight: 900;
+      left: 4px;
+      position: absolute;
+      top: -2px;
     }
     .focusItem:before {
       border: 4px solid #6b746c;
@@ -663,6 +685,31 @@ function classicWebViewReceiverHtml({
       margin-top: 18px;
       text-align: center;
     }
+    .cleaningCard {
+      background: #101211;
+      border-color: #2d3430;
+      color: #ffffff;
+      text-align: center;
+    }
+    .cleaningTitle {
+      font-size: 70px;
+      font-weight: 900;
+      line-height: 1;
+      margin-top: 50px;
+    }
+    .cleaningTimer {
+      color: #ffffff;
+      font-size: 86px;
+      font-weight: 900;
+      line-height: 1;
+      margin-top: 28px;
+    }
+    .cleaningHelp {
+      color: #d9e1dc;
+      font-size: 31px;
+      font-weight: 900;
+      margin-top: 22px;
+    }
     .miniStatus {
       color: #5d6961;
       font-size: 20px;
@@ -861,9 +908,9 @@ function classicWebViewReceiverHtml({
       <div class="homeLeftPane">
         <div class="focusPanel">
           <h1>Today&apos;s Focus</h1>
-          <div class="focusItem" id="focusStrip">Loading Today&apos;s Focus...</div>
-          <div class="focusItem focusItemSecondary" id="focusStripSecond"></div>
-          <div class="focusItem focusItemTertiary" id="focusStripThird"></div>
+          <button class="focusItem" id="focusStrip" type="button" data-focus-index="0">Loading Today&apos;s Focus...</button>
+          <button class="focusItem focusItemSecondary" id="focusStripSecond" type="button" data-focus-index="1"></button>
+          <button class="focusItem focusItemTertiary" id="focusStripThird" type="button" data-focus-index="2"></button>
         </div>
         <button class="homeAppointmentButton" data-screen="appointmentScreen">
           <span class="homeAppointmentDay" id="homeAppointmentDay">${escapeHtml(appointmentDay)}</span>
@@ -879,15 +926,15 @@ function classicWebViewReceiverHtml({
         <button class="homeActionButton blue" data-screen="messagesScreen">Messages</button>
         <button class="homeActionButton blue" data-screen="appointmentScreen">Appointment</button>
         <button class="homeActionButton" data-screen="askScreen">Ask a Question</button>
-        <button class="homeActionButton" data-screen="callScreen">Call Andrew</button>
+        <button class="homeActionButton" id="callAndrewButton" type="button">Call Andrew</button>
       </div>
       <div class="receiverFooter">
         <div class="footerLogo"><span class="cpLogo">CP</span></div>
         <div class="footerGreeting"><span id="greeting">Good afternoon</span><span class="name" id="receiverName">${escapeHtml(displayName)}</span></div>
         <div class="footerClock" id="time">--:--</div>
         <div class="footerDate"><span id="date">--</span></div>
-        <div class="footerButtonCell"><button class="footerButton" type="button">Sounds</button></div>
-        <div class="footerButtonCell"><button class="footerButton" type="button">Clean</button></div>
+        <div class="footerButtonCell"><button class="footerButton" id="soundsButton" type="button">Sounds</button></div>
+        <div class="footerButtonCell"><button class="footerButton" id="cleanButton" type="button">Clean</button></div>
       </div>
       <div class="miniStatus" id="connectionStatus">Starting...</div>
       <div id="receiverLocation" style="display:none">${escapeHtml(locationLabel)}</div>
@@ -926,8 +973,36 @@ function classicWebViewReceiverHtml({
     <div class="panelBody">
       <div class="whiteCard">
         <div class="callTitle">Calling Andrew</div>
-        <div class="callSub">Use the handset or speaker.</div>
+        <div class="callSub" id="callStatus">Connecting...</div>
         <button class="doneButton" data-screen="homeScreen">Close Call</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="soundsScreen">
+    <div class="toolbar">
+      <div class="toolbarTitle">Sounds</div>
+      <div class="toolbarAction"><button class="homeButton" data-screen="homeScreen">Go Home</button></div>
+    </div>
+    <div class="panelBody">
+      <div class="whiteCard">
+        <div class="detailTitle">Sound check</div>
+        <div class="detailTime" id="soundStatus">Tap Play Sound.</div>
+        <button class="doneButton" id="playSoundButton" type="button">Play Sound</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="cleaningScreen">
+    <div class="toolbar">
+      <div class="toolbarTitle">Clean Screen</div>
+      <div class="toolbarAction"><button class="homeButton" id="finishCleaningButton" type="button">Done</button></div>
+    </div>
+    <div class="panelBody">
+      <div class="whiteCard cleaningCard">
+        <div class="cleaningTitle">Wipe the screen</div>
+        <div class="cleaningTimer" id="cleaningTimer">30</div>
+        <div class="cleaningHelp">Touch is paused until Done.</div>
       </div>
     </div>
   </div>
@@ -975,16 +1050,22 @@ function classicWebViewReceiverHtml({
   <script>
     (function () {
       var receiverState = {
+        activeCallId: "",
+        cleaningSessionId: "",
+        cleaningStartedAt: "",
         receiverDeviceId: "",
         receiverInstallId: "",
         pairingCode: "",
         pairingDeviceId: "",
         personId: "",
+        todayFocusItems: [],
         online: false
       };
       var browserBindingStorageKey = "carepland-connect-receiver-binding";
       var browserInstallStorageKey = "carepland-connect-classic-receiver-install-id";
       var pairingPollTimer = null;
+      var cleaningTimer = null;
+      var cleaningRemainingSeconds = 30;
 
       function pad(value) {
         return value < 10 ? "0" + value : "" + value;
@@ -999,6 +1080,14 @@ function classicWebViewReceiverHtml({
       function setHtml(id, value) {
         var element = document.getElementById(id);
         if (element) element.innerHTML = value;
+      }
+      function addClass(element, className) {
+        if (!element || element.className.indexOf(className) >= 0) return;
+        element.className += " " + className;
+      }
+      function removeClass(element, className) {
+        if (!element) return;
+        element.className = element.className.replace(new RegExp("(^|\\\\s)" + className + "(\\\\s|$)", "g"), " ").replace(/^\\s+|\\s+$/g, "");
       }
       function escapeHtml(value) {
         return text(value)
@@ -1209,6 +1298,27 @@ function classicWebViewReceiverHtml({
             chooseReceiverLayout(this.getAttribute("data-layout-choice"));
           };
         }
+        var focusButtons = document.querySelectorAll("[data-focus-index]");
+        for (i = 0; i < focusButtons.length; i += 1) {
+          focusButtons[i].onclick = function () {
+            completeTodayFocus(Number(this.getAttribute("data-focus-index")));
+          };
+        }
+        document.getElementById("cleanButton").onclick = function () {
+          startCleaningMode();
+        };
+        document.getElementById("finishCleaningButton").onclick = function () {
+          finishCleaningMode();
+        };
+        document.getElementById("soundsButton").onclick = function () {
+          showScreen("soundsScreen");
+        };
+        document.getElementById("playSoundButton").onclick = function () {
+          playSoundCheck();
+        };
+        document.getElementById("callAndrewButton").onclick = function () {
+          startCallAndrew();
+        };
       }
       function readNativeConfig() {
         try {
@@ -1531,6 +1641,7 @@ function classicWebViewReceiverHtml({
       }
       function loadTodayFocus() {
         if (!receiverState.personId) {
+          receiverState.todayFocusItems = [];
           setText("focusStrip", "Receiver is connecting...");
           setText("focusStripSecond", "");
           setText("focusStripThird", "");
@@ -1544,23 +1655,58 @@ function classicWebViewReceiverHtml({
             var items = payload && payload.focusItems && payload.focusItems.length
               ? payload.focusItems
               : [];
+            receiverState.todayFocusItems = items;
             if (!items.length) {
-              setText("focusStrip", "Nothing due");
-              setText("focusStripSecond", "");
-              setText("focusStripThird", "");
+              renderFocusItem("focusStrip", null, "Nothing due");
+              renderFocusItem("focusStripSecond", null, "");
+              renderFocusItem("focusStripThird", null, "");
               return;
             }
-            setText("focusStrip", items[0] && items[0].title ? items[0].title : "");
-            setText("focusStripSecond", items[1] && items[1].title ? items[1].title : "");
-            setText("focusStripThird", items[2] && items[2].title ? items[2].title : "");
-            document.getElementById("focusStripSecond").className = items[1] && items[1].title
-              ? "focusItem"
-              : "focusItem focusItemSecondary";
-            document.getElementById("focusStripThird").className = items[2] && items[2].title
-              ? "focusItem"
-              : "focusItem focusItemTertiary";
+            renderFocusItem("focusStrip", items[0], "");
+            renderFocusItem("focusStripSecond", items[1], "");
+            renderFocusItem("focusStripThird", items[2], "");
           }
         );
+      }
+      function renderFocusItem(id, item, emptyLabel) {
+        var element = document.getElementById(id);
+        if (!element) return;
+        removeClass(element, "focusItemDone");
+        element.disabled = !item || !item.id;
+        setText(id, item && item.title ? item.title : emptyLabel);
+        if (id === "focusStripSecond") {
+          element.className = item && item.title ? "focusItem" : "focusItem focusItemSecondary";
+        }
+        if (id === "focusStripThird") {
+          element.className = item && item.title ? "focusItem" : "focusItem focusItemTertiary";
+        }
+      }
+      function completeTodayFocus(index) {
+        var item = receiverState.todayFocusItems[index];
+        var elementId = index === 0 ? "focusStrip" : index === 1 ? "focusStripSecond" : "focusStripThird";
+        var element = document.getElementById(elementId);
+        if (!item || !item.id || !receiverState.personId) return;
+        if (element) {
+          element.disabled = true;
+          addClass(element, "focusItemDone");
+        }
+        setText("connectionStatus", "Saving Focus");
+        jsonRequest("POST", "/api/connect/today-focus", {
+          focusItemId: item.id,
+          occurredAt: new Date().toISOString(),
+          personId: receiverState.personId
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            setText("connectionStatus", "Focus saved");
+            window.setTimeout(loadTodayFocus, 650);
+            return;
+          }
+          if (element) {
+            element.disabled = false;
+            removeClass(element, "focusItemDone");
+          }
+          setText("connectionStatus", payload.error || "Focus not saved");
+        });
       }
       function loadMessages() {
         if (!receiverState.personId) return;
@@ -1620,6 +1766,108 @@ function classicWebViewReceiverHtml({
           }
           setText("askStatus", payload.error || "Could not send yet.");
         });
+      }
+      function startCallAndrew() {
+        showScreen("callScreen");
+        setText("callStatus", "Creating call...");
+        if (!receiverState.personId) {
+          setText("callStatus", "Receiver is still connecting.");
+          return;
+        }
+        jsonRequest("POST", "/api/connect/calls", {
+          callerName: "Receiver",
+          mainConnectUserPersonId: receiverState.personId,
+          recipientName: "Andrew",
+          receiverId: receiverState.receiverDeviceId || "classic-webview-receiver",
+          state: "ringing"
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            receiverState.activeCallId = payload.call && payload.call.callId ? payload.call.callId : "";
+            setText("callStatus", "Call requested. Use the handset or speaker.");
+            return;
+          }
+          setText("callStatus", payload.error || "Could not start call.");
+        });
+      }
+      function recordAudioPlayback(state) {
+        if (!receiverState.personId) return;
+        jsonRequest("POST", "/api/connect/audio/playback-events", {
+          audioUrl: "classic-webview-local-sound-check",
+          mainConnectUserPersonId: receiverState.personId,
+          playbackState: state,
+          receiverId: receiverState.receiverDeviceId || "classic-webview-receiver",
+          source: "classic_webview_receiver_sound_check",
+          surface: "receiver_sounds_button"
+        }, function () {});
+      }
+      function playSoundCheck() {
+        setText("soundStatus", "Playing sound...");
+        recordAudioPlayback("started");
+        try {
+          var AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContextClass) {
+            recordAudioPlayback("fallback");
+            setText("soundStatus", "Sound test is not available on this device.");
+            return;
+          }
+          var context = new AudioContextClass();
+          var oscillator = context.createOscillator();
+          var gain = context.createGain();
+          oscillator.type = "sine";
+          oscillator.frequency.value = 660;
+          gain.gain.value = 0.18;
+          oscillator.connect(gain);
+          gain.connect(context.destination);
+          oscillator.start(0);
+          window.setTimeout(function () {
+            try {
+              oscillator.stop(0);
+              context.close();
+            } catch (error) {}
+            recordAudioPlayback("ended");
+            setText("soundStatus", "Sound played.");
+          }, 650);
+        } catch (error) {
+          recordAudioPlayback("error");
+          setText("soundStatus", "Could not play sound.");
+        }
+      }
+      function startCleaningMode() {
+        receiverState.cleaningSessionId = "classic-cleaning-" + new Date().getTime();
+        receiverState.cleaningStartedAt = new Date().toISOString();
+        cleaningRemainingSeconds = 30;
+        setText("cleaningTimer", cleaningRemainingSeconds);
+        showScreen("cleaningScreen");
+        recordCleaningSession(false);
+        if (cleaningTimer) window.clearInterval(cleaningTimer);
+        cleaningTimer = window.setInterval(function () {
+          cleaningRemainingSeconds -= 1;
+          if (cleaningRemainingSeconds < 0) cleaningRemainingSeconds = 0;
+          setText("cleaningTimer", cleaningRemainingSeconds);
+          if (cleaningRemainingSeconds <= 0) finishCleaningMode();
+        }, 1000);
+      }
+      function finishCleaningMode() {
+        if (cleaningTimer) {
+          window.clearInterval(cleaningTimer);
+          cleaningTimer = null;
+        }
+        recordCleaningSession(true);
+        showScreen("homeScreen");
+        setText("connectionStatus", "Screen cleaned");
+      }
+      function recordCleaningSession(completed) {
+        if (!receiverState.cleaningSessionId || !receiverState.personId) return;
+        jsonRequest("POST", "/api/connect/receiver/cleaning-sessions", {
+          cleaningCompletedAt: completed ? new Date().toISOString() : "",
+          cleaningStartedAt: receiverState.cleaningStartedAt,
+          mainConnectUserPersonId: receiverState.personId,
+          message: completed ? "Classic WebView screen cleaning completed." : "Classic WebView screen cleaning started.",
+          receiverDeviceId: receiverState.receiverDeviceId,
+          receiverInstallId: receiverState.receiverInstallId,
+          receiverMode: "classic_webview",
+          sessionId: receiverState.cleaningSessionId
+        }, function () {});
       }
       function markReady() {
         try {
