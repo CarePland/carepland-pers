@@ -883,6 +883,57 @@ function classicWebViewReceiverHtml({
       border-color: #17440f;
       color: #ffffff;
     }
+    .guideRectTarget {
+      border: 8px solid #ffcf33;
+      border-radius: 12px;
+      box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.36), 0 0 18px rgba(255, 207, 51, 0.95);
+      box-sizing: border-box;
+      display: none;
+      height: 80px;
+      left: 0;
+      pointer-events: none;
+      position: absolute;
+      top: 0;
+      width: 160px;
+      z-index: 18;
+    }
+    .guideRectTargetVisible {
+      display: block;
+    }
+    .guideRectLabel {
+      background: #ffcf33;
+      border-radius: 8px;
+      color: #101915;
+      font-size: 24px;
+      font-weight: 900;
+      left: 0;
+      line-height: 1.1;
+      min-width: 180px;
+      padding: 10px 14px;
+      position: absolute;
+      top: -58px;
+      white-space: nowrap;
+    }
+    .guideIdentifyCode {
+      background: #ffcf33;
+      border: 5px solid #101915;
+      border-radius: 12px;
+      box-shadow: 0 7px 0 rgba(70, 64, 56, 0.65);
+      color: #101915;
+      display: none;
+      font-size: 76px;
+      font-weight: 900;
+      left: 50%;
+      line-height: 1;
+      padding: 18px 34px;
+      position: absolute;
+      top: 210px;
+      transform: translateX(-50%);
+      z-index: 19;
+    }
+    .guideIdentifyCodeVisible {
+      display: block;
+    }
     @media (orientation: portrait) {
       body {
         overflow: auto;
@@ -1125,6 +1176,10 @@ function classicWebViewReceiverHtml({
       </div>
     </div>
   </div>
+  <div class="guideRectTarget" id="guideRectTarget" aria-hidden="true">
+    <div class="guideRectLabel" id="guideRectLabel">CarePland is pointing here.</div>
+  </div>
+  <div class="guideIdentifyCode" id="guideIdentifyCode" aria-hidden="true"></div>
   </div>
 
   <button class="fullscreenPrompt" id="fullscreenPrompt" type="button">Fill Screen</button>
@@ -1148,6 +1203,7 @@ function classicWebViewReceiverHtml({
         pairingCode: "",
         pairingDeviceId: "",
         personId: "",
+        receiverSessionId: "",
         appointments: [],
         messages: [],
         todayFocusItems: [],
@@ -1155,8 +1211,11 @@ function classicWebViewReceiverHtml({
       };
       var browserBindingStorageKey = "carepland-connect-receiver-binding";
       var browserInstallStorageKey = "carepland-connect-classic-receiver-install-id";
+      var classicCachePrefix = "carepland-connect-classic-cache";
+      var guideSessionStorageKey = "carepland-connect-classic-guide-session";
       var pairingPollTimer = null;
       var cleaningTimer = null;
+      var guidePollTimer = null;
       var cleaningRemainingSeconds = 30;
 
       function pad(value) {
@@ -1215,6 +1274,144 @@ function classicWebViewReceiverHtml({
         } catch (error) {
           callback(0, { error: "Connection failed." });
         }
+      }
+      function scopedCacheKey(name) {
+        return classicCachePrefix + "-" + name + "-" + (receiverState.personId || "unbound");
+      }
+      function readCachedItems(name) {
+        if (!receiverState.personId) return [];
+        try {
+          var raw = window.localStorage ? window.localStorage.getItem(scopedCacheKey(name)) : "";
+          var parsed = raw ? JSON.parse(raw) : null;
+          return parsed && parsed.items && parsed.items.length ? parsed.items : [];
+        } catch (error) {
+          return [];
+        }
+      }
+      function writeCachedItems(name, items) {
+        if (!receiverState.personId || !items || !items.length) return;
+        try {
+          if (window.localStorage) {
+            window.localStorage.setItem(scopedCacheKey(name), JSON.stringify({
+              cachedAt: new Date().toISOString(),
+              items: items
+            }));
+          }
+        } catch (error) {}
+      }
+      function readOrCreateGuideSessionId() {
+        if (receiverState.receiverSessionId) return receiverState.receiverSessionId;
+        var current = "";
+        try {
+          current = window.sessionStorage ? window.sessionStorage.getItem(guideSessionStorageKey) : "";
+        } catch (error) {}
+        if (!current) {
+          current = "classic-guide-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000000);
+          try {
+            if (window.sessionStorage) window.sessionStorage.setItem(guideSessionStorageKey, current);
+          } catch (error) {}
+        }
+        receiverState.receiverSessionId = current;
+        return current;
+      }
+      function receiverGuideId() {
+        return receiverState.receiverDeviceId ||
+          receiverState.pairingDeviceId ||
+          receiverState.receiverInstallId ||
+          "classic-webview-receiver";
+      }
+      function clearGuideDisplay() {
+        var rect = document.getElementById("guideRectTarget");
+        var code = document.getElementById("guideIdentifyCode");
+        if (rect) rect.className = "guideRectTarget";
+        if (code) {
+          code.className = "guideIdentifyCode";
+          code.innerHTML = "";
+        }
+      }
+      function showGuideRect(rect) {
+        var element = document.getElementById("guideRectTarget");
+        var label = document.getElementById("guideRectLabel");
+        if (!element || !rect) {
+          clearGuideDisplay();
+          return;
+        }
+        element.style.left = Math.max(0, Number(rect.x || 0)) + "px";
+        element.style.top = Math.max(0, Number(rect.y || 0)) + "px";
+        element.style.width = Math.max(24, Number(rect.width || 24)) + "px";
+        element.style.height = Math.max(24, Number(rect.height || 24)) + "px";
+        if (label) label.innerHTML = escapeHtml(rect.label || "CarePland is pointing here.");
+        element.className = "guideRectTarget guideRectTargetVisible";
+      }
+      function showGuideIdentifyCode(value) {
+        var element = document.getElementById("guideIdentifyCode");
+        if (!element) return;
+        if (!value) {
+          element.className = "guideIdentifyCode";
+          element.innerHTML = "";
+          return;
+        }
+        element.innerHTML = escapeHtml(value);
+        element.className = "guideIdentifyCode guideIdentifyCodeVisible";
+      }
+      function recordGuidePress(button) {
+        var rect = document.getElementById("guideRectTarget");
+        var code = document.getElementById("guideIdentifyCode");
+        var guideActive =
+          (rect && rect.className.indexOf("guideRectTargetVisible") >= 0) ||
+          (code && code.className.indexOf("guideIdentifyCodeVisible") >= 0);
+        if (!guideActive) return;
+        jsonRequest("POST", "/api/connect/receiver-guide", {
+          action: "press",
+          label: button ? (button.getAttribute("aria-label") || button.innerText || button.textContent || "Receiver control") : "Receiver control",
+          pressedAt: new Date().getTime(),
+          receiverId: receiverGuideId(),
+          receiverSessionId: readOrCreateGuideSessionId(),
+          target: button ? (button.getAttribute("data-screen") || button.id || button.getAttribute("data-layout-choice") || "") : ""
+        }, function () {});
+        clearGuideDisplay();
+      }
+      function syncReceiverGuide() {
+        var receiverId = receiverGuideId();
+        var receiverSessionId = readOrCreateGuideSessionId();
+        jsonRequest("POST", "/api/connect/receiver-guide", {
+          action: "presence",
+          deviceProfile: document.body.getAttribute("data-hardware-profile") || "classic_webview",
+          pageUrl: window.location.pathname + window.location.search,
+          receiverId: receiverId,
+          receiverSessionId: receiverSessionId,
+          uiLayout: document.body.getAttribute("data-ui-layout") || "classic_webview"
+        }, function () {
+          jsonRequest("GET", "/api/connect/receiver-guide?receiverId=" + encodeURIComponent(receiverId), null, function (status, payload) {
+            var guide = payload && payload.guide ? payload.guide : null;
+            var targetSessionId = guide && guide.targetReceiverSessionId ? guide.targetReceiverSessionId : "";
+            var requests = guide && guide.identifyRequests && guide.identifyRequests.length ? guide.identifyRequests : [];
+            var identifyCode = "";
+            var i;
+            if (targetSessionId && targetSessionId !== receiverSessionId) {
+              clearGuideDisplay();
+              return;
+            }
+            for (i = 0; i < requests.length; i += 1) {
+              if (requests[i].receiverSessionId === receiverSessionId && Number(requests[i].expiresAt || 0) > new Date().getTime()) {
+                identifyCode = requests[i].code || "";
+              }
+            }
+            if (guide && guide.rect) {
+              showGuideRect(guide.rect);
+            } else {
+              var rect = document.getElementById("guideRectTarget");
+              if (rect) rect.className = "guideRectTarget";
+            }
+            showGuideIdentifyCode(identifyCode);
+          });
+        });
+      }
+      function startReceiverGuideSync() {
+        readOrCreateGuideSessionId();
+        if (guidePollTimer) window.clearInterval(guidePollTimer);
+        syncReceiverGuide();
+        guidePollTimer = window.setInterval(syncReceiverGuide, 2000);
       }
       function updateClock() {
         var now = new Date();
@@ -1363,6 +1560,16 @@ function classicWebViewReceiverHtml({
       function bindButtons() {
         var buttons = document.getElementsByTagName("button");
         var i;
+        document.addEventListener("click", function (event) {
+          var node = event.target;
+          while (node && node !== document) {
+            if (node.tagName && String(node.tagName).toLowerCase() === "button") {
+              recordGuidePress(node);
+              return;
+            }
+            node = node.parentNode;
+          }
+        });
         for (i = 0; i < buttons.length; i += 1) {
           buttons[i].onclick = function () {
             var target = this.getAttribute("data-screen");
@@ -1713,6 +1920,10 @@ function classicWebViewReceiverHtml({
       }
       function loadAppointments() {
         if (!receiverState.personId) return;
+        var cached = readCachedItems("appointments");
+        if (cached.length) {
+          renderAppointments(cached);
+        }
         jsonRequest(
           "GET",
           "/api/connect/appointments?personId=" + encodeURIComponent(receiverState.personId),
@@ -1721,21 +1932,29 @@ function classicWebViewReceiverHtml({
             var appointments = payload && payload.appointments && payload.appointments.length
               ? payload.appointments
               : [];
-            receiverState.appointments = appointments;
-            if (!appointments.length) {
-              setText("homeAppointmentDay", "No appointment");
-              setText("homeAppointmentTitle", "Nothing scheduled");
-              setText("homeAppointmentTime", "");
-              setText("appointmentDetailTitle", "No upcoming appointments");
-              setText("appointmentDetailTime", "");
-              setText("appointmentDetailMeta", "CarePland will show the next appointment here.");
-              setHtml("appointmentList", "");
+            if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+              if (appointments.length) writeCachedItems("appointments", appointments);
+              renderAppointments(appointments);
               return;
             }
-            renderSelectedAppointment(0);
-            renderAppointmentList();
+            if (!cached.length) renderAppointments([]);
           }
         );
+      }
+      function renderAppointments(appointments) {
+        receiverState.appointments = appointments || [];
+        if (!receiverState.appointments.length) {
+          setText("homeAppointmentDay", "No appointment");
+          setText("homeAppointmentTitle", "Nothing scheduled");
+          setText("homeAppointmentTime", "");
+          setText("appointmentDetailTitle", "No upcoming appointments");
+          setText("appointmentDetailTime", "");
+          setText("appointmentDetailMeta", "CarePland will show the next appointment here.");
+          setHtml("appointmentList", "");
+          return;
+        }
+        renderSelectedAppointment(0);
+        renderAppointmentList();
       }
       function appointmentLabel(appt) {
         var title = appt && (appt.title || appt.reason) ? (appt.title || appt.reason) : "Appointment";
@@ -1800,6 +2019,8 @@ function classicWebViewReceiverHtml({
           setText("focusStripThird", "");
           return;
         }
+        var cached = readCachedItems("today-focus");
+        if (cached.length) renderTodayFocusItems(cached);
         jsonRequest(
           "GET",
           "/api/connect/today-focus?personId=" + encodeURIComponent(receiverState.personId),
@@ -1808,18 +2029,26 @@ function classicWebViewReceiverHtml({
             var items = payload && payload.focusItems && payload.focusItems.length
               ? payload.focusItems
               : [];
-            receiverState.todayFocusItems = items;
-            if (!items.length) {
-              renderFocusItem("focusStrip", null, "Nothing due");
-              renderFocusItem("focusStripSecond", null, "");
-              renderFocusItem("focusStripThird", null, "");
+            if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+              if (items.length) writeCachedItems("today-focus", items);
+              renderTodayFocusItems(items);
               return;
             }
-            renderFocusItem("focusStrip", items[0], "");
-            renderFocusItem("focusStripSecond", items[1], "");
-            renderFocusItem("focusStripThird", items[2], "");
+            if (!cached.length) renderTodayFocusItems([]);
           }
         );
+      }
+      function renderTodayFocusItems(items) {
+        receiverState.todayFocusItems = items || [];
+        if (!receiverState.todayFocusItems.length) {
+          renderFocusItem("focusStrip", null, "Nothing due");
+          renderFocusItem("focusStripSecond", null, "");
+          renderFocusItem("focusStripThird", null, "");
+          return;
+        }
+        renderFocusItem("focusStrip", receiverState.todayFocusItems[0], "");
+        renderFocusItem("focusStripSecond", receiverState.todayFocusItems[1], "");
+        renderFocusItem("focusStripThird", receiverState.todayFocusItems[2], "");
       }
       function renderFocusItem(id, item, emptyLabel) {
         var element = document.getElementById(id);
@@ -1863,6 +2092,8 @@ function classicWebViewReceiverHtml({
       }
       function loadMessages() {
         if (!receiverState.personId) return;
+        var cached = readCachedItems("messages");
+        if (cached.length) renderMessages(cached);
         jsonRequest(
           "GET",
           "/api/connect/messages?personId=" + encodeURIComponent(receiverState.personId),
@@ -1871,27 +2102,35 @@ function classicWebViewReceiverHtml({
             var messages = payload && payload.messages && payload.messages.length
               ? payload.messages
               : [];
-            receiverState.messages = messages;
-            var html = "";
-            var i;
-            if (!messages.length) {
-              setText("messagesEmpty", "No messages yet.");
-              setHtml("messageList", "");
-              setText("messageDetail", "");
-              setHtml("messagesPager", "&lt; &nbsp; 1 / 1 &nbsp; &gt;");
+            if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+              if (messages.length) writeCachedItems("messages", messages);
+              renderMessages(messages);
               return;
             }
-            setText("messagesEmpty", "");
-            for (i = 0; i < messages.length && i < 4; i += 1) {
-              html += '<button class="messageItem' + (messages[i].readAt ? " messageItemRead" : "") + '" type="button" data-message-index="' + i + '">' +
-                escapeHtml(messages[i].body || messages[i].transcript || "Message") +
-                "</button>";
-            }
-            setHtml("messageList", html);
-            setText("messagesPager", "1 / " + Math.max(1, messages.length));
-            bindMessageItems();
+            if (!cached.length) renderMessages([]);
           }
         );
+      }
+      function renderMessages(messages) {
+        receiverState.messages = messages || [];
+        var html = "";
+        var i;
+        if (!receiverState.messages.length) {
+          setText("messagesEmpty", "No messages yet.");
+          setHtml("messageList", "");
+          setText("messageDetail", "");
+          setHtml("messagesPager", "&lt; &nbsp; 1 / 1 &nbsp; &gt;");
+          return;
+        }
+        setText("messagesEmpty", "");
+        for (i = 0; i < receiverState.messages.length && i < 4; i += 1) {
+          html += '<button class="messageItem' + (receiverState.messages[i].readAt ? " messageItemRead" : "") + '" type="button" data-message-index="' + i + '">' +
+            escapeHtml(receiverState.messages[i].body || receiverState.messages[i].transcript || "Message") +
+            "</button>";
+        }
+        setHtml("messageList", html);
+        setText("messagesPager", "1 / " + Math.max(1, receiverState.messages.length));
+        bindMessageItems();
       }
       function bindMessageItems() {
         var items = document.querySelectorAll("[data-message-index]");
@@ -2123,6 +2362,7 @@ function classicWebViewReceiverHtml({
       applyReceiverFrameScale();
       updateReceiverChromeControls();
       bindButtons();
+      startReceiverGuideSync();
       window.onresize = function () {
         applyReceiverFrameScale();
         updateFullscreenPrompt();

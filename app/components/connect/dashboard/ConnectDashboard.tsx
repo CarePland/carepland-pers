@@ -590,16 +590,15 @@ export function ConnectDashboard() {
         return;
       }
       if (activeCallId) {
-        logDashboardCallEvent(activeCallId, "call_dashboard_ring_timeout_fired", {
+        logDashboardCallEvent(activeCallId, "call_dashboard_ring_timeout_observed", {
           callAudioStatus: callAudioStatusRef.current,
+          latestCallAudioState: latestCallAudioStateRef.current,
           source: "playCallRingback",
         });
       }
-      playCallFailureSound();
-      setRecipientCallState("ended");
-      setStatus("No approved receiver answered before timeout.");
+      setStatus("Still waiting for the receiver to answer.");
     }, 15000);
-  }, [playCallFailureSound, stopCallCue]);
+  }, [stopCallCue]);
 
   const refresh = useCallback(async () => {
     setLoading(true);

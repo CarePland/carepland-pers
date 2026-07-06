@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { GET as getClassicReceiverRoute } from "../../../connect/receiver/legacy/route";
 import { classicReceiverRuntimeInput } from "./classicWebviewReceiverRoute";
 import { createReceiverRuntimeContract } from "./receiverRuntimeContract";
 
@@ -45,5 +46,29 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.equal(contract.hardware.hardwareProfile, "grandstream_gxv3370");
     assert.equal(contract.layout.uiLayout, "desk_phone_1024x600");
     assert.equal(contract.layout.uiSchemaId, "gxv3370_classic_1024x600_v1");
+  });
+
+  it("renders receiver guide presence and highlight support", async () => {
+    const response = getClassicReceiverRoute({
+      nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),
+    } as never);
+    const html = await response.text();
+
+    assert.match(html, /\/api\/connect\/receiver-guide/);
+    assert.match(html, /guideRectTarget/);
+    assert.match(html, /guideIdentifyCode/);
+    assert.match(html, /startReceiverGuideSync/);
+  });
+
+  it("renders person-scoped local cache support for Classic data", async () => {
+    const response = getClassicReceiverRoute({
+      nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),
+    } as never);
+    const html = await response.text();
+
+    assert.match(html, /carepland-connect-classic-cache/);
+    assert.match(html, /readCachedItems/);
+    assert.match(html, /writeCachedItems/);
+    assert.match(html, /renderTodayFocusItems/);
   });
 });
