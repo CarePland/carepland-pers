@@ -4068,6 +4068,17 @@ export function ConnectReceiver() {
         return;
       }
 
+      await requestReceiverFullscreen();
+    } catch {
+      setStatus("Chrome did not allow full screen. Tap the browser menu and choose full screen if available.");
+    }
+  }
+
+  async function requestReceiverFullscreen() {
+    const fullscreenDocument = document as FullscreenDocument;
+    if (document.fullscreenElement || fullscreenDocument.webkitFullscreenElement) return;
+
+    try {
       const element = document.documentElement as FullscreenElement;
       if (element.requestFullscreen) {
         await element.requestFullscreen();
@@ -4077,6 +4088,13 @@ export function ConnectReceiver() {
       setStatus("Full screen is on.");
     } catch {
       setStatus("Chrome did not allow full screen. Tap the browser menu and choose full screen if available.");
+    }
+  }
+
+  function startReceiverFromAction() {
+    setStarted(true);
+    if (deskPhoneMode && !kioskManagedFullscreen) {
+      void requestReceiverFullscreen();
     }
   }
 
@@ -5050,7 +5068,7 @@ export function ConnectReceiver() {
           <p>CarePland Connect</p>
           <h1>Receiver</h1>
           <span>Living Room Receiver</span>
-          <button type="button" onClick={() => setStarted(true)}>
+          <button type="button" onClick={startReceiverFromAction}>
             Start Receiver
           </button>
         </section>

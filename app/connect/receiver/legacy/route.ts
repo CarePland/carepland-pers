@@ -447,6 +447,30 @@ function classicWebViewReceiverHtml({
       border-bottom: 2px solid #d4d9d2;
       padding: 14px 0;
     }
+    .fullscreenPrompt {
+      background: #17231d;
+      border: 4px solid #fbfaf5;
+      border-radius: 8px;
+      bottom: 18px;
+      box-shadow: 0 7px 0 rgba(70, 64, 56, 0.65);
+      color: #ffffff;
+      display: none;
+      font-size: 27px;
+      font-weight: 900;
+      min-height: 70px;
+      min-width: 210px;
+      padding: 12px 24px;
+      position: fixed;
+      right: 18px;
+      z-index: 20;
+    }
+    .fullscreenPromptVisible {
+      display: block;
+    }
+    .fullscreenPrompt:active {
+      box-shadow: 0 2px 0 rgba(70, 64, 56, 0.65);
+      transform: translateY(5px);
+    }
     @media (orientation: portrait) {
       body {
         overflow: auto;
@@ -481,6 +505,13 @@ function classicWebViewReceiverHtml({
       }
       .bigButton {
         height: 104px;
+      }
+      .fullscreenPrompt {
+        bottom: 10px;
+        font-size: 24px;
+        min-height: 62px;
+        min-width: 180px;
+        right: 10px;
       }
     }
   </style>
@@ -609,6 +640,8 @@ function classicWebViewReceiverHtml({
     </div>
   </div>
 
+  <button class="fullscreenPrompt" id="fullscreenPrompt" type="button">Fill Screen</button>
+
   <script>
     (function () {
       var receiverState = {
@@ -693,6 +726,57 @@ function classicWebViewReceiverHtml({
           screens[i].className = screens[i].className.replace(" screenActive", "");
         }
         document.getElementById(id).className += " screenActive";
+        updateFullscreenPrompt();
+      }
+      function fullscreenElement() {
+        return document.fullscreenElement ||
+          document.webkitFullscreenElement ||
+          document.mozFullScreenElement ||
+          document.msFullscreenElement ||
+          null;
+      }
+      function fullscreenRequestMethod(element) {
+        return element.requestFullscreen ||
+          element.webkitRequestFullscreen ||
+          element.mozRequestFullScreen ||
+          element.msRequestFullscreen ||
+          null;
+      }
+      function fullscreenPromptAllowed() {
+        return Boolean(fullscreenRequestMethod(document.documentElement));
+      }
+      function updateFullscreenPrompt(message) {
+        var prompt = document.getElementById("fullscreenPrompt");
+        if (!prompt) return;
+        if (message) prompt.innerHTML = escapeHtml(message);
+        if (!fullscreenPromptAllowed() || fullscreenElement()) {
+          prompt.className = "fullscreenPrompt";
+          return;
+        }
+        prompt.className = "fullscreenPrompt fullscreenPromptVisible";
+      }
+      function requestReceiverFullscreen() {
+        var prompt = document.getElementById("fullscreenPrompt");
+        var element = document.documentElement;
+        var request = fullscreenRequestMethod(element);
+        if (!request) {
+          if (prompt) prompt.innerHTML = "Use Chrome Menu";
+          return;
+        }
+        try {
+          var result = request.call(element);
+          if (result && result.then) {
+            result.then(function () {
+              updateFullscreenPrompt();
+            }).catch(function () {
+              if (prompt) prompt.innerHTML = "Use Chrome Menu";
+            });
+          } else {
+            updateFullscreenPrompt();
+          }
+        } catch (error) {
+          if (prompt) prompt.innerHTML = "Use Chrome Menu";
+        }
       }
       function bindButtons() {
         var buttons = document.getElementsByTagName("button");
@@ -710,6 +794,9 @@ function classicWebViewReceiverHtml({
         }
         document.getElementById("sendQuestionButton").onclick = function () {
           sendQuestion();
+        };
+        document.getElementById("fullscreenPrompt").onclick = function () {
+          requestReceiverFullscreen();
         };
       }
       function readNativeConfig() {
@@ -1120,6 +1207,12 @@ function classicWebViewReceiverHtml({
       }
       updateClock();
       bindButtons();
+      document.addEventListener("fullscreenchange", function () {
+        updateFullscreenPrompt();
+      });
+      document.addEventListener("webkitfullscreenchange", function () {
+        updateFullscreenPrompt();
+      });
       document.getElementById("newPairingCodeButton").onclick = function () {
         startClassicPairing(function () {
           loadAppointments();
@@ -1142,6 +1235,7 @@ function classicWebViewReceiverHtml({
           loadMessages();
         });
       }, 60000);
+      updateFullscreenPrompt();
       markReady();
     }());
   </script>
