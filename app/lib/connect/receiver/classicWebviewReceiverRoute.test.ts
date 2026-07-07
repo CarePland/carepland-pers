@@ -92,6 +92,8 @@ describe("Classic WebView receiver route runtime input", () => {
 
     assert.match(html, /function loadIncomingCalls/);
     assert.match(html, /\/api\/connect\/calls\?personId=/);
+    assert.match(html, /receiverDeviceId=/);
+    assert.match(html, /receiverInstallId=/);
     assert.match(html, /function showIncomingCall/);
     assert.match(html, /state: "answered"/);
     assert.match(html, /startIncomingCallPolling/);

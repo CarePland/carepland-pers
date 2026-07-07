@@ -2288,6 +2288,8 @@ function classicWebViewReceiverHtml({
         setText("callStatus", (call.callerName || "Andrew") + " is calling. Use the handset or speaker.");
         jsonRequest("POST", "/api/connect/calls/" + encodeURIComponent(call.callId) + "/state", {
           mainConnectUserPersonId: receiverState.personId,
+          receiverDeviceId: receiverState.receiverDeviceId,
+          receiverInstallId: receiverState.receiverInstallId,
           source: "classic_webview_receiver",
           state: "answered"
         }, function (status, payload) {
@@ -2299,12 +2301,20 @@ function classicWebViewReceiverHtml({
         });
       }
       function loadIncomingCalls() {
+        var url = "";
         if (!receiverState.personId || !receiverState.receiverDeviceId) return;
-        jsonRequest("GET", "/api/connect/calls?personId=" + encodeURIComponent(receiverState.personId), null, function (status, payload) {
+        url = "/api/connect/calls?personId=" + encodeURIComponent(receiverState.personId) +
+          "&receiverDeviceId=" + encodeURIComponent(receiverState.receiverDeviceId) +
+          "&receiverInstallId=" + encodeURIComponent(receiverState.receiverInstallId || "");
+        jsonRequest("GET", url, null, function (status, payload) {
           var calls = payload && payload.calls && payload.calls.length ? payload.calls : [];
           var activeCall = null;
           var i;
-          if (!(status >= 200 && status < 300) || !payload || payload.ok === false) return;
+          if (!(status >= 200 && status < 300) || !payload || payload.ok === false) {
+            if (payload && payload.error) setText("connectionStatus", payload.error);
+            return;
+          }
+          setText("connectionStatus", "Online");
           for (i = 0; i < calls.length; i += 1) {
             if (!callIsFromDashboard(calls[i])) continue;
             if (calls[i].state === "ringing" || calls[i].state === "answered" || calls[i].state === "connected") {
@@ -2343,6 +2353,8 @@ function classicWebViewReceiverHtml({
         setText("callStatus", "Closing call...");
         jsonRequest("POST", "/api/connect/calls/" + encodeURIComponent(receiverState.activeCallId) + "/state", {
           mainConnectUserPersonId: receiverState.personId,
+          receiverDeviceId: receiverState.receiverDeviceId,
+          receiverInstallId: receiverState.receiverInstallId,
           source: "classic_webview_receiver",
           state: "hung_up"
         }, function (status, payload) {
