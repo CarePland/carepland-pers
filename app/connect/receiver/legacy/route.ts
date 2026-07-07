@@ -2505,12 +2505,20 @@ function classicWebViewReceiverHtml({
           receiverInstallId: receiverState.receiverInstallId,
           source: "receiver",
           surface: "classic_webview_receiver",
-          state: "connected"
+          state: "answered"
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
             receiverState.answeredCallId = receiverState.activeCallId;
             setText("callTitle", "Connected");
             setText("callStatus", "Use the handset or speaker.");
+            jsonRequest("POST", "/api/connect/calls/" + encodeURIComponent(receiverState.activeCallId) + "/state", {
+              mainConnectUserPersonId: receiverState.personId,
+              receiverDeviceId: receiverState.receiverDeviceId,
+              receiverInstallId: receiverState.receiverInstallId,
+              source: "receiver",
+              surface: "classic_webview_receiver",
+              state: "connected"
+            }, function () {});
             return;
           }
           setVisible("answerCallButton", true);
