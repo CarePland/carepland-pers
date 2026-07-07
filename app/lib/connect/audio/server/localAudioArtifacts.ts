@@ -6,6 +6,7 @@ import {
   type ConnectAudioArtifactKind,
   type ConnectAudioDirection,
 } from "../domain";
+import { careplandRuntimeTempPath } from "../../../platform/server/runtimeTemp";
 import type { ConnectAudioArtifact, ConnectAudioCaptureContext } from "../types";
 
 type LocalAudioArtifactInput = {
@@ -32,15 +33,10 @@ type LocalAudioArtifactIndex = {
   version: 1;
 };
 
-const defaultIndexPath = path.join(
-  process.cwd(),
-  "tmp",
-  "connect-audio",
-  "artifacts.json"
-);
+const defaultIndexPath = careplandRuntimeTempPath("connect-audio", "artifacts.json");
 
 export function localConnectAudioUploadsDir() {
-  return path.join(process.cwd(), "tmp", "connect-audio", "uploads");
+  return careplandRuntimeTempPath("connect-audio", "uploads");
 }
 
 export async function recordLocalConnectAudioArtifact(

@@ -996,7 +996,7 @@ function classicWebViewReceiverHtml({
       <div class="setupCard bootCard">
         <div class="setupBrand">CarePland Connect</div>
         <div class="setupTitle">Receiver</div>
-        <div class="bootStatus">Starting Receiver...</div>
+        <div class="bootStatus" id="bootStatus">Starting Receiver...</div>
       </div>
     </div>
   </div>
@@ -1013,7 +1013,7 @@ function classicWebViewReceiverHtml({
           and enter this code.
         </div>
         <div class="setupStatus" id="setupStatus">Preparing Receiver setup...</div>
-        <button class="setupButton" id="newPairingCodeButton">New Code</button>
+        <button class="setupButton" id="newPairingCodeButton" onclick="window.location.reload(); return false;">New Code</button>
       </div>
     </div>
   </div>
@@ -1191,6 +1191,192 @@ function classicWebViewReceiverHtml({
       <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="focus">Focus</button>
     </div>
   </div>
+
+  <script>
+    (function () {
+      var fallbackInstallStorageKey = "carepland-connect-classic-receiver-install-id";
+      var fallbackBindingStorageKey = "carepland-connect-receiver-binding";
+      var fallbackInstallId = "";
+      var fallbackPairingCode = "";
+      var fallbackPairingDeviceId = "";
+      var fallbackPairingPollTimer = null;
+
+      function fallbackText(value) {
+        return value === null || value === undefined ? "" : String(value);
+      }
+      function fallbackJsonRequest(method, url, body, callback) {
+        var completed = false;
+        try {
+          var request = new XMLHttpRequest();
+          request.open(method, url, true);
+          request.setRequestHeader("Accept", "application/json");
+          if (body) request.setRequestHeader("Content-Type", "application/json");
+          request.onreadystatechange = function () {
+            if (request.readyState !== 4 || completed) return;
+            completed = true;
+            var payload = {};
+            try {
+              payload = JSON.parse(request.responseText || "{}");
+            } catch (error) {}
+            callback(request.status, payload);
+          };
+          window.setTimeout(function () {
+            if (completed) return;
+            completed = true;
+            callback(0, { error: "Receiver setup request timed out." });
+          }, 12000);
+          request.send(body ? JSON.stringify(body) : null);
+        } catch (error) {
+          if (!completed) callback(0, { error: "Receiver setup request failed." });
+        }
+      }
+      function fallbackInstallIdValue() {
+        if (fallbackInstallId) return fallbackInstallId;
+        try {
+          fallbackInstallId = window.localStorage ? window.localStorage.getItem(fallbackInstallStorageKey) || "" : "";
+          if (fallbackInstallId) return fallbackInstallId;
+          fallbackInstallId = "classic-web-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000000);
+          if (window.localStorage) window.localStorage.setItem(fallbackInstallStorageKey, fallbackInstallId);
+        } catch (error) {
+          fallbackInstallId = "classic-web-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000000);
+        }
+        return fallbackInstallId;
+      }
+      function fallbackFormatPairingCode(value) {
+        var digits = fallbackText(value).replace(/\\D/g, "");
+        if (digits.length === 6) return digits.substr(0, 3) + " " + digits.substr(3, 3);
+        return fallbackText(value) || "---";
+      }
+      function fallbackReceiverUrl() {
+        return window.location.protocol + "//" + window.location.host + "/connect/receiver/legacy?receiver_runtime=classic_webview";
+      }
+      function showSetupFallback(message) {
+        var boot = document.getElementById("bootScreen");
+        var setup = document.getElementById("setupScreen");
+        var status = document.getElementById("setupStatus");
+        if (boot && boot.className.indexOf("screenActive") >= 0) {
+          boot.className = boot.className.replace(" screenActive", "");
+          if (setup && setup.className.indexOf("screenActive") < 0) {
+            setup.className += " screenActive";
+          }
+        }
+        if (status) status.innerHTML = message || "Receiver setup is taking longer than expected. Tap New Code or reopen the app.";
+      }
+      function fallbackSaveBinding(payload) {
+        if (!payload || !payload.receiverDeviceId) return;
+        try {
+          if (window.localStorage) {
+            window.localStorage.setItem(fallbackBindingStorageKey, JSON.stringify({
+              bindingStatus: payload.bindingStatus || "bound",
+              deviceProfile: payload.deviceProfile || "",
+              hardwareProfile: payload.hardwareProfile || "",
+              mainConnectUserPersonId: payload.mainConnectUserPersonId || "",
+              receiverDeviceId: payload.receiverDeviceId || "",
+              receiverInstallId: payload.receiverInstallId || fallbackInstallIdValue(),
+              receiverUrl: payload.receiverUrl || "",
+              storageSource: "classic_fallback",
+              uiLayout: payload.uiLayout || ""
+            }));
+          }
+        } catch (error) {}
+        try {
+          if (window.CarePlandReceiver && window.CarePlandReceiver.saveBinding) {
+            window.CarePlandReceiver.saveBinding(
+              payload.receiverDeviceId || "",
+              payload.bindingStatus || "bound",
+              payload.deviceProfile || "",
+              payload.hardwareProfile || "",
+              payload.uiLayout || ""
+            );
+          }
+        } catch (error) {}
+      }
+      function fallbackRedeemPairingClaim(claim) {
+        showSetupFallback("Receiver detected. Finishing setup...");
+        fallbackJsonRequest("POST", "/api/connect/receiver-shell/claims/redeem", {
+          claim: claim,
+          receiverInstallId: fallbackInstallIdValue()
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            fallbackSaveBinding(payload);
+            showSetupFallback("Receiver ready. Opening CarePland...");
+            window.setTimeout(function () {
+              window.location.reload();
+            }, 500);
+            return;
+          }
+          showSetupFallback(payload && payload.error ? payload.error : "Receiver setup could not be completed.");
+        });
+      }
+      function fallbackPollPairing() {
+        if (!fallbackPairingCode) return;
+        var url = "/api/connect/receiver-shell/pairing-sessions?code=" + encodeURIComponent(fallbackPairingCode);
+        if (fallbackPairingDeviceId) url += "&receiverDeviceId=" + encodeURIComponent(fallbackPairingDeviceId);
+        fallbackJsonRequest("GET", url, null, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            if (payload.status === "paired" && payload.claim) {
+              fallbackRedeemPairingClaim(payload.claim);
+              return;
+            }
+            if (payload.status === "expired") {
+              showSetupFallback("This code expired. Tap New Code.");
+              return;
+            }
+          }
+          fallbackPairingPollTimer = window.setTimeout(fallbackPollPairing, 2500);
+        });
+      }
+      function fallbackRequestPairingCode() {
+        var pairingCodeElement = document.getElementById("pairingCode");
+        if (fallbackPairingPollTimer) window.clearTimeout(fallbackPairingPollTimer);
+        showSetupFallback("Getting a Receiver pairing code...");
+        if (pairingCodeElement) pairingCodeElement.innerHTML = "---";
+        fallbackJsonRequest("POST", "/api/connect/receiver-shell/pairing-sessions", {
+          deviceProfile: "classic_webview",
+          hardwareProfile: document.body.getAttribute("data-hardware-profile") || "classic_webview",
+          receiverInstallId: fallbackInstallIdValue(),
+          receiverUrl: fallbackReceiverUrl(),
+          uiLayout: document.body.getAttribute("data-ui-layout") || "desk_phone_1024x600"
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.pairingCode) {
+            fallbackPairingCode = payload.pairingCode;
+            fallbackPairingDeviceId = payload.receiverDeviceId || "";
+            if (pairingCodeElement) pairingCodeElement.innerHTML = fallbackFormatPairingCode(payload.pairingCode);
+            showSetupFallback("Enter this code in Connect to pair this Receiver.");
+            fallbackPollPairing();
+            return;
+          }
+          showSetupFallback(payload && payload.error ? payload.error : "Could not get a Receiver pairing code.");
+        });
+      }
+      window.__careplandClassicShowSetupFallback = showSetupFallback;
+      window.__careplandClassicRequestPairingCode = fallbackRequestPairingCode;
+      window.onerror = function (message) {
+        showSetupFallback("Receiver startup hit an older-device script problem. Tap New Code or reopen the app.");
+        return false;
+      };
+      var newCodeButton = document.getElementById("newPairingCodeButton");
+      if (newCodeButton) {
+        newCodeButton.onclick = function () {
+          fallbackRequestPairingCode();
+          return false;
+        };
+      }
+      try {
+        if (window.CarePlandReceiver && window.CarePlandReceiver.receiverReady) {
+          window.CarePlandReceiver.receiverReady();
+        }
+      } catch (error) {}
+      window.setTimeout(function () {
+        var pairingCodeElement = document.getElementById("pairingCode");
+        if (pairingCodeElement && pairingCodeElement.innerHTML === "---") {
+          fallbackRequestPairingCode();
+          return;
+        }
+        showSetupFallback("Receiver setup is taking longer than expected. Tap New Code or reopen the app.");
+      }, 7000);
+    }());
+  </script>
 
   <script>
     (function () {
@@ -2292,8 +2478,9 @@ function classicWebViewReceiverHtml({
           mainConnectUserPersonId: receiverState.personId,
           receiverDeviceId: receiverState.receiverDeviceId,
           receiverInstallId: receiverState.receiverInstallId,
-          source: "classic_webview_receiver",
-          state: "answered"
+          source: "receiver",
+          surface: "classic_webview_receiver",
+          state: "connected"
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
             setText("callStatus", "Connected. Use the handset or speaker.");
@@ -2357,7 +2544,8 @@ function classicWebViewReceiverHtml({
           mainConnectUserPersonId: receiverState.personId,
           receiverDeviceId: receiverState.receiverDeviceId,
           receiverInstallId: receiverState.receiverInstallId,
-          source: "classic_webview_receiver",
+          source: "receiver",
+          surface: "classic_webview_receiver",
           state: "hung_up"
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {

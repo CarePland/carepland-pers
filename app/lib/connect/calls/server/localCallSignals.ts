@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { careplandRuntimeTempPath } from "../../../platform/server/runtimeTemp";
+
 export type ConnectCallSignalSender = "dashboard" | "receiver";
 export type ConnectCallSignalType = "answer" | "ice_candidate" | "media_state" | "offer";
 
@@ -20,12 +22,7 @@ type LocalCallSignalsIndex = {
   version: 1;
 };
 
-const defaultIndexPath = path.join(
-  process.cwd(),
-  "tmp",
-  "connect-calls",
-  "signals.json"
-);
+const defaultIndexPath = careplandRuntimeTempPath("connect-calls", "signals.json");
 
 const signalSenders = new Set<string>(["dashboard", "receiver"]);
 const signalTypes = new Set<string>(["answer", "ice_candidate", "media_state", "offer"]);

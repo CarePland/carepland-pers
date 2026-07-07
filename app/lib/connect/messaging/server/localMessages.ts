@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { careplandRuntimeTempPath } from "../../../platform/server/runtimeTemp";
 import type { ConnectMessageRecord } from "../types";
 
 type LocalMessagesIndex = {
@@ -9,12 +10,7 @@ type LocalMessagesIndex = {
   version: 1;
 };
 
-const defaultIndexPath = path.join(
-  process.cwd(),
-  "tmp",
-  "connect-messages",
-  "messages.json"
-);
+const defaultIndexPath = careplandRuntimeTempPath("connect-messages", "messages.json");
 
 export async function readLocalConnectMessages(
   options: { indexPath?: string } = {}

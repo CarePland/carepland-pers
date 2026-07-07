@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { careplandRuntimeTempPath } from "../../../platform/server/runtimeTemp";
+
 export type LocalConnectCallEvent = {
   actorRole: string;
   callId: string;
@@ -17,12 +19,7 @@ type LocalCallEventsIndex = {
   version: 1;
 };
 
-const defaultIndexPath = path.join(
-  process.cwd(),
-  "tmp",
-  "connect-calls",
-  "events.json"
-);
+const defaultIndexPath = careplandRuntimeTempPath("connect-calls", "events.json");
 
 export async function recordLocalConnectCallEvent(
   input: {

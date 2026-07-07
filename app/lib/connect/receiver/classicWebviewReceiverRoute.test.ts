@@ -72,6 +72,20 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.match(html, /renderTodayFocusItems/);
   });
 
+  it("renders an early setup fallback for older WebViews", async () => {
+    const response = getClassicReceiverRoute({
+      nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),
+    } as never);
+    const html = await response.text();
+
+    assert.match(html, /__careplandClassicShowSetupFallback/);
+    assert.match(html, /__careplandClassicRequestPairingCode/);
+    assert.match(html, /fallbackRequestPairingCode/);
+    assert.match(html, /fallbackPollPairing/);
+    assert.match(html, /Receiver startup hit an older-device script problem/);
+    assert.match(html, /window\.location\.reload\(\); return false/);
+  });
+
   it("resets a revoked browser binding back into Receiver pairing", async () => {
     const response = getClassicReceiverRoute({
       nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),
@@ -95,7 +109,9 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.match(html, /receiverDeviceId=/);
     assert.match(html, /receiverInstallId=/);
     assert.match(html, /function showIncomingCall/);
-    assert.match(html, /state: "answered"/);
+    assert.match(html, /surface: "classic_webview_receiver"/);
+    assert.match(html, /source: "receiver"/);
+    assert.match(html, /state: "connected"/);
     assert.match(html, /startIncomingCallPolling/);
   });
 });

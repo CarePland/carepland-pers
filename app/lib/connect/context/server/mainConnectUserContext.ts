@@ -5,6 +5,7 @@ import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
 } from "../../../platform/server/supabase";
+import { careplandRuntimeTempPath } from "../../../platform/server/runtimeTemp";
 import { connectAvatarAltText } from "../../avatar";
 import {
   uniqueConnectParticipantPersonIds,
@@ -506,9 +507,7 @@ async function writeLocalConnectSettings(
 }
 
 function connectSettingsPathForUser(userId: string) {
-  return path.join(
-    process.cwd(),
-    "tmp",
+  return careplandRuntimeTempPath(
     "connect-settings",
     `${userId}-main-connect-user.json`
   );

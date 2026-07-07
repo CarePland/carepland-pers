@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { careplandRuntimeTempPath } from "../../../platform/server/runtimeTemp";
+
 export type LocalAudioPlaybackEvent = {
   artifactId?: string;
   audioEnhancementProfile?: {
@@ -46,9 +48,7 @@ type LocalAudioPlaybackEventIndex = {
   version: 1;
 };
 
-const defaultIndexPath = path.join(
-  process.cwd(),
-  "tmp",
+const defaultIndexPath = careplandRuntimeTempPath(
   "connect-audio",
   "playback-events.json"
 );

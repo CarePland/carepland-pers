@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { isMissingServerEnvError } from "../../platform/server/env";
 import { createSupabaseServiceClient } from "../../platform/server/supabase";
+import { careplandRuntimeTempPath } from "../../platform/server/runtimeTemp";
 
 export type ReceiverShellClaimStatus = "available" | "expired" | "revoked" | "used";
 export type ReceiverShellPairingStatus = "pending" | "paired" | "expired" | "revoked" | "used";
@@ -115,9 +116,7 @@ type ReceiverShellClaimIndex = {
   version: 1;
 };
 
-const defaultIndexPath = path.join(
-  process.cwd(),
-  "tmp",
+const defaultIndexPath = careplandRuntimeTempPath(
   "connect-receiver-shell",
   "claims.json"
 );

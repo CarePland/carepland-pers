@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createSupabaseServiceClient } from "../../platform/server/supabase";
+import { careplandRuntimeTempPath } from "../../platform/server/runtimeTemp";
 
 export type ReceiverCleaningSession = {
   cleaningCount: number | null;
@@ -41,9 +42,7 @@ type ReceiverCleaningSessionIndex = {
   version: 1;
 };
 
-const defaultIndexPath = path.join(
-  process.cwd(),
-  "tmp",
+const defaultIndexPath = careplandRuntimeTempPath(
   "connect-receiver",
   "screen-cleaning-sessions.json"
 );

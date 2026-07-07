@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { careplandRuntimeTempPath } from "../../../platform/server/runtimeTemp";
 import type { ConnectCallRecord } from "../callScoping";
 import type { ConnectCallTranscriptSegment } from "../transcriptChunking";
 import { assembleConnectCallTranscript } from "../transcriptChunking";
@@ -21,7 +22,7 @@ type LocalCallsIndex = {
   version: 1;
 };
 
-const defaultIndexPath = path.join(process.cwd(), "tmp", "connect-calls", "calls.json");
+const defaultIndexPath = careplandRuntimeTempPath("connect-calls", "calls.json");
 const defaultRingingTimeoutMs = 45_000;
 const defaultTranscriptRetentionMs = 7 * 24 * 60 * 60 * 1000;
 const expiredUnreviewedNote =
