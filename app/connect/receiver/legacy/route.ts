@@ -1384,6 +1384,7 @@ function classicWebViewReceiverHtml({
       var receiverState = {
         activeCallId: "",
         answeredCallId: "",
+        callPhase: "",
         cleaningSessionId: "",
         cleaningStartedAt: "",
         receiverDeviceId: "",
@@ -2484,7 +2485,9 @@ function classicWebViewReceiverHtml({
       function showIncomingCall(call) {
         if (!call || !call.callId || receiverState.activeCallId === call.callId) return;
         if (receiverState.answeredCallId && receiverState.answeredCallId === call.callId) return;
+        if (receiverState.callPhase === "answered" || receiverState.callPhase === "connected") return;
         receiverState.activeCallId = call.callId;
+        receiverState.callPhase = "ringing";
         var callerName = call.callerName || "Andrew";
         showScreen("callScreen");
         setText("callTitle", "Call from " + callerName);
@@ -2509,6 +2512,7 @@ function classicWebViewReceiverHtml({
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
             receiverState.answeredCallId = receiverState.activeCallId;
+            receiverState.callPhase = "answered";
             setText("callTitle", "Connected");
             setText("callStatus", "Use the handset or speaker.");
             jsonRequest("POST", "/api/connect/calls/" + encodeURIComponent(receiverState.activeCallId) + "/state", {
@@ -2518,7 +2522,11 @@ function classicWebViewReceiverHtml({
               source: "receiver",
               surface: "classic_webview_receiver",
               state: "connected"
-            }, function () {});
+            }, function (connectedStatus, connectedPayload) {
+              if (connectedStatus >= 200 && connectedStatus < 300 && connectedPayload && connectedPayload.ok !== false) {
+                receiverState.callPhase = "connected";
+              }
+            });
             return;
           }
           setVisible("answerCallButton", true);
@@ -2534,12 +2542,30 @@ function classicWebViewReceiverHtml({
         jsonRequest("GET", url, null, function (status, payload) {
           var calls = payload && payload.calls && payload.calls.length ? payload.calls : [];
           var activeCall = null;
+          var lockedCall = null;
+          var lockedCallId = receiverState.answeredCallId || receiverState.activeCallId;
           var i;
           if (!(status >= 200 && status < 300) || !payload || payload.ok === false) {
             if (payload && payload.error) setText("connectionStatus", payload.error);
             return;
           }
           setText("connectionStatus", "Online");
+          if (lockedCallId && (receiverState.callPhase === "answered" || receiverState.callPhase === "connected")) {
+            for (i = 0; i < calls.length; i += 1) {
+              if (calls[i].callId === lockedCallId) {
+                lockedCall = calls[i];
+                break;
+              }
+            }
+            if (!lockedCall || lockedCall.state === "ringing" || lockedCall.state === "answered" || lockedCall.state === "connected") {
+              showScreen("callScreen");
+              setText("callTitle", "Connected");
+              setText("callStatus", "Use the handset or speaker.");
+              setVisible("answerCallButton", false);
+              setVisible("closeCallButton", true);
+              return;
+            }
+          }
           for (i = 0; i < calls.length; i += 1) {
             if (!callIsFromDashboard(calls[i])) continue;
             if (calls[i].state === "ringing" || calls[i].state === "answered" || calls[i].state === "connected") {
@@ -2549,8 +2575,11 @@ function classicWebViewReceiverHtml({
           }
           if (!activeCall) {
             if (receiverState.activeCallId) {
-              receiverState.activeCallId = "";
-              receiverState.answeredCallId = "";
+              if (receiverState.callPhase === "ringing") {
+                receiverState.activeCallId = "";
+                receiverState.answeredCallId = "";
+                receiverState.callPhase = "";
+              }
               setText("connectionStatus", "Online");
             }
             return;
@@ -2569,6 +2598,7 @@ function classicWebViewReceiverHtml({
           receiverState.activeCallId = activeCall.callId || receiverState.activeCallId;
           if (activeCall.state === "answered" || activeCall.state === "connected") {
             receiverState.answeredCallId = activeCall.callId || receiverState.answeredCallId;
+            receiverState.callPhase = activeCall.state;
             showScreen("callScreen");
             setText("callTitle", "Connected with " + (activeCall.callerName || "Andrew"));
             setText("callStatus", "Use the handset or speaker.");
@@ -2599,6 +2629,7 @@ function classicWebViewReceiverHtml({
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
             receiverState.activeCallId = "";
             receiverState.answeredCallId = "";
+            receiverState.callPhase = "";
             setText("connectionStatus", "Call closed");
             showScreen("homeScreen");
             return;
