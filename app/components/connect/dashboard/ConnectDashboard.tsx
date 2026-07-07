@@ -279,6 +279,25 @@ function countOnlineProvisionedReceivers(provisioning: ConnectProvisioningSnapsh
   }).length;
 }
 
+function receiverUsesClassicCallBridge(receiver?: ConnectReceiverDevice | null) {
+  const deviceProfile = String(
+    (receiver as { deviceProfile?: string } | null | undefined)?.deviceProfile || ""
+  ).toLowerCase();
+  const hardwareProfile = String(receiver?.hardwareProfile || "").toLowerCase();
+  const uiLayout = String(
+    (receiver as { uiLayout?: string } | null | undefined)?.uiLayout || ""
+  ).toLowerCase();
+  const nativeModel = String(receiver?.nativeModel || "").toLowerCase();
+
+  return (
+    deviceProfile.includes("classic") ||
+    hardwareProfile.includes("grandstream") ||
+    hardwareProfile.includes("gxv") ||
+    nativeModel.includes("gxv") ||
+    uiLayout.includes("desk_phone")
+  );
+}
+
 function receiverKey(device: ConnectReceiverDevice) {
   return device.id ?? device.receiverId ?? device.name ?? connectPrototypeReceiverId;
 }
@@ -1008,6 +1027,8 @@ export function ConnectDashboard() {
       ? selectedReceiverKey
       : selectedReceiver?.name || selectedReceiver?.receiverId || "Kitchen Receiver");
   const selectedReceiverId = selectedReceiver?.receiverId || connectPrototypeReceiverId;
+  const selectedReceiverUsesClassicCallBridge =
+    receiverUsesClassicCallBridge(selectedReceiver);
   const selectedReceiverGuideId = selectedReceiverMatch
     ? receiverKey(selectedReceiverMatch)
     : selectedReceiverKey || selectedReceiverId;
@@ -1259,9 +1280,26 @@ export function ConnectDashboard() {
         logDashboardCallEvent(callResponse.call.callId, "call_dashboard_call_created", {
           source: "startCall",
         });
-        startDashboardCallAudio(callResponse.call.callId);
+        if (selectedReceiverUsesClassicCallBridge) {
+          setCallAudioStatus("idle");
+          setCallTranscriptRuntimeStatus("classic_receiver_bridge");
+          logDashboardCallEvent(
+            callResponse.call.callId,
+            "call_dashboard_classic_receiver_bridge_selected",
+            {
+              receiverId: selectedReceiverId,
+              source: "startCall",
+            }
+          );
+        } else {
+          startDashboardCallAudio(callResponse.call.callId);
+        }
       }
-      setStatus(`Call sent to ${selectedPersonName}.`);
+      setStatus(
+        selectedReceiverUsesClassicCallBridge
+          ? `Call sent to ${selectedPersonName}. Tap Answer on the Receiver.`
+          : `Call sent to ${selectedPersonName}.`
+      );
       await refreshCallState();
     } catch (error) {
       stopLiveCallAudio();
@@ -2194,6 +2232,7 @@ export function ConnectDashboard() {
             onRestartAudio={restartDashboardCallAudio}
             onToggleMuted={toggleCallMuted}
             recipientCallState={recipientCallState}
+            receiverUsesClassicCallBridge={selectedReceiverUsesClassicCallBridge}
             selectedPerson={selectedPerson}
             selectedPersonName={selectedPersonName}
             setRecipientCallState={setRecipientCallState}
@@ -5391,6 +5430,7 @@ function RecipientCallPanel({
   onRestartAudio,
   onToggleMuted,
   recipientCallState,
+  receiverUsesClassicCallBridge,
   selectedPerson,
   selectedPersonName,
   setRecipientCallState,
@@ -5415,6 +5455,7 @@ function RecipientCallPanel({
   onRestartAudio: () => void;
   onToggleMuted: () => void;
   recipientCallState: RecipientCallState;
+  receiverUsesClassicCallBridge: boolean;
   selectedPerson?: ConnectReceiverPerson;
   selectedPersonName: string;
   setRecipientCallState: (value: RecipientCallState) => void;
@@ -5448,7 +5489,9 @@ function RecipientCallPanel({
       ? "Andrew would like to talk now."
       : "A live conversation starts only if the recipient accepts.";
   const audioLabel =
-    callAudioStatus === "remote_audio" || callAudioStatus === "connected"
+    receiverUsesClassicCallBridge && isConnected
+      ? "Receiver handset"
+      : callAudioStatus === "remote_audio" || callAudioStatus === "connected"
       ? "Live audio"
       : callAudioStatus === "microphone_ready" || callAudioStatus === "connecting"
         ? "Audio connecting"
@@ -5460,7 +5503,9 @@ function RecipientCallPanel({
               ? "Waiting for audio"
               : "Audio idle";
   const audioDetail =
-    callAudioStatus === "remote_audio"
+    receiverUsesClassicCallBridge && isConnected
+      ? "Classic Receiver answered. Use the device handset or speaker."
+      : callAudioStatus === "remote_audio"
       ? "Remote sound is arriving."
       : callAudioStatus === "connected"
         ? "Peer connection is live."
