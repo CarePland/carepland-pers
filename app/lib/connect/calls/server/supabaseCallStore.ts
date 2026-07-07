@@ -73,18 +73,33 @@ type ConnectCallSummaryRow = {
 
 const connectCallSelectColumns =
   "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,summary_review_status,summary_review_note,generated_summary_text,approved_summary_text,summary_approved_at,summary_approved_by,summary_approval_draft_text,summary_approval_draft_updated_at,summary_approval_draft_updated_by,transcript_cleanup_status,transcript_deleted_at,transcript_expires_at,transcript_status,transcript_text,updated_at";
+const connectCallCoreSelectColumns =
+  "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,transcript_status,transcript_text,updated_at";
 const defaultTranscriptRetentionMs = 7 * 24 * 60 * 60 * 1000;
 const expiredUnreviewedNote =
   "Transcript expired before formal approval. Generated summary retained as unapproved.";
 
 export async function readSupabaseConnectCalls(access: ConnectCallAccess) {
   return trySupabaseCallStore(async (supabase) => {
-    const { data, error } = await supabase
+    const richResult = await supabase
       .from("connect_calls")
       .select(connectCallSelectColumns)
       .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
       .order("updated_at", { ascending: false })
       .limit(300);
+    let data: unknown = richResult.data;
+    let error = richResult.error;
+
+    if (error && supabaseConnectCallOptionalColumnsUnavailable(error)) {
+      const fallback = await supabase
+        .from("connect_calls")
+        .select(connectCallCoreSelectColumns)
+        .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
+        .order("updated_at", { ascending: false })
+        .limit(300);
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error) throw error;
     const calls = ((data ?? []) as ConnectCallRow[]).map(connectCallRecordFromRow);
@@ -169,7 +184,7 @@ export async function recordSupabaseConnectCall(
         transcript_status: input.transcriptStatus || "not_started",
         transcript_text: input.transcriptText || "",
       })
-      .select(connectCallSelectColumns)
+      .select(connectCallCoreSelectColumns)
       .single();
 
     if (error) throw error;
@@ -200,7 +215,7 @@ export async function updateSupabaseConnectCallState(
       .update(update)
       .eq("id", callId)
       .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
-      .select(connectCallSelectColumns)
+      .select(connectCallCoreSelectColumns)
       .maybeSingle();
 
     if (error) throw error;
@@ -728,6 +743,30 @@ function normalizeTranscriptSegmentStatus(value: unknown) {
   return ["completed", "failed", "not_configured", "pending"].includes(status)
     ? status
     : "failed";
+}
+
+function supabaseConnectCallOptionalColumnsUnavailable(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { code?: string; message?: string };
+  const message = maybeError.message || "";
+  return (
+    maybeError.code === "42703" ||
+    maybeError.code === "PGRST204" ||
+    [
+      "approved_summary_text",
+      "generated_summary_text",
+      "summary_approval_draft_text",
+      "summary_approval_draft_updated_at",
+      "summary_approval_draft_updated_by",
+      "summary_approved_at",
+      "summary_approved_by",
+      "summary_review_note",
+      "summary_review_status",
+      "transcript_cleanup_status",
+      "transcript_deleted_at",
+      "transcript_expires_at",
+    ].some((column) => message.includes(column))
+  );
 }
 
 function normalizeSummaryStatus(value: unknown) {
