@@ -1781,17 +1781,19 @@ function classicWebViewReceiverHtml({
             var errorMessage = payload && payload.error ? payload.error : "Receiver setup is required.";
             if (bindingNeedsFreshPairing(status, payload)) {
               clearStoredBinding();
-              if (!hasNativeReceiverBridge()) {
-                startClassicPairing(callback);
-                return;
-              }
+              startClassicPairing(callback);
+              return;
             }
             if (errorMessage.indexOf("not complete") >= 0) {
+              showScreen("setupScreen");
               setText("connectionStatus", "Pairing finishing");
               setText("focusStrip", "Receiver is connecting...");
+              setText("setupStatus", "Pairing is finishing. CarePland will keep trying.");
             } else {
+              showScreen("setupScreen");
               setText("connectionStatus", "Setup needed");
               setText("focusStrip", "Receiver setup is needed.");
+              setText("setupStatus", errorMessage);
               if (window.CarePlandReceiver && window.CarePlandReceiver.receiverSetupRequired) {
                 window.CarePlandReceiver.receiverSetupRequired(errorMessage);
               }
