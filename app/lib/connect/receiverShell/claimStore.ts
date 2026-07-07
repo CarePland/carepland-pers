@@ -1213,47 +1213,74 @@ async function tryListSupabaseReceiverShellDeviceProfiles() {
     const supabase = createSupabaseServiceClient();
     const { data, error } = await supabase
       .from("connect_receiver_devices")
-      .select(
-        [
-          "id",
-          "care_circle_id",
-          "device_profile",
-          "main_connect_user_person_id",
-          "receiver_install_id",
-          "receiver_url",
-          "status",
-          "ui_layout",
-          "last_seen_at",
-          "receiver_mode",
-          "provisioning_completed_at",
-          "capability_statuses",
-          "native_version_code",
-          "native_version_name",
-          "shell_version",
-          "native_manufacturer",
-          "native_model",
-          "native_sdk",
-          "device_owner",
-          "lock_task_permitted",
-          "lock_task_active",
-          "last_recovery_action",
-          "last_recovery_at",
-          "hardware_profile",
-        ].join(",")
-      );
-    if (error) throw error;
+      .select(receiverShellProfileColumns.join(","));
+    if (error) {
+      if (!supabaseReceiverProfileColumnsUnavailable(error)) throw error;
+      const fallback = await supabase
+        .from("connect_receiver_devices")
+        .select(receiverShellCoreProfileColumns.join(","));
+      if (fallback.error) throw fallback.error;
+      return receiverShellDeviceProfilesFromRows(fallback.data ?? []);
+    }
 
-    const rows = Array.isArray(data) ? data : [];
-    const displayNames = await tryGetSupabaseCareSubjectDisplayNames(
-      rows.map((rawRow) =>
-        stringFromRow((rawRow as unknown as Record<string, unknown>).main_connect_user_person_id)
-      )
-    );
+    return receiverShellDeviceProfilesFromRows(data ?? []);
+  } catch (error) {
+    if (
+      isMissingServerEnvError(error) ||
+      supabaseProvisioningUnavailable(error) ||
+      supabaseReceiverProfileColumnsUnavailable(error)
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
 
-    return rows.map((rawRow) => {
-      const row = rawRow as unknown as Record<string, unknown>;
-      const mainConnectUserPersonId = stringFromRow(row.main_connect_user_person_id);
-      return {
+const receiverShellCoreProfileColumns = [
+  "id",
+  "care_circle_id",
+  "device_profile",
+  "main_connect_user_person_id",
+  "receiver_install_id",
+  "receiver_url",
+  "status",
+  "ui_layout",
+  "last_seen_at",
+  "hardware_profile",
+];
+
+const receiverShellProfileColumns = [
+  ...receiverShellCoreProfileColumns,
+  "receiver_mode",
+  "provisioning_completed_at",
+  "capability_statuses",
+  "native_version_code",
+  "native_version_name",
+  "shell_version",
+  "native_manufacturer",
+  "native_model",
+  "native_sdk",
+  "device_owner",
+  "lock_task_permitted",
+  "lock_task_active",
+  "last_recovery_action",
+  "last_recovery_at",
+];
+
+async function receiverShellDeviceProfilesFromRows(
+  rowsInput: unknown
+): Promise<ReceiverShellDeviceProfile[]> {
+  const rows = Array.isArray(rowsInput) ? rowsInput : [];
+  const displayNames = await tryGetSupabaseCareSubjectDisplayNames(
+    rows.map((rawRow) =>
+      stringFromRow((rawRow as unknown as Record<string, unknown>).main_connect_user_person_id)
+    )
+  );
+
+  return rows.map((rawRow) => {
+    const row = rawRow as unknown as Record<string, unknown>;
+    const mainConnectUserPersonId = stringFromRow(row.main_connect_user_person_id);
+    return {
       capabilityStatuses: capabilityStatusesFromRow(row.capability_statuses),
       careCircleId: stringFromRow(row.care_circle_id),
       deviceProfile: stringFromRow(row.device_profile),
@@ -1279,18 +1306,8 @@ async function tryListSupabaseReceiverShellDeviceProfiles() {
       shellVersion: stringFromRow(row.shell_version),
       status: stringFromRow(row.status),
       uiLayout: stringFromRow(row.ui_layout),
-      };
-    }) satisfies ReceiverShellDeviceProfile[];
-  } catch (error) {
-    if (
-      isMissingServerEnvError(error) ||
-      supabaseProvisioningUnavailable(error) ||
-      supabaseReceiverProfileColumnsUnavailable(error)
-    ) {
-      return null;
-    }
-    throw error;
-  }
+    };
+  }) satisfies ReceiverShellDeviceProfile[];
 }
 
 async function listLocalReceiverShellDeviceProfiles() {

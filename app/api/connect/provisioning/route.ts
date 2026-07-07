@@ -16,24 +16,10 @@ import {
 
 export async function GET(request: Request) {
   try {
-    const response = await fetch(
-      connectProvisioningPrototypeProxyEndpoints.snapshot(provisioningSearchParams(request)),
-      {
-        cache: "no-store",
-      }
-    );
-    const payload = (await response.json().catch(() => ({}))) as ConnectProvisioningSnapshot & {
-      error?: string;
-      ok?: boolean;
-    };
-
-    if (!response.ok || payload.ok === false) {
-      return NextResponse.json(payload, { status: response.status });
-    }
-
+    const payload = await fetchPrototypeProvisioningSnapshot(request);
     const receiverShellProfiles = await listReceiverShellDeviceProfiles();
     return NextResponse.json(overlayReceiverShellProfiles(payload, receiverShellProfiles), {
-      status: response.status,
+      status: 200,
     });
   } catch (error) {
     return NextResponse.json(
@@ -47,6 +33,59 @@ export async function GET(request: Request) {
       { status: 502 }
     );
   }
+}
+
+async function fetchPrototypeProvisioningSnapshot(
+  request: Request
+): Promise<ConnectProvisioningSnapshot> {
+  try {
+    const response = await fetch(
+      connectProvisioningPrototypeProxyEndpoints.snapshot(provisioningSearchParams(request)),
+      {
+        cache: "no-store",
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as ConnectProvisioningSnapshot & {
+      error?: string;
+      ok?: boolean;
+    };
+
+    if (!response.ok || payload.ok === false) {
+      return emptyProvisioningSnapshot();
+    }
+
+    return payload;
+  } catch {
+    return emptyProvisioningSnapshot();
+  }
+}
+
+function emptyProvisioningSnapshot(): ConnectProvisioningSnapshot {
+  return {
+    auditEvents: [],
+    ok: true,
+    receiverDevices: [],
+    receiverHouseholds: [],
+    setupTokens: [],
+    summary: {
+      generatedAt: new Date().toISOString(),
+      totals: {
+        activeReceiverDevices: 0,
+        activeSetupTokens: 0,
+        households: 0,
+        receiverDevices: 0,
+        receiverHouseholds: 0,
+        receiverPeople: 0,
+        revokedReceiverDevices: 0,
+        setupTokens: 0,
+      },
+    },
+    totals: {
+      receiverDevices: 0,
+      receiverHouseholds: 0,
+      receiverPeople: 0,
+    },
+  };
 }
 
 function overlayReceiverShellProfiles(
