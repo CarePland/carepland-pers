@@ -109,9 +109,11 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.match(html, /receiverDeviceId=/);
     assert.match(html, /receiverInstallId=/);
     assert.match(html, /function showIncomingCall/);
+    assert.match(html, /id="answerCallButton"/);
+    assert.match(html, /function answerActiveCall/);
     assert.match(html, /id="callTitle"/);
     assert.match(html, /Call from " \+ callerName/);
-    assert.match(html, /Connected with " \+ callerName/);
+    assert.match(html, /Tap Answer to talk/);
     assert.match(html, /surface: "classic_webview_receiver"/);
     assert.match(html, /source: "receiver"/);
     assert.match(html, /state: "connected"/);

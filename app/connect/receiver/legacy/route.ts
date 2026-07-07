@@ -1113,6 +1113,7 @@ function classicWebViewReceiverHtml({
       <div class="whiteCard">
         <div class="callTitle" id="callTitle">Connect Call</div>
         <div class="callSub" id="callStatus">Connecting...</div>
+        <button class="doneButton" id="answerCallButton" type="button">Answer</button>
         <button class="doneButton" id="closeCallButton" type="button">Close Call</button>
       </div>
     </div>
@@ -1418,6 +1419,10 @@ function classicWebViewReceiverHtml({
       function setHtml(id, value) {
         var element = document.getElementById(id);
         if (element) element.innerHTML = value;
+      }
+      function setVisible(id, visible) {
+        var element = document.getElementById(id);
+        if (element) element.style.display = visible ? "" : "none";
       }
       function addClass(element, className) {
         if (!element || element.className.indexOf(className) >= 0) return;
@@ -1804,6 +1809,9 @@ function classicWebViewReceiverHtml({
         };
         document.getElementById("callAndrewButton").onclick = function () {
           startCallAndrew();
+        };
+        document.getElementById("answerCallButton").onclick = function () {
+          answerActiveCall();
         };
         document.getElementById("closeCallButton").onclick = function () {
           closeActiveCall();
@@ -2447,6 +2455,8 @@ function classicWebViewReceiverHtml({
         showScreen("callScreen");
         setText("callTitle", "Calling Andrew");
         setText("callStatus", "Creating call...");
+        setVisible("answerCallButton", false);
+        setVisible("closeCallButton", true);
         if (!receiverState.personId) {
           setText("callStatus", "Receiver is still connecting.");
           return;
@@ -2476,8 +2486,18 @@ function classicWebViewReceiverHtml({
         var callerName = call.callerName || "Andrew";
         showScreen("callScreen");
         setText("callTitle", "Call from " + callerName);
+        setText("callStatus", "Tap Answer to talk.");
+        setVisible("answerCallButton", true);
+        setVisible("closeCallButton", true);
+      }
+      function answerActiveCall() {
+        if (!receiverState.activeCallId || !receiverState.personId) {
+          setText("callStatus", "No incoming call is ready.");
+          return;
+        }
         setText("callStatus", "Connecting...");
-        jsonRequest("POST", "/api/connect/calls/" + encodeURIComponent(call.callId) + "/state", {
+        setVisible("answerCallButton", false);
+        jsonRequest("POST", "/api/connect/calls/" + encodeURIComponent(receiverState.activeCallId) + "/state", {
           mainConnectUserPersonId: receiverState.personId,
           receiverDeviceId: receiverState.receiverDeviceId,
           receiverInstallId: receiverState.receiverInstallId,
@@ -2486,10 +2506,11 @@ function classicWebViewReceiverHtml({
           state: "connected"
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
-            setText("callTitle", "Connected with " + callerName);
+            setText("callTitle", "Connected");
             setText("callStatus", "Use the handset or speaker.");
             return;
           }
+          setVisible("answerCallButton", true);
           setText("callStatus", payload.error || "Incoming call could not be answered.");
         });
       }
@@ -2531,6 +2552,8 @@ function classicWebViewReceiverHtml({
             showScreen("callScreen");
             setText("callTitle", "Connected with " + (activeCall.callerName || "Andrew"));
             setText("callStatus", "Use the handset or speaker.");
+            setVisible("answerCallButton", false);
+            setVisible("closeCallButton", true);
           }
         });
       }
