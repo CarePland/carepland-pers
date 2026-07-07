@@ -5473,23 +5473,32 @@ function RecipientCallPanel({
     recipientCallState === "connected" ||
     activeCallState === "answered" ||
     activeCallState === "connected";
+  const isClassicReceiverCall = receiverUsesClassicCallBridge && (isRinging || isConnected);
   const canEndCall = isConnected || isRinging || hasServerActiveCall;
-  const headline = isConnected
-    ? `Connected with ${selectedPersonName}.`
+  const headline = isClassicReceiverCall && isConnected
+    ? "Connected on Receiver."
+    : isConnected
+      ? `Connected with ${selectedPersonName}.`
     : isRinging
-      ? "Incoming call"
+      ? isClassicReceiverCall
+        ? "Call sent to Receiver"
+        : "Incoming call"
       : recipientCallState === "ended"
         ? "Conversation ended."
         : recipientCallState === "declined"
           ? "Conversation was not established."
           : "Waiting for a Connect Request.";
-  const subline = isConnected
-    ? "Live conversation in progress."
+  const subline = isClassicReceiverCall && isConnected
+    ? "Use the Receiver handset or speaker."
+    : isConnected
+      ? "Live conversation in progress."
     : isRinging
-      ? "Andrew would like to talk now."
+      ? isClassicReceiverCall
+        ? "Tap Answer on the Receiver."
+        : "Andrew would like to talk now."
       : "A live conversation starts only if the recipient accepts.";
   const audioLabel =
-    receiverUsesClassicCallBridge && isConnected
+    isClassicReceiverCall
       ? "Receiver handset"
       : callAudioStatus === "remote_audio" || callAudioStatus === "connected"
       ? "Live audio"
@@ -5503,8 +5512,10 @@ function RecipientCallPanel({
               ? "Waiting for audio"
               : "Audio idle";
   const audioDetail =
-    receiverUsesClassicCallBridge && isConnected
-      ? "Classic Receiver answered. Use the device handset or speaker."
+    isClassicReceiverCall
+      ? isConnected
+        ? "Audio is handled by the Receiver device."
+        : "Audio will be handled by the Receiver after it is answered."
       : callAudioStatus === "remote_audio"
       ? "Remote sound is arriving."
       : callAudioStatus === "connected"
@@ -5519,7 +5530,11 @@ function RecipientCallPanel({
                 ? "The call is connected; audio has not arrived yet."
                 : "Audio starts after the call is answered.";
   const canRestartAudio =
-    isConnected && callAudioStatus !== "remote_audio" && callAudioStatus !== "connected";
+    !isClassicReceiverCall &&
+    isConnected &&
+    callAudioStatus !== "remote_audio" &&
+    callAudioStatus !== "connected";
+  const canControlBrowserAudio = !isClassicReceiverCall;
   const transcriptLabel = transcriptStatusLabel({
     audioStatus: callAudioStatus,
     callState: recipientCallState,
@@ -5619,7 +5634,7 @@ function RecipientCallPanel({
             {audioLabel}
           </p>
           <p className="mt-1 text-sm font-semibold text-[#345d83]">
-            {callMuted ? "Your microphone is muted." : audioDetail}
+            {canControlBrowserAudio && callMuted ? "Your microphone is muted." : audioDetail}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -5632,14 +5647,16 @@ function RecipientCallPanel({
               Restart Audio
             </button>
           ) : null}
-          <button
-            className="min-h-11 rounded-md border border-[#d6e3f2] bg-white px-4 text-sm font-black text-[#345d83] hover:bg-[#edf5fc] disabled:opacity-45"
-            disabled={!isConnected}
-            onClick={onToggleMuted}
-            type="button"
-          >
-            {callMuted ? "Unmute" : "Mute"}
-          </button>
+          {canControlBrowserAudio ? (
+            <button
+              className="min-h-11 rounded-md border border-[#d6e3f2] bg-white px-4 text-sm font-black text-[#345d83] hover:bg-[#edf5fc] disabled:opacity-45"
+              disabled={!isConnected}
+              onClick={onToggleMuted}
+              type="button"
+            >
+              {callMuted ? "Unmute" : "Mute"}
+            </button>
+          ) : null}
         </div>
       </div>
       {isRinging || isConnected || callNotesLabel ? (
