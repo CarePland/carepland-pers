@@ -1383,6 +1383,7 @@ function classicWebViewReceiverHtml({
     (function () {
       var receiverState = {
         activeCallId: "",
+        answeredCallId: "",
         cleaningSessionId: "",
         cleaningStartedAt: "",
         receiverDeviceId: "",
@@ -2482,6 +2483,7 @@ function classicWebViewReceiverHtml({
       }
       function showIncomingCall(call) {
         if (!call || !call.callId || receiverState.activeCallId === call.callId) return;
+        if (receiverState.answeredCallId && receiverState.answeredCallId === call.callId) return;
         receiverState.activeCallId = call.callId;
         var callerName = call.callerName || "Andrew";
         showScreen("callScreen");
@@ -2506,6 +2508,7 @@ function classicWebViewReceiverHtml({
           state: "connected"
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            receiverState.answeredCallId = receiverState.activeCallId;
             setText("callTitle", "Connected");
             setText("callStatus", "Use the handset or speaker.");
             return;
@@ -2539,16 +2542,25 @@ function classicWebViewReceiverHtml({
           if (!activeCall) {
             if (receiverState.activeCallId) {
               receiverState.activeCallId = "";
+              receiverState.answeredCallId = "";
               setText("connectionStatus", "Online");
             }
             return;
           }
           if (activeCall.state === "ringing") {
+            if (receiverState.answeredCallId && receiverState.answeredCallId === activeCall.callId) {
+              setText("callTitle", "Connected");
+              setText("callStatus", "Use the handset or speaker.");
+              setVisible("answerCallButton", false);
+              setVisible("closeCallButton", true);
+              return;
+            }
             showIncomingCall(activeCall);
             return;
           }
           receiverState.activeCallId = activeCall.callId || receiverState.activeCallId;
           if (activeCall.state === "answered" || activeCall.state === "connected") {
+            receiverState.answeredCallId = activeCall.callId || receiverState.answeredCallId;
             showScreen("callScreen");
             setText("callTitle", "Connected with " + (activeCall.callerName || "Andrew"));
             setText("callStatus", "Use the handset or speaker.");
@@ -2578,6 +2590,7 @@ function classicWebViewReceiverHtml({
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
             receiverState.activeCallId = "";
+            receiverState.answeredCallId = "";
             setText("connectionStatus", "Call closed");
             showScreen("homeScreen");
             return;
