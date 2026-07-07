@@ -8,6 +8,7 @@ import {
 import {
   compactLocalConnectCallSignals,
   filterLocalConnectCallSignals,
+  mergeConnectCallSignals,
   recordLocalConnectCallSignal,
 } from "@/app/lib/connect/calls/server/localCallSignals";
 import {
@@ -49,25 +50,26 @@ export async function GET(request: Request, context: RouteContext) {
       },
       access
     );
+    const localIndex = await compactLocalConnectCallSignals();
+    const localSignals = filterLocalConnectCallSignals(localIndex.signals, {
+      afterSignalId,
+      callId,
+      mainConnectUserPersonId: personId,
+      notSender,
+    });
 
     if (supabaseSignals) {
       return NextResponse.json({
         mainConnectUserPersonId: personId,
         ok: true,
-        signals: supabaseSignals,
+        signals: mergeConnectCallSignals(supabaseSignals, localSignals),
       });
     }
 
-    const index = await compactLocalConnectCallSignals();
     return NextResponse.json({
       mainConnectUserPersonId: personId,
       ok: true,
-      signals: filterLocalConnectCallSignals(index.signals, {
-        afterSignalId,
-        callId,
-        mainConnectUserPersonId: personId,
-        notSender,
-      }),
+      signals: localSignals,
     });
   } catch (error) {
     if (error instanceof ReceiverDeviceAccessError) {

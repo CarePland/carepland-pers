@@ -119,6 +119,22 @@ export function filterLocalConnectCallSignals(
   );
 }
 
+export function mergeConnectCallSignals(
+  primarySignals: ConnectCallSignal[],
+  secondarySignals: ConnectCallSignal[]
+) {
+  const signalsById = new Map<string, ConnectCallSignal>();
+
+  for (const signal of [...secondarySignals, ...primarySignals]) {
+    if (!signal.signalId) continue;
+    signalsById.set(signal.signalId, signal);
+  }
+
+  return Array.from(signalsById.values()).sort((a, b) =>
+    String(a.createdAt || "").localeCompare(String(b.createdAt || ""))
+  );
+}
+
 function normalizeSignalSender(value: unknown): ConnectCallSignalSender | null {
   const sender = String(value || "");
   return signalSenders.has(sender) ? (sender as ConnectCallSignalSender) : null;

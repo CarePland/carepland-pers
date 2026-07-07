@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import {
   compactLocalConnectCallSignals,
   filterLocalConnectCallSignals,
+  mergeConnectCallSignals,
   readLocalConnectCallSignals,
   recordLocalConnectCallSignal,
 } from "./localCallSignals";
@@ -126,6 +127,48 @@ describe("local Connect call signals", () => {
       assert.equal(signal, null);
       assert.equal(index.signals.length, 0);
     });
+  });
+
+  it("merges Supabase and local fallback signals in call order", () => {
+    const signals = mergeConnectCallSignals(
+      [
+        {
+          callId: "call-1",
+          createdAt: "2026-07-07T10:00:02.000Z",
+          mainConnectUserPersonId: "person-bob",
+          payload: { type: "answer" },
+          sender: "receiver",
+          signalId: "shared-answer",
+          type: "answer",
+        },
+      ],
+      [
+        {
+          callId: "call-1",
+          createdAt: "2026-07-07T10:00:01.000Z",
+          mainConnectUserPersonId: "person-bob",
+          payload: { type: "offer" },
+          sender: "dashboard",
+          signalId: "local-offer",
+          type: "offer",
+        },
+        {
+          callId: "call-1",
+          createdAt: "2026-07-07T10:00:03.000Z",
+          mainConnectUserPersonId: "person-bob",
+          payload: { duplicate: true },
+          sender: "receiver",
+          signalId: "shared-answer",
+          type: "answer",
+        },
+      ]
+    );
+
+    assert.deepEqual(
+      signals.map((signal) => signal.signalId),
+      ["local-offer", "shared-answer"]
+    );
+    assert.equal(signals[1]?.payload.type, "answer");
   });
 
   it("compacts stale call signals", async () => {
