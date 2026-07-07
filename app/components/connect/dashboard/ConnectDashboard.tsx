@@ -1236,13 +1236,33 @@ export function ConnectDashboard() {
         method: "POST",
       } as RequestInit);
       if (callResponse.call?.callId) {
+        const optimisticCall = {
+          callId: callResponse.call.callId,
+          callerName: "Andrew",
+          recipientName: selectedPersonName,
+          state: "ringing",
+          updatedAt: new Date().toISOString(),
+        };
+        setState((current) => ({
+          ...current,
+          callSummary: {
+            ...(current.callSummary ?? {}),
+            active: Math.max(1, current.callSummary?.active ?? 0),
+            byState: {
+              ...(current.callSummary?.byState ?? {}),
+              ringing: Math.max(1, current.callSummary?.byState?.ringing ?? 0),
+            },
+            latestCall: optimisticCall,
+            total: Math.max(1, current.callSummary?.total ?? 0),
+          },
+        }));
         logDashboardCallEvent(callResponse.call.callId, "call_dashboard_call_created", {
           source: "startCall",
         });
         startDashboardCallAudio(callResponse.call.callId);
       }
       setStatus(`Call sent to ${selectedPersonName}.`);
-      await refresh();
+      await refreshCallState();
     } catch (error) {
       stopLiveCallAudio();
       playCallFailureSound();
