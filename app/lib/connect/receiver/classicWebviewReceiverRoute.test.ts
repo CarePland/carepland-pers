@@ -71,4 +71,16 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.match(html, /writeCachedItems/);
     assert.match(html, /renderTodayFocusItems/);
   });
+
+  it("resets a revoked browser binding back into Receiver pairing", async () => {
+    const response = getClassicReceiverRoute({
+      nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),
+    } as never);
+    const html = await response.text();
+
+    assert.match(html, /function clearStoredBinding/);
+    assert.match(html, /bindingNeedsFreshPairing/);
+    assert.match(html, /startClassicPairing\(callback\)/);
+    assert.match(html, /if \(!binding\) return;/);
+  });
 });

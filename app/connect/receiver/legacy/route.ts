@@ -1669,6 +1669,24 @@ function classicWebViewReceiverHtml({
           }
         } catch (error) {}
       }
+      function clearStoredBinding() {
+        try {
+          if (window.localStorage) window.localStorage.removeItem(browserBindingStorageKey);
+        } catch (error) {}
+        receiverState.receiverDeviceId = "";
+        receiverState.personId = "";
+        receiverState.online = false;
+      }
+      function hasNativeReceiverBridge() {
+        return !!(window.CarePlandReceiver && window.CarePlandReceiver.getProvisioningJson);
+      }
+      function bindingNeedsFreshPairing(status, payload) {
+        var errorMessage = payload && payload.error ? payload.error : "";
+        return status === 403 ||
+          status === 404 ||
+          errorMessage.indexOf("binding not found") >= 0 ||
+          errorMessage.indexOf("binding was revoked") >= 0;
+      }
       function readOrCreateInstallId(config) {
         var stored = readStoredBinding();
         var existing =
@@ -1760,6 +1778,13 @@ function classicWebViewReceiverHtml({
             }
             receiverState.online = false;
             var errorMessage = payload && payload.error ? payload.error : "Receiver setup is required.";
+            if (bindingNeedsFreshPairing(status, payload)) {
+              clearStoredBinding();
+              if (!hasNativeReceiverBridge()) {
+                startClassicPairing(callback);
+                return;
+              }
+            }
             if (errorMessage.indexOf("not complete") >= 0) {
               setText("connectionStatus", "Pairing finishing");
               setText("focusStrip", "Receiver is connecting...");
@@ -2381,7 +2406,8 @@ function classicWebViewReceiverHtml({
         });
       };
       window.setInterval(updateClock, 30000);
-      connectNativeReceiver(function () {
+      connectNativeReceiver(function (binding) {
+        if (!binding) return;
         showScreen("homeScreen");
         loadAppointments();
         loadTodayFocus();
@@ -2389,7 +2415,8 @@ function classicWebViewReceiverHtml({
       });
       window.setInterval(function () {
         if (!receiverState.receiverDeviceId) return;
-        connectNativeReceiver(function () {
+        connectNativeReceiver(function (binding) {
+          if (!binding) return;
           loadAppointments();
           loadTodayFocus();
           loadMessages();
