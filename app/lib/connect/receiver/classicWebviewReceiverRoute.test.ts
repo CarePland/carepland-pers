@@ -83,4 +83,17 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.match(html, /startClassicPairing\(callback\)/);
     assert.match(html, /if \(!binding\) return;/);
   });
+
+  it("polls for dashboard-originated incoming calls in Classic", async () => {
+    const response = getClassicReceiverRoute({
+      nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),
+    } as never);
+    const html = await response.text();
+
+    assert.match(html, /function loadIncomingCalls/);
+    assert.match(html, /\/api\/connect\/calls\?personId=/);
+    assert.match(html, /function showIncomingCall/);
+    assert.match(html, /state: "answered"/);
+    assert.match(html, /startIncomingCallPolling/);
+  });
 });

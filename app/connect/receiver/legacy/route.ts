@@ -1213,6 +1213,7 @@ function classicWebViewReceiverHtml({
       var browserInstallStorageKey = "carepland-connect-classic-receiver-install-id";
       var classicCachePrefix = "carepland-connect-classic-cache";
       var guideSessionStorageKey = "carepland-connect-classic-guide-session";
+      var incomingCallPollTimer = null;
       var pairingPollTimer = null;
       var cleaningTimer = null;
       var guidePollTimer = null;
@@ -2276,6 +2277,64 @@ function classicWebViewReceiverHtml({
           setText("callStatus", payload.error || "Could not start call.");
         });
       }
+      function callIsFromDashboard(call) {
+        var callerName = text(call && (call.callerName || call.callerDisplayName)).toLowerCase();
+        return callerName !== "receiver";
+      }
+      function showIncomingCall(call) {
+        if (!call || !call.callId || receiverState.activeCallId === call.callId) return;
+        receiverState.activeCallId = call.callId;
+        showScreen("callScreen");
+        setText("callStatus", (call.callerName || "Andrew") + " is calling. Use the handset or speaker.");
+        jsonRequest("POST", "/api/connect/calls/" + encodeURIComponent(call.callId) + "/state", {
+          mainConnectUserPersonId: receiverState.personId,
+          source: "classic_webview_receiver",
+          state: "answered"
+        }, function (status, payload) {
+          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
+            setText("callStatus", "Connected. Use the handset or speaker.");
+            return;
+          }
+          setText("callStatus", payload.error || "Incoming call could not be answered.");
+        });
+      }
+      function loadIncomingCalls() {
+        if (!receiverState.personId || !receiverState.receiverDeviceId) return;
+        jsonRequest("GET", "/api/connect/calls?personId=" + encodeURIComponent(receiverState.personId), null, function (status, payload) {
+          var calls = payload && payload.calls && payload.calls.length ? payload.calls : [];
+          var activeCall = null;
+          var i;
+          if (!(status >= 200 && status < 300) || !payload || payload.ok === false) return;
+          for (i = 0; i < calls.length; i += 1) {
+            if (!callIsFromDashboard(calls[i])) continue;
+            if (calls[i].state === "ringing" || calls[i].state === "answered" || calls[i].state === "connected") {
+              activeCall = calls[i];
+              break;
+            }
+          }
+          if (!activeCall) {
+            if (receiverState.activeCallId) {
+              receiverState.activeCallId = "";
+              setText("connectionStatus", "Online");
+            }
+            return;
+          }
+          if (activeCall.state === "ringing") {
+            showIncomingCall(activeCall);
+            return;
+          }
+          receiverState.activeCallId = activeCall.callId || receiverState.activeCallId;
+          if (activeCall.state === "answered" || activeCall.state === "connected") {
+            showScreen("callScreen");
+            setText("callStatus", "Connected. Use the handset or speaker.");
+          }
+        });
+      }
+      function startIncomingCallPolling() {
+        if (incomingCallPollTimer) window.clearInterval(incomingCallPollTimer);
+        loadIncomingCalls();
+        incomingCallPollTimer = window.setInterval(loadIncomingCalls, 3000);
+      }
       function closeActiveCall() {
         if (!receiverState.activeCallId || !receiverState.personId) {
           showScreen("homeScreen");
@@ -2412,6 +2471,7 @@ function classicWebViewReceiverHtml({
         loadAppointments();
         loadTodayFocus();
         loadMessages();
+        startIncomingCallPolling();
       });
       window.setInterval(function () {
         if (!receiverState.receiverDeviceId) return;
@@ -2420,6 +2480,7 @@ function classicWebViewReceiverHtml({
           loadAppointments();
           loadTodayFocus();
           loadMessages();
+          startIncomingCallPolling();
         });
       }, 60000);
       updateFullscreenPrompt();
