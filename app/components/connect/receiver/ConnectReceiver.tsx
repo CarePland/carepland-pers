@@ -4990,7 +4990,21 @@ export function ConnectReceiver() {
         callId,
         connectAuthHeaders,
         mainConnectUserPersonId: selectedReceiverUser.id,
-        onConnected: () => setStatus(`Connected to ${callerName}.`),
+        onConnected: () => {
+          setStatus(`Connected to ${callerName}.`);
+          void reportCallState(callId, "connected").then((connected) => {
+            if (!connected) return;
+            setModal((current) =>
+              current?.type === "incomingCall" && current.callId === callId
+                ? {
+                    ...current,
+                    callStartedAt: current.callStartedAt || new Date().toISOString(),
+                    callState: "connected",
+                  }
+                : current
+            );
+          });
+        },
         onError: (message) => setStatus(message),
         onPeerEnded: () => {
           logReceiverCallEvent(callId, "call_receiver_peer_ended_received", {
@@ -5037,24 +5051,6 @@ export function ConnectReceiver() {
       liveCallAudioRef.current = controller;
       void controller.start();
     }
-    window.setTimeout(() => {
-      logReceiverCallEvent(callId, "call_receiver_connected_timer_fired", {
-        delayMs: 250,
-        source: "answerIncomingCall",
-      });
-      void reportCallState(callId, "connected").then((connected) => {
-        if (!connected) return;
-        setModal((current) =>
-          current?.type === "incomingCall" && current.callId === callId
-            ? {
-                ...current,
-                callStartedAt: current.callStartedAt || new Date().toISOString(),
-                callState: "connected",
-              }
-            : current
-        );
-      });
-    }, 250);
   }
 
   function declineIncomingCall(callerName: string, callId?: string) {

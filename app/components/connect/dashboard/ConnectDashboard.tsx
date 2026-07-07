@@ -139,7 +139,13 @@ type ConnectPageViewState = {
   scrollY?: number;
   setupView?: SetupView;
 };
-type RecipientCallState = "waiting" | "ringing" | "connected" | "ended" | "declined";
+type RecipientCallState =
+  | "waiting"
+  | "ringing"
+  | "connecting"
+  | "connected"
+  | "ended"
+  | "declined";
 type ConnectAskMessage = {
   body: string;
   role: "assistant" | "user";
@@ -727,7 +733,12 @@ export function ConnectDashboard() {
       }
 
       if (latestState === "ringing") setRecipientCallState("ringing");
-      if (latestState === "answered" || latestState === "connected") {
+      if (latestState === "answered") {
+        latestCallAudioStateRef.current = latestState;
+        stopCallCue();
+        setRecipientCallState("connecting");
+      }
+      if (latestState === "connected") {
         latestCallAudioStateRef.current = latestState;
         stopCallCue();
         setRecipientCallState("connected");
@@ -1165,13 +1176,26 @@ export function ConnectDashboard() {
       mainConnectUserPersonId: selectedMainConnectUserPersonId,
       onConnected: () => {
         stopCallCue();
+        setRecipientCallState("connected");
         setStatus(`Connected with ${selectedPersonName}.`);
+        void reportDashboardCallState("connected", {
+          callId,
+          refreshAfter: false,
+          source: "dashboard_audio_connected",
+        });
       },
       onError: (message) => setStatus(message),
       onPeerEnded: () => {
         logDashboardCallEvent(callId, "call_dashboard_peer_ended_received", {
+          callAudioStatus: callAudioStatusRef.current,
           source: "audio_controller_onPeerEnded",
         });
+        if (!["connected", "remote_audio"].includes(callAudioStatusRef.current)) {
+          liveCallAudioRef.current = null;
+          setCallAudioStatus("interrupted");
+          setStatus("Call audio stopped before it fully connected. Try the call again.");
+          return;
+        }
         setStatus(`${selectedPersonName} ended the call.`);
         setRecipientCallState("ended");
         stopCallCue();
@@ -5459,17 +5483,21 @@ function RecipientCallPanel({
 }) {
   const hasServerActiveCall = ["answered", "connected", "ringing"].includes(activeCallState);
   const isRinging = recipientCallState === "ringing" || activeCallState === "ringing";
+  const isConnecting =
+    recipientCallState === "connecting" ||
+    (activeCallState === "answered" && recipientCallState !== "connected");
   const isConnected =
     recipientCallState === "connected" ||
-    activeCallState === "answered" ||
     activeCallState === "connected";
-  const isClassicReceiverCall = receiverUsesClassicCallBridge && (isRinging || isConnected);
-  const isClassicReceiverRinging = receiverUsesClassicCallBridge && isRinging && !isConnected;
-  const canEndCall = isConnected || isRinging || hasServerActiveCall;
-  const headline = isClassicReceiverCall && isConnected
+  const isClassicReceiverCall = receiverUsesClassicCallBridge && (isRinging || isConnecting || isConnected);
+  const isClassicReceiverRinging = receiverUsesClassicCallBridge && isRinging && !isConnecting && !isConnected;
+  const canEndCall = isConnected || isConnecting || isRinging || hasServerActiveCall;
+  const headline = isClassicReceiverCall && (isConnected || isConnecting)
     ? "Connected on Receiver."
     : isConnected
       ? `Connected with ${selectedPersonName}.`
+    : isConnecting
+      ? `Connecting with ${selectedPersonName}.`
     : isRinging
       ? isClassicReceiverCall
         ? "Call sent to Receiver"
@@ -5479,10 +5507,12 @@ function RecipientCallPanel({
         : recipientCallState === "declined"
           ? "Conversation was not established."
           : "Waiting for a Connect Request.";
-  const subline = isClassicReceiverCall && isConnected
+  const subline = isClassicReceiverCall && (isConnected || isConnecting)
     ? "Use the Receiver handset or speaker."
     : isConnected
       ? "Live conversation in progress."
+    : isConnecting
+      ? "Receiver answered. Connecting live audio."
     : isRinging
       ? isClassicReceiverCall
         ? "Tap Answer on the Receiver."
@@ -5499,7 +5529,7 @@ function RecipientCallPanel({
           ? "Audio interrupted"
           : callAudioStatus === "starting"
             ? "Starting audio"
-            : isConnected
+            : isConnected || isConnecting
               ? "Waiting for audio"
               : "Audio idle";
   const audioDetail =
@@ -5519,10 +5549,12 @@ function RecipientCallPanel({
               ? "Try hanging up and calling again."
               : isConnected
                 ? "The call is connected; audio has not arrived yet."
+                : isConnecting
+                  ? "Receiver answered. Waiting for the browser audio link."
                 : "Audio starts after the call is answered.";
   const canRestartAudio =
     !isClassicReceiverCall &&
-    isConnected &&
+    (isConnected || isConnecting) &&
     callAudioStatus !== "remote_audio" &&
     callAudioStatus !== "connected";
   const canControlBrowserAudio = !isClassicReceiverCall;
@@ -5572,7 +5604,7 @@ function RecipientCallPanel({
           <h2 className="text-2xl font-black text-[#173150]">Incoming call</h2>
         </div>
         <span className="rounded-full bg-[#edf5fc] px-4 py-2 text-sm font-black uppercase tracking-normal text-[#345d83]">
-          {isConnected ? "Active call" : isRinging ? "Ringing" : "No active call"}
+          {isConnected ? "Active call" : isConnecting ? "Connecting" : isRinging ? "Ringing" : "No active call"}
         </span>
       </div>
       {isRinging ? (
