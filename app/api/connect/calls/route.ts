@@ -7,17 +7,14 @@ import {
   ReceiverDeviceAccessError,
   receiverDeviceSetupRequiredBody,
 } from "@/app/lib/connect/context/server/personScopedAccess";
-import {
-  filterCallsForMainConnectUser,
-  mergeConnectCalls,
-  type ConnectCallRecord,
-} from "@/app/lib/connect/calls/callScoping";
+import { type ConnectCallRecord } from "@/app/lib/connect/calls/callScoping";
 import {
   cleanupExpiredLocalConnectCallTranscripts,
   markStaleLocalConnectCallsMissed,
   readLocalConnectCalls,
   recordLocalConnectCall,
 } from "@/app/lib/connect/calls/server/localCalls";
+import { callsVisibleToConnectSurface } from "@/app/lib/connect/calls/server/callSources";
 import {
   cleanupExpiredSupabaseConnectCallTranscripts,
   markStaleSupabaseConnectCallsMissed,
@@ -55,10 +52,12 @@ export async function GET(request: Request) {
       supabaseCalls ?? [],
       localCallIndex.calls
     );
-    const calls = filterCallsForMainConnectUser(
-      mergeConnectCalls(persistedCalls, prototypeCalls),
-      personId
-    );
+    const calls = callsVisibleToConnectSurface({
+      accessType: access.accessType,
+      persistedCalls,
+      personId,
+      prototypeCalls,
+    });
 
     return NextResponse.json({
       calls,

@@ -5464,6 +5464,7 @@ function RecipientCallPanel({
     activeCallState === "answered" ||
     activeCallState === "connected";
   const isClassicReceiverCall = receiverUsesClassicCallBridge && (isRinging || isConnected);
+  const isClassicReceiverRinging = receiverUsesClassicCallBridge && isRinging && !isConnected;
   const canEndCall = isConnected || isRinging || hasServerActiveCall;
   const headline = isClassicReceiverCall && isConnected
     ? "Connected on Receiver."
@@ -5578,27 +5579,39 @@ function RecipientCallPanel({
         <div className="mb-4 rounded-lg border border-[#d6e3f2] bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-2xl font-black text-[#173150]">Andrew is calling</h3>
+              <h3 className="text-2xl font-black text-[#173150]">
+                {isClassicReceiverRinging ? "Call sent to Receiver" : "Andrew is calling"}
+              </h3>
               <p className="mt-1 text-lg font-semibold text-[#5f6e84]">
-                Press Answer to talk.
+                {isClassicReceiverRinging ? "Answer on the Receiver." : "Press Answer to talk."}
               </p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
+            {isClassicReceiverRinging ? (
               <button
-                className="min-h-12 rounded-md bg-[#345d83] px-6 text-lg font-black text-white hover:bg-[#254a6d]"
-                onClick={() => updateCall("connected", `${selectedPersonName} answered the call.`)}
+                className="min-h-12 rounded-md bg-[#a43f34] px-6 text-lg font-black text-white hover:bg-[#8d342b]"
+                onClick={() => updateCall("ended", "The call was canceled.")}
                 type="button"
               >
-                Answer
+                Cancel Call
               </button>
-              <button
-                className="min-h-12 rounded-md border border-[#d6e3f2] bg-white px-6 text-lg font-black text-[#5f6e84] hover:bg-[#f8fafc]"
-                onClick={() => updateCall("declined", `${selectedPersonName} declined the call.`)}
-                type="button"
-              >
-                Not Now
-              </button>
-            </div>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  className="min-h-12 rounded-md bg-[#345d83] px-6 text-lg font-black text-white hover:bg-[#254a6d]"
+                  onClick={() => updateCall("connected", `${selectedPersonName} answered the call.`)}
+                  type="button"
+                >
+                  Answer
+                </button>
+                <button
+                  className="min-h-12 rounded-md border border-[#d6e3f2] bg-white px-6 text-lg font-black text-[#5f6e84] hover:bg-[#f8fafc]"
+                  onClick={() => updateCall("declined", `${selectedPersonName} declined the call.`)}
+                  type="button"
+                >
+                  Not Now
+                </button>
+              </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -5722,15 +5735,17 @@ function RecipientCallPanel({
           ) : null}
         </div>
       ) : null}
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <button
-          className="min-h-12 rounded-md bg-[#b6cfe8] px-4 text-base font-black text-white hover:bg-[#345d83] disabled:opacity-45"
-          disabled={!isRinging}
-          onClick={() => updateCall("connected", `${selectedPersonName} answered the call.`)}
-          type="button"
-        >
-          Answer
-        </button>
+      <div className={`mt-3 grid gap-2 ${receiverUsesClassicCallBridge ? "" : "sm:grid-cols-2"}`}>
+        {!receiverUsesClassicCallBridge ? (
+          <button
+            className="min-h-12 rounded-md bg-[#b6cfe8] px-4 text-base font-black text-white hover:bg-[#345d83] disabled:opacity-45"
+            disabled={!isRinging}
+            onClick={() => updateCall("connected", `${selectedPersonName} answered the call.`)}
+            type="button"
+          >
+            Answer
+          </button>
+        ) : null}
         <button
           className="min-h-12 rounded-md bg-[#a7adb6] px-4 text-base font-black text-white hover:bg-[#626b78] disabled:opacity-45"
           disabled={!canEndCall}
@@ -5744,21 +5759,25 @@ function RecipientCallPanel({
         >
           {isRinging ? "Cancel Call" : "Hang Up"}
         </button>
-        <button
-          className="min-h-12 rounded-md bg-[#f8eeee] px-4 text-base font-black text-[#a43f34] hover:bg-[#f3dfdc] disabled:opacity-45"
-          disabled={!isRinging}
-          onClick={() => updateCall("declined", `${selectedPersonName} declined the call.`)}
-          type="button"
-        >
-          Decline
-        </button>
-        <button
-          className="min-h-12 rounded-md border border-[#d6e3f2] bg-white px-4 text-base font-black text-[#7f8794] hover:bg-[#f8fafc]"
-          onClick={() => updateCall("waiting", "Receiver unavailable.")}
-          type="button"
-        >
-          Receiver unavailable
-        </button>
+        {!receiverUsesClassicCallBridge ? (
+          <>
+            <button
+              className="min-h-12 rounded-md bg-[#f8eeee] px-4 text-base font-black text-[#a43f34] hover:bg-[#f3dfdc] disabled:opacity-45"
+              disabled={!isRinging}
+              onClick={() => updateCall("declined", `${selectedPersonName} declined the call.`)}
+              type="button"
+            >
+              Decline
+            </button>
+            <button
+              className="min-h-12 rounded-md border border-[#d6e3f2] bg-white px-4 text-base font-black text-[#7f8794] hover:bg-[#f8fafc]"
+              onClick={() => updateCall("waiting", "Receiver unavailable.")}
+              type="button"
+            >
+              Receiver unavailable
+            </button>
+          </>
+        ) : null}
       </div>
     </section>
   );

@@ -45,10 +45,13 @@ export async function POST(request: Request, context: RouteContext) {
       (await updateLocalConnectCallState(callId, payload.state || "", {
         mainConnectUserPersonId: personId,
       }));
-    const prototypeBody = await postPrototypeCallState(callId, {
-      ...payload,
-      mainConnectUserPersonId: personId,
-    });
+    const prototypeBody =
+      access.accessType === "receiver_device"
+        ? {}
+        : await postPrototypeCallState(callId, {
+            ...payload,
+            mainConnectUserPersonId: personId,
+          });
     if (call) {
       void recordSupabaseConnectCallEvent(
         {

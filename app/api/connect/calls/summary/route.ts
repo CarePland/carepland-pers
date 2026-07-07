@@ -2,12 +2,11 @@ import { NextResponse } from "next/server";
 
 import {
   emptyConnectCallSummary,
-  filterCallsForMainConnectUser,
-  mergeConnectCalls,
   summarizeConnectCalls,
   type ConnectCallRecord,
 } from "@/app/lib/connect/calls/callScoping";
 import { readConnectCallPersonAccessForRequest } from "@/app/lib/connect/calls/server/callAccess";
+import { callsVisibleToConnectSurface } from "@/app/lib/connect/calls/server/callSources";
 import {
   cleanupExpiredLocalConnectCallTranscripts,
   markStaleLocalConnectCallsMissed,
@@ -57,10 +56,12 @@ export async function GET(request: Request) {
       supabaseCalls ?? [],
       localCallIndex.calls
     );
-    const calls = filterCallsForMainConnectUser(
-      mergeConnectCalls(persistedCalls, prototypeCalls),
-      personId
-    );
+    const calls = callsVisibleToConnectSurface({
+      accessType: access.accessType,
+      persistedCalls,
+      personId,
+      prototypeCalls,
+    });
 
     return NextResponse.json({
       mainConnectUserPersonId: personId,
