@@ -128,6 +128,7 @@ type ReceiverCall = {
   callId: string;
   callerName: string;
   generatedSummaryText?: string;
+  receiverId?: string;
   state: string;
   summaryApprovalDraftText?: string;
   summaryStatus?: string;
@@ -981,6 +982,23 @@ function readReceiverGuideId() {
     readReceiverDeviceId() ||
     connectPrototypeReceiverId
   ).trim();
+}
+
+function receiverCallMatchesThisDevice(call: Partial<ReceiverCall>) {
+  const targetReceiverId = String(call.receiverId || "").trim();
+  if (!targetReceiverId) return true;
+  const receiverIds = new Set(
+    [
+      readReceiverDeviceId(),
+      readReceiverGuideId(),
+      readReceiverInstallId(),
+      connectPrototypeReceiverId,
+    ]
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
+
+  return receiverIds.has(targetReceiverId);
 }
 
 function readReceiverGuideSessionId() {
@@ -2163,8 +2181,10 @@ export function ConnectReceiver() {
       });
       setPendingCallSummaryReviews(pendingReviews);
 
-      const activeCall = payload.calls.find((call) =>
-        receiverCallRecordStateIsActive(String(call.state || ""))
+      const activeCall = payload.calls.find(
+        (call) =>
+          receiverCallMatchesThisDevice(call) &&
+          receiverCallRecordStateIsActive(String(call.state || ""))
       );
       if (activeCall?.callId && locallyEndedCallIdsRef.current.has(String(activeCall.callId))) {
         setInterruptedReviewIncomingCall((current) =>

@@ -1027,7 +1027,8 @@ export function ConnectDashboard() {
     (selectedReceiverKey && selectedReceiverKey !== connectPrototypeReceiverId
       ? selectedReceiverKey
       : selectedReceiver?.name || selectedReceiver?.receiverId || "Kitchen Receiver");
-  const selectedReceiverId = selectedReceiver?.receiverId || connectPrototypeReceiverId;
+  const selectedReceiverId =
+    selectedReceiver?.id || selectedReceiver?.receiverId || connectPrototypeReceiverId;
   const selectedReceiverUsesClassicCallBridge =
     receiverUsesClassicCallBridge(selectedReceiver);
   const selectedReceiverGuideId = selectedReceiverMatch

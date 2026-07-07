@@ -9,6 +9,7 @@ export type ConnectCallRecord = {
   modelSummaryText?: string;
   recipientName?: string;
   recipientPersonId?: string;
+  receiverId?: string;
   state?: string;
   summaryApprovedAt?: string;
   summaryApprovedBy?: string;

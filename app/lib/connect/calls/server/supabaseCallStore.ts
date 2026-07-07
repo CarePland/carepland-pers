@@ -29,6 +29,7 @@ type ConnectCallRow = {
   id: string;
   main_connect_user_person_id: string;
   caller_display_name: string | null;
+  receiver_device_id?: string | null;
   receiver_display_name: string | null;
   summary_approval_draft_text?: string | null;
   summary_approval_draft_updated_at?: string | null;
@@ -72,8 +73,10 @@ type ConnectCallSummaryRow = {
 };
 
 const connectCallSelectColumns =
-  "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,summary_review_status,summary_review_note,generated_summary_text,approved_summary_text,summary_approved_at,summary_approved_by,summary_approval_draft_text,summary_approval_draft_updated_at,summary_approval_draft_updated_by,transcript_cleanup_status,transcript_deleted_at,transcript_expires_at,transcript_status,transcript_text,updated_at";
+  "id,main_connect_user_person_id,caller_display_name,receiver_device_id,receiver_display_name,state,summary_status,summary_review_status,summary_review_note,generated_summary_text,approved_summary_text,summary_approved_at,summary_approved_by,summary_approval_draft_text,summary_approval_draft_updated_at,summary_approval_draft_updated_by,transcript_cleanup_status,transcript_deleted_at,transcript_expires_at,transcript_status,transcript_text,updated_at";
 const connectCallCoreSelectColumns =
+  "id,main_connect_user_person_id,caller_display_name,receiver_device_id,receiver_display_name,state,summary_status,transcript_status,transcript_text,updated_at";
+const connectCallLegacyCoreSelectColumns =
   "id,main_connect_user_person_id,caller_display_name,receiver_display_name,state,summary_status,transcript_status,transcript_text,updated_at";
 const defaultTranscriptRetentionMs = 7 * 24 * 60 * 60 * 1000;
 const expiredUnreviewedNote =
@@ -99,6 +102,16 @@ export async function readSupabaseConnectCalls(access: ConnectCallAccess) {
         .limit(300);
       data = fallback.data;
       error = fallback.error;
+      if (error && supabaseConnectCallReceiverDeviceColumnUnavailable(error)) {
+        const legacyFallback = await supabase
+          .from("connect_calls")
+          .select(connectCallLegacyCoreSelectColumns)
+          .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
+          .order("updated_at", { ascending: false })
+          .limit(300);
+        data = legacyFallback.data;
+        error = legacyFallback.error;
+      }
     }
 
     if (error) throw error;
@@ -177,6 +190,7 @@ export async function recordSupabaseConnectCall(
         care_circle_id: access.careCircleId,
         caller_display_name: input.callerName || "Andrew",
         main_connect_user_person_id: access.mainConnectUserPersonId,
+        receiver_device_id: input.receiverId || null,
         receiver_display_name: input.recipientName || "",
         started_at: isConnectCallState(input.state) && input.state !== "ringing" ? now : null,
         state: isConnectCallState(input.state) ? input.state : "ringing",
@@ -186,6 +200,26 @@ export async function recordSupabaseConnectCall(
       })
       .select(connectCallCoreSelectColumns)
       .single();
+
+    if (error && supabaseConnectCallReceiverDeviceColumnUnavailable(error)) {
+      const fallback = await supabase
+        .from("connect_calls")
+        .insert({
+          care_circle_id: access.careCircleId,
+          caller_display_name: input.callerName || "Andrew",
+          main_connect_user_person_id: access.mainConnectUserPersonId,
+          receiver_display_name: input.recipientName || "",
+          started_at: isConnectCallState(input.state) && input.state !== "ringing" ? now : null,
+          state: isConnectCallState(input.state) ? input.state : "ringing",
+          summary_status: input.summaryStatus || "not_requested",
+          transcript_status: input.transcriptStatus || "not_started",
+          transcript_text: input.transcriptText || "",
+        })
+        .select(connectCallLegacyCoreSelectColumns)
+        .single();
+      if (fallback.error) throw fallback.error;
+      return connectCallRecordFromRow(fallback.data as ConnectCallRow);
+    }
 
     if (error) throw error;
     return connectCallRecordFromRow(data as ConnectCallRow);
@@ -664,6 +698,7 @@ function connectCallRecordFromRow(row: ConnectCallRow): ConnectCallRecord {
     mainConnectUserPersonId: row.main_connect_user_person_id,
     recipientName: row.receiver_display_name || "",
     recipientPersonId: row.main_connect_user_person_id,
+    receiverId: row.receiver_device_id || undefined,
     state: row.state,
     modelSummaryText: row.generated_summary_text || undefined,
     summaryApprovalDraftText: row.summary_approval_draft_text || undefined,
@@ -765,7 +800,19 @@ function supabaseConnectCallOptionalColumnsUnavailable(error: unknown) {
       "transcript_cleanup_status",
       "transcript_deleted_at",
       "transcript_expires_at",
+      "receiver_device_id",
     ].some((column) => message.includes(column))
+  );
+}
+
+function supabaseConnectCallReceiverDeviceColumnUnavailable(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { code?: string; message?: string };
+  const message = maybeError.message || "";
+  return (
+    maybeError.code === "42703" ||
+    maybeError.code === "PGRST204" ||
+    message.includes("receiver_device_id")
   );
 }
 

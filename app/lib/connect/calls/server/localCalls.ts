@@ -124,6 +124,7 @@ export async function recordLocalConnectCall(
     generatedSummaryText: input.generatedSummaryText,
     recipientName: input.recipientName || "",
     recipientPersonId: personId,
+    receiverId: input.receiverId || "",
     state: isConnectCallState(input.state) ? input.state : "ringing",
     summaryApprovedAt: input.summaryApprovedAt,
     summaryApprovedBy: input.summaryApprovedBy,

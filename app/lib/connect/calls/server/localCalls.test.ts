@@ -43,6 +43,7 @@ describe("local Connect calls", () => {
       assert.equal(call.state, "ringing");
       assert.equal(call.mainConnectUserPersonId, "person-bob");
       assert.equal(call.recipientPersonId, "person-bob");
+      assert.equal(call.receiverId, "living-room-receiver");
       assert.equal(index.calls.length, 1);
     });
   });
