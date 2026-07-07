@@ -3670,6 +3670,17 @@ function SetupPanel({
     return `${pairedLabel} · ${lastSeen}${mode ? ` · ${mode}` : ""}`;
   }
 
+  function receiverShortId(device: ConnectReceiverDevice) {
+    const id = (device.receiverId || device.id || "").trim();
+    if (!id) return "No ID";
+    const compact = id.replace(/^receiver-/, "");
+    return compact.length > 10 ? compact.slice(-10) : compact;
+  }
+
+  function receiverFullId(device: ConnectReceiverDevice) {
+    return device.receiverId || device.id || "Not reported";
+  }
+
   function receiverHeartbeatState(device: ConnectReceiverDevice) {
     if (!device.lastSeenAt) {
       return {
@@ -4240,6 +4251,10 @@ function SetupPanel({
                     value={receiverHeartbeatState(selectedDevice).label}
                   />
                   <MiniStatus
+                    label="Receiver ID"
+                    value={receiverShortId(selectedDevice)}
+                  />
+                  <MiniStatus
                     label="APK"
                     value={receiverAppVersionLine(selectedDevice)}
                   />
@@ -4323,6 +4338,7 @@ function SetupPanel({
                           </strong>
                           <span className="block text-sm font-semibold text-[#5f6e84]">
                             {device.locationLabel || "No location"} ·{" "}
+                            ID {receiverShortId(device)} ·{" "}
                             {receiverHouseholdName(device.receiverHouseholdId)} ·{" "}
                             {receiverSetupStatus(device)} ·{" "}
                             {device.presence?.label || statusLabel(presenceState)}
@@ -4389,8 +4405,13 @@ function SetupPanel({
                             />
                             <MiniStatus label="Setup tokens" value={String(deviceTokens.length)} />
                             <MiniStatus label="Audit events" value={String(deviceEvents.length)} />
+                            <MiniStatus label="Receiver ID" value={receiverShortId(device)} />
                           </div>
                           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <MiniStatus
+                              label="Paired"
+                              value={device.pairedAt ? formatDateTime(device.pairedAt) : "Not paired"}
+                            />
                             <MiniStatus
                               label="Receiver mode"
                               value={receiverModeLabel(device.receiverMode) || "Not reported"}
@@ -4416,6 +4437,10 @@ function SetupPanel({
                             <MiniStatus
                               label="Hardware profile"
                               value={device.hardwareProfile || "Not reported"}
+                            />
+                            <MiniStatus
+                              label="Full receiver ID"
+                              value={receiverFullId(device)}
                             />
                             <MiniStatus
                               label="Recovery"
@@ -5381,9 +5406,12 @@ function RecipientCallPanel({
   transcriptStatus: string;
   transcriptText: string;
 }) {
-  const isRinging = recipientCallState === "ringing";
-  const isConnected = recipientCallState === "connected";
   const hasServerActiveCall = ["answered", "connected", "ringing"].includes(activeCallState);
+  const isRinging = recipientCallState === "ringing" || activeCallState === "ringing";
+  const isConnected =
+    recipientCallState === "connected" ||
+    activeCallState === "answered" ||
+    activeCallState === "connected";
   const canEndCall = isConnected || isRinging || hasServerActiveCall;
   const headline = isConnected
     ? `Connected with ${selectedPersonName}.`
@@ -5473,7 +5501,7 @@ function RecipientCallPanel({
           <h2 className="text-2xl font-black text-[#173150]">Incoming call</h2>
         </div>
         <span className="rounded-full bg-[#edf5fc] px-4 py-2 text-sm font-black uppercase tracking-normal text-[#345d83]">
-          {isConnected ? "Active" : isRinging ? "Ringing" : "No active receiver"}
+          {isConnected ? "Active call" : isRinging ? "Ringing" : "No active call"}
         </span>
       </div>
       {isRinging ? (

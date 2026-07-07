@@ -98,6 +98,7 @@ export type ReceiverShellDeviceProfile = {
   nativeSdk?: number;
   nativeVersionCode?: number;
   nativeVersionName?: string;
+  pairedAt?: string;
   receiverInstallId?: string;
   provisioningCompletedAt?: string;
   receiverDeviceId: string;
@@ -1247,6 +1248,7 @@ const receiverShellCoreProfileColumns = [
   "ui_layout",
   "last_seen_at",
   "hardware_profile",
+  "bound_at",
 ];
 
 const receiverShellProfileColumns = [
@@ -1298,6 +1300,7 @@ async function receiverShellDeviceProfilesFromRows(
       nativeSdk: finiteNumberOrUndefined(row.native_sdk),
       nativeVersionCode: finiteNumberOrUndefined(row.native_version_code),
       nativeVersionName: stringFromRow(row.native_version_name),
+      pairedAt: stringFromRow(row.bound_at),
       provisioningCompletedAt: stringFromRow(row.provisioning_completed_at),
       receiverInstallId: stringFromRow(row.receiver_install_id),
       receiverDeviceId: stringFromRow(row.id),
@@ -1332,6 +1335,7 @@ async function listLocalReceiverShellDeviceProfiles() {
       nativeSdk: claim.nativeSdk,
       nativeVersionCode: claim.nativeVersionCode,
       nativeVersionName: claim.nativeVersionName,
+      pairedAt: claim.redeemedAt,
       provisioningCompletedAt: claim.provisioningCompletedAt,
       receiverInstallId: claim.receiverInstallId,
       receiverDeviceId: claim.receiverDeviceId,

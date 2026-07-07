@@ -168,7 +168,7 @@ function shellProfileToReceiverDevice(profile: ReceiverShellDeviceProfile): Conn
     nativeSdk: profile.nativeSdk,
     nativeVersionCode: profile.nativeVersionCode,
     nativeVersionName: profile.nativeVersionName,
-    pairedAt: profile.receiverInstallId ? profile.lastSeenAt : undefined,
+    pairedAt: profile.pairedAt || profile.provisioningCompletedAt,
     presence,
     provisioningCompletedAt: profile.provisioningCompletedAt,
     receiverId: profile.receiverDeviceId,
