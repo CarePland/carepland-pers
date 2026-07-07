@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import {
   emptyConnectCallSummary,
+  mergeConnectCalls,
   summarizeConnectCalls,
   type ConnectCallRecord,
 } from "@/app/lib/connect/calls/callScoping";

@@ -7,7 +7,10 @@ import {
   ReceiverDeviceAccessError,
   receiverDeviceSetupRequiredBody,
 } from "@/app/lib/connect/context/server/personScopedAccess";
-import { type ConnectCallRecord } from "@/app/lib/connect/calls/callScoping";
+import {
+  mergeConnectCalls,
+  type ConnectCallRecord,
+} from "@/app/lib/connect/calls/callScoping";
 import {
   cleanupExpiredLocalConnectCallTranscripts,
   markStaleLocalConnectCallsMissed,
