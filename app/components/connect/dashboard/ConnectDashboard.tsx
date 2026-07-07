@@ -283,19 +283,9 @@ function receiverUsesClassicCallBridge(receiver?: ConnectReceiverDevice | null) 
   const deviceProfile = String(
     (receiver as { deviceProfile?: string } | null | undefined)?.deviceProfile || ""
   ).toLowerCase();
-  const hardwareProfile = String(receiver?.hardwareProfile || "").toLowerCase();
-  const uiLayout = String(
-    (receiver as { uiLayout?: string } | null | undefined)?.uiLayout || ""
-  ).toLowerCase();
-  const nativeModel = String(receiver?.nativeModel || "").toLowerCase();
+  const receiverMode = String(receiver?.receiverMode || "").toLowerCase();
 
-  return (
-    deviceProfile.includes("classic") ||
-    hardwareProfile.includes("grandstream") ||
-    hardwareProfile.includes("gxv") ||
-    nativeModel.includes("gxv") ||
-    uiLayout.includes("desk_phone")
-  );
+  return deviceProfile.includes("classic") || receiverMode === "classic_webview";
 }
 
 function receiverKey(device: ConnectReceiverDevice) {
