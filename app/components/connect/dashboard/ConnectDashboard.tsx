@@ -1360,6 +1360,34 @@ export function ConnectDashboard() {
     }
   }
 
+  useEffect(() => {
+    if (activeView === "connect") return;
+    if (recipientCallState !== "ringing" && state.callSummary?.latestCall?.state !== "ringing") {
+      return;
+    }
+
+    const callId = activeCallIdRef.current || state.callSummary?.latestCall?.callId;
+    if (!callId) return;
+
+    stopCallCue();
+    stopLiveCallAudio();
+    setRecipientCallState("ended");
+    setStatus("Call ended.");
+    void reportDashboardCallState("hung_up", {
+      callId,
+      refreshAfter: false,
+      source: "connect_dashboard_left_call_view",
+    });
+    activeCallIdRef.current = "";
+  }, [
+    activeView,
+    recipientCallState,
+    state.callSummary?.latestCall?.callId,
+    state.callSummary?.latestCall?.state,
+    stopCallCue,
+    stopLiveCallAudio,
+  ]);
+
   async function endDashboardCall() {
     const callId = activeCallIdRef.current || state.callSummary?.latestCall?.callId;
     if (!callId) {

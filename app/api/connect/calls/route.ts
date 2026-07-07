@@ -103,6 +103,14 @@ export async function POST(request: Request) {
 
     const access = await readConnectCallPersonAccessForRequest(request, personId, payload);
 
+    await Promise.all([
+      markStaleLocalConnectCallsMissed({
+        mainConnectUserPersonId: personId,
+        ringingTimeoutMs: 0,
+      }),
+      markStaleSupabaseConnectCallsMissed(access, { ringingTimeoutMs: 0 }),
+    ]);
+
     const call =
       (await recordSupabaseConnectCall(
         {

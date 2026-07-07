@@ -47,6 +47,47 @@ describe("local Connect calls", () => {
     });
   });
 
+  it("can retire only one person's still-ringing calls before a new call starts", async () => {
+    await withTempCallIndex(async (indexPath) => {
+      await recordLocalConnectCall(
+        {
+          callId: "bob-ringing",
+          mainConnectUserPersonId: "person-bob",
+          state: "ringing",
+          updatedAt: "2026-06-21T12:01:00.000Z",
+        },
+        { indexPath }
+      );
+      await recordLocalConnectCall(
+        {
+          callId: "alice-ringing",
+          mainConnectUserPersonId: "person-alice",
+          state: "ringing",
+          updatedAt: "2026-06-21T12:01:00.000Z",
+        },
+        { indexPath }
+      );
+
+      const changed = await markStaleLocalConnectCallsMissed({
+        indexPath,
+        mainConnectUserPersonId: "person-bob",
+        now: new Date("2026-06-21T12:01:00.000Z"),
+        ringingTimeoutMs: 0,
+      });
+      const index = await readLocalConnectCalls({ indexPath });
+
+      assert.equal(changed, 1);
+      assert.equal(
+        index.calls.find((call) => call.callId === "bob-ringing")?.state,
+        "missed"
+      );
+      assert.equal(
+        index.calls.find((call) => call.callId === "alice-ringing")?.state,
+        "ringing"
+      );
+    });
+  });
+
   it("updates allowed call state transitions", async () => {
     await withTempCallIndex(async (indexPath) => {
       const call = await recordLocalConnectCall(

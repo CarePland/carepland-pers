@@ -63,7 +63,12 @@ export async function readLocalConnectCalls(options: { indexPath?: string } = {}
 }
 
 export async function markStaleLocalConnectCallsMissed(
-  options: { indexPath?: string; now?: Date; ringingTimeoutMs?: number } = {}
+  options: {
+    indexPath?: string;
+    mainConnectUserPersonId?: string;
+    now?: Date;
+    ringingTimeoutMs?: number;
+  } = {}
 ) {
   const indexPath = options.indexPath ?? defaultIndexPath;
   const index = await readLocalCallsIndex(indexPath);
@@ -73,6 +78,12 @@ export async function markStaleLocalConnectCallsMissed(
 
   index.calls = index.calls.map((call) => {
     if (call.state !== "ringing") return call;
+    if (
+      options.mainConnectUserPersonId &&
+      call.mainConnectUserPersonId !== options.mainConnectUserPersonId
+    ) {
+      return call;
+    }
 
     const updatedAtMs = Date.parse(call.updatedAt || "");
     if (!Number.isFinite(updatedAtMs) || nowMs - updatedAtMs < timeoutMs) return call;
