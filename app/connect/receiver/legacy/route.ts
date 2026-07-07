@@ -1111,7 +1111,7 @@ function classicWebViewReceiverHtml({
     </div>
     <div class="panelBody">
       <div class="whiteCard">
-        <div class="callTitle">Calling Andrew</div>
+        <div class="callTitle" id="callTitle">Connect Call</div>
         <div class="callSub" id="callStatus">Connecting...</div>
         <button class="doneButton" id="closeCallButton" type="button">Close Call</button>
       </div>
@@ -2445,6 +2445,7 @@ function classicWebViewReceiverHtml({
       }
       function startCallAndrew() {
         showScreen("callScreen");
+        setText("callTitle", "Calling Andrew");
         setText("callStatus", "Creating call...");
         if (!receiverState.personId) {
           setText("callStatus", "Receiver is still connecting.");
@@ -2472,8 +2473,10 @@ function classicWebViewReceiverHtml({
       function showIncomingCall(call) {
         if (!call || !call.callId || receiverState.activeCallId === call.callId) return;
         receiverState.activeCallId = call.callId;
+        var callerName = call.callerName || "Andrew";
         showScreen("callScreen");
-        setText("callStatus", (call.callerName || "Andrew") + " is calling. Use the handset or speaker.");
+        setText("callTitle", "Call from " + callerName);
+        setText("callStatus", "Connecting...");
         jsonRequest("POST", "/api/connect/calls/" + encodeURIComponent(call.callId) + "/state", {
           mainConnectUserPersonId: receiverState.personId,
           receiverDeviceId: receiverState.receiverDeviceId,
@@ -2483,7 +2486,8 @@ function classicWebViewReceiverHtml({
           state: "connected"
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
-            setText("callStatus", "Connected. Use the handset or speaker.");
+            setText("callTitle", "Connected with " + callerName);
+            setText("callStatus", "Use the handset or speaker.");
             return;
           }
           setText("callStatus", payload.error || "Incoming call could not be answered.");
@@ -2525,7 +2529,8 @@ function classicWebViewReceiverHtml({
           receiverState.activeCallId = activeCall.callId || receiverState.activeCallId;
           if (activeCall.state === "answered" || activeCall.state === "connected") {
             showScreen("callScreen");
-            setText("callStatus", "Connected. Use the handset or speaker.");
+            setText("callTitle", "Connected with " + (activeCall.callerName || "Andrew"));
+            setText("callStatus", "Use the handset or speaker.");
           }
         });
       }
