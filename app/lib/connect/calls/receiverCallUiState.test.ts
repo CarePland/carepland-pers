@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   receiverCallRecordStateIsActive,
+  receiverCallRecordStateIsTerminal,
   receiverCallUiStateFromRecordState,
 } from "./receiverCallUiState";
 
@@ -23,5 +24,13 @@ describe("receiver call UI state", () => {
     assert.equal(receiverCallRecordStateIsActive("declined"), false);
     assert.equal(receiverCallRecordStateIsActive("failed"), false);
     assert.equal(receiverCallRecordStateIsActive(""), false);
+  });
+
+  it("identifies terminal receiver call records", () => {
+    assert.equal(receiverCallRecordStateIsTerminal("hung_up"), true);
+    assert.equal(receiverCallRecordStateIsTerminal("missed"), true);
+    assert.equal(receiverCallRecordStateIsTerminal("receiver_unavailable"), true);
+    assert.equal(receiverCallRecordStateIsTerminal("ringing"), false);
+    assert.equal(receiverCallRecordStateIsTerminal("answered"), false);
   });
 });

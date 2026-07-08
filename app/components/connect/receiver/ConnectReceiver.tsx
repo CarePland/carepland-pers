@@ -51,6 +51,7 @@ import {
 import { recordConnectCallLifecycleEvent } from "../../../lib/connect/calls/browserCallDiagnostics";
 import {
   receiverCallRecordStateIsActive,
+  receiverCallRecordStateIsTerminal,
   receiverCallUiStateFromRecordState,
   type ReceiverCallUiState,
 } from "../../../lib/connect/calls/receiverCallUiState";
@@ -182,6 +183,18 @@ const receiverAudioPack = {
   sit: "/connect/receiver/audio/sit.wav",
   unavailable: "/connect/receiver/audio/number-not-available.mp3",
 };
+
+function receiverCallStateUpdateReachedRequestedState(
+  requestedState: string,
+  returnedState: string
+) {
+  if (returnedState === requestedState) return true;
+  if (requestedState === "answered") return returnedState === "connected";
+  if (["declined", "hung_up"].includes(requestedState)) {
+    return receiverCallRecordStateIsTerminal(returnedState);
+  }
+  return false;
+}
 
 type ReaderTextSize = "standard" | "large" | "extra";
 
@@ -2378,6 +2391,17 @@ export function ConnectReceiver() {
           (receiverCallState === "incoming" ? undefined : new Date().toISOString());
         if (stableCallStartedAt && !callStartedAtByCallIdRef.current[activeCallId]) {
           callStartedAtByCallIdRef.current[activeCallId] = stableCallStartedAt;
+        }
+        if (
+          currentIsSameCall &&
+          (current.callState === "ended" || current.callState === "failed")
+        ) {
+          locallyEndedCallIdsRef.current.add(String(activeCall.callId));
+          logReceiverCallEvent(String(activeCall.callId), "call_receiver_poll_ended_call_preserved", {
+            nextCallState: callState,
+            source: "refreshCalls",
+          });
+          return current;
         }
         const shouldPreserveLocalAnsweredState =
           currentIsSameCall &&
@@ -4784,18 +4808,21 @@ export function ConnectReceiver() {
     cueAudioRef.current = playReceiverUnavailableSequence(soundSettings) || null;
   }
 
-  async function reportCallState(callId: string | undefined, state: string) {
+  async function reportCallState(
+    callId: string | undefined,
+    state: string
+  ): Promise<{ callState?: string; ok: boolean }> {
     if (!receiverOnline) {
       explainOfflineAction();
-      return false;
+      return { ok: false };
     }
     if (!callId) {
       setStatus("Call details are not available yet.");
-      return false;
+      return { ok: false };
     }
     if (!selectedReceiverUser.id) {
       setStatus("Choose a Main Connect User before answering calls.");
-      return false;
+      return { ok: false };
     }
 
     try {
@@ -4816,9 +4843,11 @@ export function ConnectReceiver() {
         method: "POST",
       });
       const payload = (await response.json().catch(() => ({}))) as {
+        call?: ReceiverCall;
         error?: string;
         ok?: boolean;
       };
+      const returnedCallState = String(payload.call?.state || "").trim();
 
       if (!response.ok || payload.ok === false) {
         const message =
@@ -4833,13 +4862,44 @@ export function ConnectReceiver() {
           state,
         });
         setStatus(message);
-        return false;
+        return { callState: returnedCallState || undefined, ok: false };
       }
 
-      return true;
+      if (
+        returnedCallState &&
+        returnedCallState !== state &&
+        receiverCallRecordStateIsTerminal(returnedCallState)
+      ) {
+        logReceiverCallEvent(callId, "call_receiver_state_update_rejected_terminal", {
+          requestedState: state,
+          resultState: returnedCallState,
+          source: "reportCallState",
+        });
+        setStatus("That call already ended.");
+        return { callState: returnedCallState, ok: false };
+      }
+
+      if (
+        returnedCallState &&
+        !receiverCallStateUpdateReachedRequestedState(state, returnedCallState)
+      ) {
+        logReceiverCallEvent(callId, "call_receiver_state_update_not_applied", {
+          requestedState: state,
+          resultState: returnedCallState,
+          source: "reportCallState",
+        });
+        setStatus(
+          state === "answered"
+            ? "Receiver could not answer this call yet."
+            : "Receiver could not update this call yet."
+        );
+        return { callState: returnedCallState, ok: false };
+      }
+
+      return { callState: returnedCallState || state, ok: true };
     } catch {
       setStatus("Could not update the call on the CarePland server.");
-      return false;
+      return { ok: false };
     }
   }
 
@@ -5049,14 +5109,24 @@ export function ConnectReceiver() {
     });
     setStatus(`Connecting to ${callerName}. If Chrome asks, allow microphone access.`);
     const answered = await reportCallState(callId, "answered");
-    if (!answered) {
+    if (!answered.ok) {
       setCallAudioStatus("interrupted");
+      if (callId && receiverCallRecordStateIsTerminal(answered.callState)) {
+        locallyEndedCallIdsRef.current.add(callId);
+      }
       setModal((current) =>
         current?.type === "incomingCall" && current.callId === callId
-          ? {
-              ...current,
-              callState: "incoming",
-            }
+          ? receiverCallRecordStateIsTerminal(answered.callState)
+            ? {
+                ...current,
+                callEndedAt: current.callEndedAt || new Date().toISOString(),
+                callState: "ended",
+                textView: undefined,
+              }
+            : {
+                ...current,
+                callState: "incoming",
+              }
           : current
       );
       return;
@@ -5083,7 +5153,23 @@ export function ConnectReceiver() {
         onConnected: () => {
           setStatus(`Connected to ${callerName}.`);
           void reportCallState(callId, "connected").then((connected) => {
-            if (!connected) return;
+            if (!connected.ok) {
+              if (receiverCallRecordStateIsTerminal(connected.callState)) {
+                locallyEndedCallIdsRef.current.add(callId);
+                stopLiveCallAudio({ notifyPeer: false });
+                setModal((current) =>
+                  current?.type === "incomingCall" && current.callId === callId
+                    ? {
+                        ...current,
+                        callEndedAt: current.callEndedAt || new Date().toISOString(),
+                        callState: "ended",
+                        textView: undefined,
+                      }
+                    : current
+                );
+              }
+              return;
+            }
             setModal((current) =>
               current?.type === "incomingCall" && current.callId === callId
                 ? {

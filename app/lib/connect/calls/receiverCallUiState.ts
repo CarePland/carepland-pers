@@ -28,3 +28,8 @@ export function receiverCallRecordStateIsActive(state: string | null | undefined
   const uiState = receiverCallUiStateFromRecordState(state);
   return uiState === "incoming" || uiState === "connecting" || uiState === "connected";
 }
+
+export function receiverCallRecordStateIsTerminal(state: string | null | undefined) {
+  const uiState = receiverCallUiStateFromRecordState(state);
+  return uiState === "ended" || uiState === "failed";
+}
