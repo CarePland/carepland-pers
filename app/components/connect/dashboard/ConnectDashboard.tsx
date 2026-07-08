@@ -212,6 +212,7 @@ type ReceiverGuideState = {
 const receiverGuideTargetStorageKey = "carepland-connect-guide-target";
 const receiverGuideRectStorageKey = "carepland-connect-guide-rect";
 const receiverLastPressStorageKey = "carepland-connect-last-press";
+const selectedReceiverStorageKeyPrefix = "carepland-connect-selected-receiver";
 const receiverGuideEndpoint = "/api/connect/receiver-guide";
 const connectMessagesEndpoint = "/api/connect/messages";
 const connectAvatarsEndpoint = "/api/connect/avatars";
@@ -318,6 +319,20 @@ function receiverShortDisplayId(device?: ConnectReceiverDevice | null) {
   if (!id) return "";
   const compact = id.replace(/^receiver-/, "");
   return compact.length > 10 ? compact.slice(-10) : compact;
+}
+
+function selectedReceiverStorageKey(personId: string) {
+  return `${selectedReceiverStorageKeyPrefix}:${personId || "default"}`;
+}
+
+function readStickySelectedReceiverKey(personId: string) {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(selectedReceiverStorageKey(personId)) || "";
+}
+
+function writeStickySelectedReceiverKey(personId: string, receiverKeyValue: string) {
+  if (typeof window === "undefined" || !receiverKeyValue) return;
+  window.localStorage.setItem(selectedReceiverStorageKey(personId), receiverKeyValue);
 }
 
 function personName(person?: ConnectReceiverPerson) {
@@ -1099,6 +1114,25 @@ export function ConnectDashboard() {
     savedMainConnectUserPersonId,
   });
   const isEveryoneFocus = globalFocusId === allCarePlandFocusValue;
+
+  useEffect(() => {
+    if (!activeConnectPersonId || activeDevices.length === 0) return;
+    if (activeDevices.some((device) => receiverKey(device) === selectedReceiverKey)) return;
+
+    const stickyKey = readStickySelectedReceiverKey(activeConnectPersonId);
+    if (stickyKey && activeDevices.some((device) => receiverKey(device) === stickyKey)) {
+      setSelectedReceiverKey(stickyKey);
+      return;
+    }
+
+    setSelectedReceiverKey(receiverKey(activeDevices[0]));
+  }, [activeConnectPersonId, activeDevices, selectedReceiverKey]);
+
+  useEffect(() => {
+    if (!activeConnectPersonId) return;
+    if (!activeDevices.some((device) => receiverKey(device) === selectedReceiverKey)) return;
+    writeStickySelectedReceiverKey(activeConnectPersonId, selectedReceiverKey);
+  }, [activeConnectPersonId, activeDevices, selectedReceiverKey]);
 
   const selectedReceiverMatch = activeDevices.find(
     (device) => receiverKey(device) === selectedReceiverKey
