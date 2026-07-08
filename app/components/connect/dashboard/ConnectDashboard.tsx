@@ -115,6 +115,16 @@ type ConnectCallSummary = {
   total?: number;
 };
 
+type CallPathDiagnostics = {
+  checkedAt: string;
+  endpointStatus: "checking" | "not_checked" | "ready" | "unavailable";
+  error: string;
+  hasTurnServer: boolean;
+  iceServerCount: number;
+  isSecureContext: boolean;
+  microphoneApiAvailable: boolean;
+};
+
 type ConnectAudioProfile = {
   events?: Array<Record<string, unknown>>;
   summary?: {
@@ -527,6 +537,15 @@ export function ConnectDashboard() {
     useState<RecipientCallState>("waiting");
   const [callAudioStatus, setCallAudioStatus] =
     useState<ConnectCallAudioStatus>("idle");
+  const [callPathDiagnostics, setCallPathDiagnostics] = useState<CallPathDiagnostics>({
+    checkedAt: "",
+    endpointStatus: "not_checked",
+    error: "",
+    hasTurnServer: false,
+    iceServerCount: 0,
+    isSecureContext: false,
+    microphoneApiAvailable: false,
+  });
   const [callMuted, setCallMuted] = useState(false);
   const [callTranscriptRuntimeStatus, setCallTranscriptRuntimeStatus] = useState("");
   const savedMainConnectUserPersonId =
@@ -561,6 +580,49 @@ export function ConnectDashboard() {
       engaged: true,
     });
   }, [activeView, setupView]);
+
+  const refreshCallPathDiagnostics = useCallback(async () => {
+    const browserBasics = readBrowserCallPathBasics();
+    setCallPathDiagnostics((current) => ({
+      ...current,
+      ...browserBasics,
+      endpointStatus: "checking",
+      error: "",
+    }));
+
+    try {
+      const response = await fetch("/api/connect/calls/ice-config", {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(`ICE endpoint returned ${response.status}`);
+      }
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        iceServers?: RTCIceServer[];
+      };
+      const iceServers = Array.isArray(payload.iceServers)
+        ? payload.iceServers.filter(isCallPathIceServer)
+        : [];
+      setCallPathDiagnostics({
+        ...browserBasics,
+        checkedAt: new Date().toISOString(),
+        endpointStatus: iceServers.length > 0 ? "ready" : "unavailable",
+        error: iceServers.length > 0 ? "" : "ICE endpoint returned no usable servers.",
+        hasTurnServer: iceServers.some(callPathIceServerUsesTurn),
+        iceServerCount: iceServers.length,
+      });
+    } catch (error) {
+      setCallPathDiagnostics({
+        ...browserBasics,
+        checkedAt: new Date().toISOString(),
+        endpointStatus: "unavailable",
+        error: error instanceof Error ? error.message : "ICE endpoint could not be reached.",
+        hasTurnServer: false,
+        iceServerCount: 0,
+      });
+    }
+  }, []);
 
   const stopCallCue = useCallback(() => {
     if (callTimeoutRef.current) {
@@ -809,6 +871,11 @@ export function ConnectDashboard() {
 
     return () => window.clearTimeout(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    if (activeView !== "connect") return;
+    void refreshCallPathDiagnostics();
+  }, [activeView, refreshCallPathDiagnostics]);
 
   useEffect(() => {
     const latestCall = state.callSummary?.latestCall;
@@ -2386,6 +2453,7 @@ export function ConnectDashboard() {
             canShowDiagnostics={isAdmin}
             callAudioStatus={callAudioStatus}
             callMuted={callMuted}
+            callPathDiagnostics={callPathDiagnostics}
             onCallStateChange={(stateValue) => {
               void reportDashboardCallState(stateValue);
             }}
@@ -2398,10 +2466,15 @@ export function ConnectDashboard() {
             onRefreshCallNotes={() => {
               void refreshCallState();
             }}
+            onRefreshCallPathDiagnostics={() => {
+              void refreshCallPathDiagnostics();
+            }}
             onRestartAudio={restartDashboardCallAudio}
             onToggleMuted={toggleCallMuted}
             recipientCallState={recipientCallState}
             receiverUsesClassicCallBridge={selectedReceiverUsesClassicCallBridge}
+            selectedReceiverId={selectedReceiverId}
+            selectedReceiverLabel={selectedReceiverLabel}
             selectedPerson={selectedPerson}
             selectedPersonName={selectedPersonName}
             setRecipientCallState={setRecipientCallState}
@@ -5675,10 +5748,13 @@ function RecipientCallPanel({
   onCallFailed,
   onHangUpCall,
   onRefreshCallNotes,
+  onRefreshCallPathDiagnostics,
   onRestartAudio,
   onToggleMuted,
   recipientCallState,
   receiverUsesClassicCallBridge,
+  selectedReceiverId,
+  selectedReceiverLabel,
   selectedPerson,
   selectedPersonName,
   setRecipientCallState,
@@ -5689,21 +5765,26 @@ function RecipientCallPanel({
   transcriptRuntimeStatus,
   transcriptStatus,
   transcriptText,
+  callPathDiagnostics,
 }: {
   activeCallState: string;
   canShowDiagnostics: boolean;
   callAudioStatus: ConnectCallAudioStatus;
   callMuted: boolean;
+  callPathDiagnostics: CallPathDiagnostics;
   onCallStateChange: (state: string) => void;
   onCallAnswered: () => void;
   onCallEnded: () => void;
   onCallFailed: () => void;
   onHangUpCall: () => void;
   onRefreshCallNotes: () => void;
+  onRefreshCallPathDiagnostics: () => void;
   onRestartAudio: () => void;
   onToggleMuted: () => void;
   recipientCallState: RecipientCallState;
   receiverUsesClassicCallBridge: boolean;
+  selectedReceiverId: string;
+  selectedReceiverLabel: string;
   selectedPerson?: ConnectReceiverPerson;
   selectedPersonName: string;
   setRecipientCallState: (value: RecipientCallState) => void;
@@ -5944,6 +6025,15 @@ function RecipientCallPanel({
           ) : null}
         </div>
       </div>
+      {canShowDiagnostics ? (
+        <CallPathDiagnosticsPanel
+          callAudioStatus={callAudioStatus}
+          diagnostics={callPathDiagnostics}
+          onRefresh={onRefreshCallPathDiagnostics}
+          receiverId={selectedReceiverId}
+          receiverLabel={selectedReceiverLabel}
+        />
+      ) : null}
       {isRinging || isConnected || callNotesLabel ? (
         <div className="mt-3 rounded-lg border border-[#d6e3f2] bg-white p-4">
           <p className="text-sm font-black uppercase tracking-normal text-[#5f6e84]">
@@ -6063,6 +6153,162 @@ function RecipientCallPanel({
       </div>
     </section>
   );
+}
+
+function CallPathDiagnosticsPanel({
+  callAudioStatus,
+  diagnostics,
+  onRefresh,
+  receiverId,
+  receiverLabel,
+}: {
+  callAudioStatus: ConnectCallAudioStatus;
+  diagnostics: CallPathDiagnostics;
+  onRefresh: () => void;
+  receiverId: string;
+  receiverLabel: string;
+}) {
+  const endpointReady = diagnostics.endpointStatus === "ready";
+  const endpointChecking = diagnostics.endpointStatus === "checking";
+  const endpointLabel =
+    diagnostics.endpointStatus === "ready"
+      ? "Ready"
+      : diagnostics.endpointStatus === "checking"
+        ? "Checking"
+        : diagnostics.endpointStatus === "unavailable"
+          ? "Unavailable"
+          : "Not checked";
+  const items = [
+    {
+      detail: diagnostics.isSecureContext ? "HTTPS or localhost" : "Browser blocks microphone",
+      label: "Secure browser",
+      tone: diagnostics.isSecureContext ? "good" : "bad",
+      value: diagnostics.isSecureContext ? "Yes" : "No",
+    },
+    {
+      detail: diagnostics.microphoneApiAvailable ? "mediaDevices available" : "No mediaDevices API",
+      label: "Microphone API",
+      tone: diagnostics.microphoneApiAvailable ? "good" : "bad",
+      value: diagnostics.microphoneApiAvailable ? "Ready" : "Missing",
+    },
+    {
+      detail: diagnostics.error || `${diagnostics.iceServerCount} ICE server${diagnostics.iceServerCount === 1 ? "" : "s"}`,
+      label: "ICE endpoint",
+      tone: endpointReady ? "good" : endpointChecking ? "warn" : "bad",
+      value: endpointLabel,
+    },
+    {
+      detail: diagnostics.hasTurnServer ? "Relay server included" : "STUN only",
+      label: "TURN relay",
+      tone: diagnostics.hasTurnServer ? "good" : "warn",
+      value: diagnostics.hasTurnServer ? "Available" : "Missing",
+    },
+    {
+      detail: shortDiagnosticId(receiverId),
+      label: "Receiver",
+      tone: receiverId ? "good" : "warn",
+      value: receiverLabel || "None",
+    },
+    {
+      detail: callAudioStatus === "idle" ? "No active browser audio" : "Live controller status",
+      label: "Audio status",
+      tone:
+        callAudioStatus === "connected" || callAudioStatus === "remote_audio"
+          ? "good"
+          : callAudioStatus === "interrupted"
+            ? "bad"
+            : "warn",
+      value: readableDiagnosticStatus(callAudioStatus),
+    },
+  ] as const;
+
+  return (
+    <details className="mt-3 rounded-lg border border-[#d6e3f2] bg-white p-4 shadow-sm" open>
+      <summary className="cursor-pointer list-none text-sm font-black uppercase tracking-normal text-[#5f6e84]">
+        Call path diagnostics
+      </summary>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((item) => (
+          <div
+            className={`rounded-md border px-3 py-2 ${diagnosticToneClass(item.tone)}`}
+            key={item.label}
+          >
+            <p className="text-xs font-black uppercase tracking-normal opacity-75">
+              {item.label}
+            </p>
+            <p className="mt-1 truncate text-sm font-black">{item.value}</p>
+            <p className="mt-1 truncate text-xs font-bold opacity-75">{item.detail}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-bold text-[#5f6e84]">
+          {diagnostics.checkedAt
+            ? `Checked ${formatCallPathCheckedAt(diagnostics.checkedAt)}`
+            : "Not checked yet"}
+        </p>
+        <button
+          className="min-h-9 rounded-md border border-[#d6e3f2] bg-white px-3 text-xs font-black text-[#345d83] hover:bg-[#edf5fc] disabled:opacity-55"
+          disabled={endpointChecking}
+          onClick={onRefresh}
+          type="button"
+        >
+          {endpointChecking ? "Checking" : "Refresh"}
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function readBrowserCallPathBasics() {
+  return {
+    isSecureContext: typeof window !== "undefined" && window.isSecureContext,
+    microphoneApiAvailable:
+      typeof navigator !== "undefined" &&
+      Boolean(navigator.mediaDevices?.getUserMedia),
+  };
+}
+
+function isCallPathIceServer(value: unknown): value is RTCIceServer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const urls = (value as { urls?: unknown }).urls;
+  if (typeof urls === "string") return Boolean(urls.trim());
+  if (Array.isArray(urls)) {
+    return urls.some((url) => typeof url === "string" && Boolean(url.trim()));
+  }
+  return false;
+}
+
+function callPathIceServerUsesTurn(server: RTCIceServer) {
+  const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+  return urls.some((url) => String(url || "").startsWith("turn:"));
+}
+
+function diagnosticToneClass(tone: "bad" | "good" | "warn") {
+  if (tone === "good") return "border-[#b9d4ba] bg-[#f7fcf5] text-[#173b22]";
+  if (tone === "bad") return "border-[#e7c3bf] bg-[#fff6f5] text-[#7f1d1d]";
+  return "border-[#d8c48b] bg-[#fff9e8] text-[#5a4b1e]";
+}
+
+function shortDiagnosticId(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return "No Receiver id";
+  if (normalized.length <= 18) return normalized;
+  return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
+}
+
+function formatCallPathCheckedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "recently";
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
+function readableDiagnosticStatus(value: string) {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ") || "Idle";
 }
 
 function transcriptStatusLabel({
