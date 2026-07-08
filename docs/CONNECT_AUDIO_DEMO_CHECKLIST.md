@@ -22,6 +22,21 @@ Internet demos may connect less reliably with only public STUN. Configure TURN b
 Supported environment options:
 
 ```bash
+CONNECT_ICE_SERVERS_JSON='[{"urls":["stun:stun.l.google.com:19302"]},{"urls":["turn:example.com:3478"],"username":"demo-user","credential":"demo-password"}]'
+```
+
+Or:
+
+```bash
+CONNECT_STUN_URLS='stun:stun.l.google.com:19302'
+CONNECT_TURN_URLS='turn:example.com:3478'
+CONNECT_TURN_USERNAME='demo-user'
+CONNECT_TURN_CREDENTIAL='demo-password'
+```
+
+The browser fetches these from `/api/connect/calls/ice-config` when a live call starts. The older browser-exposed names still work as a fallback:
+
+```bash
 NEXT_PUBLIC_CONNECT_ICE_SERVERS_JSON='[{"urls":["stun:stun.l.google.com:19302"]},{"urls":["turn:example.com:3478"],"username":"demo-user","credential":"demo-password"}]'
 ```
 
@@ -54,4 +69,3 @@ Avoid demonstrating summary capture with gossip, jokes, politics, or general cha
 - No transcript after a short call: speak for at least 35-45 seconds; chunked transcript capture is not instant.
 - Summary is delayed: use `Check Again` on Dashboard or wait for the Receiver post-call status to update.
 - Raw transcript/debug details: use Admin Diagnostics. Do not expose transcript internals as the default demo story.
-

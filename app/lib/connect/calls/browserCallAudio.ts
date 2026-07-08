@@ -48,6 +48,13 @@ type ConnectCallAudioOptions = {
   transcriptChunks?: boolean;
 };
 
+type BrowserIceConfig = {
+  hasTurnServer: boolean;
+  iceServerCount: number;
+  iceServers: RTCIceServer[];
+  source: "default" | "public_env" | "server_env" | "server_route";
+};
+
 const defaultIceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 const connectionTimeoutMs = 25000;
 
@@ -170,12 +177,13 @@ export function createConnectCallAudioController(
     if (stopped) throw new Error("Call audio has already stopped.");
     if (peerConnection) return peerConnection;
 
-    const iceServers = configuredIceServers();
+    const iceConfig = await configuredIceServers();
     logLifecycle("call_peer_connection_creating", {
-      hasTurnServer: iceServers.some(iceServerUsesTurn),
-      iceServerCount: iceServers.length,
+      hasTurnServer: iceConfig.hasTurnServer,
+      iceConfigSource: iceConfig.source,
+      iceServerCount: iceConfig.iceServerCount,
     });
-    const connection = new RTCPeerConnection({ iceServers });
+    const connection = new RTCPeerConnection({ iceServers: iceConfig.iceServers });
     peerConnection = connection;
     logLifecycle("call_peer_connection_created", {
       iceConnectionState: connection.iceConnectionState,
@@ -800,11 +808,51 @@ function recordTranscriptWindowAudio(
   });
 }
 
-function configuredIceServers() {
+async function configuredIceServers(): Promise<BrowserIceConfig> {
+  const serverConfig = await fetchServerIceConfig();
+  if (serverConfig) return serverConfig;
+
+  return configuredIceServersFromPublicEnv();
+}
+
+async function fetchServerIceConfig(): Promise<BrowserIceConfig | null> {
+  try {
+    const response = await fetch("/api/connect/calls/ice-config", {
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+
+    const payload = (await response.json().catch(() => null)) as Partial<BrowserIceConfig> | null;
+    if (!payload || !Array.isArray(payload.iceServers)) return null;
+    const iceServers = payload.iceServers.filter(isIceServer);
+    if (iceServers.length === 0) return null;
+
+    return {
+      hasTurnServer: Boolean(payload.hasTurnServer) || iceServers.some(iceServerUsesTurn),
+      iceServerCount:
+        typeof payload.iceServerCount === "number" ? payload.iceServerCount : iceServers.length,
+      iceServers,
+      source: isBrowserIceConfigSource(payload.source) ? payload.source : "server_route",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isBrowserIceConfigSource(value: unknown): value is BrowserIceConfig["source"] {
+  return (
+    value === "default" ||
+    value === "public_env" ||
+    value === "server_env" ||
+    value === "server_route"
+  );
+}
+
+function configuredIceServersFromPublicEnv(): BrowserIceConfig {
   const jsonServers = parseIceServersJson(
     process.env.NEXT_PUBLIC_CONNECT_ICE_SERVERS_JSON
   );
-  if (jsonServers.length > 0) return jsonServers;
+  if (jsonServers.length > 0) return toBrowserIceConfig(jsonServers, "public_env");
 
   const stunUrls = splitIceUrls(process.env.NEXT_PUBLIC_CONNECT_STUN_URLS);
   const turnUrls = splitIceUrls(process.env.NEXT_PUBLIC_CONNECT_TURN_URLS);
@@ -821,7 +869,20 @@ function configuredIceServers() {
     });
   }
 
-  return servers;
+  const source = turnUrls.length > 0 || stunUrls.length > 0 ? "public_env" : "default";
+  return toBrowserIceConfig(servers, source);
+}
+
+function toBrowserIceConfig(
+  iceServers: RTCIceServer[],
+  source: BrowserIceConfig["source"]
+): BrowserIceConfig {
+  return {
+    hasTurnServer: iceServers.some(iceServerUsesTurn),
+    iceServerCount: iceServers.length,
+    iceServers,
+    source,
+  };
 }
 
 function parseIceServersJson(value: string | undefined) {
