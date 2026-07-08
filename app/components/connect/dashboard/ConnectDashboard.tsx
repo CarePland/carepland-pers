@@ -5685,9 +5685,25 @@ function RecipientCallPanel({
           </p>
           <h2 className="text-2xl font-black text-[#173150]">Incoming call</h2>
         </div>
-        <span className="rounded-full bg-[#edf5fc] px-4 py-2 text-sm font-black uppercase tracking-normal text-[#345d83]">
-          {isConnected ? "Active call" : isConnecting ? "Connecting" : isRinging ? "Ringing" : "No active call"}
-        </span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="rounded-full bg-[#edf5fc] px-4 py-2 text-sm font-black uppercase tracking-normal text-[#345d83]">
+            {isConnected ? "Active call" : isConnecting ? "Connecting" : isRinging ? "Ringing" : "No active call"}
+          </span>
+          {canEndCall ? (
+            <button
+              className="min-h-10 rounded-md bg-[#a43f34] px-4 text-sm font-black text-white hover:bg-[#8d342b]"
+              onClick={() =>
+                updateCall(
+                  "ended",
+                  isRinging ? "The call was canceled." : "The call ended."
+                )
+              }
+              type="button"
+            >
+              {isRinging ? "Cancel Call" : "Hang Up"}
+            </button>
+          ) : null}
+        </div>
       </div>
       {isRinging ? (
         <div className="mb-4 rounded-lg border border-[#d6e3f2] bg-white p-5 shadow-sm">
