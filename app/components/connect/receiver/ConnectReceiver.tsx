@@ -2195,11 +2195,25 @@ export function ConnectReceiver() {
       });
       setPendingCallSummaryReviews(pendingReviews);
 
-      const activeCall = payload.calls.find(
-        (call) =>
-          receiverCallMatchesThisDevice(call) &&
-          receiverCallRecordStateIsActive(String(call.state || ""))
+      const activeCalls = payload.calls.filter((call) =>
+        receiverCallRecordStateIsActive(String(call.state || ""))
       );
+      const matchedActiveCall = activeCalls.find(receiverCallMatchesThisDevice);
+      const fallbackActiveCall =
+        matchedActiveCall || activeCalls.length !== 1 ? undefined : activeCalls[0];
+      const activeCall = matchedActiveCall ?? fallbackActiveCall;
+      if (fallbackActiveCall?.callId) {
+        logReceiverCallEvent(
+          String(fallbackActiveCall.callId),
+          "call_receiver_person_scoped_call_fallback_used",
+          {
+            receiverDeviceId: readReceiverDeviceId(),
+            receiverInstallId: readReceiverInstallId(),
+            source: "refreshCalls",
+            targetReceiverId: String(fallbackActiveCall.receiverId || ""),
+          }
+        );
+      }
       if (activeCall?.callId && locallyEndedCallIdsRef.current.has(String(activeCall.callId))) {
         setInterruptedReviewIncomingCall((current) =>
           current?.callId === activeCall.callId ? null : current
