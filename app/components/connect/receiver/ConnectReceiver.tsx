@@ -4698,7 +4698,7 @@ export function ConnectReceiver() {
     recordConnectCallLifecycleEvent({
       actorRole: "receiver",
       callId,
-      connectAuthHeaders,
+      connectAuthHeaders: connectReceiverRequestHeaders,
       details,
       eventType,
       mainConnectUserPersonId: selectedReceiverUser.id,
@@ -5019,11 +5019,24 @@ export function ConnectReceiver() {
       );
       return;
     }
+    if (callId && !selectedReceiverUser.id) {
+      setCallAudioStatus("interrupted");
+      setStatus("Receiver setup is missing the active person. Pair this Receiver again.");
+      setModal((current) =>
+        current?.type === "incomingCall" && current.callId === callId
+          ? {
+              ...current,
+              callState: "incoming",
+            }
+          : current
+      );
+      return;
+    }
     if (callId && selectedReceiverUser.id) {
       stopLiveCallAudio();
       const controller = createConnectCallAudioController({
         callId,
-        connectAuthHeaders,
+        connectAuthHeaders: connectReceiverRequestHeaders,
         mainConnectUserPersonId: selectedReceiverUser.id,
         onConnected: () => {
           setStatus(`Connected to ${callerName}.`);

@@ -16,6 +16,7 @@ import {
   redeemReceiverShellClaim,
   ReceiverShellBindingError,
   revokeReceiverShellDevice,
+  updateReceiverShellDeviceLabel,
   verifyReceiverShellBinding,
 } from "./claimStore";
 
@@ -72,6 +73,47 @@ describe("receiver shell claim store", () => {
       assert.equal(binding.receiverDeviceId, "local-dev-rob-gxv3370");
       assert.equal(binding.receiverInstallId, "install-1");
       assert.equal(binding.storageSource, "local_file");
+    });
+  });
+
+  it("updates a receiver label without changing its binding", async () => {
+    await withClaimIndex(async (indexPath) => {
+      const claim = await issueReceiverShellClaim(
+        {
+          receiverUrl: "http://10.0.2.2:3002/connect/receiver",
+          setupCode: "12345",
+        },
+        { indexPath, now: new Date("2026-06-27T12:00:00.000Z") }
+      );
+      const redeemed = await redeemReceiverShellClaim(
+        {
+          claim: claim.claim,
+          receiverInstallId: "install-1",
+        },
+        { indexPath, now: new Date("2026-06-27T12:01:00.000Z") }
+      );
+
+      const updated = await updateReceiverShellDeviceLabel(
+        {
+          locationLabel: "Living Rm",
+          receiverDeviceId: redeemed.receiverDeviceId,
+        },
+        { indexPath, now: new Date("2026-06-27T12:02:00.000Z") }
+      );
+
+      assert.equal(updated.locationLabel, "Living Rm");
+      assert.equal(updated.receiverDeviceId, "local-dev-rob-gxv3370");
+
+      const binding = await verifyReceiverShellBinding(
+        {
+          receiverDeviceId: redeemed.receiverDeviceId,
+          receiverInstallId: "install-1",
+        },
+        { indexPath, now: new Date("2026-06-27T12:03:00.000Z") }
+      );
+
+      assert.equal(binding.locationLabel, "Living Rm");
+      assert.equal(binding.receiverInstallId, "install-1");
     });
   });
 
@@ -161,6 +203,14 @@ describe("receiver shell claim store", () => {
       );
       assert.equal(ready.status, "paired");
       assert.equal(ready.claim, paired.claim);
+
+      const redeemed = await redeemReceiverShellClaim(
+        { claim: paired.claim, receiverInstallId: "install-demo" },
+        { indexPath, now: new Date("2026-06-27T12:04:00.000Z") }
+      );
+
+      assert.equal(redeemed.mainConnectUserPersonId, "person-rob");
+      assert.equal(redeemed.careCircleId, "care-circle-1");
     });
   });
 

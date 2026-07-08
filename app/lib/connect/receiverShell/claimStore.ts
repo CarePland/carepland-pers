@@ -22,6 +22,7 @@ export type ReceiverShellClaimRecord = {
   lastRecoveryAt?: string;
   lockTaskActive?: boolean;
   lockTaskPermitted?: boolean;
+  locationLabel?: string;
   mainConnectUserPersonId?: string;
   mainConnectUserDisplayName?: string;
   nativeManufacturer?: string;
@@ -54,6 +55,7 @@ export type ReceiverShellBindingRecord = {
   lastRecoveryAt?: string;
   lockTaskActive?: boolean;
   lockTaskPermitted?: boolean;
+  locationLabel?: string;
   mainConnectUserPersonId?: string;
   mainConnectUserDisplayName?: string;
   nativeManufacturer?: string;
@@ -92,6 +94,7 @@ export type ReceiverShellDeviceProfile = {
   lastSeenAt?: string;
   lockTaskActive?: boolean;
   lockTaskPermitted?: boolean;
+  locationLabel?: string;
   mainConnectUserPersonId?: string;
   mainConnectUserDisplayName?: string;
   nativeManufacturer?: string;
@@ -525,6 +528,7 @@ export async function verifyReceiverShellBinding(
     lastRecoveryAt: claim.lastRecoveryAt,
     lockTaskActive: claim.lockTaskActive,
     lockTaskPermitted: claim.lockTaskPermitted,
+    locationLabel: claim.locationLabel,
     mainConnectUserPersonId: claim.mainConnectUserPersonId,
     mainConnectUserDisplayName: claim.mainConnectUserDisplayName,
     nativeManufacturer: claim.nativeManufacturer,
@@ -546,6 +550,56 @@ export async function verifyReceiverShellBinding(
 export async function listReceiverShellDeviceProfiles() {
   const supabaseProfiles = await tryListSupabaseReceiverShellDeviceProfiles();
   return supabaseProfiles ?? listLocalReceiverShellDeviceProfiles();
+}
+
+export async function updateReceiverShellDeviceLabel(
+  input: {
+    locationLabel?: string;
+    receiverDeviceId?: string;
+  },
+  options: { indexPath?: string; now?: Date } = {}
+) {
+  const receiverDeviceId = input.receiverDeviceId?.trim() || "";
+  const locationLabel = input.locationLabel?.trim() || "";
+  if (!receiverDeviceId) {
+    throw new ReceiverShellBindingError("Missing receiver device.", 400);
+  }
+  if (!locationLabel) {
+    throw new ReceiverShellBindingError("Enter a Receiver name.", 400);
+  }
+  if (locationLabel.length > 80) {
+    throw new ReceiverShellBindingError("Receiver name is too long.", 400);
+  }
+
+  if (!options.indexPath) {
+    const supabaseUpdate = await tryUpdateSupabaseReceiverShellDeviceLabel(
+      { locationLabel, receiverDeviceId },
+      options
+    );
+    if (supabaseUpdate) return supabaseUpdate;
+  }
+
+  const indexPath = options.indexPath ?? defaultIndexPath;
+  const index = await readReceiverShellClaimIndex(indexPath);
+  const now = options.now ?? new Date();
+  let found = false;
+  index.claims = index.claims.map((record) => {
+    if (record.receiverDeviceId !== receiverDeviceId) return record;
+    found = true;
+    return { ...record, locationLabel };
+  });
+  if (!found) {
+    throw new ReceiverShellBindingError("Receiver device not found.", 404);
+  }
+
+  await writeReceiverShellClaimIndex(index, indexPath);
+  return {
+    locationLabel,
+    ok: true,
+    receiverDeviceId,
+    storageSource: "local_file" as const,
+    updatedAt: now.toISOString(),
+  };
 }
 
 export async function revokeReceiverShellDevice(
@@ -1070,7 +1124,9 @@ async function tryRedeemSupabaseReceiverShellClaim(
 
     return {
       ...supabaseClaimRecord(updated),
+      careCircleId: current.careCircleId,
       mainConnectUserDisplayName: displayNames.get(current.mainConnectUserPersonId || ""),
+      mainConnectUserPersonId: current.mainConnectUserPersonId,
     };
   } catch (error) {
     if (error instanceof ReceiverShellClaimError) throw error;
@@ -1177,6 +1233,7 @@ async function tryVerifySupabaseReceiverShellBinding(
         timestampFromMs(input.lastRecoveryAtMs) || stringFromRow(data.last_recovery_at),
       lockTaskActive: booleanOrUndefined(input.lockTaskActive ?? data.lock_task_active),
       lockTaskPermitted: booleanOrUndefined(input.lockTaskPermitted ?? data.lock_task_permitted),
+      locationLabel: stringFromRow(data.location_label),
       mainConnectUserPersonId,
       mainConnectUserDisplayName: displayNames.get(mainConnectUserPersonId),
       nativeManufacturer:
@@ -1246,6 +1303,7 @@ const receiverShellCoreProfileColumns = [
   "status",
   "ui_layout",
   "last_seen_at",
+  "location_label",
   "hardware_profile",
   "bound_at",
 ];
@@ -1292,6 +1350,7 @@ async function receiverShellDeviceProfilesFromRows(
       lastSeenAt: stringFromRow(row.last_seen_at),
       lockTaskActive: booleanOrUndefined(row.lock_task_active),
       lockTaskPermitted: booleanOrUndefined(row.lock_task_permitted),
+      locationLabel: stringFromRow(row.location_label),
       mainConnectUserPersonId,
       mainConnectUserDisplayName: displayNames.get(mainConnectUserPersonId),
       nativeManufacturer: stringFromRow(row.native_manufacturer),
@@ -1312,6 +1371,49 @@ async function receiverShellDeviceProfilesFromRows(
   }) satisfies ReceiverShellDeviceProfile[];
 }
 
+async function tryUpdateSupabaseReceiverShellDeviceLabel(
+  input: {
+    locationLabel: string;
+    receiverDeviceId: string;
+  },
+  options: { now?: Date }
+) {
+  try {
+    const supabase = createSupabaseServiceClient();
+    const now = options.now ?? new Date();
+    const { data, error } = await supabase
+      .from("connect_receiver_devices")
+      .update({
+        location_label: input.locationLabel,
+        updated_at: now.toISOString(),
+      })
+      .eq("id", input.receiverDeviceId)
+      .neq("status", "revoked")
+      .select("id, location_label")
+      .single();
+    if (error) {
+      if (supabaseRecordNotFound(error)) {
+        throw new ReceiverShellBindingError("Receiver device not found.", 404);
+      }
+      throw error;
+    }
+
+    return {
+      locationLabel: stringFromRow(data.location_label),
+      ok: true,
+      receiverDeviceId: stringFromRow(data.id),
+      storageSource: "supabase" as const,
+      updatedAt: now.toISOString(),
+    };
+  } catch (error) {
+    if (error instanceof ReceiverShellBindingError) throw error;
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function listLocalReceiverShellDeviceProfiles() {
   const index = await readReceiverShellClaimIndex(defaultIndexPath);
   const profiles = new Map<string, ReceiverShellDeviceProfile>();
@@ -1327,6 +1429,7 @@ async function listLocalReceiverShellDeviceProfiles() {
       lastRecoveryAt: claim.lastRecoveryAt,
       lockTaskActive: claim.lockTaskActive,
       lockTaskPermitted: claim.lockTaskPermitted,
+      locationLabel: claim.locationLabel,
       mainConnectUserPersonId: claim.mainConnectUserPersonId,
       mainConnectUserDisplayName: claim.mainConnectUserDisplayName,
       nativeManufacturer: claim.nativeManufacturer,

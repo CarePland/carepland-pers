@@ -125,6 +125,8 @@ function overlayReceiverShellProfiles(
         lastRecoveryAt: profile.lastRecoveryAt,
         lockTaskActive: profile.lockTaskActive,
         lockTaskPermitted: profile.lockTaskPermitted,
+        locationLabel: profile.locationLabel || device.locationLabel,
+        name: profile.locationLabel || device.name,
         nativeManufacturer: profile.nativeManufacturer,
         nativeModel: profile.nativeModel,
         nativeSdk: profile.nativeSdk,
@@ -147,6 +149,7 @@ function shellProfileToReceiverDevice(profile: ReceiverShellDeviceProfile): Conn
   const updatePolicy = receiverUpdatePolicy(profile);
   const status = profile.status || (profile.receiverInstallId ? "bound" : "setup_pending");
   const displayName = profile.mainConnectUserDisplayName?.trim() || "";
+  const locationLabel = profile.locationLabel?.trim() || "";
   const presence = receiverPresence(profile.lastSeenAt, status);
 
   return {
@@ -161,8 +164,8 @@ function shellProfileToReceiverDevice(profile: ReceiverShellDeviceProfile): Conn
     lastSeenAt: profile.lastSeenAt,
     lockTaskActive: profile.lockTaskActive,
     lockTaskPermitted: profile.lockTaskPermitted,
-    locationLabel: displayName ? `${displayName}'s Receiver` : "Receiver",
-    name: displayName ? `${displayName}'s Receiver` : "Receiver",
+    locationLabel: locationLabel || (displayName ? `${displayName}'s Receiver` : "Receiver"),
+    name: locationLabel || (displayName ? `${displayName}'s Receiver` : "Receiver"),
     nativeManufacturer: profile.nativeManufacturer,
     nativeModel: profile.nativeModel,
     nativeSdk: profile.nativeSdk,

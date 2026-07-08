@@ -95,6 +95,7 @@ type ConnectCallSummary = {
     callId?: string;
     callerName?: string;
     recipientName?: string;
+    receiverId?: string;
     state?: string;
     summaryStatus?: string;
     summaryText?: string;
@@ -1249,7 +1250,7 @@ export function ConnectDashboard() {
     }
 
     setActionPending("call");
-    setStatus(`Calling ${selectedPersonName}...`);
+    setStatus(`Calling ${selectedPersonName} on ${selectedReceiverLabel}...`);
     setRecipientCallState("ringing");
     setCallTranscriptRuntimeStatus("");
     playCallRingback();
@@ -1276,6 +1277,7 @@ export function ConnectDashboard() {
           callId: callResponse.call.callId,
           callerName: "Andrew",
           recipientName: selectedPersonName,
+          receiverId: selectedReceiverId,
           state: "ringing",
           updatedAt: new Date().toISOString(),
         };
@@ -1312,8 +1314,8 @@ export function ConnectDashboard() {
       }
       setStatus(
         selectedReceiverUsesClassicCallBridge
-          ? `Call sent to ${selectedPersonName}. Tap Answer on the Receiver.`
-          : `Call sent to ${selectedPersonName}.`
+          ? `Call sent to ${selectedPersonName} on ${selectedReceiverLabel}. Tap Answer on that Receiver.`
+          : `Call sent to ${selectedPersonName} on ${selectedReceiverLabel}.`
       );
       await refreshCallState();
     } catch (error) {
@@ -3440,6 +3442,7 @@ function SetupPanel({
   const [visualSkin, setVisualSkin] = useState("Modern");
   const [showRevokedDevices, setShowRevokedDevices] = useState(false);
   const [expandedReceiverDeviceId, setExpandedReceiverDeviceId] = useState("");
+  const [receiverLabelDrafts, setReceiverLabelDrafts] = useState<Record<string, string>>({});
   const selectedDevice =
     activeDevices.find((device) => receiverKey(device) === selectedReceiverKey) ??
     activeDevices[0] ??
@@ -3601,8 +3604,16 @@ function SetupPanel({
       .filter(Boolean)
       .join(", ") || "No Connect participants assigned";
   const receiverLabel =
-    selectedDevice?.name || selectedDevice?.receiverId || "No receiver selected";
+    selectedDevice ? receiverDisplayName(selectedDevice) : "No receiver selected";
   const receiverPairingCodeReady = browserReceiverPairingCodeReady(receiverPairingCode);
+
+  function receiverDisplayName(device: ConnectReceiverDevice) {
+    return device.locationLabel || device.name || device.receiverId || "Receiver";
+  }
+
+  function receiverDraftLabel(device: ConnectReceiverDevice) {
+    return receiverLabelDrafts[receiverKey(device)] ?? receiverDisplayName(device);
+  }
 
   function openReceiverSetupModal() {
     if (!activeMainConnectUserPersonId) {
@@ -3986,7 +3997,7 @@ function SetupPanel({
       return;
     }
 
-    const label = device.name || device.receiverId || "this receiver";
+    const label = receiverDisplayName(device);
     const confirmed = window.confirm(
       `Revoke ${label}? This will not delete the Android app. It only removes this receiver's server approval, so it will need setup again.`
     );
@@ -4018,6 +4029,58 @@ function SetupPanel({
       await onRefresh();
     } catch (error) {
       setSetupStatus(error instanceof Error ? error.message : "Receiver could not be revoked.");
+    } finally {
+      setReceiverActionPending(null);
+    }
+  }
+
+  async function saveReceiverLabel(device: ConnectReceiverDevice) {
+    if (!device.id) {
+      setSetupStatus("Select a receiver first.");
+      return;
+    }
+
+    const nextLabel = receiverDraftLabel(device).trim();
+    if (!nextLabel) {
+      setSetupStatus("Enter a Receiver name.");
+      return;
+    }
+
+    setReceiverActionPending(device.id);
+    setSetupStatus(`Saving ${nextLabel}...`);
+    try {
+      const response = await fetch(
+        `/api/connect/provisioning/receiver-devices/${encodeURIComponent(device.id)}`,
+        {
+          body: JSON.stringify({
+            confirmedPrototypeWrite: true,
+            locationLabel: nextLabel,
+            operationReason: `Updated receiver label to ${nextLabel}.`,
+          }),
+          headers: {
+            ...(await connectAuthHeaders()),
+            "Content-Type": "application/json",
+          },
+          method: "PATCH",
+        }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+      };
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `Receiver update returned ${response.status}`);
+      }
+
+      setReceiverLabelDrafts((current) => {
+        const next = { ...current };
+        delete next[receiverKey(device)];
+        return next;
+      });
+      setSetupStatus(`${nextLabel} saved.`);
+      await onRefresh();
+    } catch (error) {
+      setSetupStatus(error instanceof Error ? error.message : "Receiver could not be updated.");
     } finally {
       setReceiverActionPending(null);
     }
@@ -4184,21 +4247,31 @@ function SetupPanel({
               ))}
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto_auto]">
+            <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(220px,2fr)_minmax(180px,1fr)_auto_auto_auto]">
               <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
-                Device name
-                <input
+                Receiver to call
+                <select
                   className="min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-black text-[#0f172a]"
-                  readOnly
-                  value={selectedDevice?.name || "Kitchen Receiver"}
-                />
+                  onChange={(event) => setSelectedReceiverKey(event.target.value)}
+                  value={selectedDevice ? receiverKey(selectedDevice) : ""}
+                >
+                  {activeDevices.map((device) => {
+                    const key = receiverKey(device);
+                    return (
+                      <option key={key} value={key}>
+                        {receiverDisplayName(device)} · ID {receiverShortId(device)}
+                      </option>
+                    );
+                  })}
+                  {!activeDevices.length ? <option>No active Receiver</option> : null}
+                </select>
               </label>
               <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
-                Location
+                Current target
                 <input
                   className="min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-black text-[#0f172a]"
                   readOnly
-                  value={selectedDevice?.locationLabel || "Kitchen"}
+                  value={selectedDevice ? receiverDisplayName(selectedDevice) : "No active Receiver"}
                 />
               </label>
               <button
@@ -4299,7 +4372,7 @@ function SetupPanel({
                       Selected Receiver
                     </p>
                     <h3 className="mt-1 text-2xl font-black text-[#172f49]">
-                      {selectedDevice.name || selectedDevice.receiverId || "Receiver"}
+                      {receiverDisplayName(selectedDevice)}
                     </h3>
                     <p className="mt-1 text-sm font-semibold text-[#5f6e84]">
                       {receiverConnectionLine(selectedDevice)}
@@ -4408,10 +4481,10 @@ function SetupPanel({
                           type="button"
                         >
                           <strong className="block text-lg font-black text-[#0f172a]">
-                            {device.name || device.receiverId || "Receiver"}
+                            {receiverDisplayName(device)}
                           </strong>
                           <span className="block text-sm font-semibold text-[#5f6e84]">
-                            {device.locationLabel || "No location"} ·{" "}
+                            {device.locationLabel ? "Named" : "Unnamed"} ·{" "}
                             ID {receiverShortId(device)} ·{" "}
                             {receiverHouseholdName(device.receiverHouseholdId)} ·{" "}
                             {receiverSetupStatus(device)} ·{" "}
@@ -4568,29 +4641,33 @@ function SetupPanel({
                               />
                             </div>
                           </div>
-                          <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                          <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                             <label className="grid gap-2 text-sm font-black uppercase text-[#5f6e84]">
-                              Name
+                              Receiver name
                               <input
                                 className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-black normal-case text-[#0f172a]"
-                                readOnly
-                                value={device.name || "Receiver"}
-                              />
-                            </label>
-                            <label className="grid gap-2 text-sm font-black uppercase text-[#5f6e84]">
-                              Location
-                              <input
-                                className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-black normal-case text-[#0f172a]"
-                                readOnly
-                                value={device.locationLabel || ""}
+                                maxLength={80}
+                                onChange={(event) =>
+                                  setReceiverLabelDrafts((current) => ({
+                                    ...current,
+                                    [deviceKey]: event.target.value,
+                                  }))
+                                }
+                                placeholder="Living Rm"
+                                value={receiverDraftLabel(device)}
                               />
                             </label>
                             <button
-                              className="self-end min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] opacity-60"
-                              disabled
+                              className="self-end min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc] disabled:opacity-55"
+                              disabled={
+                                !device.id ||
+                                receiverActionPending === device.id ||
+                                receiverDraftLabel(device).trim() === receiverDisplayName(device)
+                              }
+                              onClick={() => void saveReceiverLabel(device)}
                               type="button"
                             >
-                              Save
+                              {receiverActionPending === device.id ? "Saving" : "Save name"}
                             </button>
                           </div>
                           <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -4656,7 +4733,11 @@ function SetupPanel({
             <div className="mt-4 rounded-xl border border-[#d6e3f2] bg-white p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <strong className="text-lg font-black text-[#172f49]">
-                  {setupPendingDevice?.name || selectedDevice?.name || "Kitchen Receiver"}
+                  {setupPendingDevice
+                    ? receiverDisplayName(setupPendingDevice)
+                    : selectedDevice
+                      ? receiverDisplayName(selectedDevice)
+                      : "Receiver"}
                 </strong>
                 <span className="text-sm font-black text-[#5f6e84]">
                   {setupPendingDevice?.status === "setup_pending" ? "Setup Pending" : "Setup progress"}
@@ -4665,7 +4746,7 @@ function SetupPanel({
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <MiniStatus
                   label="Receiver device record"
-                  value={setupPendingDevice?.name || "Not created"}
+                  value={setupPendingDevice ? receiverDisplayName(setupPendingDevice) : "Not created"}
                 />
                 <MiniStatus
                   label="Single-use setup link"
@@ -4789,7 +4870,7 @@ function SetupPanel({
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-[#9bc5ef] bg-white px-4 py-3">
                   <span>
                     <strong className="block text-base font-black text-[#0f172a]">
-                      {selectedDevice?.name || "Living Room Receiver"} (Web)
+                      {selectedDevice ? receiverDisplayName(selectedDevice) : "Receiver"} (Web)
                     </strong>
                     <span className="text-sm font-semibold text-[#5f6e84]">
                       {selectedDevice?.presence?.label || statusLabel(selectedDevice?.presence?.state || "ringing")} ·{" "}
