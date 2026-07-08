@@ -884,11 +884,7 @@ function readInitialReceiverUsers() {
 
 function readInitialReceiverRegistration() {
   if (typeof window === "undefined") return false;
-  return (
-    window.localStorage.getItem(receiverRegistrationStorageKey) === testReceiverUser.id ||
-    Boolean(readStoredReceiverBinding().receiverDeviceId) ||
-    readLocalTestReceiverProvisioning()
-  );
+  return Boolean(readStoredReceiverBinding().receiverDeviceId) || readLocalTestReceiverProvisioning();
 }
 
 function readLocalTestReceiverProvisioning() {
