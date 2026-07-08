@@ -12,7 +12,11 @@ import type {
   ConnectCallSignalSender,
   ConnectCallSignalType,
 } from "./localCallSignals";
-import { isConnectCallState, type ConnectCallState } from "./localCalls";
+import {
+  canTransitionConnectCallState,
+  isConnectCallState,
+  type ConnectCallState,
+} from "./localCalls";
 
 type ConnectCallAccess = {
   accessToken?: string;
@@ -235,6 +239,21 @@ export async function updateSupabaseConnectCallState(
 
   return trySupabaseCallStore(async (supabase) => {
     const now = new Date().toISOString();
+    const { data: currentData, error: currentError } = await supabase
+      .from("connect_calls")
+      .select(connectCallCoreSelectColumns)
+      .eq("id", callId)
+      .eq("main_connect_user_person_id", access.mainConnectUserPersonId)
+      .maybeSingle();
+
+    if (currentError) throw currentError;
+    if (!currentData) return null;
+
+    const currentCall = connectCallRecordFromRow(currentData as ConnectCallRow);
+    if (!canTransitionConnectCallState(currentCall.state, state)) {
+      return currentCall;
+    }
+
     const update: Record<string, unknown> = {
       state,
       updated_at: now,

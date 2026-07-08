@@ -58,6 +58,16 @@ const callStateTransitions: Record<ConnectCallState, Set<ConnectCallState>> = {
   ]),
 };
 
+export function canTransitionConnectCallState(
+  currentState: string | null | undefined,
+  nextState: string | null | undefined
+) {
+  if (!isConnectCallState(nextState)) return false;
+  const current = isConnectCallState(currentState) ? currentState : "ringing";
+  if (current === nextState) return true;
+  return callStateTransitions[current].has(nextState);
+}
+
 export async function readLocalConnectCalls(options: { indexPath?: string } = {}) {
   return readLocalCallsIndex(options.indexPath ?? defaultIndexPath);
 }
@@ -174,7 +184,7 @@ export async function updateLocalConnectCallState(
     }
 
     const currentState = isConnectCallState(call.state) ? call.state : "ringing";
-    if (!callStateTransitions[currentState].has(state)) {
+    if (!canTransitionConnectCallState(currentState, state)) {
       updated = call;
       return call;
     }

@@ -2288,9 +2288,35 @@ export function ConnectReceiver() {
             };
           }
           logReceiverCallEvent(current.callId, "call_receiver_poll_no_active_call", {
+            callAudioStatus: callAudioStatusRef.current,
             currentCallState: current.callState,
             source: "refreshCalls",
           });
+          const currentServerCall = payload.calls?.find(
+            (call) => call.callId === current.callId
+          );
+          const currentServerState = String(currentServerCall?.state || "");
+          const currentServerCallActive = receiverCallRecordStateIsActive(currentServerState);
+          const localAudioStillConnecting = [
+            "starting",
+            "microphone_ready",
+            "connecting",
+            "connected",
+            "remote_audio",
+          ].includes(callAudioStatusRef.current);
+          if (
+            (current.callState === "connecting" || current.callState === "connected") &&
+            localAudioStillConnecting &&
+            (!currentServerCall || currentServerCallActive)
+          ) {
+            logReceiverCallEvent(current.callId, "call_receiver_poll_no_active_call_preserved", {
+              callAudioStatus: callAudioStatusRef.current,
+              currentCallState: current.callState,
+              serverState: currentServerState,
+              source: "refreshCalls",
+            });
+            return current;
+          }
           stopLiveCallAudio();
           setStatus("Call ended.");
           return {

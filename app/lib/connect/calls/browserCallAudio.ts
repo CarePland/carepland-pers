@@ -94,7 +94,7 @@ export function createConnectCallAudioController(
       mediaState: type === "media_state" ? String(payload.state || "") : "",
       signalType: type,
     });
-    await fetch(signalUrl(), {
+    const response = await fetch(signalUrl(), {
       body: JSON.stringify({
         mainConnectUserPersonId: options.mainConnectUserPersonId,
         payload,
@@ -107,6 +107,10 @@ export function createConnectCallAudioController(
       },
       method: "POST",
     });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error || `Call signal failed with ${response.status}.`);
+    }
     logLifecycle("call_signal_send_completed", {
       mediaState: type === "media_state" ? String(payload.state || "") : "",
       signalType: type,
@@ -149,6 +153,10 @@ export function createConnectCallAudioController(
       cache: "no-store",
       headers: await options.connectAuthHeaders(),
     });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error || `Call signal poll failed with ${response.status}.`);
+    }
     const payload = (await response.json().catch(() => ({}))) as {
       signals?: ConnectCallSignal[];
     };

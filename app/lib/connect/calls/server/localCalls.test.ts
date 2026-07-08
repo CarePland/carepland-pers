@@ -14,6 +14,7 @@ import {
   saveLocalConnectCallSummaryDraft,
   updateLocalConnectCallSummary,
   updateLocalConnectCallState,
+  canTransitionConnectCallState,
 } from "./localCalls";
 
 async function withTempCallIndex<T>(callback: (indexPath: string) => Promise<T>) {
@@ -111,6 +112,15 @@ describe("local Connect calls", () => {
       assert.equal(answered?.state, "answered");
       assert.equal(connected?.state, "connected");
     });
+  });
+
+  it("does not allow delayed call states to move backward", () => {
+    assert.equal(canTransitionConnectCallState("connected", "answered"), false);
+    assert.equal(canTransitionConnectCallState("connected", "ringing"), false);
+    assert.equal(canTransitionConnectCallState("hung_up", "connected"), false);
+    assert.equal(canTransitionConnectCallState("missed", "answered"), false);
+    assert.equal(canTransitionConnectCallState("answered", "connected"), true);
+    assert.equal(canTransitionConnectCallState("connected", "hung_up"), true);
   });
 
   it("does not update another person's call", async () => {
