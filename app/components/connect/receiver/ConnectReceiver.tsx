@@ -1926,6 +1926,7 @@ export function ConnectReceiver() {
   const liveCallAudioRef = useRef<ConnectCallAudioController | null>(null);
   const callAudioStatusRef = useRef<ConnectCallAudioStatus>("idle");
   const callStartedAtByCallIdRef = useRef<Record<string, string>>({});
+  const locallyAnsweredCallIdsRef = useRef<Set<string>>(new Set());
   const locallyEndedCallIdsRef = useRef<Set<string>>(new Set());
   const pendingCallSummaryReviewsRef = useRef<Array<Partial<ReceiverCall>>>([]);
   const summaryApprovalAdvanceTimerRef = useRef<number | null>(null);
@@ -2345,6 +2346,9 @@ export function ConnectReceiver() {
             return current;
           }
           stopLiveCallAudio({ notifyPeer: false });
+          if (current.callId) {
+            locallyAnsweredCallIdsRef.current.delete(current.callId);
+          }
           setStatus("Call ended.");
           return {
             ...current,
@@ -2357,7 +2361,14 @@ export function ConnectReceiver() {
       }
 
       const callState = String(activeCall.state || "ringing");
+      const activeCallId = String(activeCall.callId);
       const receiverCallState = receiverCallUiStateFromRecordState(callState);
+      const locallyAnswered = locallyAnsweredCallIdsRef.current.has(activeCallId);
+      const effectiveReceiverCallState =
+        locallyAnswered &&
+        (receiverCallState === "incoming" || receiverCallState === "connecting")
+          ? "connecting"
+          : receiverCallState;
       const callerName = String(activeCall.callerName || "Andrew");
       const summaryStatus = String(activeCall.summaryStatus || "");
       const summaryText = String(activeCall.summaryText || "");
@@ -2367,7 +2378,6 @@ export function ConnectReceiver() {
       );
       const transcriptStatus = String(activeCall.transcriptStatus || "");
       const transcriptText = String(activeCall.transcriptText || "");
-      const activeCallId = String(activeCall.callId);
       const visibleModal = modalRef.current;
       const activeCallWouldInterruptSummaryReview =
         visibleModal?.type === "incomingCall" &&
@@ -2375,11 +2385,11 @@ export function ConnectReceiver() {
         visibleModal.textView === "summary" &&
         visibleModal.summaryApproval !== "approved";
       setInterruptedReviewIncomingCall(
-        activeCallWouldInterruptSummaryReview && receiverCallState === "incoming"
+        activeCallWouldInterruptSummaryReview && effectiveReceiverCallState === "incoming"
           ? activeCall
           : null
       );
-      if (receiverCallState !== "incoming" && !callStartedAtByCallIdRef.current[activeCallId]) {
+      if (effectiveReceiverCallState !== "incoming" && !callStartedAtByCallIdRef.current[activeCallId]) {
         callStartedAtByCallIdRef.current[activeCallId] = new Date().toISOString();
       }
       setModal((current) => {
@@ -2388,7 +2398,7 @@ export function ConnectReceiver() {
         const stableCallStartedAt =
           callStartedAtByCallIdRef.current[activeCallId] ||
           (currentIsSameCall ? current.callStartedAt : undefined) ||
-          (receiverCallState === "incoming" ? undefined : new Date().toISOString());
+          (effectiveReceiverCallState === "incoming" ? undefined : new Date().toISOString());
         if (stableCallStartedAt && !callStartedAtByCallIdRef.current[activeCallId]) {
           callStartedAtByCallIdRef.current[activeCallId] = stableCallStartedAt;
         }
@@ -2397,6 +2407,7 @@ export function ConnectReceiver() {
           (current.callState === "ended" || current.callState === "failed")
         ) {
           locallyEndedCallIdsRef.current.add(String(activeCall.callId));
+          locallyAnsweredCallIdsRef.current.delete(String(activeCall.callId));
           logReceiverCallEvent(String(activeCall.callId), "call_receiver_poll_ended_call_preserved", {
             nextCallState: callState,
             source: "refreshCalls",
@@ -2406,30 +2417,32 @@ export function ConnectReceiver() {
         const shouldPreserveLocalAnsweredState =
           currentIsSameCall &&
           (current.callState === "connecting" || current.callState === "connected") &&
-          (receiverCallState === "incoming" || receiverCallState === "connecting");
+          (effectiveReceiverCallState === "incoming" || effectiveReceiverCallState === "connecting");
         if (
           currentIsSameCall &&
-          current.callState !== receiverCallState
+          current.callState !== effectiveReceiverCallState
         ) {
           logReceiverCallEvent(String(activeCall.callId), "call_receiver_poll_state_changed", {
             nextCallState: callState,
             previousCallState: current.callState,
+            locallyAnswered,
             source: "refreshCalls",
             preservedLocalAnsweredState: shouldPreserveLocalAnsweredState,
           });
         }
         if (
           currentIsSameCall &&
-          (current.callState === receiverCallState || shouldPreserveLocalAnsweredState)
+          (current.callState === effectiveReceiverCallState || shouldPreserveLocalAnsweredState)
         ) {
           if (!receiverCallRecordStateIsActive(String(activeCall.state || ""))) {
             locallyEndedCallIdsRef.current.delete(String(activeCall.callId));
+            locallyAnsweredCallIdsRef.current.delete(String(activeCall.callId));
           }
           return {
             ...current,
             callState: shouldPreserveLocalAnsweredState
               ? current.callState
-              : receiverCallState,
+              : effectiveReceiverCallState,
             callStartedAt: stableCallStartedAt,
             approvedSummaryText: String(
               activeCall.approvedSummaryText || current.approvedSummaryText || ""
@@ -2455,7 +2468,7 @@ export function ConnectReceiver() {
         return {
           callId: String(activeCall.callId),
           callerName,
-          callState: receiverCallState === "idle" ? "incoming" : receiverCallState,
+          callState: effectiveReceiverCallState === "idle" ? "incoming" : effectiveReceiverCallState,
           callStartedAt: stableCallStartedAt,
           approvedSummaryText: String(activeCall.approvedSummaryText || ""),
           generatedSummaryText,
@@ -2470,8 +2483,10 @@ export function ConnectReceiver() {
       });
       setStatus(
         receiverCallState === "incoming"
-          ? `${callerName} is calling.`
-          : receiverCallState === "connecting"
+          ? locallyAnswered
+            ? `Connecting to ${callerName}.`
+            : `${callerName} is calling.`
+          : effectiveReceiverCallState === "connecting"
             ? `Connecting to ${callerName}.`
             : `Connected to ${callerName}.`
       );
@@ -5091,6 +5106,7 @@ export function ConnectReceiver() {
     }
     setInterruptedReviewIncomingCall(null);
     if (callId) {
+      locallyAnsweredCallIdsRef.current.add(callId);
       locallyEndedCallIdsRef.current.delete(callId);
       callStartedAtByCallIdRef.current[callId] =
         callStartedAtByCallIdRef.current[callId] || new Date().toISOString();
@@ -5113,6 +5129,7 @@ export function ConnectReceiver() {
       setCallAudioStatus("interrupted");
       if (callId && receiverCallRecordStateIsTerminal(answered.callState)) {
         locallyEndedCallIdsRef.current.add(callId);
+        locallyAnsweredCallIdsRef.current.delete(callId);
       }
       setModal((current) =>
         current?.type === "incomingCall" && current.callId === callId
@@ -5125,7 +5142,7 @@ export function ConnectReceiver() {
               }
             : {
                 ...current,
-                callState: "incoming",
+                callState: "connecting",
               }
           : current
       );
@@ -5156,6 +5173,7 @@ export function ConnectReceiver() {
             if (!connected.ok) {
               if (receiverCallRecordStateIsTerminal(connected.callState)) {
                 locallyEndedCallIdsRef.current.add(callId);
+                locallyAnsweredCallIdsRef.current.delete(callId);
                 stopLiveCallAudio({ notifyPeer: false });
                 setModal((current) =>
                   current?.type === "incomingCall" && current.callId === callId
@@ -5188,6 +5206,7 @@ export function ConnectReceiver() {
             source: "audio_controller_onPeerEnded",
           });
           locallyEndedCallIdsRef.current.add(callId);
+          locallyAnsweredCallIdsRef.current.delete(callId);
           liveCallAudioRef.current = null;
           setCallAudioStatus("ended");
           setCallMuted(false);
@@ -5226,7 +5245,10 @@ export function ConnectReceiver() {
       return;
     }
     stopReceiverCue();
-    if (callId) locallyEndedCallIdsRef.current.add(callId);
+    if (callId) {
+      locallyAnsweredCallIdsRef.current.delete(callId);
+      locallyEndedCallIdsRef.current.add(callId);
+    }
     setInterruptedReviewIncomingCall((current) =>
       current?.callId === callId ? null : current
     );
@@ -5251,7 +5273,10 @@ export function ConnectReceiver() {
     logReceiverCallEvent(callId, "call_receiver_hangup_clicked", {
       source: "hangUpIncomingCall",
     });
-    if (callId) locallyEndedCallIdsRef.current.add(callId);
+    if (callId) {
+      locallyAnsweredCallIdsRef.current.delete(callId);
+      locallyEndedCallIdsRef.current.add(callId);
+    }
     stopLiveCallAudio();
     void reportCallState(callId, "hung_up");
     setModal((current) =>
