@@ -5162,6 +5162,33 @@ export function ConnectReceiver() {
       return;
     }
     if (callId && selectedReceiverUser.id) {
+      const connected = await reportCallState(callId, "connected");
+      if (connected.ok) {
+        setModal((current) =>
+          current?.type === "incomingCall" && current.callId === callId
+            ? {
+                ...current,
+                callStartedAt: current.callStartedAt || new Date().toISOString(),
+                callState: "connected",
+              }
+            : current
+        );
+        setStatus(`Connected to ${callerName}.`);
+      } else if (receiverCallRecordStateIsTerminal(connected.callState)) {
+        locallyEndedCallIdsRef.current.add(callId);
+        locallyAnsweredCallIdsRef.current.delete(callId);
+        setModal((current) =>
+          current?.type === "incomingCall" && current.callId === callId
+            ? {
+                ...current,
+                callEndedAt: current.callEndedAt || new Date().toISOString(),
+                callState: "ended",
+                textView: undefined,
+              }
+            : current
+        );
+        return;
+      }
       stopLiveCallAudio({ notifyPeer: false });
       const controller = createConnectCallAudioController({
         callId,
@@ -5201,10 +5228,30 @@ export function ConnectReceiver() {
         },
         onError: (message) => setStatus(message),
         onPeerEnded: () => {
+          const audioWasLive = ["connected", "remote_audio"].includes(callAudioStatusRef.current);
           logReceiverCallEvent(callId, "call_receiver_peer_ended_received", {
             callAudioStatus: callAudioStatusRef.current,
+            audioWasLive,
             source: "audio_controller_onPeerEnded",
           });
+          if (!audioWasLive) {
+            liveCallAudioRef.current = null;
+            setCallAudioStatus("interrupted");
+            setCallMuted(false);
+            setModal((current) =>
+              current?.type === "incomingCall" && current.callId === callId
+                ? {
+                    ...current,
+                    callStartedAt: current.callStartedAt || new Date().toISOString(),
+                    callState: "connected",
+                  }
+                : current
+            );
+            setStatus(
+              `Connected to ${callerName}. Live audio did not fully connect on this device.`
+            );
+            return;
+          }
           locallyEndedCallIdsRef.current.add(callId);
           locallyAnsweredCallIdsRef.current.delete(callId);
           liveCallAudioRef.current = null;
