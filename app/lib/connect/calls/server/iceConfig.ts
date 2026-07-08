@@ -2,12 +2,36 @@ export type ConnectIceConfig = {
   hasTurnServer: boolean;
   iceServerCount: number;
   iceServers: RTCIceServer[];
-  source: "default" | "public_env" | "server_env";
+  source: "default" | "public_env" | "server_env" | "twilio";
 };
 
 type IceEnv = Record<string, string | undefined>;
+type FetchIceToken = (
+  input: string,
+  init: {
+    headers: Record<string, string>;
+    method: "POST";
+    signal?: AbortSignal;
+  }
+) => Promise<{
+  json: () => Promise<unknown>;
+  ok: boolean;
+  status: number;
+}>;
 
 const defaultIceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+const twilioTokenTimeoutMs = 5000;
+
+export async function resolveConnectIceConfig(options: {
+  env?: IceEnv;
+  fetchIceToken?: FetchIceToken;
+} = {}): Promise<ConnectIceConfig> {
+  const env = options.env ?? process.env;
+  const twilioIceConfig = await twilioIceConfigFromEnv(env, options.fetchIceToken);
+  if (twilioIceConfig) return twilioIceConfig;
+
+  return connectIceConfigFromEnv(env);
+}
 
 export function connectIceConfigFromEnv(env: IceEnv = process.env): ConnectIceConfig {
   const serverEnvServers = configuredIceServersFromEnv(env, {
@@ -31,6 +55,58 @@ export function connectIceConfigFromEnv(env: IceEnv = process.env): ConnectIceCo
   if (publicEnvServers) return publicEnvServers;
 
   return toIceConfig(defaultIceServers, "default");
+}
+
+export async function twilioIceConfigFromEnv(
+  env: IceEnv = process.env,
+  fetchIceToken: FetchIceToken = fetch
+) {
+  const accountSid = env.TWILIO_ACCOUNT_SID?.trim();
+  const authToken = env.TWILIO_AUTH_TOKEN?.trim();
+  if (!accountSid || !authToken) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), twilioTokenTimeoutMs);
+  try {
+    const response = await fetchIceToken(
+      `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(
+        accountSid
+      )}/Tokens.json`,
+      {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+        },
+        method: "POST",
+        signal: controller.signal,
+      }
+    );
+    if (!response.ok) {
+      console.warn("[connect:calls:ice-config] Twilio token request failed", {
+        source: "twilio",
+        status: response.status,
+      });
+      return null;
+    }
+
+    const payload = await response.json().catch(() => null);
+    const iceServers = parseTwilioIceServers(payload);
+    if (iceServers.length === 0) {
+      console.warn("[connect:calls:ice-config] Twilio token response had no ICE servers", {
+        source: "twilio",
+      });
+      return null;
+    }
+
+    return toIceConfig(iceServers, "twilio");
+  } catch (error) {
+    console.warn("[connect:calls:ice-config] Twilio token request unavailable", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      source: "twilio",
+    });
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function iceServerUsesTurn(server: RTCIceServer) {
@@ -92,6 +168,15 @@ function parseIceServersJson(value: string | undefined) {
   } catch {
     return [];
   }
+}
+
+function parseTwilioIceServers(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const iceServers = (payload as { ice_servers?: unknown; iceServers?: unknown }).ice_servers ??
+    (payload as { iceServers?: unknown }).iceServers;
+  if (!Array.isArray(iceServers)) return [];
+
+  return iceServers.filter(isIceServer);
 }
 
 function isIceServer(value: unknown): value is RTCIceServer {

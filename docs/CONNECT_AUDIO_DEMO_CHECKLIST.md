@@ -19,7 +19,16 @@ This checklist is for near-term CarePland Connect demos where the goal is to sho
 
 Internet demos may connect less reliably with only public STUN. Configure TURN before relying on a remote demo.
 
-Supported environment options:
+For production, use Twilio Network Traversal Service. The app generates short-lived ICE credentials server-side when these environment variables are present:
+
+```bash
+TWILIO_ACCOUNT_SID='AC...'
+TWILIO_AUTH_TOKEN='...'
+```
+
+The browser fetches the resulting ICE server list from `/api/connect/calls/ice-config` when a live call starts. The Twilio auth token is never sent to the browser.
+
+Static TURN settings are still supported as a fallback or short demo bridge:
 
 ```bash
 CONNECT_ICE_SERVERS_JSON='[{"urls":["stun:stun.l.google.com:19302"]},{"urls":["turn:example.com:3478"],"username":"demo-user","credential":"demo-password"}]'
@@ -34,7 +43,7 @@ CONNECT_TURN_USERNAME='demo-user'
 CONNECT_TURN_CREDENTIAL='demo-password'
 ```
 
-The browser fetches these from `/api/connect/calls/ice-config` when a live call starts. The older browser-exposed names still work as a fallback:
+The older browser-exposed names still work as a fallback:
 
 ```bash
 NEXT_PUBLIC_CONNECT_ICE_SERVERS_JSON='[{"urls":["stun:stun.l.google.com:19302"]},{"urls":["turn:example.com:3478"],"username":"demo-user","credential":"demo-password"}]'
@@ -49,7 +58,7 @@ NEXT_PUBLIC_CONNECT_TURN_USERNAME='demo-user'
 NEXT_PUBLIC_CONNECT_TURN_CREDENTIAL='demo-password'
 ```
 
-Static TURN credentials are acceptable only as a short demo bridge. Production should use short-lived TURN credentials.
+Static TURN credentials are acceptable only as a short demo bridge. Production should use Twilio-generated short-lived TURN credentials.
 
 ## Demo Script
 
