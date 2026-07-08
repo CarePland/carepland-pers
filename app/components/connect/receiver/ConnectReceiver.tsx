@@ -2317,7 +2317,7 @@ export function ConnectReceiver() {
             });
             return current;
           }
-          stopLiveCallAudio();
+          stopLiveCallAudio({ notifyPeer: false });
           setStatus("Call ended.");
           return {
             ...current,
@@ -4731,14 +4731,16 @@ export function ConnectReceiver() {
     });
   }
 
-  function stopLiveCallAudio() {
+  function stopLiveCallAudio(options: { notifyPeer?: boolean } = {}) {
+    const notifyPeer = options.notifyPeer ?? true;
     const currentCallId =
       modal?.type === "incomingCall" ? modal.callId : undefined;
     logReceiverCallEvent(currentCallId, "call_receiver_audio_cleanup_requested", {
       callAudioStatus,
+      notifyPeer,
       source: "receiver_stop_live_call_audio",
     });
-    liveCallAudioRef.current?.stop();
+    liveCallAudioRef.current?.stop({ notifyPeer });
     liveCallAudioRef.current = null;
     setCallAudioStatus("idle");
     setCallMuted(false);
@@ -5059,7 +5061,7 @@ export function ConnectReceiver() {
       return;
     }
     if (callId && selectedReceiverUser.id) {
-      stopLiveCallAudio();
+      stopLiveCallAudio({ notifyPeer: false });
       const controller = createConnectCallAudioController({
         callId,
         connectAuthHeaders: connectReceiverRequestHeaders,
@@ -5085,15 +5087,6 @@ export function ConnectReceiver() {
             callAudioStatus: callAudioStatusRef.current,
             source: "audio_controller_onPeerEnded",
           });
-          const endedBeforeLiveAudio = !["connected", "remote_audio"].includes(
-            callAudioStatusRef.current
-          );
-          if (endedBeforeLiveAudio) {
-            liveCallAudioRef.current = null;
-            setCallAudioStatus("interrupted");
-            setStatus("Call audio stopped before it fully connected. Try the call again.");
-            return;
-          }
           locallyEndedCallIdsRef.current.add(callId);
           liveCallAudioRef.current = null;
           setCallAudioStatus("ended");

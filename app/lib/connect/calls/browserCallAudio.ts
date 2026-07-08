@@ -27,7 +27,7 @@ export type ConnectCallAudioController = {
   isMuted: () => boolean;
   setMuted: (muted: boolean) => void;
   start: () => Promise<void>;
-  stop: () => void;
+  stop: (options?: { notifyPeer?: boolean }) => void;
 };
 
 type ConnectCallAudioOptions = {
@@ -497,9 +497,10 @@ export function createConnectCallAudioController(
         );
       }
     },
-    stop() {
-      logLifecycle("call_audio_stop_called");
-      finish(true);
+    stop(options: { notifyPeer?: boolean } = {}) {
+      const notifyPeer = options.notifyPeer ?? true;
+      logLifecycle("call_audio_stop_called", { notifyPeer });
+      finish(notifyPeer);
     },
   };
 

@@ -633,7 +633,8 @@ export function ConnectDashboard() {
     callCueRef.current = null;
   }, []);
 
-  const stopLiveCallAudio = useCallback(() => {
+  const stopLiveCallAudio = useCallback((options: { notifyPeer?: boolean } = {}) => {
+    const notifyPeer = options.notifyPeer ?? true;
     if (activeCallIdRef.current && mainConnectUserPersonIdRef.current) {
       recordConnectCallLifecycleEvent({
         actorRole: "dashboard",
@@ -641,13 +642,14 @@ export function ConnectDashboard() {
         connectAuthHeaders,
         details: {
           callAudioStatus: callAudioStatusRef.current,
+          notifyPeer,
           source: "dashboard_stop_live_call_audio",
         },
         eventType: "call_ui_audio_cleanup_requested",
         mainConnectUserPersonId: mainConnectUserPersonIdRef.current,
       });
     }
-    liveCallAudioRef.current?.stop();
+    liveCallAudioRef.current?.stop({ notifyPeer });
     liveCallAudioRef.current = null;
     setCallAudioStatus("idle");
     setCallMuted(false);
@@ -827,7 +829,7 @@ export function ConnectDashboard() {
             source: "refreshCallState",
           });
         }
-        stopLiveCallAudio();
+        stopLiveCallAudio({ notifyPeer: false });
         if (latestState === "receiver_unavailable") playCallFailureSound();
         else {
           latestCallAudioStateRef.current = latestState;
@@ -843,7 +845,7 @@ export function ConnectDashboard() {
             source: "refreshCallState",
           });
         }
-        stopLiveCallAudio();
+        stopLiveCallAudio({ notifyPeer: false });
         if (latestState === "missed" || latestState === "failed") playCallFailureSound();
         else {
           latestCallAudioStateRef.current = latestState;
@@ -974,7 +976,7 @@ export function ConnectDashboard() {
   useEffect(() => {
     return () => {
       stopCallCue();
-      stopLiveCallAudio();
+      stopLiveCallAudio({ notifyPeer: false });
     };
   }, [stopCallCue, stopLiveCallAudio]);
 
@@ -1257,7 +1259,7 @@ export function ConnectDashboard() {
       callMuted,
       source: "startDashboardCallAudio",
     });
-    stopLiveCallAudio();
+    stopLiveCallAudio({ notifyPeer: false });
     activeCallIdRef.current = callId;
     const controller = createConnectCallAudioController({
       callId,
@@ -1279,16 +1281,11 @@ export function ConnectDashboard() {
           callAudioStatus: callAudioStatusRef.current,
           source: "audio_controller_onPeerEnded",
         });
-        if (!["connected", "remote_audio"].includes(callAudioStatusRef.current)) {
-          liveCallAudioRef.current = null;
-          setCallAudioStatus("interrupted");
-          setStatus("Call audio stopped before it fully connected. Try the call again.");
-          return;
-        }
         setStatus(`${selectedPersonName} ended the call.`);
         setRecipientCallState("ended");
         stopCallCue();
         liveCallAudioRef.current = null;
+        setCallMuted(false);
         void reportDashboardCallState("hung_up");
       },
       onRemoteMutedChange: (muted) => {
@@ -1467,7 +1464,7 @@ export function ConnectDashboard() {
       );
       await refreshCallState();
     } catch (error) {
-      stopLiveCallAudio();
+      stopLiveCallAudio({ notifyPeer: false });
       playCallFailureSound();
       setRecipientCallState("waiting");
       setCallTranscriptRuntimeStatus("");
@@ -1527,7 +1524,7 @@ export function ConnectDashboard() {
           stateValue
         )
       ) {
-        stopLiveCallAudio();
+        stopLiveCallAudio({ notifyPeer: false });
         activeCallIdRef.current = "";
       }
     } catch (error) {
@@ -1539,7 +1536,7 @@ export function ConnectDashboard() {
     const callId = activeCallIdRef.current || state.callSummary?.latestCall?.callId;
     if (!callId) {
       stopCallCue();
-      stopLiveCallAudio();
+      stopLiveCallAudio({ notifyPeer: false });
       setRecipientCallState("ended");
       setStatus("Call ended.");
       return;
