@@ -299,6 +299,17 @@ function receiverKey(device: ConnectReceiverDevice) {
   return device.id ?? device.receiverId ?? device.name ?? connectPrototypeReceiverId;
 }
 
+function receiverDisplayName(device?: ConnectReceiverDevice | null) {
+  return device?.locationLabel || device?.name || device?.receiverId || "Receiver";
+}
+
+function receiverShortDisplayId(device?: ConnectReceiverDevice | null) {
+  const id = (device?.receiverId || device?.id || "").trim();
+  if (!id) return "";
+  const compact = id.replace(/^receiver-/, "");
+  return compact.length > 10 ? compact.slice(-10) : compact;
+}
+
 function personName(person?: ConnectReceiverPerson) {
   return person?.displayName || "Main Connect User";
 }
@@ -503,6 +514,9 @@ export function ConnectDashboard() {
   const [accountEmail, setAccountEmail] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedReceiverKey, setSelectedReceiverKey] = useState(connectPrototypeReceiverId);
+  const [receiverRenameOpen, setReceiverRenameOpen] = useState(false);
+  const [receiverLabelDraft, setReceiverLabelDraft] = useState("");
+  const [receiverLabelPending, setReceiverLabelPending] = useState(false);
   const [messageIndex, setMessageIndex] = useState(0);
   const [recording, setRecording] = useState(false);
   const [processingRecording, setProcessingRecording] = useState(false);
@@ -1023,11 +1037,11 @@ export function ConnectDashboard() {
   const selectedReceiver = selectedReceiverMatch ?? activeDevices[0];
 
   const selectedReceiverLabel =
-    selectedReceiverMatch?.name ||
-    selectedReceiverMatch?.receiverId ||
-    (selectedReceiverKey && selectedReceiverKey !== connectPrototypeReceiverId
-      ? selectedReceiverKey
-      : selectedReceiver?.name || selectedReceiver?.receiverId || "Kitchen Receiver");
+    selectedReceiverMatch || selectedReceiver
+      ? receiverDisplayName(selectedReceiverMatch ?? selectedReceiver)
+      : selectedReceiverKey && selectedReceiverKey !== connectPrototypeReceiverId
+        ? selectedReceiverKey
+        : "Receiver";
   const selectedReceiverId =
     selectedReceiver?.id || selectedReceiver?.receiverId || connectPrototypeReceiverId;
   const selectedReceiverUsesClassicCallBridge =
@@ -1071,6 +1085,12 @@ export function ConnectDashboard() {
     setupView,
     state,
   });
+
+  useEffect(() => {
+    if (!receiverRenameOpen) {
+      setReceiverLabelDraft(selectedReceiverLabel);
+    }
+  }, [receiverRenameOpen, selectedReceiverLabel, selectedReceiverId]);
 
   function handleChangeGlobalFocus(focusId: string) {
     const nextFocusId = focusId || allCarePlandFocusValue;
@@ -1241,6 +1261,67 @@ export function ConnectDashboard() {
     controller.setMuted(callMuted);
     liveCallAudioRef.current = controller;
     void controller.start();
+  }
+
+  async function saveSelectedReceiverLabel() {
+    if (!selectedReceiver?.id) {
+      setStatus("Select a paired Receiver before renaming it.");
+      return;
+    }
+
+    const nextLabel = receiverLabelDraft.trim();
+    if (!nextLabel) {
+      setStatus("Enter a Receiver name.");
+      return;
+    }
+
+    setReceiverLabelPending(true);
+    setStatus(`Saving ${nextLabel}...`);
+    try {
+      const response = await fetch(
+        `/api/connect/provisioning/receiver-devices/${encodeURIComponent(selectedReceiver.id)}`,
+        {
+          body: JSON.stringify({
+            confirmedPrototypeWrite: true,
+            locationLabel: nextLabel,
+            operationReason: `Updated receiver label to ${nextLabel}.`,
+          }),
+          headers: {
+            ...(await connectAuthHeaders()),
+            "Content-Type": "application/json",
+          },
+          method: "PATCH",
+        }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+      };
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `Receiver update returned ${response.status}`);
+      }
+
+      setState((current) => ({
+        ...current,
+        provisioning: current.provisioning
+          ? {
+              ...current.provisioning,
+              receiverDevices: current.provisioning.receiverDevices?.map((device) =>
+                device.id === selectedReceiver.id
+                  ? { ...device, locationLabel: nextLabel, name: nextLabel }
+                  : device
+              ),
+            }
+          : current.provisioning,
+      }));
+      setReceiverRenameOpen(false);
+      setStatus(`${nextLabel} saved.`);
+      await refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Receiver could not be renamed.");
+    } finally {
+      setReceiverLabelPending(false);
+    }
   }
 
   async function startCall() {
@@ -1957,6 +2038,77 @@ export function ConnectDashboard() {
                   >
                     Message History
                   </button>
+                  <div className="flex min-h-9 max-w-full flex-wrap items-center gap-2 rounded-full border border-blue-100 bg-white px-2 py-1 shadow-sm">
+                    <span className="text-xs font-black uppercase tracking-normal text-slate-500">
+                      Receiver
+                    </span>
+                    {receiverRenameOpen ? (
+                      <>
+                        <input
+                          className="h-8 w-32 rounded-full border border-blue-100 bg-blue-50 px-3 text-sm font-black text-blue-950 outline-none focus:border-blue-300"
+                          maxLength={80}
+                          onChange={(event) => setReceiverLabelDraft(event.target.value)}
+                          placeholder="Living Rm"
+                          value={receiverLabelDraft}
+                        />
+                        <button
+                          className="h-8 rounded-full bg-blue-800 px-3 text-xs font-black text-white hover:bg-blue-900 disabled:opacity-55"
+                          disabled={
+                            receiverLabelPending ||
+                            !receiverLabelDraft.trim() ||
+                            receiverLabelDraft.trim() === selectedReceiverLabel
+                          }
+                          onClick={() => void saveSelectedReceiverLabel()}
+                          type="button"
+                        >
+                          {receiverLabelPending ? "Saving" : "Save"}
+                        </button>
+                        <button
+                          className="h-8 rounded-full px-2 text-xs font-black text-slate-500 hover:bg-slate-50"
+                          disabled={receiverLabelPending}
+                          onClick={() => {
+                            setReceiverRenameOpen(false);
+                            setReceiverLabelDraft(selectedReceiverLabel);
+                          }}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <select
+                          aria-label="Receiver to call"
+                          className="h-8 max-w-[13rem] rounded-full border border-blue-100 bg-blue-50 px-3 text-sm font-black text-blue-950 outline-none focus:border-blue-300"
+                          disabled={!activeDevices.length || actionPending === "call"}
+                          onChange={(event) => setSelectedReceiverKey(event.target.value)}
+                          value={selectedReceiver ? receiverKey(selectedReceiver) : ""}
+                        >
+                          {activeDevices.map((device) => {
+                            const shortId = receiverShortDisplayId(device);
+                            return (
+                              <option key={receiverKey(device)} value={receiverKey(device)}>
+                                {receiverDisplayName(device)}
+                                {shortId ? ` · ${shortId}` : ""}
+                              </option>
+                            );
+                          })}
+                          {!activeDevices.length ? <option>No paired Receiver</option> : null}
+                        </select>
+                        <button
+                          className="h-8 rounded-full px-2 text-xs font-black text-blue-800 hover:bg-blue-50 disabled:opacity-45"
+                          disabled={!selectedReceiver?.id}
+                          onClick={() => {
+                            setReceiverLabelDraft(selectedReceiverLabel);
+                            setReceiverRenameOpen(true);
+                          }}
+                          type="button"
+                        >
+                          Rename
+                        </button>
+                      </>
+                    )}
+                  </div>
                   <button
                     className="inline-flex min-h-9 items-center gap-2 rounded-full border border-blue-100 bg-blue-50/80 px-3 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100 disabled:opacity-55"
                     disabled={actionPending === "call" || !selectedMainConnectUserPersonId}

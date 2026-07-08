@@ -139,7 +139,9 @@ export function createConnectCallAudioController(
       if (stopped) return;
       logLifecycle("call_connection_timer_fired", { timeoutMs: connectionTimeoutMs });
       setAudioStatus("interrupted");
-      options.onError?.("Call audio did not connect. Hang up and try again.");
+      options.onError?.(
+        "Call audio did not connect. If both browsers are online on different networks, CarePland may need a TURN relay configured."
+      );
     }, connectionTimeoutMs);
   }
 
@@ -168,8 +170,12 @@ export function createConnectCallAudioController(
     if (stopped) throw new Error("Call audio has already stopped.");
     if (peerConnection) return peerConnection;
 
-    logLifecycle("call_peer_connection_creating");
-    const connection = new RTCPeerConnection({ iceServers: configuredIceServers() });
+    const iceServers = configuredIceServers();
+    logLifecycle("call_peer_connection_creating", {
+      hasTurnServer: iceServers.some(iceServerUsesTurn),
+      iceServerCount: iceServers.length,
+    });
+    const connection = new RTCPeerConnection({ iceServers });
     peerConnection = connection;
     logLifecycle("call_peer_connection_created", {
       iceConnectionState: connection.iceConnectionState,
@@ -839,6 +845,11 @@ function isIceServer(value: unknown): value is RTCIceServer {
     return urls.some((url) => typeof url === "string" && Boolean(url.trim()));
   }
   return false;
+}
+
+function iceServerUsesTurn(server: RTCIceServer) {
+  const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+  return urls.some((url) => String(url || "").startsWith("turn:"));
 }
 
 function splitIceUrls(value: string | undefined) {
