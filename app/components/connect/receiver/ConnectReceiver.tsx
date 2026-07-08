@@ -984,6 +984,24 @@ function readReceiverGuideId() {
   ).trim();
 }
 
+function compactReceiverIdentifier(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return "";
+  if (normalized.length <= 18) return normalized;
+  return `${normalized.slice(0, 8)}...${normalized.slice(-8)}`;
+}
+
+function readReceiverIdentityDisplay() {
+  const receiverDeviceId = readReceiverDeviceId();
+  const receiverInstallId = readReceiverInstallId();
+  const identifier = receiverDeviceId || receiverInstallId || connectPrototypeReceiverId;
+  return {
+    full: identifier,
+    label: compactReceiverIdentifier(identifier),
+    type: receiverDeviceId ? "Receiver ID" : "Local ID",
+  };
+}
+
 function receiverCallMatchesThisDevice(call: Partial<ReceiverCall>) {
   const targetReceiverId = String(call.receiverId || "").trim();
   if (!targetReceiverId) return true;
@@ -3170,6 +3188,7 @@ export function ConnectReceiver() {
     messages,
     pendingCallSummaryReviews,
   });
+  const receiverIdentityDisplay = readReceiverIdentityDisplay();
   const todayFocusDisplayMode =
     visibleTodayFocusItems.length > 0
       ? "items"
@@ -6106,6 +6125,13 @@ export function ConnectReceiver() {
               secondsRemaining={screenCleaningSecondsRemaining}
             />
           ) : null}
+          <div
+            className={styles.receiverIdentityBadge}
+            title={`${receiverIdentityDisplay.type}: ${receiverIdentityDisplay.full}`}
+            aria-label={`${receiverIdentityDisplay.type}: ${receiverIdentityDisplay.full}`}
+          >
+            {receiverIdentityDisplay.type}: {receiverIdentityDisplay.label}
+          </div>
         </section>
       </div>
     </main>

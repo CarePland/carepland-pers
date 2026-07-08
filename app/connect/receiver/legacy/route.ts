@@ -275,6 +275,26 @@ function classicWebViewReceiverHtml({
       right: 24px;
       table-layout: fixed;
     }
+    .classicReceiverIdentity {
+      background: rgba(251, 250, 245, 0.86);
+      border: 2px solid rgba(23, 35, 29, 0.36);
+      border-radius: 6px;
+      bottom: 4px;
+      box-sizing: border-box;
+      color: rgba(23, 35, 29, 0.82);
+      font-size: 16px;
+      font-weight: 900;
+      left: 28px;
+      line-height: 1;
+      max-width: 460px;
+      overflow: hidden;
+      padding: 5px 8px;
+      pointer-events: none;
+      position: absolute;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      z-index: 24;
+    }
     .footerLogo,
     .footerGreeting,
     .footerClock,
@@ -1181,6 +1201,7 @@ function classicWebViewReceiverHtml({
     <div class="guideRectLabel" id="guideRectLabel">CarePland is pointing here.</div>
   </div>
   <div class="guideIdentifyCode" id="guideIdentifyCode" aria-hidden="true"></div>
+  <div class="classicReceiverIdentity" id="receiverIdentityBadge">Receiver ID: starting</div>
   </div>
 
   <button class="fullscreenPrompt" id="fullscreenPrompt" type="button">Fill Screen</button>
@@ -1248,6 +1269,23 @@ function classicWebViewReceiverHtml({
         if (digits.length === 6) return digits.substr(0, 3) + " " + digits.substr(3, 3);
         return fallbackText(value) || "---";
       }
+      function fallbackCompactReceiverIdentifier(value) {
+        var normalized = fallbackText(value);
+        if (normalized.length <= 18) return normalized;
+        return normalized.substr(0, 8) + "..." + normalized.substr(normalized.length - 8);
+      }
+      function fallbackUpdateReceiverIdentityBadge(deviceId, installId) {
+        var badge = document.getElementById("receiverIdentityBadge");
+        if (!badge) return;
+        var full = fallbackText(deviceId || installId || "classic-webview-receiver");
+        var prefix = deviceId ? "Receiver ID" : "Local ID";
+        var label = fallbackCompactReceiverIdentifier(full);
+        badge.innerHTML = (prefix + ": " + label)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        badge.setAttribute("title", prefix + ": " + full);
+      }
       function fallbackReceiverUrl() {
         return window.location.protocol + "//" + window.location.host + "/connect/receiver/legacy?receiver_runtime=classic_webview";
       }
@@ -1265,6 +1303,10 @@ function classicWebViewReceiverHtml({
       }
       function fallbackSaveBinding(payload) {
         if (!payload || !payload.receiverDeviceId) return;
+        fallbackUpdateReceiverIdentityBadge(
+          payload.receiverDeviceId || "",
+          payload.receiverInstallId || fallbackInstallIdValue()
+        );
         try {
           if (window.localStorage) {
             window.localStorage.setItem(fallbackBindingStorageKey, JSON.stringify({
@@ -1873,6 +1915,7 @@ function classicWebViewReceiverHtml({
         receiverState.receiverDeviceId = "";
         receiverState.personId = "";
         receiverState.online = false;
+        updateReceiverIdentityBadge();
       }
       function hasNativeReceiverBridge() {
         return !!(window.CarePlandReceiver && window.CarePlandReceiver.getProvisioningJson);
@@ -1900,6 +1943,18 @@ function classicWebViewReceiverHtml({
         } catch (error) {
           return "classic-web-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000000);
         }
+      }
+      function compactReceiverIdentifier(value) {
+        var normalized = text(value);
+        if (normalized.length <= 18) return normalized;
+        return normalized.substr(0, 8) + "..." + normalized.substr(normalized.length - 8);
+      }
+      function updateReceiverIdentityBadge() {
+        var full = receiverState.receiverDeviceId || receiverState.receiverInstallId || "classic-webview-receiver";
+        var prefix = receiverState.receiverDeviceId ? "Receiver ID" : "Local ID";
+        setText("receiverIdentityBadge", prefix + ": " + compactReceiverIdentifier(full));
+        var badge = document.getElementById("receiverIdentityBadge");
+        if (badge) badge.setAttribute("title", prefix + ": " + full);
       }
       function mergedReceiverConfig(config) {
         var stored = readStoredBinding();
@@ -1939,6 +1994,7 @@ function classicWebViewReceiverHtml({
         receiverState.receiverDeviceId = payload.receiverDeviceId || receiverState.receiverDeviceId;
         receiverState.receiverInstallId = payload.receiverInstallId || receiverState.receiverInstallId;
         receiverState.personId = payload.mainConnectUserPersonId || receiverState.personId;
+        updateReceiverIdentityBadge();
       }
       function postNativeBinding(config, callback) {
         if (!config || !config.receiverDeviceId || !config.receiverInstallId) {
@@ -1947,6 +2003,7 @@ function classicWebViewReceiverHtml({
         }
         receiverState.receiverDeviceId = config.receiverDeviceId;
         receiverState.receiverInstallId = config.receiverInstallId;
+        updateReceiverIdentityBadge();
         try {
           jsonRequest("POST", "/api/connect/receiver-shell/devices/binding", {
             capabilities: config.capabilities || {},
@@ -2090,6 +2147,7 @@ function classicWebViewReceiverHtml({
       function startClassicPairing(callback) {
         showScreen("setupScreen");
         receiverState.receiverInstallId = readOrCreateInstallId(readNativeConfig());
+        updateReceiverIdentityBadge();
         if (pairingPollTimer) window.clearTimeout(pairingPollTimer);
         showSetupStatus("Preparing Receiver setup...");
         jsonRequest("POST", "/api/connect/receiver-shell/pairing-sessions", {
@@ -2728,6 +2786,8 @@ function classicWebViewReceiverHtml({
       applyReceiverFrameScale();
       updateReceiverChromeControls();
       bindButtons();
+      receiverState.receiverInstallId = readOrCreateInstallId(readNativeConfig());
+      updateReceiverIdentityBadge();
       startReceiverGuideSync();
       window.onresize = function () {
         applyReceiverFrameScale();
