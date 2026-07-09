@@ -26,12 +26,17 @@ export async function recordLocalConnectMessage(
   const index = await readLocalMessagesIndex(indexPath);
   const createdAt = input.createdAt || new Date().toISOString();
   const message: ConnectMessageRecord = {
+    acknowledgedAt: input.acknowledgedAt || "",
+    allowsCallbackRequest: Boolean(input.allowsCallbackRequest),
     audioArtifactId: input.audioArtifactId || "",
     audioDurationMs: input.audioDurationMs,
     audioMimeType: input.audioMimeType || "",
     audioUrl: input.audioUrl || "",
     body: input.body || input.transcript || "Voice message",
+    callbackRequestedAt: input.callbackRequestedAt || "",
+    clientMessageId: input.clientMessageId || "",
     createdAt,
+    deliveredAt: input.deliveredAt || "",
     from: input.from || "receiver_user",
     heardAt: input.heardAt || "",
     id:
@@ -40,8 +45,13 @@ export async function recordLocalConnectMessage(
       `connect-message-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     mainConnectUserPersonId: input.mainConnectUserPersonId || "",
     messageType: input.messageType || (input.audioUrl ? "audio" : "text"),
+    metadata: input.metadata ?? {},
     readAt: input.readAt || "",
+    receiverDeviceId: input.receiverDeviceId || input.receiverId || "",
     receiverId: input.receiverId || "",
+    requiresAcknowledgement: Boolean(input.requiresAcknowledgement),
+    senderRole: input.senderRole || "",
+    senderUserId: input.senderUserId || "",
     source: input.source || "connect_message",
     to: input.to || "",
     transcript: input.transcript || "",
@@ -59,7 +69,7 @@ export async function recordLocalConnectMessage(
 
 export async function updateLocalConnectMessageState(
   messageId: string,
-  state: "heard" | "read",
+  state: "acknowledged" | "callback_requested" | "heard" | "read",
   options: { indexPath?: string; mainConnectUserPersonId?: string } = {}
 ) {
   const indexPath = options.indexPath ?? defaultIndexPath;
@@ -78,8 +88,13 @@ export async function updateLocalConnectMessageState(
 
     updated = {
       ...message,
+      acknowledgedAt:
+        state === "acknowledged" ? now : message.acknowledgedAt,
+      callbackRequestedAt:
+        state === "callback_requested" ? now : message.callbackRequestedAt,
       heardAt: state === "heard" ? now : message.heardAt,
       readAt: state === "read" ? now : message.readAt,
+      updatedAt: now,
     };
     return updated;
   });

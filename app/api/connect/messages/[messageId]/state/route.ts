@@ -1,8 +1,19 @@
 import { NextResponse } from "next/server";
 
-import { verifyConnectMessagePersonAccess } from "@/app/lib/connect/messaging/server/messageAccess";
+import {
+  ConnectPersonAccessDeniedError,
+} from "@/app/lib/connect/context/server/mainConnectUserContext";
+import {
+  ReceiverDeviceAccessError,
+  receiverDeviceSetupRequiredBody,
+} from "@/app/lib/connect/context/server/personScopedAccess";
+import { readConnectMessagePersonAccessForRequest } from "@/app/lib/connect/messaging/server/messageAccess";
 import { updateLocalConnectMessageState } from "@/app/lib/connect/messaging/server/localMessages";
-import { resolveConnectMessageState } from "@/app/lib/connect/messaging/server/messageState";
+import {
+  resolveConnectMessageState,
+  type ConnectMessageState,
+} from "@/app/lib/connect/messaging/server/messageState";
+import { updateSupabaseConnectMessageState } from "@/app/lib/connect/messaging/server/supabaseMessages";
 import { connectPrototypeEndpoints } from "@/app/lib/connect/prototypeClient";
 
 type RouteContext = {
@@ -13,9 +24,12 @@ export async function PATCH(request: Request, context: RouteContext) {
   try {
     const { messageId } = await context.params;
     const payload = (await request.json().catch(() => ({}))) as {
+      acknowledged?: boolean;
+      callbackRequested?: boolean;
       heard?: boolean;
       mainConnectUserPersonId?: string;
       read?: boolean;
+      receiverId?: string;
       state?: string;
     };
     const personId = payload.mainConnectUserPersonId?.trim() ?? "";
@@ -27,18 +41,20 @@ export async function PATCH(request: Request, context: RouteContext) {
       );
     }
 
-    const deniedResponse = await verifyConnectMessagePersonAccess(
-      personId,
+    const access = await readConnectMessagePersonAccessForRequest(
       request,
-      {},
-      { body: payload as unknown as Record<string, unknown> }
+      personId,
+      payload as unknown as Record<string, unknown>
     );
-    if (deniedResponse) return deniedResponse;
 
     const state = resolveConnectMessageState(payload);
-    const message = await updateLocalConnectMessageState(messageId, state, {
-      mainConnectUserPersonId: personId,
-    });
+    const message =
+      (await updateSupabaseConnectMessageState(messageId, state, access, {
+        receiverDeviceId: payload.receiverId,
+      })) ??
+      (await updateLocalConnectMessageState(messageId, state, {
+        mainConnectUserPersonId: personId,
+      }));
 
     void forwardPrototypeMessageState(messageId, state);
 
@@ -48,6 +64,21 @@ export async function PATCH(request: Request, context: RouteContext) {
       ok: true,
     });
   } catch (error) {
+    if (error instanceof ReceiverDeviceAccessError) {
+      return NextResponse.json(receiverDeviceSetupRequiredBody(error), {
+        status: error.status,
+      });
+    }
+    if (error instanceof ConnectPersonAccessDeniedError) {
+      return NextResponse.json(
+        {
+          error: "Choose a Main Connect User from your CarePland collection.",
+          ok: false,
+        },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json(
       {
         error:
@@ -61,7 +92,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 }
 
-async function forwardPrototypeMessageState(messageId: string, state: "heard" | "read") {
+async function forwardPrototypeMessageState(messageId: string, state: ConnectMessageState) {
   try {
     const url = new URL(
       `/messages/${encodeURIComponent(messageId)}/state`,

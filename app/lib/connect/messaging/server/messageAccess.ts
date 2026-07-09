@@ -43,3 +43,11 @@ export async function verifyConnectMessagePersonAccess(
     );
   }
 }
+
+export async function readConnectMessagePersonAccessForRequest(
+  request: Request,
+  personId: string,
+  body?: Record<string, unknown>
+) {
+  return readConnectPersonScopedAccess(request, personId, { body });
+}

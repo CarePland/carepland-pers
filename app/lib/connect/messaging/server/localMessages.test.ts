@@ -67,4 +67,39 @@ describe("local Connect messages", () => {
       await rm(dir, { force: true, recursive: true });
     }
   });
+
+  it("records acknowledgement and callback request state for local fallback", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "connect-messages-"));
+    const indexPath = path.join(dir, "messages.json");
+
+    try {
+      const message = await recordLocalConnectMessage(
+        {
+          allowsCallbackRequest: true,
+          body: "Please call when you can.",
+          from: "Andrew",
+          mainConnectUserPersonId: "person-bob",
+          requiresAcknowledgement: true,
+          to: "Bob",
+        },
+        { indexPath }
+      );
+      await updateLocalConnectMessageState(message.id, "acknowledged", {
+        indexPath,
+        mainConnectUserPersonId: "person-bob",
+      });
+      await updateLocalConnectMessageState(message.id, "callback_requested", {
+        indexPath,
+        mainConnectUserPersonId: "person-bob",
+      });
+      const index = await readLocalConnectMessages({ indexPath });
+
+      assert.equal(index.messages[0]?.requiresAcknowledgement, true);
+      assert.equal(index.messages[0]?.allowsCallbackRequest, true);
+      assert.equal(Boolean(index.messages[0]?.acknowledgedAt), true);
+      assert.equal(Boolean(index.messages[0]?.callbackRequestedAt), true);
+    } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
+  });
 });
