@@ -24,6 +24,7 @@ node_modules/
 
 # misc
 .DS_Store
+.rollback/
 *.pem
 CP Family summry.docx
 
