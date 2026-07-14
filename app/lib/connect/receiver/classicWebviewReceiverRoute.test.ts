@@ -48,7 +48,7 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.equal(contract.layout.uiSchemaId, "gxv3370_classic_1024x600_v1");
   });
 
-  it("renders receiver guide presence and highlight support", async () => {
+  it("renders receiver guide helpers without starting recurring guide polling", async () => {
     const response = getClassicReceiverRoute({
       nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),
     } as never);
@@ -58,6 +58,8 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.match(html, /guideRectTarget/);
     assert.match(html, /guideIdentifyCode/);
     assert.match(html, /startReceiverGuideSync/);
+    assert.match(html, /Receiver Guide is deprecated for now/);
+    assert.doesNotMatch(html, /setInterval\(syncReceiverGuide/);
   });
 
   it("renders person-scoped local cache support for Classic data", async () => {
@@ -98,7 +100,7 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.match(html, /if \(!binding\) return;/);
   });
 
-  it("polls for dashboard-originated incoming calls in Classic", async () => {
+  it("keeps Classic call code recoverable without starting call polling", async () => {
     const response = getClassicReceiverRoute({
       nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),
     } as never);
@@ -123,5 +125,8 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.match(html, /lockedCallId/);
     assert.match(html, /receiverState\.answeredCallId === activeCall\.callId/);
     assert.match(html, /startIncomingCallPolling/);
+    assert.match(html, /Connect calls are deprecated for now/);
+    assert.match(html, /Calling is currently paused while this feature is refined/);
+    assert.doesNotMatch(html, /setInterval\(loadIncomingCalls/);
   });
 });

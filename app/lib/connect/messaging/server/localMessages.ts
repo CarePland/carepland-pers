@@ -28,6 +28,7 @@ export async function recordLocalConnectMessage(
   const message: ConnectMessageRecord = {
     acknowledgedAt: input.acknowledgedAt || "",
     allowsCallbackRequest: Boolean(input.allowsCallbackRequest),
+    appointmentId: input.appointmentId || "",
     audioArtifactId: input.audioArtifactId || "",
     audioDurationMs: input.audioDurationMs,
     audioMimeType: input.audioMimeType || "",

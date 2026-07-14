@@ -92,6 +92,79 @@ export function PencilSquareIcon({ className = "h-4 w-4" }: IconProps) {
   );
 }
 
+export function PaperAirplaneIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="m22 2-7 20-4-9-9-4 20-7Z" />
+      <path d="M22 2 11 13" />
+    </svg>
+  );
+}
+
+export function EnvelopeIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <rect height="16" rx="2" width="20" x="2" y="4" />
+      <path d="m22 7-10 6L2 7" />
+    </svg>
+  );
+}
+
+export function MessageCircleIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6A8.4 8.4 0 0 1 12.5 3H13a8 8 0 0 1 8 8v.5Z" />
+    </svg>
+  );
+}
+
+export function MicrophoneIcon({ className = "h-4 w-4" }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z" />
+      <path d="M18 11a6 6 0 0 1-12 0" />
+      <path d="M12 17v4" />
+      <path d="M8 21h8" />
+    </svg>
+  );
+}
+
 export function RefreshCircleIcon({ className = "h-4 w-4" }: IconProps) {
   return (
     <svg

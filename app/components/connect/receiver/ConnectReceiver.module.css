@@ -341,14 +341,11 @@
   z-index: 24;
   max-width: min(54cqw, 460px);
   overflow: hidden;
-  border: 2px solid rgba(23, 35, 29, 0.32);
-  border-radius: 6px;
-  background: rgba(255, 253, 247, 0.84);
-  color: rgba(23, 35, 29, 0.82);
-  font-size: clamp(0.68rem, 1.7cqw, 0.92rem);
-  font-weight: 950;
+  color: rgba(23, 35, 29, 0.56);
+  font-size: clamp(0.62rem, 1.45cqw, 0.78rem);
+  font-weight: 800;
   line-height: 1;
-  padding: 5px 8px;
+  padding: 0;
   pointer-events: none;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -358,7 +355,441 @@
   right: 10px;
   bottom: 6px;
   max-width: 380px;
+  font-size: 0.64rem;
+}
+
+.receiverTraceButton {
+  position: absolute;
+  right: 14px;
+  bottom: 26px;
+  z-index: 84;
+  border: 1px solid rgba(23, 35, 29, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  color: rgba(23, 35, 29, 0.68);
+  font-size: clamp(0.68rem, 1.55cqw, 0.85rem);
+  font-weight: 900;
+  line-height: 1;
+  padding: 6px 10px;
+}
+
+.receiverTraceOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: grid;
+  place-items: start center;
+  background: rgba(16, 25, 21, 0.36);
+  overflow: hidden;
+  padding: 8px 16px 16px;
+}
+
+.receiverTracePanel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  width: min(820px, calc(100vw - 32px));
+  height: min(760px, calc(100dvh - 32px));
+  max-height: calc(100dvh - 32px);
+  min-height: 0;
+  overflow: hidden;
+  border: 2px solid rgba(23, 35, 29, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 20px 60px rgba(16, 25, 21, 0.3);
+  padding: clamp(12px, 2.1cqw, 20px);
+  color: #17231d;
+  text-align: left;
+}
+
+.receiverTraceHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.receiverTraceHeader span {
+  color: rgba(23, 35, 29, 0.58);
+  font-size: 0.78rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.receiverTraceHeader h2 {
+  margin: 0;
+  font-size: clamp(1.55rem, 4.5cqw, 2.4rem);
+  line-height: 1;
+}
+
+.receiverTraceCloseButton {
+  min-width: 96px;
+  min-height: 44px;
+  border: 1px solid rgba(23, 35, 29, 0.2);
+  border-radius: 999px;
+  background: #f7faf8;
+  color: #17331f;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.receiverTraceSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.receiverTraceSummary div {
+  border: 1px solid rgba(23, 35, 29, 0.12);
+  border-radius: 8px;
+  background: #f6f8f6;
+  padding: 8px 10px;
+}
+
+.receiverTraceSummary dt {
+  color: rgba(23, 35, 29, 0.56);
   font-size: 0.72rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.receiverTraceSummary dd {
+  margin: 2px 0 0;
+  color: #17231d;
+  font-size: 0.95rem;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.receiverTraceChain {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+}
+
+.receiverTraceStoryPanel,
+.receiverTraceRevisionCard,
+.receiverTraceDetails {
+  border: 1px solid rgba(23, 35, 29, 0.12);
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px;
+}
+
+.receiverTraceStoryPanel {
+  display: grid;
+  gap: 8px;
+}
+
+.receiverTraceStoryPanel h3,
+.receiverTraceRevisionCard h3 {
+  margin: 0;
+  color: #17231d;
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.receiverTraceStoryPanel p,
+.receiverTraceStoryPanel blockquote {
+  margin: 0;
+}
+
+.receiverTraceStoryPanel blockquote {
+  border-left: 4px solid rgba(36, 112, 72, 0.28);
+  padding-left: 10px;
+  color: rgba(23, 35, 29, 0.72);
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.receiverTraceFamilyFlow {
+  color: #1f7345;
+  font-size: 1.08rem;
+  font-weight: 950;
+}
+
+.receiverTraceReviewNote {
+  color: rgba(23, 35, 29, 0.62);
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.receiverTraceReviewList,
+.receiverTraceAnalysisList {
+  display: grid;
+  gap: 8px;
+}
+
+.receiverTraceReviewCard {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(23, 35, 29, 0.12);
+  border-radius: 8px;
+  background: #f8faf8;
+  padding: 10px;
+}
+
+.receiverTraceReviewCard > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.receiverTraceReviewCard strong {
+  color: #17231d;
+  font-size: 0.9rem;
+  font-weight: 950;
+}
+
+.receiverTraceReviewCard time,
+.receiverTraceReviewActions span {
+  color: rgba(23, 35, 29, 0.56);
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.receiverTraceReviewCard p,
+.receiverTraceAnalysisBody p {
+  margin: 0;
+  color: #17231d;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.receiverTraceAnalysisBody {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.receiverTraceReviewEditor {
+  display: grid;
+  gap: 6px;
+}
+
+.receiverTraceReviewEditor span {
+  color: rgba(23, 35, 29, 0.56);
+  font-size: 0.76rem;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.receiverTraceReviewEditor textarea {
+  min-height: 88px;
+  resize: vertical;
+  border: 1px solid rgba(23, 35, 29, 0.18);
+  border-radius: 8px;
+  background: #fff;
+  color: #17231d;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 750;
+  line-height: 1.35;
+  padding: 10px;
+}
+
+.receiverTraceReviewActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.receiverTraceSecondaryButton {
+  justify-self: start;
+  border: 1px solid rgba(23, 35, 29, 0.18);
+  border-radius: 999px;
+  background: #f7faf8;
+  color: #17331f;
+  font-size: 0.84rem;
+  font-weight: 900;
+  padding: 8px 12px;
+}
+
+.receiverTraceSecondaryButton:disabled {
+  opacity: 0.55;
+}
+
+.receiverTraceRevisionCard {
+  display: grid;
+  gap: 10px;
+}
+
+.receiverTraceRevisionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.receiverTraceRevisionHeader span {
+  border-radius: 999px;
+  background: #eef5f0;
+  color: rgba(23, 35, 29, 0.68);
+  font-size: 0.78rem;
+  font-weight: 900;
+  padding: 4px 8px;
+  text-transform: capitalize;
+}
+
+.receiverTraceActors {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 8px;
+}
+
+.receiverTraceActors article {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  border-radius: 8px;
+  background: #f7f9f7;
+  padding: 10px;
+}
+
+.receiverTraceActors article:nth-child(1) {
+  background: #f6f8fb;
+}
+
+.receiverTraceActors article:nth-child(2) {
+  background: #f6faf7;
+}
+
+.receiverTraceActors article:nth-child(3) {
+  background: #fbfaf6;
+}
+
+.receiverTraceActors span {
+  color: rgba(23, 35, 29, 0.56);
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.receiverTraceActors p,
+.receiverTraceActors small {
+  margin: 0;
+  color: #17231d;
+  font-size: 0.9rem;
+  font-weight: 850;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.receiverTraceActors small {
+  color: rgba(23, 35, 29, 0.58);
+  font-size: 0.78rem;
+}
+
+.receiverTraceDetails {
+  padding: 0;
+}
+
+.receiverTraceDetails summary {
+  cursor: pointer;
+  color: rgba(23, 35, 29, 0.64);
+  font-size: 0.82rem;
+  font-weight: 950;
+  list-style-position: inside;
+  padding: 10px 12px;
+}
+
+.receiverTraceDetails[open] {
+  padding-bottom: 12px;
+}
+
+.receiverTraceMiniGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0 12px 10px;
+}
+
+.receiverTraceStoryPanel .receiverTraceMiniGrid {
+  padding: 0;
+}
+
+.receiverTraceMiniGrid div {
+  min-width: 0;
+  border-radius: 8px;
+  background: #f6f8f6;
+  padding: 8px;
+}
+
+.receiverTraceMiniGrid dt {
+  color: rgba(23, 35, 29, 0.54);
+  font-size: 0.68rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.receiverTraceMiniGrid dd {
+  margin: 2px 0 0;
+  color: #17231d;
+  font-size: 0.82rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.receiverTraceRawList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 12px;
+  list-style: none;
+}
+
+.receiverTraceRawList li {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(23, 35, 29, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.receiverTraceRawList li > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.receiverTraceRawList strong {
+  color: #17231d;
+  font-size: 0.98rem;
+  font-weight: 950;
+}
+
+.receiverTraceRawList time {
+  flex: none;
+  color: rgba(23, 35, 29, 0.52);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.receiverTraceRawList pre {
+  margin: 0;
+  color: rgba(23, 35, 29, 0.72);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: pre-wrap;
 }
 
 .deskPhoneMode .receiverShell {
@@ -401,6 +832,686 @@
   display: none;
 }
 
+.modernReceiverMode {
+  overflow: auto;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(72, 147, 117, 0.16), transparent 28%),
+    linear-gradient(135deg, #f7faf7 0%, #eef4f0 44%, #e9eef1 100%);
+}
+
+.modernReceiverMode .applianceFrame {
+  display: grid;
+  place-items: center;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  background: transparent;
+}
+
+.modernReceiverMode .receiverShell {
+  width: min(100vw, calc(100dvh * 4 / 3));
+  height: min(100dvh, calc(100vw * 3 / 4));
+  min-height: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  padding: clamp(18px, 2.4vw, 28px);
+  transform: none;
+}
+
+.modernReceiverHome {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "header header"
+    "context ask"
+    "actions actions";
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.modernReceiverHeader {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 0;
+}
+
+.modernReceiverHeader > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.modernReceiverHeader span {
+  color: #65716a;
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.modernReceiverHeader strong {
+  color: #14221b;
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  font-weight: 950;
+  line-height: 1;
+}
+
+.modernReceiverHeaderMeta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+  color: #14221b;
+}
+
+.modernReceiverHeaderMeta strong {
+  font-size: clamp(1.5rem, 3vw, 2.4rem);
+}
+
+.modernReceiverOnline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(31, 78, 52, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 8px 11px;
+  color: #244237 !important;
+  font-weight: 900 !important;
+}
+
+.modernReceiverLayoutButton {
+  min-height: 42px;
+  border: 1px solid rgba(20, 34, 27, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #244237;
+  font: inherit;
+  font-weight: 900;
+  padding: 8px 14px;
+}
+
+.modernReceiverStyleControl .receiverLayoutMenu {
+  top: calc(100% + 8px);
+  right: 0;
+}
+
+.modernAskTellCard,
+.modernReceiverCard,
+.modernReceiverTile {
+  border: 1px solid rgba(20, 34, 27, 0.11);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 18px 48px rgba(36, 62, 48, 0.1);
+}
+
+.modernAskTellCard {
+  grid-area: ask;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: start;
+  gap: 18px;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(31, 105, 70, 0.94), rgba(31, 82, 112, 0.9)),
+    #1f6946;
+  color: #ffffff;
+  padding: clamp(28px, 5vw, 54px);
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.modernAskTellCard span {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 1rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.modernAskTellCard h1 {
+  margin: 8px 0;
+  font-size: clamp(3.6rem, 8vw, 6.5rem);
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 0.9;
+}
+
+.modernAskTellCard p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: clamp(1.18rem, 2.2vw, 1.55rem);
+  font-weight: 800;
+}
+
+.modernAskTellButton {
+  min-width: 148px;
+  min-height: 76px;
+  border: 0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1f5b3d;
+  font: inherit;
+  font-size: 1.3rem;
+  font-weight: 950;
+  box-shadow: 0 14px 28px rgba(11, 34, 23, 0.22);
+}
+
+.modernReceiverCard {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 22px;
+  color: #14221b;
+}
+
+.modernReceiverContext {
+  grid-area: context;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto minmax(92px, auto);
+  gap: 14px;
+  min-height: 0;
+}
+
+.modernReceiverCard > span,
+.modernReceiverTile span {
+  color: #65716a;
+  font-size: 0.92rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.modernGoalsCard {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.modernGoalsCard h2 {
+  margin: 0 0 8px;
+  font-size: 1.65rem;
+}
+
+.modernGoalsCard :global(.today-focus-list) {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.modernGoalsCard :global(.today-focus-complete-button) {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: #14221b;
+  font: inherit;
+  font-size: 1.02rem;
+  font-weight: 850;
+  text-align: left;
+}
+
+.modernGoalsCard :global(.today-focus-checkbox)::before {
+  content: "✓";
+  color: #2f7e50;
+  font-weight: 950;
+}
+
+.modernAppointmentCard {
+  border: 1px solid rgba(20, 34, 27, 0.11);
+  color: #14221b;
+  font: inherit;
+  text-align: left;
+}
+
+.modernAppointmentCard strong {
+  font-size: clamp(1.45rem, 3vw, 2.1rem);
+  line-height: 1.05;
+}
+
+.modernAppointmentCard span:last-child {
+  color: #65716a;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.modernNotificationCard {
+  align-content: center;
+  border: 0;
+  text-align: center;
+}
+
+.modernNotificationCard p,
+.modernReceiverLowerGrid p {
+  margin: 0;
+  color: #2a3830;
+  font-size: 1.08rem;
+  font-weight: 820;
+  line-height: 1.32;
+}
+
+.modernReceiverGrid {
+  grid-area: actions;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.modernReceiverTile {
+  display: grid;
+  align-content: space-between;
+  min-height: 88px;
+  color: #14221b;
+  font: inherit;
+  padding: 18px;
+  text-align: left;
+}
+
+.modernReceiverTile strong {
+  font-size: 1.32rem;
+  font-weight: 950;
+}
+
+.modernModal {
+  align-items: center;
+  justify-items: center;
+  background: rgba(15, 26, 20, 0.38);
+  padding: clamp(18px, 3vw, 32px);
+}
+
+.modernModalPanel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 18px;
+  width: min(980px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+  min-height: min(620px, calc(100dvh - 48px));
+  overflow: hidden;
+  border: 1px solid rgba(20, 34, 27, 0.12);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #14221b;
+  padding: clamp(22px, 3vw, 32px);
+  box-shadow: 0 28px 72px rgba(15, 26, 20, 0.24);
+}
+
+.modernModalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 0;
+}
+
+.modernModalHeader > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.modernModalHeader span {
+  color: #65716a;
+  font-size: 0.92rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.modernModalHeader h2 {
+  margin: 0;
+  color: #14221b;
+  font-size: clamp(1.7rem, 3vw, 2.45rem);
+  font-weight: 950;
+  line-height: 1.02;
+}
+
+.modernPrimaryButton,
+.modernSecondaryButton {
+  min-height: 48px;
+  border: 1px solid rgba(20, 34, 27, 0.12);
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 920;
+  padding: 10px 18px;
+}
+
+.modernPrimaryButton {
+  background: #246d48;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(31, 105, 70, 0.18);
+}
+
+.modernSecondaryButton {
+  background: #eef4f0;
+  color: #244237;
+}
+
+.modernPrimaryButton:disabled,
+.modernSecondaryButton:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.modernScrollableContent {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.modernAskTellPanel {
+  width: min(1080px, 100%);
+}
+
+.modernAskTellBody {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.82fr) minmax(0, 1.18fr);
+  gap: 20px;
+  min-height: 0;
+}
+
+.modernAskTellVoice,
+.modernAskTellDraft {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+}
+
+.modernAskTellDraft {
+  grid-template-rows: minmax(0, 1fr) auto auto;
+}
+
+.modernExampleGrid {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+}
+
+.modernExampleButton {
+  min-height: 48px;
+  border: 1px solid rgba(20, 34, 27, 0.11);
+  border-radius: 16px;
+  background: #f6faf7;
+  color: #14221b;
+  font: inherit;
+  font-weight: 850;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.modernRequestInput {
+  width: 100%;
+  min-height: 0;
+  border: 1px solid rgba(20, 34, 27, 0.12);
+  border-radius: 20px;
+  background: #fbfdfb;
+  color: #14221b;
+  font: inherit;
+  font-size: 1.12rem;
+  font-weight: 700;
+  line-height: 1.35;
+  padding: 18px;
+  resize: none;
+}
+
+.modernCallSummaryPanel {
+  width: min(980px, 100%);
+  min-height: min(700px, calc(100dvh - 32px));
+}
+
+.modernCallSummaryContent {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.modernCallSummaryInput {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 360px;
+  overflow: auto;
+}
+
+.modernAppointmentDetailPanel {
+  width: min(720px, 100%);
+  min-height: min(460px, calc(100dvh - 48px));
+  max-height: min(560px, calc(100dvh - 48px));
+}
+
+.modernReplacePrompt {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(137, 104, 30, 0.22);
+  border-radius: 18px;
+  background: #fff8df;
+  padding: 14px;
+}
+
+.modernReplacePrompt p,
+.modernReplacePrompt strong {
+  margin: 0;
+}
+
+.modernReplacePrompt div,
+.modernActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.modernCompactPanel {
+  width: min(680px, 100%);
+  min-height: auto;
+  grid-template-rows: auto auto;
+}
+
+.modernReaderPanel,
+.modernAllMessagesPanel {
+  width: min(860px, 100%);
+}
+
+.modernWeightEntry {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.modernReaderText {
+  margin: 0;
+  color: #14221b;
+  font-size: clamp(1.15rem, 2.4vw, 1.45rem);
+  font-weight: 750;
+  line-height: 1.42;
+  white-space: pre-wrap;
+}
+
+.modernAskedText {
+  margin: 0 0 14px;
+  color: #65716a;
+  font-size: 1.02rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.modernMeaningConfirmation {
+  display: grid;
+  gap: 12px;
+  max-width: 620px;
+}
+
+.modernMeaningConfirmation span {
+  color: #65716a;
+  font-size: 0.92rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.modernMeaningConfirmation p {
+  margin: 0;
+  color: #14221b;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  font-weight: 950;
+  line-height: 1.12;
+}
+
+.modernMeaningConfirmation strong {
+  color: #244237;
+  font-size: clamp(1.18rem, 2.4vw, 1.5rem);
+  font-weight: 950;
+}
+
+.modernMeaningConfirmation small {
+  color: #65716a;
+  font-size: 1rem;
+  font-weight: 820;
+  line-height: 1.32;
+}
+
+.modernHelperText {
+  margin: 0;
+  color: #65716a;
+  font-size: 0.98rem;
+  font-weight: 850;
+}
+
+.modernDetailStack {
+  display: grid;
+  gap: 12px;
+  color: #14221b;
+}
+
+.modernDetailStack strong {
+  font-size: clamp(1.18rem, 2.4vw, 1.5rem);
+  font-weight: 950;
+  line-height: 1.2;
+}
+
+.modernDetailStack p {
+  margin: 0;
+  color: #4c5b52;
+  font-size: 1.04rem;
+  font-weight: 760;
+  line-height: 1.36;
+}
+
+.modernStatusPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  border-radius: 999px;
+  background: #edf4ef;
+  color: #244237;
+  font-weight: 900;
+  padding: 8px 14px;
+}
+
+.modernMessageList {
+  display: grid;
+  gap: 12px;
+}
+
+.modernMessageRow {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid rgba(20, 34, 27, 0.1);
+  border-radius: 18px;
+  background: #fbfdfb;
+  color: #14221b;
+  font: inherit;
+  padding: 16px;
+  text-align: left;
+}
+
+.modernMessageRow strong {
+  font-size: 1.08rem;
+  font-weight: 950;
+}
+
+.modernMessageRow span {
+  overflow: hidden;
+  color: #4c5b52;
+  font-size: 0.98rem;
+  font-weight: 760;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modernTileActive {
+  background: #ffffff;
+}
+
+.modernTileMuted {
+  background: rgba(255, 255, 255, 0.52);
+  color: #77817a;
+}
+
+.modernTileMuted strong {
+  color: #77817a;
+}
+
+@media (max-width: 760px) {
+  .modernReceiverMode .applianceFrame {
+    display: block;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .modernReceiverMode .receiverShell {
+    width: 100%;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .modernReceiverHome {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas:
+      "header"
+      "context"
+      "ask"
+      "actions";
+  }
+
+  .modernReceiverHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .modernAskTellCard,
+  .modernReceiverGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modernAskTellBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modernModalPanel {
+    min-height: calc(100dvh - 36px);
+  }
+}
+
 .statusZone,
 .contactZone,
 .actionZone,
@@ -421,16 +1532,21 @@
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 12px;
   min-height: 154px;
+  overflow: visible;
+  position: relative;
+  z-index: 70;
 }
 
 .deskPhoneMode .statusZone {
   grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.2fr) minmax(250px, 0.82fr);
   align-items: center;
   gap: 12px;
+  overflow: visible;
   border-color: transparent;
   background: transparent;
   padding: 6px 18px 10px;
   position: relative;
+  z-index: 15;
   box-shadow: none;
 }
 
@@ -512,13 +1628,14 @@
 .receiverLayoutControl {
   position: relative;
   display: inline-grid;
+  z-index: 120;
 }
 
 .receiverLayoutMenu {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 35;
+  z-index: 121;
   display: grid;
   width: 150px;
   gap: 5px;
@@ -590,21 +1707,19 @@
   justify-content: center;
   width: max-content;
   max-width: 100%;
-  min-height: 30px;
-  border: 2px solid #26661a;
-  border-radius: 8px;
-  background: #e7f1e3;
-  color: #17440f;
-  padding: 3px 8px;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #3cac42;
+  padding: 0;
   font-size: 0.98rem;
   font-weight: 950;
   line-height: 1.05;
 }
 
 .offlineStatus {
-  border-color: #9a8d70;
-  background: #eeece5;
-  color: #5d675f;
+  color: #303833;
 }
 
 .timeBlock span,
@@ -657,7 +1772,7 @@
     inset 0 2px 0 rgba(255, 255, 255, 0.74),
     0 5px 0 rgba(42, 31, 21, 0.34),
     0 8px 13px rgba(50, 37, 22, 0.18);
-  z-index: 1;
+  z-index: 12;
 }
 
 .applianceAppointmentPanel:focus-visible {
@@ -974,6 +2089,20 @@
   padding: 12px 16px;
 }
 
+.gxvAskTellHomeMode .receiverShell {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  padding: 12px 16px;
+}
+
+.gxvAskTell2HomeMode .receiverShell {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  padding: 12px 16px;
+}
+
 .gxvFocusHomeMode .actionZone {
   position: relative;
   grid-column: 1;
@@ -988,6 +2117,40 @@
     "greeting greeting greeting greeting time time time utilities utilities utilities utilities utilities";
   gap: 16px 14px;
   padding: 10px 18px 8px;
+}
+
+.gxvAskTellHomeMode .actionZone {
+  position: relative;
+  grid-column: 1;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: 132px 178px 126px 70px;
+  grid-template-areas:
+    "focus focus focus focus focus focus controls controls time time time time"
+    "ask ask ask ask ask ask ask ask ask ask ask ask"
+    "upcoming upcoming upcoming upcoming upcoming upcoming secondary secondary secondary secondary secondary secondary"
+    "greeting greeting greeting greeting utilities utilities utilities utilities utilities utilities utilities utilities";
+  gap: 14px;
+  padding: 10px 18px 8px;
+}
+
+.gxvAskTell2HomeMode .actionZone {
+  position: relative;
+  grid-column: 1;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: 184px 142px 34px 28px 38px 68px;
+  grid-template-areas:
+    "focus focus focus focus focus focus ask ask ask ask ask ask"
+    "upcoming upcoming upcoming upcoming upcoming upcoming ask ask ask ask ask ask"
+    "notification notification notification notification notification notification secondary secondary secondary secondary secondary secondary"
+    "notification notification notification notification notification notification secondary secondary secondary secondary secondary secondary"
+    "max max max max max max secondary secondary secondary secondary secondary secondary"
+    "greeting greeting greeting time time time utilities utilities utilities utilities utilities utilities";
+  gap: 12px 14px;
+  padding: 10px 18px 12px;
 }
 
 .focusHomeGreetingPanel,
@@ -1072,6 +2235,43 @@
   font-size: 1.24rem;
 }
 
+.gxvAskTell2HomeMode .focusHomeGreetingPanel {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-areas:
+    "logo greeting"
+    "logo name";
+  align-content: center;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 0 6px;
+}
+
+.gxvAskTell2HomeMode .focusHomeGreetingPanel .focusHomeLogo {
+  grid-area: logo;
+}
+
+.gxvAskTell2HomeMode .focusHomeGreetingPanel span {
+  grid-area: greeting;
+  min-width: 0;
+  font-size: 0.92rem;
+}
+
+.gxvAskTell2HomeMode .focusHomeGreetingPanel strong {
+  grid-area: name;
+  display: -webkit-box;
+  min-width: 0;
+  max-height: 2.1em;
+  overflow: hidden;
+  font-size: 1.05rem;
+  line-height: 1.02;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .focusHomeTalkAction {
   grid-area: talk;
   grid-template-columns: 126px minmax(0, 1fr);
@@ -1136,12 +2336,70 @@
   box-shadow: none;
 }
 
+.todayFocusPanelMenuOpen {
+  z-index: 260;
+}
+
 .todayFocusPanel h2 {
   margin: 0;
   color: #17231d;
   font-size: 1.52rem;
   font-weight: 950;
   line-height: 1.05;
+}
+
+.todayFocusHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.todayFocusHeader .fullscreenTinyButton {
+  align-self: start;
+  min-width: 74px;
+  min-height: 45px;
+  font-size: 1rem;
+}
+
+.gxvAskTell2HomeMode .todayFocusPanel {
+  gap: 6px;
+  padding-top: 0;
+}
+
+.gxvAskTell2HomeMode .todayFocusHeader {
+  display: grid;
+  grid-template-columns: minmax(34px, 1fr) auto minmax(34px, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 0 28px 0 14px;
+  min-height: 28px;
+}
+
+.gxvAskTell2HomeMode .todayFocusHeader::before,
+.gxvAskTell2HomeMode .todayFocusHeader::after {
+  content: "";
+  height: 1px;
+  background: rgba(95, 105, 98, 0.58);
+}
+
+.gxvAskTell2HomeMode .todayFocusHeader h2 {
+  grid-column: 2;
+  color: rgba(95, 105, 98, 0.9);
+  font-size: 1.38rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: center;
+}
+
+.gxvAskTell2HomeMode .todayFocusPanel :global(.today-focus-list) {
+  gap: 14px;
+}
+
+.gxvAskTell2HomeMode .todayFocusPanel :global(.today-focus-complete-button) {
+  min-height: 44px;
 }
 
 .todayFocusPanel :global(.today-focus-list) {
@@ -1158,7 +2416,7 @@
 }
 
 .todayFocusPanel :global(.today-focus-list-item-open) {
-  z-index: 30;
+  z-index: 120;
 }
 
 .todayFocusPanel :global(.today-focus-item-row) {
@@ -1168,9 +2426,14 @@
   gap: 8px;
 }
 
+.todayFocusPanel :global(.today-focus-list-receiver) :global(.today-focus-item-row) {
+  grid-template-columns: minmax(0, 1fr) 58px;
+}
+
 .todayFocusPanel :global(.today-focus-complete-button) {
+  position: relative;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
+  grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -1189,12 +2452,36 @@
   white-space: nowrap;
 }
 
+.todayFocusPanel :global(.today-focus-undone-overlay) {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: rgba(251, 250, 243, 0.96);
+  color: #17231d;
+  font-size: 1.05rem;
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
+  pointer-events: none;
+}
+
+.todayFocusPanel :global(.today-focus-title) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .todayFocusPanel :global(.today-focus-checkbox) {
   display: grid;
   place-items: center;
   width: 24px;
   height: 24px;
-  border: 0;
+  box-sizing: border-box;
+  border: 3px solid #5d675f;
+  border-radius: 5px;
   color: #5d675f;
   font-size: 1.55rem;
   font-weight: 950;
@@ -1202,7 +2489,7 @@
 }
 
 .todayFocusPanel :global(.today-focus-checkbox)::before {
-  content: "✓";
+  content: "";
 }
 
 .todayFocusPanel :global(.today-focus-complete-active) {
@@ -1213,16 +2500,34 @@
   outline-offset: 2px;
 }
 
+.todayFocusPanel :global(.today-focus-list-home) :global(.today-focus-complete-active) {
+  grid-template-columns: 30px minmax(0, 1fr) 92px;
+}
+
 .todayFocusPanel :global(.today-focus-complete-active) :global(.today-focus-checkbox) {
-  color: #17440f;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 0;
+  color: #2fb84a;
+  font-size: 2.25rem;
+  transform: rotate(-8deg);
+}
+
+.todayFocusPanel :global(.today-focus-complete-active) :global(.today-focus-checkbox)::before {
+  content: "✓";
 }
 
 .todayFocusPanel :global(.today-focus-undo-label) {
+  display: grid;
+  place-items: center;
   color: #17440f;
-  font-size: 0.94rem;
+  font-size: 1.05rem;
   font-weight: 950;
   line-height: 1;
-  padding-right: 4px;
+  min-height: 30px;
+  padding-right: 6px;
+  text-align: right;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -1241,16 +2546,66 @@
   line-height: 1;
 }
 
+.todayFocusPanel :global(.today-focus-snooze-button) {
+  width: 46px;
+  height: 34px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #5d675f;
+  font-size: 0.84rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  transform: translateX(8px) rotate(-8deg);
+}
+
+.todayFocusPanel :global(.today-focus-snooze-mark) {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1px;
+  line-height: 0.9;
+}
+
+.todayFocusPanel :global(.today-focus-snooze-mark span:nth-child(1)) {
+  font-size: 1.08rem;
+}
+
+.todayFocusPanel :global(.today-focus-snooze-mark span:nth-child(2)) {
+  font-size: 0.86rem;
+}
+
+.todayFocusPanel :global(.today-focus-snooze-mark span:nth-child(3)) {
+  font-size: 0.68rem;
+}
+
 .todayFocusPanel :global(.today-focus-preference-button:focus-visible),
 .todayFocusPanel :global(.today-focus-preference-button:hover) {
-  background: #eef3ed;
+  background: transparent;
   color: #17231d;
   outline: 3px solid #8bb4d7;
 }
 
+.todayFocusPanel :global(.today-focus-undo-button) {
+  width: 58px;
+  height: 34px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #17440f;
+  transform: none;
+}
+
+.todayFocusPanel :global(.today-focus-undo-button) :global(.today-focus-undo-label) {
+  min-height: 0;
+  padding-right: 0;
+  color: inherit;
+  font-size: 0.92rem;
+  text-align: center;
+}
+
 .todayFocusPanel :global(.today-focus-preference-popover) {
   position: absolute;
-  z-index: 40;
+  z-index: 240;
   right: 0;
   top: 34px;
   display: grid;
@@ -1330,6 +2685,57 @@
   height: 100%;
   transform: none;
   padding: 18px 28px 20px;
+}
+
+.receiverNotificationPanel {
+  background: transparent;
+  border: 0;
+  grid-area: notification;
+  display: grid;
+  align-items: end;
+  justify-items: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 16px 4px;
+  color: #17231d;
+}
+
+.receiverNotificationAction {
+  cursor: pointer;
+  min-height: 96px;
+  padding: 18px 24px;
+  touch-action: manipulation;
+}
+
+.receiverNotificationAction:disabled {
+  cursor: default;
+}
+
+.receiverNotificationAction:not(:disabled):active {
+  transform: translateY(-6px);
+}
+
+.modernNotificationCard[aria-hidden="true"],
+.receiverNotificationPanel[aria-hidden="true"] {
+  visibility: hidden;
+}
+
+.receiverNotificationPanel p {
+  max-width: 30ch;
+  margin: 0;
+  overflow: visible;
+  font-size: clamp(1rem, 2.35vw, 1.18rem);
+  font-weight: 900;
+  line-height: 1.1;
+  text-align: center;
+  white-space: normal;
+}
+
+.gxvAskTell2HomeMode .focusHomeAppointmentPanel {
+  align-content: center;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding-block: 20px;
 }
 
 .focusHomeAppointmentPanel:active {
@@ -1438,12 +2844,541 @@
   font-size: 1rem;
 }
 
+.focusHomeUtilityControl {
+  width: 100%;
+  height: 100%;
+}
+
+.focusHomeUtilityControl .receiverLayoutMenu {
+  top: auto;
+  right: 0;
+  bottom: calc(100% + 8px);
+}
+
+.askTellFocusPanel {
+  padding-left: 8px;
+}
+
+.askTellPrimaryAction {
+  grid-area: ask;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  min-width: 0;
+  min-height: 0;
+  border: 5px solid #17440f;
+  border-radius: 10px;
+  background: #236b1b;
+  color: #ffffff;
+  font: inherit;
+  padding: 18px 28px;
+  text-align: center;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.22),
+    0 6px 0 #143a0e,
+    0 10px 16px rgba(50, 37, 22, 0.22);
+}
+
+.askTellPrimaryAction span {
+  font-size: 4.35rem;
+  font-weight: 950;
+  line-height: 0.95;
+}
+
+.askTellPrimaryAction:active {
+  transform: translateY(4px);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.18),
+    0 2px 0 #143a0e,
+    0 4px 8px rgba(50, 37, 22, 0.18);
+}
+
+.askTellSecondaryGrid {
+  grid-area: secondary;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.askTellSecondaryGrid .secondaryAction {
+  min-height: 0;
+  height: 100%;
+  font-size: 1.55rem;
+}
+
+.gxvAskTell2HomeMode .askTellSecondaryGrid .secondaryAction {
+  font-size: 2.65rem;
+}
+
+.gxvAskTell2HomeMode .askTellSecondaryGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.askTell2PrimaryAction span {
+  font-size: 4rem;
+}
+
+.askTell2MaxPanel {
+  grid-area: max;
+  display: grid;
+  align-items: end;
+  justify-content: end;
+  min-height: 0;
+}
+
+.askTell2MaxPanel .fullscreenTinyButton {
+  min-width: 68px;
+  min-height: 34px;
+  border: 3px solid #919892;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow:
+    0 3px 0 rgba(42, 31, 21, 0.22),
+    0 5px 8px rgba(60, 44, 28, 0.1);
+  font-size: 1rem;
+  padding: 2px 8px 3px;
+}
+
+.gxvAskTell2HomeMode .focusHomeTimePanel {
+  align-content: center;
+  justify-content: end;
+  justify-items: end;
+  padding: 0 8px 0 0;
+  text-align: right;
+}
+
+.gxvAskTell2HomeMode .focusHomeTimePanel strong {
+  font-size: 2.65rem;
+}
+
+.askTell2TimePanel {
+  display: grid;
+  grid-template-columns: max-content;
+  grid-template-areas:
+    "time"
+    "date";
+  row-gap: 2px;
+  width: 100%;
+}
+
+.askTell2TimePanel .dateControlRow {
+  grid-area: date;
+  justify-self: end;
+  line-height: 1;
+}
+
+.askTell2TimePanel strong {
+  grid-area: time;
+  justify-self: end;
+}
+
+.askTell2ConnectionPanel {
+  align-items: center;
+  justify-content: center;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  cursor: default;
+  pointer-events: none;
+}
+
+.askTell2ConnectionStatus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  margin-left: 0;
+  padding: 2px 4px;
+  transform: translateY(1px);
+}
+
+.askTell2ConnectionStatus .onlineStatus,
+.askTell2ConnectionStatus .offlineStatus {
+  font-size: 1.05rem;
+}
+
+.askTell2ConnectionLight {
+  display: inline-block;
+  flex: 0 0 13px;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #4f5a52;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+
+.askTell2ConnectionLightOnline {
+  background: #3cac42;
+}
+
+.askTell2ConnectionLightOffline {
+  background: #303833;
+}
+
+.gxvAskTell2HomeMode .focusHomeGreetingPanel {
+  padding: 4px 10px 4px 8px;
+}
+
+.receiverHomeDisabledAction,
+.receiverHomeDisabledAction:disabled {
+  border-color: #858d87 !important;
+  background: #cfd5d0 !important;
+  color: #5c665f !important;
+  cursor: default;
+  opacity: 1;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.5),
+    0 3px 0 rgba(86, 94, 89, 0.45),
+    0 5px 8px rgba(34, 44, 38, 0.1) !important;
+}
+
+.receiverHomeDisabledAction:active {
+  transform: none;
+}
+
+.askTellAppointmentPanel strong {
+  font-size: 1.72rem;
+}
+
+.askTellPanel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+}
+
+.applianceFullscreenModal .askTellPanel {
+  width: calc(100% - 36px);
+  height: calc(100% - 34px);
+  max-height: calc(100% - 34px);
+  align-content: stretch;
+  overflow: hidden;
+}
+
+.askTellHeaderRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(138px, 176px);
+  align-items: center;
+  gap: 12px;
+}
+
+.askTellHeaderRow h2 {
+  margin: 0;
+  color: #17231d;
+  font-size: 1.9rem;
+  font-weight: 950;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+
+.askTellHeaderRow .modalButton {
+  min-height: 64px;
+  font-size: 1.28rem;
+  padding-inline: 14px;
+}
+
+.askTellSplitPane {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.askTellExitOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  border-radius: 10px;
+  background: rgba(17, 28, 22, 0.48);
+  padding: 18px;
+}
+
+.askTellExitPrompt {
+  display: grid;
+  width: min(620px, 92%);
+  gap: 12px;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17231d;
+  padding: 22px;
+  text-align: center;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+}
+
+.askTellExitPrompt h3,
+.askTellExitPrompt p {
+  margin: 0;
+}
+
+.askTellExitPrompt h3 {
+  font-size: 1.85rem;
+  font-weight: 900;
+}
+
+.askTellExitPrompt p {
+  font-size: 1.18rem;
+  font-weight: 850;
+}
+
+.askTellExitPrompt div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.askTellExitPrompt .modalButton {
+  min-height: 72px;
+  font-size: 1.2rem;
+}
+
+.askTellLeftPane,
+.askTellRightPane {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  align-content: start;
+  gap: 16px;
+  padding: 4px 16px 8px;
+}
+
+.askTellLeftPane {
+  padding-left: 0;
+}
+
+.askTellRightPane {
+  grid-template-rows: minmax(0, 1fr) auto auto auto;
+  padding-right: 0;
+}
+
+.askTellTextToolbar {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.58fr) minmax(180px, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.askTellSizeRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.askTellSizeButton {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  min-width: 0;
+  min-height: 52px;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17231d;
+  font: inherit;
+  font-weight: 950;
+  line-height: 1;
+  padding: 4px 6px;
+}
+
+.askTellSizeStandard {
+  font-size: 1.08rem;
+}
+
+.askTellSizeLarge {
+  font-size: 1.42rem;
+}
+
+.askTellSizeExtra {
+  font-size: 1.84rem;
+}
+
+.askTellSizeButtonSelected {
+  border-color: #17440f;
+  background: #26661a;
+  color: #ffffff;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.2),
+    0 3px 0 #17440f;
+}
+
+.askTellPageControls {
+  grid-template-columns: minmax(48px, 0.58fr) auto minmax(48px, 0.58fr);
+  gap: 8px;
+}
+
+.askTellPageControls .modalButton {
+  min-height: 52px;
+  font-size: 1.35rem;
+  padding: 6px 8px;
+}
+
+.askTellPageControls span {
+  min-width: 72px;
+  font-size: 1.12rem;
+}
+
+.askTellExampleList {
+  display: grid;
+  gap: 12px;
+}
+
+.askTellExampleButton {
+  display: block;
+  min-height: 58px;
+  border: 3px solid #9ca59f;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17231d;
+  font: inherit;
+  font-size: 1.12rem;
+  font-weight: 950;
+  line-height: 1.12;
+  padding: 10px 12px;
+  text-align: left;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.82),
+    0 3px 0 #b5bdb7,
+    0 5px 8px rgba(34, 44, 38, 0.12);
+}
+
+.askTellExampleButton:active {
+  background: #e8ebdf;
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.12),
+    0 1px 0 #b5bdb7;
+}
+
+.askTellSpeechAction {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 104px;
+  border: 5px solid #17440f;
+  border-radius: 10px;
+  background: #236b1b;
+  color: #ffffff;
+  font: inherit;
+  font-size: 2rem;
+  font-weight: 950;
+  line-height: 1.08;
+  padding: 14px 22px;
+  text-align: left;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.2),
+    0 6px 0 #143a0e;
+}
+
+.askTellSpeechAction .talkFooterIcon {
+  width: 68px;
+  height: 52px;
+}
+
+.askTellInput {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  resize: none;
+}
+
+.askTellReplacePrompt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 10px 18px;
+  border: 4px solid #8b6f22;
+  border-radius: 10px;
+  background: #fff7d9;
+  padding: 12px 14px;
+  color: #17231d;
+}
+
+.askTellReplacePrompt p,
+.askTellReplacePrompt strong {
+  margin: 0;
+}
+
+.askTellReplacePrompt p {
+  color: #5a4b1e;
+  font-size: 1.05rem;
+  font-weight: 950;
+}
+
+.askTellReplacePrompt strong {
+  overflow: hidden;
+  font-size: 1.25rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.askTellReplacePrompt div {
+  grid-column: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.askTellReplacePrompt .modalButton {
+  min-width: 0;
+  min-height: 58px;
+  font-size: 1rem;
+}
+
 .focusHomeUtilityStack .focusHomeUtilityAction:first-child:nth-last-child(2) {
   grid-column: 2;
 }
 
 .focusHomeUtilityStack .focusHomeUtilityAction:nth-child(2):last-child {
   grid-column: 3;
+}
+
+.gxvAskTell2HomeMode .focusHomeUtilityStack {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.gxvAskTell2HomeMode .focusHomeUtilityStack .focusHomeUtilityAction:first-child:nth-last-child(2) {
+  grid-column: 1;
+}
+
+.gxvAskTell2HomeMode .focusHomeUtilityStack .focusHomeUtilityAction:nth-child(2):last-child {
+  grid-column: 2;
+}
+
+.gxvAskTell2HomeMode .focusHomeUtilityStack .focusHomeUtilityAction {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  align-self: start;
+  justify-self: center;
+  width: 100%;
+  height: 54px;
+  border: 3px solid #919892;
+  border-radius: 6px;
+  background: transparent;
+  padding: 5px 10px 7px;
+  line-height: 1.02;
+  box-shadow:
+    0 3px 0 rgba(42, 31, 21, 0.22),
+    0 5px 8px rgba(60, 44, 28, 0.1);
+}
+
+.gxvAskTell2HomeMode .focusHomeUtilityStack .focusHomeUtilityAction > span {
+  transform: translateY(1px);
 }
 
 .cleaningFooterRow {
@@ -2119,6 +4054,14 @@
   background: #fff7d8;
 }
 
+.receiverTraceDiagnostic {
+  margin: 4px 0;
+  color: rgba(23, 35, 29, 0.48);
+  font-size: clamp(0.78rem, 1.5cqw, 1rem);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
 .soundHelpPanel {
   display: grid;
   gap: 8px;
@@ -2662,6 +4605,30 @@
   resize: vertical;
 }
 
+.messageCondensationInput {
+  min-height: clamp(84px, 14dvh, 128px);
+  padding: clamp(12px, 1.6cqw, 18px);
+  font-size: clamp(1.05rem, 2.2vw, 1.55rem);
+  font-weight: 850;
+  line-height: 1.28;
+}
+
+.messageCondensationPrompt {
+  font-size: clamp(1.15rem, 2.6vw, 1.65rem);
+  line-height: 1.1;
+}
+
+.messageCondensationCounter {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: rgba(23, 35, 29, 0.62);
+  font-size: clamp(0.95rem, 1.8vw, 1.18rem);
+  font-weight: 850;
+  line-height: 1.1;
+}
+
 .requestExamples {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2755,7 +4722,7 @@
 .readerText {
   min-height: 0;
   max-height: 100%;
-  overflow: auto;
+  overflow: hidden;
   text-align: left;
 }
 
@@ -2765,6 +4732,15 @@
   gap: 12px;
   max-height: calc(100dvh - 34px);
   overflow: hidden;
+}
+
+.applianceReaderPanel {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  padding: clamp(14px, 2.8dvh, 22px) clamp(18px, 2.4vw, 28px);
 }
 
 .readerTitle {
@@ -2861,7 +4837,7 @@
 .messageBodySlot {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 12px;
   min-height: 0;
   overflow: hidden;
@@ -2870,7 +4846,7 @@
 .messageFeedbackOverlay {
   position: absolute;
   z-index: 2;
-  top: calc(clamp(70px, 8dvh, 92px) + 22px);
+  top: 0;
   right: 0;
   bottom: 0;
   left: 0;
@@ -2887,6 +4863,13 @@
     );
 }
 
+.messageDetailFooter {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) minmax(260px, 0.8fr) minmax(210px, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
 .messageDetailActions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2894,8 +4877,82 @@
   margin-top: 12px;
 }
 
+.messageDetailFooter .messageDetailActions {
+  margin-top: 0;
+}
+
 .messageDetailActions .modalButton {
   font-size: clamp(1.35rem, 3.2vw, 2rem);
+}
+
+.readerCompactSizeRow {
+  display: grid;
+  grid-template-columns: repeat(3, clamp(48px, 6.4dvw, 72px));
+  gap: 8px;
+  justify-content: end;
+  justify-self: end;
+}
+
+.readerCompactPageControls {
+  justify-self: center;
+  display: grid;
+  grid-template-columns: clamp(48px, 6.4dvw, 72px) auto clamp(48px, 6.4dvw, 72px);
+  gap: 8px;
+  align-items: center;
+}
+
+.readerCompactPageControls .modalButton {
+  min-height: clamp(56px, 9dvh, 72px);
+  padding: 0;
+  font-size: clamp(1.35rem, 3.2vw, 2rem);
+}
+
+.readerCompactPageControls span {
+  min-width: 3.4ch;
+  color: #5d675f;
+  font-size: clamp(1.25rem, 2.6vw, 1.7rem);
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
+}
+
+.readerCompactSizeButton {
+  min-height: clamp(56px, 9dvh, 72px);
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #fffdf7;
+  color: #17231d;
+  padding: 0;
+  font: inherit;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.78),
+    0 3px 0 #b9aa8a,
+    0 5px 8px rgba(60, 44, 28, 0.12);
+}
+
+.readerCompactSizeButtonSelected {
+  border-color: #17440f;
+  background: #26661a;
+  color: #ffffff;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.2),
+    0 3px 0 #17440f,
+    0 6px 9px var(--selected-action-shadow);
+}
+
+.readerCompactSizeStandard {
+  font-size: clamp(1.25rem, 2.5vw, 1.65rem);
+  text-transform: lowercase;
+}
+
+.readerCompactSizeLarge {
+  font-size: clamp(1.75rem, 3.3vw, 2.2rem);
+}
+
+.readerCompactSizeExtra {
+  font-size: clamp(2.25rem, 4.3vw, 2.85rem);
 }
 
 .messagePreferenceAction {
@@ -3148,6 +5205,39 @@
   white-space: nowrap;
 }
 
+.askClarificationForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.askClarificationPrompt {
+  color: #17231d;
+  font-size: clamp(1.85rem, 4.6vw, 3.35rem);
+  font-weight: 950;
+  line-height: 1.05;
+}
+
+.askClarificationForm input {
+  min-width: 0;
+  min-height: clamp(58px, 8dvh, 78px);
+  border: 3px solid #aeb6b0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17231d;
+  font: inherit;
+  font-size: clamp(1.25rem, 2.8vw, 1.95rem);
+  font-weight: 850;
+  padding: 10px 14px;
+}
+
+.askClarificationForm input:focus {
+  border-color: #2f6c9f;
+  box-shadow: 0 0 0 4px rgba(47, 108, 159, 0.18);
+  outline: none;
+}
+
 .allMessagesPanel {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
@@ -3272,24 +5362,15 @@
   inset: 0;
   z-index: 50;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   align-items: center;
   justify-items: center;
-  gap: clamp(20px, 4dvh, 32px);
   background: #050605;
   color: #ffffff;
   padding: clamp(28px, 5dvh, 44px) clamp(40px, 6vw, 72px);
   text-align: center;
   touch-action: none;
   user-select: none;
-}
-
-.screenCleaningView h1 {
-  margin: 0;
-  color: #ffffff;
-  font-size: clamp(1.55rem, 3vw, 2.15rem);
-  font-weight: 950;
-  line-height: 1.02;
 }
 
 .screenCleaningCenter {
@@ -3303,10 +5384,11 @@
 .screenCleaningView p {
   margin: 0;
   color: #ffffff;
-  max-width: 820px;
-  font-size: clamp(2rem, 4.5vw, 3.35rem);
+  max-width: min(1500px, 92vw);
+  font-size: clamp(2.2rem, 5.3vw, 5rem);
   font-weight: 950;
-  line-height: 1.12;
+  line-height: 1.05;
+  text-wrap: balance;
   white-space: pre-line;
 }
 
@@ -3356,6 +5438,21 @@
 
 .applianceAskAnswerPanel {
   grid-template-rows: auto minmax(0, 1fr) auto auto;
+}
+
+.applianceMessageCondensationPanel {
+  grid-template-rows: auto auto minmax(84px, 1fr) auto auto;
+  gap: clamp(6px, 1.1dvh, 10px);
+}
+
+.messageCondensationToolbar {
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 112px) minmax(126px, 154px);
+}
+
+.messageCondensationToolbar h2 {
+  white-space: nowrap;
+  font-size: clamp(1.85rem, 3.6vw, 2.35rem);
+  line-height: 1;
 }
 
 .applianceAskRecoveryPanel {
@@ -3413,6 +5510,14 @@
   grid-column: 3;
 }
 
+.applianceMessagesToolbar {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.applianceMessagesToolbar > .modalButton {
+  grid-column: 2;
+}
+
 .applianceReaderSizeRow .readerSizeButtonSelected {
   border-width: 4px;
 }
@@ -3420,6 +5525,22 @@
 .applianceMessageList {
   align-content: start;
   padding: 4px 0;
+  overflow: hidden;
+}
+
+.applianceMessagesFooter {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) minmax(260px, 0.8fr) minmax(210px, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.applianceMessagesFooter > .modalButton {
+  justify-self: start;
+  min-width: min(230px, 100%);
+  min-height: clamp(56px, 9dvh, 72px);
+  padding: 8px 14px;
+  font-size: clamp(1.35rem, 3.2vw, 2rem);
 }
 
 .applianceEmptyText {
@@ -4124,72 +6245,6 @@
 .callSummaryEditBox textarea::placeholder {
   color: #79857e;
   font-weight: 800;
-}
-
-.pendingCallReviewStrip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin: 0 0 16px;
-  border: 4px solid #d8c48b;
-  border-radius: 8px;
-  background: #fff9e8;
-  padding: 16px;
-}
-
-.pendingCallReviewStrip div {
-  display: grid;
-  gap: 4px;
-}
-
-.pendingCallReviewStrip span {
-  color: #5a4b1e;
-  font-size: 0.9rem;
-  font-weight: 950;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.pendingCallReviewStrip strong {
-  color: #173150;
-  font-size: 1.35rem;
-  line-height: 1.1;
-}
-
-.pendingCallReviewStrip button {
-  min-width: 132px;
-  min-height: 58px;
-  border: 0;
-  border-radius: 8px;
-  background: #345d83;
-  color: #fff;
-  font-size: 1.1rem;
-  font-weight: 950;
-}
-
-.deskPhoneMode .pendingCallReviewStrip {
-  position: absolute;
-  z-index: 35;
-  right: 18px;
-  bottom: 18px;
-  left: 18px;
-  margin: 0;
-  padding: 12px 14px;
-  box-shadow: 0 7px 0 rgba(42, 31, 21, 0.22);
-}
-
-.gxvFocusHomeMode .pendingCallReviewStrip {
-  right: auto;
-  width: min(640px, calc(100% - 36px));
-}
-
-.deskPhoneMode .pendingCallReviewStrip strong {
-  font-size: 1.15rem;
-}
-
-.deskPhoneMode .pendingCallReviewStrip button {
-  min-height: 50px;
 }
 
 .incomingCallPanel {

@@ -26,8 +26,34 @@ import {
 import {
   readSupabaseConnectMessages,
   recordSupabaseConnectMessage,
+  recordSupabaseConnectMessageStrict,
 } from "@/app/lib/connect/messaging/server/supabaseMessages";
 import type { ConnectMessageRecord } from "@/app/lib/connect/messaging";
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object") {
+    const payload = error as Record<string, unknown>;
+    const parts = [
+      payload.message,
+      payload.details,
+      payload.hint,
+      payload.code ? `Code: ${payload.code}` : "",
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+
+    if (parts.length > 0) {
+      return parts.join(" ");
+    }
+  }
+
+  const normalized = String(error || "").trim();
+  return normalized || fallback;
+}
 
 export async function GET(request: Request) {
   try {
@@ -112,8 +138,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Unable to load Connect messages.",
+        error: errorMessage(error, "Unable to load Connect messages."),
         localMessages: [],
         mainConnectUserPersonId: null,
         messages: [],
@@ -144,9 +169,10 @@ export async function POST(request: Request) {
     );
 
     const messagePayload = await ensureAudioMessageOriginalPreserved(payload);
-    const message =
-      (await recordSupabaseConnectMessage(messagePayload, access)) ??
-      (await recordLocalConnectMessage(messagePayload));
+    const message = messagePayload.appointmentId
+      ? await recordSupabaseConnectMessageStrict(messagePayload, access)
+      : (await recordSupabaseConnectMessage(messagePayload, access)) ??
+        (await recordLocalConnectMessage(messagePayload));
 
     void forwardPrototypeMessage(messagePayload);
 
@@ -172,11 +198,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Unable to save Connect message.",
+        error: errorMessage(error, "Unable to save Connect message."),
         ok: false,
       },
-      { status: 401 }
+      { status: 503 }
     );
   }
 }

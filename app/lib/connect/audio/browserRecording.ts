@@ -16,6 +16,14 @@ export type ConnectAudioRecording = {
   size: number;
 };
 
+export type ConnectAudioRecordingChunk = {
+  blob: Blob;
+  chunkIndex: number;
+  durationMs: number;
+  mimeType: string;
+  startedAtMs: number;
+};
+
 export type ConnectAudioRecordingController = {
   cancel(): void;
   readonly state: RecordingState;
@@ -33,7 +41,9 @@ export type ConnectAudioCaptureContextInput = {
 };
 
 type RecordingOptions = {
+  chunkIntervalMs?: number;
   maxDurationMs?: number;
+  onChunk?: (chunk: ConnectAudioRecordingChunk) => void | Promise<void>;
   onAutoStop?: (reason: "max_duration" | "silence") => void;
   silenceGraceMs?: number;
   silenceThreshold?: number;
@@ -81,6 +91,12 @@ export async function startConnectAudioRecording(
   const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
   const chunks: Blob[] = [];
   const startedAtMs = Date.now();
+  const chunkCapture = options.chunkIntervalMs && options.onChunk
+    ? createChunkCapture(stream, {
+        chunkIntervalMs: options.chunkIntervalMs,
+        onChunk: options.onChunk,
+      })
+    : null;
   const silenceMonitor = options.stopAfterSilenceMs
     ? createSilenceMonitor(stream, {
         graceMs: options.silenceGraceMs,
@@ -104,6 +120,7 @@ export async function startConnectAudioRecording(
 
   const stopped = new Promise<ConnectAudioRecording>((resolve) => {
     recorder.addEventListener("stop", () => {
+      chunkCapture?.stop();
       silenceMonitor?.stop();
       const blob = new Blob(chunks, {
         type: recorder.mimeType || mimeType || "audio/webm",
@@ -121,9 +138,11 @@ export async function startConnectAudioRecording(
 
   recorder.start();
   silenceMonitor?.start();
+  chunkCapture?.start();
 
   return {
     cancel() {
+      chunkCapture?.stop();
       silenceMonitor?.stop();
       stopStream(stream);
       if (recorder.state === "recording") {
@@ -134,12 +153,115 @@ export async function startConnectAudioRecording(
       return recorder.state;
     },
     stop() {
+      chunkCapture?.stop();
       if (recorder.state === "recording") {
         recorder.stop();
       }
       return stopped;
     },
   };
+}
+
+function createChunkCapture(
+  stream: MediaStream,
+  options: {
+    chunkIntervalMs: number;
+    onChunk: (chunk: ConnectAudioRecordingChunk) => void | Promise<void>;
+  }
+) {
+  let chunkIndex = 0;
+  let intervalId = 0;
+  let stopped = false;
+  const activeRecorders = new Set<MediaRecorder>();
+  const chunkIntervalMs = Math.max(1000, Math.floor(options.chunkIntervalMs));
+  const captureStartedAtMs = Date.now();
+
+  function start() {
+    recordWindow();
+    intervalId = window.setInterval(recordWindow, chunkIntervalMs);
+  }
+
+  function stop() {
+    stopped = true;
+    if (intervalId) {
+      window.clearInterval(intervalId);
+      intervalId = 0;
+    }
+    activeRecorders.forEach((recorder) => {
+      try {
+        if (recorder.state === "recording") recorder.stop();
+      } catch {
+        // Best-effort chunk recorder cleanup.
+      }
+    });
+    activeRecorders.clear();
+  }
+
+  function recordWindow() {
+    if (stopped) return;
+    const currentChunkIndex = chunkIndex;
+    const startedAtMs = Math.max(0, Date.now() - captureStartedAtMs);
+    chunkIndex += 1;
+    void recordChunkWindow(stream, chunkIntervalMs, activeRecorders).then((recording) => {
+      if (!recording || stopped) return;
+      void options.onChunk({
+        ...recording,
+        chunkIndex: currentChunkIndex,
+        startedAtMs,
+      });
+    });
+  }
+
+  return { start, stop };
+}
+
+function recordChunkWindow(
+  stream: MediaStream,
+  durationMs: number,
+  activeRecorders: Set<MediaRecorder>
+) {
+  return new Promise<{
+    blob: Blob;
+    durationMs: number;
+    mimeType: string;
+  } | null>((resolve) => {
+    try {
+      const mimeType = preferredConnectAudioMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks: Blob[] = [];
+      const startedAtMs = Date.now();
+      let resolved = false;
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data?.size) chunks.push(event.data);
+      });
+      recorder.addEventListener("stop", () => {
+        if (resolved) return;
+        resolved = true;
+        activeRecorders.delete(recorder);
+        const blob = new Blob(chunks, {
+          type: recorder.mimeType || mimeType || "audio/webm",
+        });
+        resolve(
+          blob.size
+            ? {
+                blob,
+                durationMs: Math.max(0, Date.now() - startedAtMs),
+                mimeType: blob.type || recorder.mimeType || mimeType || "audio/webm",
+              }
+            : null
+        );
+      });
+
+      activeRecorders.add(recorder);
+      recorder.start();
+      window.setTimeout(() => {
+        if (recorder.state === "recording") recorder.stop();
+      }, durationMs);
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 export function createConnectAudioCaptureId(source = "audio") {

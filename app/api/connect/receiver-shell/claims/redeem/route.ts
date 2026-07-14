@@ -20,6 +20,7 @@ export async function POST(request: Request) {
       hardwareProfile: claim.hardwareProfile,
       mainConnectUserDisplayName: claim.mainConnectUserDisplayName,
       mainConnectUserPersonId: claim.mainConnectUserPersonId,
+      primaryCoordinatorDisplayName: claim.primaryCoordinatorDisplayName,
       ok: true,
       receiverDeviceId: claim.receiverDeviceId,
       receiverInstallId: claim.receiverInstallId || stringValue(body.receiverInstallId),

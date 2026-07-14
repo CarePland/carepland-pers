@@ -1,6 +1,9 @@
 export type ConnectMessageRecord = {
   acknowledgedAt?: string;
   allowsCallbackRequest?: boolean;
+  appointmentId?: string;
+  appointmentStartsAt?: string;
+  appointmentTitle?: string;
   audioArtifactId?: string;
   audioDurationMs?: number;
   audioMimeType?: string;

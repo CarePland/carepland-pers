@@ -128,7 +128,7 @@ export async function recordLocalConnectCall(
     callId:
       input.callId ||
       `connect-call-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-    callerName: input.callerName || "Andrew",
+    callerName: input.callerName || "Care coordinator",
     mainConnectUserPersonId: personId,
     modelSummaryText: input.modelSummaryText,
     generatedSummaryText: input.generatedSummaryText,

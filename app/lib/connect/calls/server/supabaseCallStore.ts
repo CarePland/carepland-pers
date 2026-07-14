@@ -192,7 +192,7 @@ export async function recordSupabaseConnectCall(
       .from("connect_calls")
       .insert({
         care_circle_id: access.careCircleId,
-        caller_display_name: input.callerName || "Andrew",
+        caller_display_name: input.callerName || "Care coordinator",
         main_connect_user_person_id: access.mainConnectUserPersonId,
         receiver_device_id: input.receiverId || null,
         receiver_display_name: input.recipientName || "",
@@ -210,7 +210,7 @@ export async function recordSupabaseConnectCall(
         .from("connect_calls")
         .insert({
           care_circle_id: access.careCircleId,
-          caller_display_name: input.callerName || "Andrew",
+          caller_display_name: input.callerName || "Care coordinator",
           main_connect_user_person_id: access.mainConnectUserPersonId,
           receiver_display_name: input.recipientName || "",
           started_at: isConnectCallState(input.state) && input.state !== "ringing" ? now : null,
@@ -711,7 +711,7 @@ async function trySupabaseCallStore<T>(
 function connectCallRecordFromRow(row: ConnectCallRow): ConnectCallRecord {
   return {
     callId: row.id,
-    callerName: row.caller_display_name || "Andrew",
+    callerName: row.caller_display_name || "Care coordinator",
     approvedSummaryText: row.approved_summary_text || undefined,
     generatedSummaryText: row.generated_summary_text || undefined,
     mainConnectUserPersonId: row.main_connect_user_person_id,

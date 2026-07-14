@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { isMissingServerEnvError } from "../../platform/server/env";
 import { createSupabaseServiceClient } from "../../platform/server/supabase";
 import { careplandRuntimeTempPath } from "../../platform/server/runtimeTemp";
+import { readPrimaryCoordinatorForCareCircle } from "../context/server/primaryCoordinator";
 
 export type ReceiverShellClaimStatus = "available" | "expired" | "revoked" | "used";
 export type ReceiverShellPairingStatus = "pending" | "paired" | "expired" | "revoked" | "used";
@@ -25,6 +26,7 @@ export type ReceiverShellClaimRecord = {
   locationLabel?: string;
   mainConnectUserPersonId?: string;
   mainConnectUserDisplayName?: string;
+  primaryCoordinatorDisplayName?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -58,6 +60,7 @@ export type ReceiverShellBindingRecord = {
   locationLabel?: string;
   mainConnectUserPersonId?: string;
   mainConnectUserDisplayName?: string;
+  primaryCoordinatorDisplayName?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -97,6 +100,7 @@ export type ReceiverShellDeviceProfile = {
   locationLabel?: string;
   mainConnectUserPersonId?: string;
   mainConnectUserDisplayName?: string;
+  primaryCoordinatorDisplayName?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -531,6 +535,7 @@ export async function verifyReceiverShellBinding(
     locationLabel: claim.locationLabel,
     mainConnectUserPersonId: claim.mainConnectUserPersonId,
     mainConnectUserDisplayName: claim.mainConnectUserDisplayName,
+    primaryCoordinatorDisplayName: claim.primaryCoordinatorDisplayName,
     nativeManufacturer: claim.nativeManufacturer,
     nativeModel: claim.nativeModel,
     nativeSdk: claim.nativeSdk,
@@ -1121,12 +1126,16 @@ async function tryRedeemSupabaseReceiverShellClaim(
     const displayNames = await tryGetSupabaseCareSubjectDisplayNames([
       current.mainConnectUserPersonId,
     ]);
+    const primaryCoordinator = await readPrimaryCoordinatorForCareCircle(
+      current.careCircleId
+    );
 
     return {
       ...supabaseClaimRecord(updated),
       careCircleId: current.careCircleId,
       mainConnectUserDisplayName: displayNames.get(current.mainConnectUserPersonId || ""),
       mainConnectUserPersonId: current.mainConnectUserPersonId,
+      primaryCoordinatorDisplayName: primaryCoordinator.displayName,
     };
   } catch (error) {
     if (error instanceof ReceiverShellClaimError) throw error;
@@ -1216,13 +1225,15 @@ async function tryVerifySupabaseReceiverShellBinding(
     const displayNames = await tryGetSupabaseCareSubjectDisplayNames([
       mainConnectUserPersonId,
     ]);
+    const careCircleId = stringFromRow(data.care_circle_id);
+    const primaryCoordinator = await readPrimaryCoordinatorForCareCircle(careCircleId);
 
     return {
       bindingStatus: "bound",
       capabilityStatuses:
         normalizeCapabilityStatuses(input.capabilityStatuses) ||
         capabilityStatusesFromRow(data.capability_statuses),
-      careCircleId: stringFromRow(data.care_circle_id),
+      careCircleId,
       deviceOwner: booleanOrUndefined(input.deviceOwner ?? data.device_owner),
       deviceProfile: stringFromRow(data.device_profile),
       hardwareProfile: stringFromRow(data.hardware_profile),
@@ -1236,6 +1247,7 @@ async function tryVerifySupabaseReceiverShellBinding(
       locationLabel: stringFromRow(data.location_label),
       mainConnectUserPersonId,
       mainConnectUserDisplayName: displayNames.get(mainConnectUserPersonId),
+      primaryCoordinatorDisplayName: primaryCoordinator.displayName,
       nativeManufacturer:
         input.nativeManufacturer?.trim() || stringFromRow(data.native_manufacturer),
       nativeModel: input.nativeModel?.trim() || stringFromRow(data.native_model),
@@ -1335,13 +1347,24 @@ async function receiverShellDeviceProfilesFromRows(
       stringFromRow((rawRow as unknown as Record<string, unknown>).main_connect_user_person_id)
     )
   );
+  const coordinatorNames = new Map<string, string>();
+  await Promise.all(
+    rows.map(async (rawRow) => {
+      const row = rawRow as unknown as Record<string, unknown>;
+      const careCircleId = stringFromRow(row.care_circle_id);
+      if (!careCircleId || coordinatorNames.has(careCircleId)) return;
+      const coordinator = await readPrimaryCoordinatorForCareCircle(careCircleId);
+      coordinatorNames.set(careCircleId, coordinator.displayName);
+    })
+  );
 
   return rows.map((rawRow) => {
     const row = rawRow as unknown as Record<string, unknown>;
     const mainConnectUserPersonId = stringFromRow(row.main_connect_user_person_id);
+    const careCircleId = stringFromRow(row.care_circle_id);
     return {
       capabilityStatuses: capabilityStatusesFromRow(row.capability_statuses),
-      careCircleId: stringFromRow(row.care_circle_id),
+      careCircleId,
       deviceProfile: stringFromRow(row.device_profile),
       deviceOwner: booleanOrUndefined(row.device_owner),
       hardwareProfile: stringFromRow(row.hardware_profile),
@@ -1353,6 +1376,7 @@ async function receiverShellDeviceProfilesFromRows(
       locationLabel: stringFromRow(row.location_label),
       mainConnectUserPersonId,
       mainConnectUserDisplayName: displayNames.get(mainConnectUserPersonId),
+      primaryCoordinatorDisplayName: coordinatorNames.get(careCircleId),
       nativeManufacturer: stringFromRow(row.native_manufacturer),
       nativeModel: stringFromRow(row.native_model),
       nativeSdk: finiteNumberOrUndefined(row.native_sdk),
@@ -1432,6 +1456,7 @@ async function listLocalReceiverShellDeviceProfiles() {
       locationLabel: claim.locationLabel,
       mainConnectUserPersonId: claim.mainConnectUserPersonId,
       mainConnectUserDisplayName: claim.mainConnectUserDisplayName,
+      primaryCoordinatorDisplayName: claim.primaryCoordinatorDisplayName,
       nativeManufacturer: claim.nativeManufacturer,
       nativeModel: claim.nativeModel,
       nativeSdk: claim.nativeSdk,

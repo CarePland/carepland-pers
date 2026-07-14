@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  markAppointmentCommunicationSummaryFailed,
+  updateAppointmentCommunicationSummaryForMessage,
+} from "../../../personal/appointments/communicationSummary";
 import type { ConnectPersonScopedAccess } from "../../context/server/personScopedAccess";
 import type { ConnectMessageRecord } from "../types";
 
@@ -19,6 +23,7 @@ type ConnectMessageAccess = Pick<
 type ConnectMessageRow = {
   acknowledged_at?: string | null;
   allows_callback_request?: boolean | null;
+  appointment_id?: string | null;
   audio_artifact_id?: string | null;
   audio_duration_ms?: number | null;
   audio_mime_type?: string | null;
@@ -46,6 +51,13 @@ type ConnectMessageRow = {
   updated_at?: string | null;
 };
 
+type ConnectMessageAppointmentRow = {
+  id: string;
+  starts_at?: string | null;
+  title?: string | null;
+  reason?: string | null;
+};
+
 const connectMessageSelectColumns = [
   "id",
   "main_connect_user_person_id",
@@ -69,6 +81,7 @@ const connectMessageSelectColumns = [
   "heard_at",
   "acknowledged_at",
   "callback_requested_at",
+  "appointment_id",
   "client_message_id",
   "source",
   "metadata",
@@ -86,7 +99,10 @@ export async function readSupabaseConnectMessages(access: ConnectMessageAccess) 
       .limit(300);
 
     if (error) throw error;
-    return ((data ?? []) as unknown as ConnectMessageRow[]).map(connectMessageRecordFromRow);
+    const messages = ((data ?? []) as unknown as ConnectMessageRow[]).map(
+      connectMessageRecordFromRow
+    );
+    return enrichConnectMessagesWithAppointments(messages, access);
   }, access);
 }
 
@@ -95,28 +111,15 @@ export async function recordSupabaseConnectMessage(
   access: ConnectMessageAccess
 ) {
   return trySupabaseMessageStore(async (supabase) => {
-    const insert = connectMessageInsertFromInput(input, access);
-    const { data, error } = await supabase
-      .from("connect_messages")
-      .insert(insert)
-      .select(connectMessageSelectColumns)
-      .single();
-
-    if (error) throw error;
-    const message = connectMessageRecordFromRow(data as unknown as ConnectMessageRow);
-    await recordSupabaseConnectMessageEvent(
-      supabase,
-      message.id,
-      "created",
-      access,
-      {
-        clientMessageId: input.clientMessageId || "",
-        messageType: message.messageType || "",
-        source: input.source || "",
-      }
-    );
-    return message;
+    return insertSupabaseConnectMessage(input, access, supabase);
   }, access);
+}
+
+export async function recordSupabaseConnectMessageStrict(
+  input: Partial<ConnectMessageRecord>,
+  access: ConnectMessageAccess
+) {
+  return insertSupabaseConnectMessage(input, access, access.supabase);
 }
 
 export async function updateSupabaseConnectMessageState(
@@ -161,6 +164,7 @@ export function connectMessageInsertFromInput(
 
   return {
     allows_callback_request: Boolean(input.allowsCallbackRequest),
+    appointment_id: input.appointmentId || null,
     audio_artifact_id: input.audioArtifactId || "",
     audio_duration_ms:
       typeof input.audioDurationMs === "number" && Number.isFinite(input.audioDurationMs)
@@ -174,11 +178,11 @@ export function connectMessageInsertFromInput(
     main_connect_user_person_id: access.mainConnectUserPersonId,
     message_type: input.messageType || (input.audioUrl ? "audio" : "text"),
     metadata: input.metadata ?? {},
-    receiver_device_id:
-      input.receiverDeviceId || input.receiverId || access.receiverDeviceId || null,
+    receiver_device_id: access.receiverDeviceId || null,
     recipient_display_name: input.to || "",
     requires_acknowledgement: Boolean(input.requiresAcknowledgement),
-    sender_display_name: input.from || (senderRole === "receiver" ? "Receiver" : "Andrew"),
+    sender_display_name:
+      input.from || (senderRole === "receiver" ? "Receiver" : "Care coordinator"),
     sender_role: senderRole,
     sender_user_id: senderRole === "dashboard" ? access.createdByUserId : null,
     source: input.source || "connect_message",
@@ -204,9 +208,15 @@ export function connectMessageStateUpdate(
 export function connectMessageRecordFromRow(
   row: ConnectMessageRow
 ): ConnectMessageRecord {
+  const inferredAppointmentId =
+    row.appointment_id || appointmentIdFromClientMessageId(row.client_message_id);
+
   return {
     acknowledgedAt: row.acknowledged_at || "",
     allowsCallbackRequest: Boolean(row.allows_callback_request),
+    appointmentId: inferredAppointmentId,
+    appointmentStartsAt: "",
+    appointmentTitle: "",
     audioArtifactId: row.audio_artifact_id || "",
     audioDurationMs: row.audio_duration_ms ?? undefined,
     audioMimeType: row.audio_mime_type || "",
@@ -234,6 +244,128 @@ export function connectMessageRecordFromRow(
     transcriptStatus: row.transcript_status || "",
     updatedAt: row.updated_at || row.created_at,
   };
+}
+
+export async function enrichConnectMessagesWithAppointments(
+  messages: ConnectMessageRecord[],
+  access: ConnectMessageAccess
+) {
+  const appointmentIds = Array.from(
+    new Set(
+      messages
+        .map((message) => String(message.appointmentId || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (!appointmentIds.length) {
+    return messages;
+  }
+
+  const { data, error } = await access.supabase
+    .from("appointments")
+    .select("id,title,reason,starts_at")
+    .in("id", appointmentIds)
+    .eq("care_circle_id", access.careCircleId)
+    .eq("care_subject_id", access.mainConnectUserPersonId)
+    .is("deleted_at", null);
+
+  if (error) {
+    throw error;
+  }
+
+  const appointmentsById = new Map(
+    ((data ?? []) as unknown as ConnectMessageAppointmentRow[]).map((appointment) => [
+      appointment.id,
+      appointment,
+    ])
+  );
+
+  return messages.map((message) => {
+    const appointment = appointmentsById.get(String(message.appointmentId || ""));
+    if (!appointment) return message;
+
+    return {
+      ...message,
+      appointmentStartsAt: appointment.starts_at || "",
+      appointmentTitle:
+        appointment.title?.trim() ||
+        appointment.reason?.trim() ||
+        "Untitled appointment",
+    };
+  });
+}
+
+function appointmentIdFromClientMessageId(value: string | null | undefined) {
+  const match = String(value || "").match(
+    /^appointment-(?:text|audio)-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})-\d+$/
+  );
+
+  return match?.[1] ?? "";
+}
+
+async function verifyMessageAppointmentAccess(
+  appointmentId: string | undefined,
+  access: ConnectMessageAccess
+) {
+  const normalizedAppointmentId = String(appointmentId || "").trim();
+
+  if (!normalizedAppointmentId) {
+    return;
+  }
+
+  const { data, error } = await access.supabase
+    .from("appointments")
+    .select("id,care_circle_id,care_subject_id,deleted_at")
+    .eq("id", normalizedAppointmentId)
+    .eq("care_circle_id", access.careCircleId)
+    .eq("care_subject_id", access.mainConnectUserPersonId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    throw new Error("Message appointment must belong to the selected Care VIP.");
+  }
+}
+
+async function insertSupabaseConnectMessage(
+  input: Partial<ConnectMessageRecord>,
+  access: ConnectMessageAccess,
+  supabase: SupabaseClient
+) {
+  await verifyMessageAppointmentAccess(input.appointmentId, access);
+  const insert = connectMessageInsertFromInput(input, access);
+  const { data, error } = await supabase
+    .from("connect_messages")
+    .insert(insert)
+    .select(connectMessageSelectColumns)
+    .single();
+
+  if (error) throw error;
+  const message = connectMessageRecordFromRow(data as unknown as ConnectMessageRow);
+  await recordSupabaseConnectMessageEvent(
+    supabase,
+    message.id,
+    "created",
+    access,
+    {
+      clientMessageId: input.clientMessageId || "",
+      messageType: message.messageType || "",
+      source: input.source || "",
+    }
+  );
+  if (message.appointmentId) {
+    try {
+      await updateAppointmentCommunicationSummaryForMessage(supabase, access, message);
+    } catch (error) {
+      await markAppointmentCommunicationSummaryFailed(supabase, access, message, error);
+    }
+  }
+  return message;
 }
 
 async function recordSupabaseConnectMessageEvent(
@@ -283,5 +415,5 @@ function normalizeSenderRole(
 }
 
 function senderFallbackName(role: string | null | undefined) {
-  return role === "receiver" ? "Receiver" : "Andrew";
+  return role === "receiver" ? "Receiver" : "Care coordinator";
 }

@@ -66,6 +66,19 @@ Proposed rule:
 - Receiver experiences should always resolve to a concrete `care_subjects.id`.
 - “Everyone” is allowed in Personal/Home UI, but not as the active identity for a Receiver session unless a future multi-person Receiver mode is explicitly designed.
 
+### Primary Connect Contact / Coordinator
+
+The primary Connect contact is the Care VIP group member who should receive fallback Receiver communication and appear in Receiver labels such as `Send to [Name]` or `Call [Name]`.
+
+Current implementation may use the Care Circle owner/profile display name as a temporary proxy because the durable selector does not exist yet.
+
+Target model:
+
+- Profile should allow selecting the primary Connect contact/coordinator per Care VIP group or Care Circle.
+- Receiver binding/context APIs should expose the selected contact display name to both hosted Receiver and Classic WebView Receiver surfaces.
+- Receiver UI must fall back to neutral `Care coordinator` copy when no selected contact can be resolved.
+- The primary contact is not the Receiver Active Person and does not change bound-device authorization.
+
 ### Receiver Active Person
 
 Receiver Active Person is the clearer internal concept for the person currently served by a bound Receiver.
@@ -595,7 +608,7 @@ Rule:
 - Claim creation does not yet define an approved person list for controlled Receiver Active Person switching; this can wait until v1.5.
 - Prototype setup code `12345` and local-dev device id still exist for local/dev fallback only.
 - Message storage is still less mature than provisioning and calls, although Receiver-facing message access now uses the shared bound-device authorization path.
-- Household exists in prototype types/state but not as a durable Connect table.
+- Household exists in prototype types/state but not as a durable Connect table. It should remain future/dev-only language and must not appear as visible Receiver configuration until the durable household/multi-user model exists.
 - Receiver stale/revoked handling exists at heartbeat level but needs a complete user-facing appliance recovery flow.
 - Device/profile status is captured, but admin-facing reassignment workflows are still thin.
 

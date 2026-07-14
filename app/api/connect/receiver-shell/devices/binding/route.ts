@@ -48,6 +48,7 @@ export async function POST(request: Request) {
       provisioningCompletedAt: binding.provisioningCompletedAt,
       mainConnectUserDisplayName: binding.mainConnectUserDisplayName,
       mainConnectUserPersonId: binding.mainConnectUserPersonId,
+      primaryCoordinatorDisplayName: binding.primaryCoordinatorDisplayName,
       receiverDeviceId: binding.receiverDeviceId,
       receiverMode: binding.receiverMode,
       receiverUrl: binding.receiverUrl,

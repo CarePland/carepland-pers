@@ -16,6 +16,11 @@ export type ConnectMainUserContext = {
   mainConnectUserPerson: ConnectPersPerson | null;
   mainConnectUserPersonId: string | null;
   people: ConnectPersPerson[];
+  primaryCoordinator?: {
+    displayName: string;
+    source: "care_circle_owner" | "fallback";
+    userId?: string;
+  };
   source: "local_dev" | "supabase" | "unset";
 };
 

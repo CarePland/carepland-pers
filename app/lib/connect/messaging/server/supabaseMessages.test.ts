@@ -12,11 +12,13 @@ describe("Supabase Connect messages", () => {
     const insert = connectMessageInsertFromInput(
       {
         allowsCallbackRequest: true,
+        appointmentId: "appointment-1",
         body: "Lunch is in the fridge.",
         clientMessageId: "coordinator-text-1",
         from: "Andrew",
         mainConnectUserPersonId: "person-bob",
         receiverId: "receiver-1",
+        receiverDeviceId: "receiver-2",
         requiresAcknowledgement: true,
         source: "coordinator_text_message",
         to: "Bob",
@@ -31,9 +33,10 @@ describe("Supabase Connect messages", () => {
     );
 
     assert.equal(insert.allows_callback_request, true);
+    assert.equal(insert.appointment_id, "appointment-1");
     assert.equal(insert.requires_acknowledgement, true);
     assert.equal(insert.main_connect_user_person_id, "person-bob");
-    assert.equal(insert.receiver_device_id, "receiver-1");
+    assert.equal(insert.receiver_device_id, null);
     assert.equal(insert.sender_display_name, "Andrew");
     assert.equal(insert.sender_role, "dashboard");
     assert.equal(insert.sender_user_id, "user-1");
@@ -89,9 +92,11 @@ describe("Supabase Connect messages", () => {
   });
 
   it("maps durable rows back to existing message response shape", () => {
+    const appointmentId = "11111111-2222-4333-8444-555555555555";
     const message = connectMessageRecordFromRow({
       acknowledged_at: "2026-07-09T12:05:00.000Z",
       allows_callback_request: true,
+      appointment_id: appointmentId,
       audio_artifact_id: "",
       audio_duration_ms: null,
       audio_mime_type: "",
@@ -124,8 +129,45 @@ describe("Supabase Connect messages", () => {
     assert.equal(message.from, "Andrew");
     assert.equal(message.to, "Bob");
     assert.equal(message.requiresAcknowledgement, true);
+    assert.equal(message.appointmentId, appointmentId);
     assert.equal(message.allowsCallbackRequest, true);
     assert.equal(message.acknowledgedAt, "2026-07-09T12:05:00.000Z");
     assert.equal(message.callbackRequestedAt, "2026-07-09T12:06:00.000Z");
+  });
+
+  it("recovers appointment context from appointment composer client ids", () => {
+    const appointmentId = "11111111-2222-4333-8444-555555555555";
+    const message = connectMessageRecordFromRow({
+      acknowledged_at: null,
+      allows_callback_request: true,
+      appointment_id: null,
+      audio_artifact_id: "",
+      audio_duration_ms: null,
+      audio_mime_type: "",
+      audio_url: "",
+      body: "Bring your glasses.",
+      callback_requested_at: null,
+      client_message_id: `appointment-text-${appointmentId}-1`,
+      created_at: "2026-07-09T12:00:00.000Z",
+      delivered_at: null,
+      heard_at: null,
+      id: "message-1",
+      main_connect_user_person_id: "person-bob",
+      message_type: "text",
+      metadata: {},
+      read_at: null,
+      receiver_device_id: null,
+      recipient_display_name: "Bob",
+      requires_acknowledgement: true,
+      sender_display_name: "Andrew",
+      sender_role: "dashboard",
+      sender_user_id: "user-1",
+      source: "appointment_text_message",
+      transcript: "",
+      transcript_status: "",
+      updated_at: "2026-07-09T12:00:00.000Z",
+    });
+
+    assert.equal(message.appointmentId, appointmentId);
   });
 });

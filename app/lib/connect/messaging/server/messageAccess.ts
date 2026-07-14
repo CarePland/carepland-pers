@@ -8,6 +8,7 @@ import {
   ReceiverDeviceAccessError,
   receiverDeviceSetupRequiredBody,
 } from "../../context/server/personScopedAccess";
+import { createSupabaseServiceClient } from "../../../platform/server/supabase";
 
 export async function verifyConnectMessagePersonAccess(
   personId: string,
@@ -49,5 +50,8 @@ export async function readConnectMessagePersonAccessForRequest(
   personId: string,
   body?: Record<string, unknown>
 ) {
-  return readConnectPersonScopedAccess(request, personId, { body });
+  return readConnectPersonScopedAccess(request, personId, {
+    body,
+    createUserClient: createSupabaseServiceClient,
+  });
 }

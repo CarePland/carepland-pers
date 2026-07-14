@@ -38,10 +38,6 @@ import {
   connectPrototypeReceiverId,
 } from "../../../lib/connect/prototypeClient";
 import {
-  groupMessagesByAppointment,
-  type MessageGroup,
-} from "../../../lib/connect/messaging/messageGrouping";
-import {
   createConnectCallAudioController,
   type ConnectCallAudioStatus,
   type ConnectCallAudioController,
@@ -58,22 +54,15 @@ import {
   browserReceiverPairingCodeReady,
   formatBrowserReceiverPairingCode,
 } from "../../../lib/connect/receiverShell/browserPairing";
-import { AppointmentMessageComposer } from "../../personal/messages/AppointmentMessageComposer";
 import {
   connectCallsDeprecated,
-  connectPollingIntervals,
   connectReceiverGuideDeprecated,
-  recordConnectPollingRequest,
 } from "../../../lib/connect/receiver/pollingPolicy";
 import {
   allCarePlandFocusValue,
   readCarePlandFocusId,
   writeCarePlandFocusId,
 } from "../../../lib/platform/focus";
-import {
-  adminItemsVisibilityChangedEvent,
-  readShowAdminItemsPreference,
-} from "../../../lib/platform/adminItemsVisibility";
 import {
   clearAllPageViewState,
   restorePageViewState,
@@ -87,9 +76,6 @@ import {
 type ConnectMessage = {
   acknowledgedAt?: string;
   allowsCallbackRequest?: boolean;
-  appointmentId?: string;
-  appointmentStartsAt?: string;
-  appointmentTitle?: string;
   audioArtifactId?: string;
   audioDurationMs?: number;
   audioMimeType?: string;
@@ -165,9 +151,8 @@ type DashboardState = {
   receiversOnline: number | null;
 };
 
-type DashboardView = "connect" | "settings";
-type MessageHistoryView = "timeline" | "appointment";
-type SetupView = "people" | "receivers";
+type DashboardView = "connect" | "receiver" | "settings";
+type SetupView = "people" | "guide" | "receivers" | "appearance";
 type ConnectPageViewState = {
   activeView?: DashboardView;
   scrollY?: number;
@@ -260,8 +245,10 @@ const emptyDashboardState: DashboardState = {
 };
 
 function setupViewLabel(view: SetupView) {
-  if (view === "people") return "Receiver User";
-  return "Receiver Settings";
+  if (view === "people") return "People";
+  if (view === "guide") return "Guide";
+  if (view === "receivers") return "Receiver";
+  return "Appearance";
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -314,55 +301,6 @@ function connectMessageDeliveryLabel(message: ConnectMessage) {
   if (message.heardAt) return `Heard ${formatClockTime(message.heardAt)}`;
   if (message.createdAt) return `Sent ${formatClockTime(message.createdAt)}`;
   return "Sent";
-}
-
-function messageBody(message: ConnectMessage) {
-  return message.transcript || message.body || "No message body";
-}
-
-function messageSender(message: ConnectMessage, selectedPersonName: string) {
-  return !message.from || message.from === "receiver_user"
-    ? selectedPersonName
-    : message.from;
-}
-
-function messageAppointmentLabel(message: ConnectMessage) {
-  return (
-    String(message.appointmentTitle || "").trim() ||
-    (message.appointmentId ? "Appointment" : "General")
-  );
-}
-
-function messageDirectionLabel(message: ConnectMessage, selectedPersonName: string) {
-  const sender = messageSender(message, selectedPersonName);
-  return `${sender} -> ${message.to || selectedPersonName}`;
-}
-
-function formatTimelineDayLabel(value?: string) {
-  if (!value) return "Date unavailable";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Date unavailable";
-
-  const today = new Date();
-  if (date.toDateString() === today.toDateString()) return "Today";
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-  }).format(date);
-}
-
-function formatTimelineDate(value?: string) {
-  if (!value) return "Date unavailable";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Date unavailable";
-
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  })
-    .format(date)
-    .replace(",", "");
 }
 
 function settledValue<T>(result: PromiseSettledResult<T>): T | null {
@@ -419,7 +357,7 @@ function writeStickySelectedReceiverKey(personId: string, receiverKeyValue: stri
 }
 
 function personName(person?: ConnectReceiverPerson) {
-  return person?.displayName || "Main Receiver User";
+  return person?.displayName || "Main Connect User";
 }
 
 function firstNameLabel(value?: string | null) {
@@ -592,223 +530,10 @@ function buildConnectAskContext({
   };
 }
 
-function MessageDevDetails({
-  detailView,
-  message,
-  selectedReceiverId,
-}: {
-  detailView: boolean;
-  message: ConnectMessage;
-  selectedReceiverId: string;
-}) {
-  if (!detailView) return null;
-
-  return (
-    <div className="mt-5 grid gap-4 rounded-lg border border-dashed border-[#cbd9e7] bg-[#f8fafc] p-4 text-sm sm:grid-cols-3">
-      <div>
-        <strong className="block text-xs font-black uppercase text-[#5f6e84]">
-          Transcript
-        </strong>
-        <span className="font-bold text-[#334155]">
-          {statusLabel(message.transcriptStatus || "not_requested")}
-        </span>
-      </div>
-      <div>
-        <strong className="block text-xs font-black uppercase text-[#5f6e84]">
-          Type
-        </strong>
-        <span className="font-bold text-[#334155]">
-          {statusLabel(message.messageType || "text")}
-        </span>
-      </div>
-      <div>
-        <strong className="block text-xs font-black uppercase text-[#5f6e84]">
-          Deliver
-        </strong>
-        <span className="font-bold text-[#334155]">
-          {connectMessageDeliveryLabel(message)}
-        </span>
-      </div>
-      <div className="sm:col-span-3">
-        <strong className="block text-xs font-black uppercase text-[#5f6e84]">
-          Receiver
-        </strong>
-        <span className="break-all font-bold text-[#334155]">
-          {message.receiverId || selectedReceiverId}
-        </span>
-      </div>
-      <div className="sm:col-span-3">
-        <strong className="block text-xs font-black uppercase text-[#5f6e84]">
-          Message ID
-        </strong>
-        <span className="break-all font-bold text-[#334155]">
-          {message.id || "local"}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function CompactHistoryMessageRow({
-  detailView,
-  markMessageHeard,
-  message,
-  selectedPersonName,
-  selectedReceiverId,
-  showAppointment = true,
-  showDate = true,
-}: {
-  detailView: boolean;
-  markMessageHeard: (message: ConnectMessage) => Promise<void>;
-  message: ConnectMessage;
-  selectedPersonName: string;
-  selectedReceiverId: string;
-  showAppointment?: boolean;
-  showDate?: boolean;
-}) {
-  return (
-    <article className="border-t border-[#d6e3f2] py-3">
-      <div className="grid gap-x-7 gap-y-1 sm:grid-cols-[88px_minmax(0,1fr)]">
-        <time className="text-sm font-semibold text-[#5f6e84]">
-          {formatClockTime(message.createdAt)}
-        </time>
-        <div className="min-w-0">
-          <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm font-semibold text-[#5f6e84]">
-            {showAppointment ? (
-              <span className="text-base font-semibold text-[#173150]">
-                {messageAppointmentLabel(message)}
-              </span>
-            ) : null}
-            <span>{messageDirectionLabel(message, selectedPersonName)}</span>
-          </p>
-        </div>
-        {showDate ? (
-          <time className="text-sm font-semibold text-[#5f6e84]">
-            {formatTimelineDate(message.createdAt)}
-          </time>
-        ) : (
-          <span aria-hidden="true" className="hidden sm:block" />
-        )}
-        <div className="min-w-0">
-          <p className="text-base leading-6 text-[#0f172a]">
-            {messageBody(message)}
-          </p>
-          {message.audioUrl ? (
-            <div className="mt-3 rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-3">
-              <strong className="block text-xs font-semibold uppercase text-[#5f6e84]">
-                Voice message
-              </strong>
-              <audio
-                className="mt-2 w-full"
-                controls
-                onPlay={() => {
-                  void markMessageHeard(message);
-                }}
-                src={connectAudioUrl(message.audioUrl)}
-              >
-                <track kind="captions" />
-              </audio>
-            </div>
-          ) : null}
-          <MessageDevDetails
-            detailView={detailView}
-            message={message}
-            selectedReceiverId={selectedReceiverId}
-          />
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function TimelineMessageEvent({
-  detailView,
-  isFirstInDay,
-  markMessageHeard,
-  message,
-  selectedPersonName,
-  selectedReceiverId,
-}: {
-  detailView: boolean;
-  isFirstInDay: boolean;
-  markMessageHeard: (message: ConnectMessage) => Promise<void>;
-  message: ConnectMessage;
-  selectedPersonName: string;
-  selectedReceiverId: string;
-}) {
-  return (
-    <>
-      {isFirstInDay ? (
-        <h4 className="border-t border-[#d6e3f2] pt-4 text-lg font-semibold leading-tight text-[#173150]">
-          {formatTimelineDayLabel(message.createdAt)}
-        </h4>
-      ) : null}
-      <CompactHistoryMessageRow
-        detailView={detailView}
-        markMessageHeard={markMessageHeard}
-        message={message}
-        selectedPersonName={selectedPersonName}
-        selectedReceiverId={selectedReceiverId}
-      />
-    </>
-  );
-}
-
-function AppointmentCommunicationSummary({
-  detailView,
-  group,
-  markMessageHeard,
-  selectedPersonName,
-  selectedReceiverId,
-}: {
-  detailView: boolean;
-  group: MessageGroup<ConnectMessage>;
-  markMessageHeard: (message: ConnectMessage) => Promise<void>;
-  selectedPersonName: string;
-  selectedReceiverId: string;
-}) {
-  const firstMessage = group.messages[0];
-  const messageCount = group.messages.length;
-
-  return (
-    <section className="border-t border-[#d6e3f2] py-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h4 className="text-2xl font-semibold leading-tight text-[#0f172a]">
-            {group.label}
-          </h4>
-          {group.id !== "general" && group.sortDate ? (
-            <p className="mt-1 text-sm font-semibold text-[#5f6e84]">
-              {formatDateTime(group.sortDate)}
-            </p>
-          ) : null}
-        </div>
-        <p className="pt-1 text-base font-semibold text-[#345d83]">
-          {messageCount} {messageCount === 1 ? "message" : "messages"}
-        </p>
-      </div>
-
-      <div className="mt-3">
-        {group.messages.map((message) => (
-          <CompactHistoryMessageRow
-            detailView={detailView}
-            key={message.id ?? `${group.id}-${message.createdAt ?? message.body}`}
-            markMessageHeard={markMessageHeard}
-            message={message}
-            selectedPersonName={selectedPersonName}
-            selectedReceiverId={selectedReceiverId}
-            showAppointment={false}
-            showDate
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-export function ConnectDashboard() {
+export function ConnectArchiveDashboard() {
   const [initialConnectPageViewState] = useState<ConnectPageViewState | null>(() => {
-    const restoredState = restorePageViewState<ConnectPageViewState>("connect");
+    const restoredState =
+      restorePageViewState<ConnectPageViewState>("connectArchive");
 
     return restoredState?.engaged ? restoredState : null;
   });
@@ -817,29 +542,17 @@ export function ConnectDashboard() {
   const [status, setStatus] = useState("Loading Connect state...");
   const [loading, setLoading] = useState(false);
   const [messageText, setMessageText] = useState("");
-  const [messageAppointmentId] = useState(() => {
-    if (typeof window === "undefined") {
-      return "";
-    }
-
-    return new URLSearchParams(window.location.search).get("appointmentId")?.trim() ?? "";
-  });
-  const [messageContextPersonId] = useState(() => {
-    if (typeof window === "undefined") {
-      return "";
-    }
-
-    return new URLSearchParams(window.location.search).get("personId")?.trim() ?? "";
-  });
   const [messageAllowsCallbackRequest, setMessageAllowsCallbackRequest] =
     useState(true);
   const [messageRequiresAcknowledgement, setMessageRequiresAcknowledgement] =
     useState(true);
   const [actionPending, setActionPending] = useState<"call" | "message" | null>(null);
   const [connectTool, setConnectTool] = useState<"message" | "history">("message");
-  const [activeView] = useState<DashboardView>("connect");
+  const [activeView, setActiveView] = useState<DashboardView>(
+    initialConnectPageViewState?.activeView ?? "connect"
+  );
   const [setupView, setSetupView] = useState<SetupView>(
-    initialConnectPageViewState?.setupView === "receivers" ? "receivers" : "people"
+    initialConnectPageViewState?.setupView ?? "people"
   );
   const [globalFocusId, setGlobalFocusId] = useState(() => {
     if (typeof window === "undefined") {
@@ -848,22 +561,20 @@ export function ConnectDashboard() {
 
     return readCarePlandFocusId(window.localStorage);
   });
-  const [connectTargetPersonId, setConnectTargetPersonId] = useState(messageContextPersonId);
+  const [connectTargetPersonId, setConnectTargetPersonId] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminCheckComplete, setAdminCheckComplete] = useState(false);
   const [selectedReceiverKey, setSelectedReceiverKey] = useState(connectPrototypeReceiverId);
   const [receiverRenameOpen, setReceiverRenameOpen] = useState(false);
   const [receiverLabelDraft, setReceiverLabelDraft] = useState("");
   const [receiverLabelPending, setReceiverLabelPending] = useState(false);
-  const [messageHistoryView, setMessageHistoryView] =
-    useState<MessageHistoryView>("timeline");
-  const [messageHistoryComposerOpen, setMessageHistoryComposerOpen] = useState(false);
+  const [messageIndex, setMessageIndex] = useState(0);
   const [recording, setRecording] = useState(false);
   const [processingRecording, setProcessingRecording] = useState(false);
   const [pendingRecording, setPendingRecording] =
     useState<PendingMessageRecording | null>(null);
   const [detailView, setDetailView] = useState(true);
-  const [showAdminItems, setShowAdminItems] = useState(true);
   const [recipientCallState, setRecipientCallState] =
     useState<RecipientCallState>("waiting");
   const [callAudioStatus, setCallAudioStatus] =
@@ -903,7 +614,7 @@ export function ConnectDashboard() {
   mainConnectUserPersonIdRef.current = savedMainConnectUserPersonId;
 
   const saveConnectViewState = useCallback((overrides: Partial<ConnectPageViewState> = {}) => {
-    savePageViewState<ConnectPageViewState>("connect", {
+    savePageViewState<ConnectPageViewState>("connectArchive", {
       activeView,
       scrollY: typeof window === "undefined" ? 0 : window.scrollY,
       setupView,
@@ -1059,7 +770,7 @@ export function ConnectDashboard() {
       )
         ? focusedPersonId
         : "";
-      const [messagesResult, audioProfileResult] =
+      const [messagesResult, callSummaryResult, audioProfileResult] =
         await Promise.allSettled([
           scopedParticipantId
           ? fetchJson<{ messages?: ConnectMessage[] }>(
@@ -1068,6 +779,12 @@ export function ConnectDashboard() {
             )
           : Promise.resolve({ messages: [] }),
           scopedParticipantId
+          ? fetchJson<{ summary?: ConnectCallSummary }>(
+              `${connectCallsSummaryEndpoint}?personId=${encodeURIComponent(scopedParticipantId)}`,
+              { headers: authHeaders }
+            )
+          : Promise.resolve({ summary: null }),
+          scopedParticipantId
           ? fetchJson<{ profile?: ConnectAudioProfile }>(
               `${connectAudioProfileEndpoint}?personId=${encodeURIComponent(scopedParticipantId)}`,
               { headers: authHeaders }
@@ -1075,18 +792,20 @@ export function ConnectDashboard() {
           : Promise.resolve({ profile: null }),
         ]);
       const messagesBody = settledValue(messagesResult);
+      const callSummaryBody = settledValue(callSummaryResult);
       const audioProfileBody = settledValue(audioProfileResult);
       const failedCount = [
         contextResult,
         focusPeopleResult,
         provisioningResult,
         messagesResult,
+        callSummaryResult,
         audioProfileResult,
       ].filter((result) => result.status === "rejected").length;
 
       setState({
         audioProfile: audioProfileBody?.profile ?? null,
-        callSummary: null,
+        callSummary: callSummaryBody?.summary ?? null,
         connectContext,
         focusPeople,
         messages: messagesBody?.messages ?? [],
@@ -1095,7 +814,7 @@ export function ConnectDashboard() {
       });
       setStatus(
         contextResult.status === "rejected"
-          ? "Sign in to CarePland Personal to load your Receiver users."
+          ? "Sign in to CarePland Personal to load your Connect people."
           : failedCount
           ? "Ready. Some Connect data is still loading."
           : "Ready."
@@ -1264,6 +983,7 @@ export function ConnectDashboard() {
       if (!user?.id) {
         setAccountEmail("");
         setIsAdmin(false);
+        setAdminCheckComplete(true);
         redirectToCarePlandSignInFromCurrentLocation();
         return;
       }
@@ -1277,6 +997,7 @@ export function ConnectDashboard() {
 
       if (!cancelled) {
         setIsAdmin(profile?.is_admin === true);
+        setAdminCheckComplete(true);
       }
     });
 
@@ -1293,6 +1014,7 @@ export function ConnectDashboard() {
       if (session?.user?.id) return;
       setAccountEmail("");
       setIsAdmin(false);
+      setAdminCheckComplete(true);
       redirectToCarePlandSignInFromCurrentLocation();
     });
 
@@ -1331,7 +1053,8 @@ export function ConnectDashboard() {
     let frameId = 0;
 
     const saveScrollPosition = () => {
-      const restoredState = restorePageViewState<ConnectPageViewState>("connect");
+      const restoredState =
+        restorePageViewState<ConnectPageViewState>("connectArchive");
 
       if (!restoredState?.engaged) {
         return;
@@ -1354,6 +1077,17 @@ export function ConnectDashboard() {
   useEffect(() => {
     return () => setConnectTargetPersonId("");
   }, []);
+
+  useEffect(() => {
+    if (connectCallsDeprecated) return undefined;
+    if (activeView !== "connect") return undefined;
+
+    const timer = window.setInterval(() => {
+      void refreshCallState();
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [activeView, refreshCallState]);
 
   useEffect(() => {
     return () => {
@@ -1470,13 +1204,11 @@ export function ConnectDashboard() {
       : "Connect User";
   const selectedPersonFirstName =
     firstNameLabel(selectedPersonName) || selectedPersonName;
-  const visibleMessages = state.messages;
-  const appointmentMessageGroups = useMemo(
-    () => groupMessagesByAppointment(state.messages),
-    [state.messages]
-  );
-  const canShowAdminItems = isAdmin && showAdminItems;
-  const devViewEnabled = canShowAdminItems && detailView;
+  const safeMessageIndex = Math.min(messageIndex, Math.max(0, state.messages.length - 1));
+  const messagePageStart = Math.min(safeMessageIndex, Math.max(0, state.messages.length - 2));
+  const visibleMessages = state.messages.slice(messagePageStart, messagePageStart + 2);
+  const canPagePreviousMessages = messagePageStart > 0;
+  const canPageNextMessages = messagePageStart + 2 < state.messages.length;
   const connectAskContext = buildConnectAskContext({
     activeDevices,
     activeView,
@@ -1491,21 +1223,6 @@ export function ConnectDashboard() {
     setupView,
     state,
   });
-
-  useEffect(() => {
-    function syncShowAdminItems() {
-      setShowAdminItems(readShowAdminItemsPreference());
-    }
-
-    syncShowAdminItems();
-    window.addEventListener(adminItemsVisibilityChangedEvent, syncShowAdminItems);
-    window.addEventListener("storage", syncShowAdminItems);
-
-    return () => {
-      window.removeEventListener(adminItemsVisibilityChangedEvent, syncShowAdminItems);
-      window.removeEventListener("storage", syncShowAdminItems);
-    };
-  }, []);
 
   useEffect(() => {
     if (!receiverRenameOpen) {
@@ -1523,6 +1240,7 @@ export function ConnectDashboard() {
       writeCarePlandFocusId(window.localStorage, nextFocusId);
     }
 
+    setMessageIndex(0);
     setStatus(
       nextFocusId === allCarePlandFocusValue
         ? "Showing Connect for everyone."
@@ -1541,6 +1259,7 @@ export function ConnectDashboard() {
     }
 
     setConnectTargetPersonId(person.id);
+    setMessageIndex(0);
     setStatus(
       `Ready for ${firstNameLabel(person.displayName) || person.displayName}.`
     );
@@ -1946,7 +1665,6 @@ export function ConnectDashboard() {
       const messagePayload = pendingRecording
         ? {
             artifactKind: "coordinator_message",
-            appointmentId: messageAppointmentId,
             audioArtifactId: pendingRecording.artifactId,
             audioBase64: await blobToBase64(pendingRecording.recording.blob),
             audioDirection: "coordinator_to_receiver",
@@ -1977,7 +1695,6 @@ export function ConnectDashboard() {
           }
         : {
             allowsCallbackRequest: messageAllowsCallbackRequest,
-            appointmentId: messageAppointmentId,
             body,
             clientMessageId,
             from: "Andrew",
@@ -2001,6 +1718,7 @@ export function ConnectDashboard() {
       );
       setMessageText("");
       setPendingRecording(null);
+      setMessageIndex(0);
       setStatus(
         pendingRecording
           ? "Audio message sent with original recording preserved."
@@ -2209,19 +1927,12 @@ export function ConnectDashboard() {
   }
 
   useEffect(() => {
-    // Receiver Guide is deprecated. Leave state-writing helpers intact for a
-    // future opt-in implementation, but do not poll while the feature is parked.
     if (connectReceiverGuideDeprecated) return undefined;
     if (!guideMode) return undefined;
     let cancelled = false;
 
     async function pollReceiverGuideState() {
       try {
-        recordConnectPollingRequest({
-          caller: "connect_dashboard_guide_feedback",
-          endpoint: receiverGuideEndpoint,
-          reason: "poll",
-        });
         const response = await fetch(
           `${receiverGuideEndpoint}?receiverId=${encodeURIComponent(selectedReceiverGuideId)}`,
           { cache: "no-store" }
@@ -2246,7 +1957,7 @@ export function ConnectDashboard() {
     void pollReceiverGuideState();
     const timer = window.setInterval(() => {
       void pollReceiverGuideState();
-    }, connectPollingIntervals.dashboardGuideFeedbackMs);
+    }, 1500);
 
     return () => {
       cancelled = true;
@@ -2292,7 +2003,9 @@ export function ConnectDashboard() {
           currentPage:
             activeView === "settings"
               ? `Connect / Settings / ${setupView}`
-              : "Connect Home",
+              : activeView === "receiver"
+                ? "Connect / Receiver"
+                : "Connect Home",
           message: outgoingMessage,
           threadId: connectAskThreadId,
         }),
@@ -2333,13 +2046,40 @@ export function ConnectDashboard() {
     }
   }
 
+  if (!adminCheckComplete) {
+    return (
+      <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900">
+        <section className="mx-auto w-full max-w-5xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-semibold text-slate-500">
+            Loading Connect Archive...
+          </p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-900">
+        <section className="mx-auto w-full max-w-5xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <h1 className="text-xl font-bold text-slate-900">
+            Connect Archive is Admin-only
+          </h1>
+          <p className="mt-2 text-sm font-medium text-slate-600">
+            Sign in with an Admin account to open this preserved Connect copy.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen overflow-x-clip bg-slate-50 px-3 pb-20 pt-2 text-slate-900 sm:px-4 sm:pt-4 lg:px-6 lg:py-8">
       <section className="mx-auto w-full max-w-5xl 2xl:max-w-6xl">
         <header className="sticky top-0 z-50 grid gap-2 bg-slate-50 py-1.5 sm:gap-3 sm:py-3 relative">
           <CarePlandTopNav
             accountEmail={accountEmail}
-            activeModule="connect"
+            activeModule="connectArchive"
             askActive={connectAskOpen}
             canShowAdmin={isAdmin}
             canShowAsk
@@ -2368,135 +2108,547 @@ export function ConnectDashboard() {
                 : []
             }
           />
+          <div className="flex w-full flex-wrap items-center justify-between gap-2">
+            {activeView === "settings" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <nav
+                  aria-label="Settings sections"
+                  className="flex flex-wrap items-center gap-1.5 rounded-full border border-blue-100 bg-white/55 p-0.5 shadow-sm"
+                >
+                  {(["people", "guide", "receivers", "appearance"] as SetupView[]).map((view) => (
+                    <button
+                      aria-pressed={setupView === view}
+                      className={`relative rounded-full px-3 py-1 text-sm font-semibold capitalize transition-colors ${
+                        setupView === view
+                          ? "bg-blue-50 text-blue-800 ring-1 ring-blue-100"
+                          : "text-slate-500 hover:bg-blue-50/70 hover:text-blue-800"
+                      }`}
+                      key={view}
+                      onClick={() => {
+                        setSetupView(view);
+                        saveConnectViewState({
+                          activeView: "settings",
+                          setupView: view,
+                        });
+                      }}
+                      type="button"
+                    >
+                      {setupViewLabel(view)}
+                    </button>
+                  ))}
+                </nav>
+                <button
+                  className="min-h-9 rounded-md px-2 text-sm font-semibold text-slate-500 transition-colors hover:text-blue-800"
+                  onClick={() => {
+                    setActiveView("connect");
+                    saveConnectViewState({ activeView: "connect" });
+                  }}
+                  type="button"
+                >
+                  Exit
+                </button>
+              </div>
+            ) : activeView === "connect" ? (
+              <>
+                {isEveryoneFocus && state.focusPeople.length > 1 ? (
+                  <div className="flex min-w-0 max-w-full items-center gap-2 overflow-x-auto">
+                    {state.focusPeople.map((person) => {
+                      const selected = person.id === activeConnectPersonId;
+
+                      return (
+                        <button
+                          aria-pressed={selected}
+                          className={`inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full py-1 pl-1 pr-2.5 text-sm font-black transition ${
+                            selected
+                              ? "bg-[#edf5fc] text-[#244d73] ring-1 ring-[#b6d8f2]"
+                              : "text-[#345d83] hover:bg-blue-50"
+                          }`}
+                          key={person.id ?? person.displayName}
+                          onClick={() => handleChooseConnectTarget(person)}
+                          type="button"
+                        >
+                          <ConnectPersonAvatar
+                            person={focusPersonAsReceiverPerson(person)}
+                            selected={selected}
+                            size="xs"
+                          />
+                          {firstNameLabel(person.displayName)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span aria-hidden="true" />
+                )}
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
+                  <button
+                    aria-pressed={connectTool === "message"}
+                    className={`inline-flex min-h-9 items-center gap-2 rounded-full px-3 text-sm font-semibold transition ${
+                      connectTool === "message"
+                        ? "border border-blue-200 bg-blue-50 text-blue-900 shadow-sm"
+                        : "text-slate-500 hover:bg-blue-50 hover:text-blue-800"
+                    }`}
+                    onClick={() => setConnectTool("message")}
+                    type="button"
+                  >
+                    {selectedPerson
+                      ? `Send a Message to ${selectedPersonFirstName}`
+                      : "Send a Message"}
+                  </button>
+                  <button
+                    aria-pressed={connectTool === "history"}
+                    className={`inline-flex min-h-9 items-center gap-2 rounded-full px-3 text-sm font-semibold transition ${
+                      connectTool === "history"
+                        ? "border border-blue-200 bg-blue-50 text-blue-900 shadow-sm"
+                        : "text-slate-500 hover:bg-blue-50 hover:text-blue-800"
+                    }`}
+                    onClick={() => setConnectTool("history")}
+                    type="button"
+                  >
+                    Message History
+                  </button>
+                  <div className="flex min-h-9 max-w-full flex-wrap items-center gap-2 rounded-full border border-blue-100 bg-white px-2 py-1 shadow-sm">
+                    <span className="text-xs font-black uppercase tracking-normal text-slate-500">
+                      Receiver
+                    </span>
+                    {receiverRenameOpen ? (
+                      <>
+                        <input
+                          className="h-8 w-32 rounded-full border border-blue-100 bg-blue-50 px-3 text-sm font-black text-blue-950 outline-none focus:border-blue-300"
+                          maxLength={80}
+                          onChange={(event) => setReceiverLabelDraft(event.target.value)}
+                          placeholder="Living Rm"
+                          value={receiverLabelDraft}
+                        />
+                        <button
+                          className="h-8 rounded-full bg-blue-800 px-3 text-xs font-black text-white hover:bg-blue-900 disabled:opacity-55"
+                          disabled={
+                            receiverLabelPending ||
+                            !receiverLabelDraft.trim() ||
+                            receiverLabelDraft.trim() === selectedReceiverLabel
+                          }
+                          onClick={() => void saveSelectedReceiverLabel()}
+                          type="button"
+                        >
+                          {receiverLabelPending ? "Saving" : "Save"}
+                        </button>
+                        <button
+                          className="h-8 rounded-full px-2 text-xs font-black text-slate-500 hover:bg-slate-50"
+                          disabled={receiverLabelPending}
+                          onClick={() => {
+                            setReceiverRenameOpen(false);
+                            setReceiverLabelDraft(selectedReceiverLabel);
+                          }}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <select
+                          aria-label="Receiver to call"
+                          className="h-8 max-w-[13rem] rounded-full border border-blue-100 bg-blue-50 px-3 text-sm font-black text-blue-950 outline-none focus:border-blue-300"
+                          disabled={!activeDevices.length || actionPending === "call"}
+                          onChange={(event) => setSelectedReceiverKey(event.target.value)}
+                          value={selectedReceiver ? receiverKey(selectedReceiver) : ""}
+                        >
+                          {activeDevices.map((device) => {
+                            const shortId = receiverShortDisplayId(device);
+                            return (
+                              <option key={receiverKey(device)} value={receiverKey(device)}>
+                                {receiverDisplayName(device)}
+                                {shortId ? ` · ${shortId}` : ""}
+                              </option>
+                            );
+                          })}
+                          {!activeDevices.length ? <option>No paired Receiver</option> : null}
+                        </select>
+                        <button
+                          className="h-8 rounded-full px-2 text-xs font-black text-blue-800 hover:bg-blue-50 disabled:opacity-45"
+                          disabled={!selectedReceiver?.id}
+                          onClick={() => {
+                            setReceiverLabelDraft(selectedReceiverLabel);
+                            setReceiverRenameOpen(true);
+                          }}
+                          type="button"
+                        >
+                          Rename
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <button
+                    className="inline-flex min-h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-500 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-55"
+                    disabled={actionPending === "call" || !selectedMainConnectUserPersonId}
+                    onClick={() => void startCall()}
+                    type="button"
+                  >
+                    <PhoneIcon />
+                    {actionPending === "call"
+                      ? "Calling"
+                      : selectedPerson
+                        ? `Live Call ${selectedPersonFirstName}`
+                        : "Live Call"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <span aria-hidden="true" />
+            )}
+            <button
+              aria-current={activeView === "settings" ? "page" : undefined}
+              className={`ml-auto min-h-9 rounded-md px-2 text-sm font-semibold transition-colors ${
+                activeView === "settings"
+                  ? "text-blue-800"
+                  : "text-slate-500 hover:text-blue-800"
+              }`}
+              onClick={() => {
+                setSetupView("people");
+                setActiveView("settings");
+                saveConnectViewState({
+                  activeView: "settings",
+                  setupView: "people",
+                });
+              }}
+              type="button"
+            >
+              Settings
+            </button>
+          </div>
         </header>
 
       {activeView === "connect" ? (
-        <section className="grid w-full gap-5 px-2 pt-2 pb-5 sm:px-4 sm:pt-3 lg:px-6">
-            <div>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <button
-                  aria-expanded={messageHistoryComposerOpen}
-                  className={`min-h-10 rounded-full border px-4 text-sm font-black shadow-sm transition ${
-                    messageHistoryComposerOpen
-                      ? "border-blue-200 bg-blue-50 text-blue-900"
-                      : "border-[#d6e3f2] bg-white text-[#173150] hover:bg-[#f8fafc]"
-                  }`}
-                  onClick={() =>
-                    setMessageHistoryComposerOpen((isOpen) => !isOpen)
-                  }
-                  type="button"
-                >
-                  New Message
-                </button>
-                <div className="flex flex-wrap items-center justify-end gap-3">
-                  <div
-                    aria-label="Message history view"
-                    className="inline-flex min-h-10 overflow-hidden rounded-full border border-[#d6e3f2] bg-white p-1 shadow-sm"
-                    role="group"
-                  >
-                    {([
-                      ["timeline", "Timeline"],
-                      ["appointment", "By Appointment"],
-                    ] as const).map(([view, label]) => (
-                      <button
-                        aria-pressed={messageHistoryView === view}
-                        className={`rounded-full px-4 py-1.5 text-sm font-black transition ${
-                          messageHistoryView === view
-                            ? "bg-[#edf5fc] text-[#173150]"
-                            : "text-[#5f6e84] hover:bg-[#f8fafc] hover:text-[#345d83]"
-                        }`}
-                        key={view}
-                        onClick={() => {
-                          setMessageHistoryView(view);
-                        }}
-                        type="button"
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+        <section className="grid w-full gap-5 px-2 py-5 sm:px-4 lg:px-6">
+          {connectTool === "message" ? (
+          <section className="grid max-w-[940px] items-start gap-5">
+            <section className="grid max-w-[940px] gap-4">
+              <div>
+                <p className="text-lg font-bold text-[#5f6e84]">
+                    {recording
+                      ? "Recording. Press Stop when done."
+                      : processingRecording
+                        ? "Transcribing recording..."
+                        : pendingRecording
+                          ? "Original audio and transcript will be sent together."
+                        : ""}
+                  </p>
+              </div>
+              <form
+              className="grid gap-4"
+                onSubmit={sendMessage}
+              >
+                <textarea
+                className="min-h-32 min-w-0 resize-y rounded-lg border border-[#b6cfe8] bg-white px-5 py-5 text-lg leading-relaxed shadow-sm"
+                  onChange={(event) => setMessageText(event.target.value)}
+                  placeholder="Type a message, or record one"
+                  value={messageText}
+                />
+                <div className="flex flex-wrap gap-3 rounded-lg border border-[#d6e3f2] bg-white px-4 py-3">
+                  <label className="inline-flex items-center gap-3 text-base font-black text-[#173150]">
+                    <input
+                      checked={messageRequiresAcknowledgement}
+                      className="h-5 w-5 accent-[#345d83]"
+                      onChange={(event) =>
+                        setMessageRequiresAcknowledgement(event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    Needs OK
+                  </label>
+                  <label className="inline-flex items-center gap-3 text-base font-black text-[#173150]">
+                    <input
+                      checked={messageAllowsCallbackRequest}
+                      className="h-5 w-5 accent-[#345d83]"
+                      onChange={(event) =>
+                        setMessageAllowsCallbackRequest(event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    Offer callback
+                  </label>
+                </div>
+              <div className="flex flex-wrap items-center gap-3">
                   <button
-                    className="min-h-10 rounded-md bg-transparent px-2 text-lg font-black text-[#5f6e84] hover:text-[#345d83] disabled:opacity-55"
-                    disabled={loading}
-                    onClick={() => void refresh()}
+                  className={`inline-flex min-h-14 items-center justify-center gap-3 rounded-lg border px-8 text-xl font-black shadow-sm ${
+                      recording
+                        ? "border-[#111111] bg-[#111111] text-white"
+                        : "border-[#d6e3f2] bg-white text-[#0f172a] hover:bg-[#f8fafc]"
+                    }`}
+                    disabled={processingRecording || actionPending === "message"}
+                    onClick={() => void toggleRecording()}
                     type="button"
                   >
-                    Refresh
+                    <span className="grid h-9 w-9 place-items-center rounded-full bg-[#ef3f43] text-white">
+                      <MicIcon />
+                    </span>
+                    {recording ? "Stop" : processingRecording ? "Transcribing" : "Record"}
                   </button>
-                  {canShowAdminItems ? (
-                    <label className="flex min-h-10 items-center gap-2 rounded-md bg-transparent px-1 text-lg font-black text-[#5f6e84]">
+                  <button
+                  className="min-h-14 rounded-lg bg-[#9fb2c6] px-8 text-xl font-black text-white shadow-sm hover:bg-[#345d83] disabled:opacity-80"
+                    disabled={
+                      (!messageText.trim() && !pendingRecording) ||
+                      !selectedMainConnectUserPersonId ||
+                      actionPending === "message" ||
+                      recording ||
+                      processingRecording
+                    }
+                    type="submit"
+                  >
+                    {actionPending === "message"
+                      ? "Sending"
+                      : pendingRecording
+                        ? "Send Audio Message"
+                        : "Send Message"}
+                  </button>
+                  <button
+                  className="min-h-14 rounded-lg border border-[#d6e3f2] bg-white px-8 text-xl font-black text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
+                    onClick={clearComposer}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                </div>
+                {pendingRecording ? (
+                <div className="rounded-md border border-[#d6e3f2] bg-[#f8fafc] p-3 text-sm text-[#334155]">
+                    <strong className="block text-[#172f49]">Recording ready</strong>
+                    <span className="mt-1 block">
+                      {pendingRecording.transcriptStatus === "completed"
+                        ? "Transcript is ready."
+                        : "Transcript is not available yet."}{" "}
+                      Duration {Math.max(1, Math.round(pendingRecording.recording.durationMs / 1000))}s.
+                    </span>
+                    {pendingRecording.recording.localUrl ? (
+                      <audio className="mt-2 w-full" controls src={pendingRecording.recording.localUrl}>
+                        <track kind="captions" />
+                      </audio>
+                    ) : null}
+                  </div>
+                ) : null}
+              <p className="text-lg font-black text-[#5f6e84]">
+                Recordings keep original audio and transcript.
+              </p>
+              </form>
+              </section>
+            </section>
+          ) : null}
+
+            {connectTool === "history" ? (
+            <div className="mt-2">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-4xl font-black leading-none text-[#173150]">
+                  Message<br className="sm:hidden" /> History
+                </h3>
+                <div className="flex flex-wrap items-center justify-end gap-3 pt-3">
+                    <button
+                    className="min-h-10 rounded-md bg-transparent px-2 text-lg font-black text-[#5f6e84] hover:text-[#345d83] disabled:opacity-55"
+                      disabled={loading}
+                      onClick={() => void refresh()}
+                      type="button"
+                    >
+                      Refresh
+                    </button>
+                  <label className="flex min-h-10 items-center gap-2 rounded-md bg-transparent px-1 text-lg font-black text-[#5f6e84]">
                       <input
                         checked={detailView}
                         onChange={(event) => setDetailView(event.target.checked)}
                         type="checkbox"
                       />
-                      Dev View
+                      Detail View
                     </label>
-                  ) : null}
+                    <button
+                      aria-label="Previous messages"
+                      className="grid h-9 w-9 place-items-center rounded-md border border-[#cbd9e7] bg-white text-[#345d83] shadow-sm hover:bg-[#edf5fc] disabled:bg-[#d0d6d2] disabled:text-[#7a827d] disabled:shadow-none"
+                      disabled={!canPagePreviousMessages}
+                      onClick={() => setMessageIndex(Math.max(0, messagePageStart - 2))}
+                      type="button"
+                    >
+                      <ChevronLeftIcon />
+                    </button>
+                    <button
+                      aria-label="Next messages"
+                      className="grid h-9 w-9 place-items-center rounded-md border border-[#cbd9e7] bg-white text-[#345d83] shadow-sm hover:bg-[#edf5fc] disabled:bg-[#d0d6d2] disabled:text-[#7a827d] disabled:shadow-none"
+                      disabled={!canPageNextMessages}
+                      onClick={() => setMessageIndex(messagePageStart + 2)}
+                      type="button"
+                    >
+                      <ChevronRightIcon />
+                    </button>
                 </div>
-              </div>
-              {messageHistoryComposerOpen ? (
-                <div className="mt-4">
-                  <AppointmentMessageComposer
-                    onCancel={() => setMessageHistoryComposerOpen(false)}
-                    onSent={async () => {
-                      setMessageHistoryComposerOpen(false);
-                      await refresh();
-                    }}
-                    personId={selectedMainConnectUserPersonId}
-                    recipientName={selectedPersonName}
-                  />
                 </div>
-              ) : null}
-              {messageHistoryView === "timeline" && visibleMessages.length ? (
-                <div className="mt-5">
-                  {visibleMessages.map((message, index) => (
-                    <TimelineMessageEvent
-                      detailView={devViewEnabled}
-                      isFirstInDay={
-                        index === 0 ||
-                        formatTimelineDayLabel(message.createdAt) !==
-                          formatTimelineDayLabel(visibleMessages[index - 1]?.createdAt)
-                      }
-                      key={message.id ?? `${message.from}-${message.createdAt ?? message.body}`}
-                      markMessageHeard={markMessageHeard}
-                      message={message}
-                      selectedPersonName={selectedPersonName}
-                      selectedReceiverId={selectedReceiverId}
-                    />
-                  ))}
+                {visibleMessages.length ? (
+                <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                  {visibleMessages.map((message) => {
+                    const sender =
+                      !message.from || message.from === "receiver_user"
+                        ? selectedPersonName
+                        : message.from;
+                    const body = message.transcript || message.body || "No message body";
+                    const sentTime = formatClockTime(message.createdAt);
+                    const deliveryLabel = connectMessageDeliveryLabel(message);
+                    const messageOptions = [
+                      message.requiresAcknowledgement ? "Needs OK" : "",
+                      message.allowsCallbackRequest ? "Callback offered" : "",
+                    ].filter(Boolean);
+
+                    return (
+                      <article
+                        className="min-h-[220px] rounded-2xl border border-[#d6e3f2] bg-white p-6 shadow-sm"
+                        key={message.id ?? `${sender}-${message.createdAt ?? body}`}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <ConnectPersonAvatar
+                              person={
+                                sender === selectedPersonName
+                                  ? selectedPerson
+                                  : { displayName: sender }
+                              }
+                              size="sm"
+                            />
+                            <h4 className="text-2xl font-black leading-tight text-[#0f172a]">
+                              Message from {sender}
+                            </h4>
+                          </div>
+                          {detailView ? (
+                            <span className="text-lg font-black uppercase tracking-wide text-[#5f6e84]">
+                              Transcript:{" "}
+                              {statusLabel(message.transcriptStatus || "not_requested")}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-4 text-xl font-black leading-relaxed text-[#5f6e84]">
+                          To {message.to || selectedPersonName} - {sentTime} * {deliveryLabel}
+                        </p>
+                        {messageOptions.length ? (
+                          <p className="mt-2 text-base font-black text-[#345d83]">
+                            {messageOptions.join(" / ")}
+                          </p>
+                        ) : null}
+                        <p className="mt-5 text-2xl leading-relaxed text-[#0f172a]">
+                          {body}
+                        </p>
+                        {detailView ? (
+                          <div className="mt-5 grid gap-3 rounded-lg border border-[#d6e3f2] bg-white p-4 text-base sm:grid-cols-2">
+                            <div>
+                              <strong className="block text-xs font-black uppercase text-[#5f6e84]">
+                                Receiver
+                              </strong>
+                              <span className="font-bold text-[#334155]">
+                                {message.receiverId || selectedReceiverId}
+                              </span>
+                            </div>
+                            <div>
+                              <strong className="block text-xs font-black uppercase text-[#5f6e84]">
+                                Type
+                              </strong>
+                              <span className="font-bold text-[#334155]">
+                                {statusLabel(message.messageType || "text")}
+                              </span>
+                            </div>
+                          </div>
+                        ) : null}
+                        {message.audioUrl ? (
+                          <div className="mt-5 rounded-md border border-[#d6e3f2] bg-white p-3">
+                            <strong className="block text-xs uppercase text-[#5f6e84]">
+                              Original audio
+                            </strong>
+                            <audio
+                              className="mt-2 w-full"
+                              controls
+                              onPlay={() => {
+                                void markMessageHeard(message);
+                              }}
+                              src={connectAudioUrl(message.audioUrl)}
+                            >
+                              <track kind="captions" />
+                            </audio>
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
                 </div>
-              ) : messageHistoryView === "appointment" && appointmentMessageGroups.length ? (
-                <div className="mt-5">
-                  {appointmentMessageGroups.map((group) => (
-                    <AppointmentCommunicationSummary
-                      detailView={devViewEnabled}
-                      group={group}
-                      key={group.id}
-                      markMessageHeard={markMessageHeard}
-                      selectedPersonName={selectedPersonName}
-                      selectedReceiverId={selectedReceiverId}
-                    />
-                  ))}
-                </div>
-              ) : (
+                ) : (
                 <p className="mt-5 text-xl font-black text-[#5f6e84]">
                   {selectedMainConnectUserPersonId
                     ? "No receiver messages yet."
                     : `${selectedPersonName} is not enabled for Connect messages yet.`}
-                </p>
-              )}
-            </div>
+                  </p>
+                )}
+              </div>
+            ) : null}
+
+          <RecipientCallPanel
+            activeCallState={state.callSummary?.latestCall?.state || ""}
+            canShowDiagnostics={isAdmin}
+            callAudioStatus={callAudioStatus}
+            callMuted={callMuted}
+            callPathDiagnostics={callPathDiagnostics}
+            onCallStateChange={(stateValue) => {
+              void reportDashboardCallState(stateValue);
+            }}
+            onCallAnswered={stopCallCue}
+            onCallEnded={stopCallCue}
+            onCallFailed={playCallFailureSound}
+            onHangUpCall={() => {
+              void endDashboardCall();
+            }}
+            onRefreshCallNotes={() => {
+              void refreshCallState();
+            }}
+            onRefreshCallPathDiagnostics={() => {
+              void refreshCallPathDiagnostics();
+            }}
+            onRestartAudio={restartDashboardCallAudio}
+            onToggleMuted={toggleCallMuted}
+            recipientCallState={recipientCallState}
+            receiverUsesClassicCallBridge={selectedReceiverUsesClassicCallBridge}
+            selectedReceiverId={selectedReceiverId}
+            selectedReceiverLabel={selectedReceiverLabel}
+            selectedPerson={selectedPerson}
+            selectedPersonName={selectedPersonName}
+            setRecipientCallState={setRecipientCallState}
+            setStatus={setStatus}
+            summaryStatus={state.callSummary?.latestCall?.summaryStatus || ""}
+            summaryText={state.callSummary?.latestCall?.summaryText || ""}
+            pendingSummaryReviewCount={state.callSummary?.pendingSummaryReviewCount || 0}
+            transcriptRuntimeStatus={callTranscriptRuntimeStatus}
+            transcriptStatus={state.callSummary?.latestCall?.transcriptStatus || ""}
+            transcriptText={state.callSummary?.latestCall?.transcriptText || ""}
+          />
+
         </section>
+      ) : activeView === "receiver" ? (
+        <ReceiverTroubleshootingView
+          activeDevices={activeDevices}
+          clearReceiverGuide={() => {
+            void clearPublishedReceiverGuide(selectedReceiverGuideId);
+          }}
+          chooseGuidePreviewTarget={chooseGuidePreviewTarget}
+          guideMode={guideMode}
+          receiverGuideId={selectedReceiverGuideId}
+          selectedReceiverKey={selectedReceiverKey}
+          selectedReceiverLabel={selectedReceiverLabel}
+          setGuideMode={setGuideMode}
+          setSelectedReceiverKey={setSelectedReceiverKey}
+          status={status}
+        />
       ) : (
         <ConnectSettingsView
           activeDevices={activeDevices}
           activeMainConnectUserPersonId={selectedMainConnectUserPersonId}
-          canShowAdminItems={canShowAdminItems}
           households={households}
           onRefresh={refresh}
           selectedReceiverKey={selectedReceiverKey}
+          clearReceiverGuide={() => {
+            void clearPublishedReceiverGuide(selectedReceiverGuideId);
+          }}
+          chooseGuidePreviewTarget={chooseGuidePreviewTarget}
+          guideMode={guideMode}
+          receiverGuideId={selectedReceiverGuideId}
           setSelectedReceiverKey={setSelectedReceiverKey}
+          setGuideMode={setGuideMode}
           setupView={setupView}
           setSetupView={setSetupView}
           state={state}
@@ -2520,133 +2672,6 @@ export function ConnectDashboard() {
         }}
       />
     </main>
-  );
-}
-
-export function ConnectProfileSettingsPanel({
-  canShowAdminItems = false,
-  setupView,
-}: {
-  canShowAdminItems?: boolean;
-  setupView: "people" | "receivers";
-}) {
-  const [state, setState] = useState<DashboardState>(emptyDashboardState);
-  const [status, setStatus] = useState("Loading receiver settings...");
-  const [selectedReceiverKey, setSelectedReceiverKey] = useState(connectPrototypeReceiverId);
-
-  const refresh = useCallback(async () => {
-    setStatus("Refreshing receiver settings...");
-    try {
-      const [
-        contextResult,
-        focusPeopleResult,
-        provisioningResult,
-      ] = await Promise.allSettled([
-        fetchConnectMainUserContext(),
-        fetchConnectFocusPeople(),
-        fetchConnectProvisioningSnapshot({
-          includeInactiveHouseholds: true,
-        }),
-      ]);
-      const connectContext = settledValue(contextResult);
-      const focusPeople = (settledValue(focusPeopleResult) ?? []).filter(
-        (person) => !isConnectPetSubjectType(person.subjectType)
-      );
-      const provisioning = settledValue(provisioningResult);
-      const activeMainConnectUserPersonId =
-        connectContext?.mainConnectUserPersonId || focusPeople[0]?.id || "";
-      const audioProfileResult = activeMainConnectUserPersonId
-        ? await fetchJson<{ profile?: ConnectAudioProfile }>(
-            `${connectAudioProfileEndpoint}?personId=${encodeURIComponent(
-              activeMainConnectUserPersonId
-            )}`,
-            { headers: await connectAuthHeaders() }
-          ).catch(() => null)
-        : null;
-      const failedCount = [
-        contextResult,
-        focusPeopleResult,
-        provisioningResult,
-      ].filter((result) => result.status === "rejected").length;
-
-      setState({
-        audioProfile: audioProfileResult?.profile ?? null,
-        callSummary: null,
-        connectContext,
-        focusPeople,
-        messages: [],
-        provisioning: provisioning ?? null,
-        receiversOnline: countOnlineProvisionedReceivers(provisioning),
-      });
-      setStatus(
-        contextResult.status === "rejected"
-          ? "Sign in to CarePland Personal to load receiver settings."
-          : failedCount
-            ? "Ready. Some receiver settings data is still loading."
-            : "Ready."
-      );
-    } catch (error) {
-      setStatus(
-        error instanceof Error
-          ? error.message
-          : "Receiver settings are unavailable."
-      );
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const activeDevices = useMemo(
-    () =>
-      state.provisioning?.receiverDevices?.filter(
-        (device) => device.status !== "revoked"
-      ) ?? [],
-    [state.provisioning?.receiverDevices]
-  );
-  const households = useMemo(
-    () => state.provisioning?.receiverHouseholds ?? [],
-    [state.provisioning?.receiverHouseholds]
-  );
-  const activeMainConnectUserPersonId =
-    state.connectContext?.mainConnectUserPersonId ||
-    state.focusPeople[0]?.id ||
-    "";
-
-  useEffect(() => {
-    if (!activeMainConnectUserPersonId || activeDevices.length === 0) return;
-    if (activeDevices.some((device) => receiverKey(device) === selectedReceiverKey)) return;
-
-    const stickyKey = readStickySelectedReceiverKey(activeMainConnectUserPersonId);
-    if (stickyKey && activeDevices.some((device) => receiverKey(device) === stickyKey)) {
-      setSelectedReceiverKey(stickyKey);
-      return;
-    }
-
-    setSelectedReceiverKey(receiverKey(activeDevices[0]));
-  }, [activeDevices, activeMainConnectUserPersonId, selectedReceiverKey]);
-
-  useEffect(() => {
-    if (!activeMainConnectUserPersonId) return;
-    if (!activeDevices.some((device) => receiverKey(device) === selectedReceiverKey)) return;
-    writeStickySelectedReceiverKey(activeMainConnectUserPersonId, selectedReceiverKey);
-  }, [activeDevices, activeMainConnectUserPersonId, selectedReceiverKey]);
-
-  return (
-    <ConnectSettingsView
-      activeDevices={activeDevices}
-      activeMainConnectUserPersonId={activeMainConnectUserPersonId}
-      canShowAdminItems={canShowAdminItems}
-      households={households}
-      onRefresh={refresh}
-      selectedReceiverKey={selectedReceiverKey}
-      setSelectedReceiverKey={setSelectedReceiverKey}
-      setupView={setupView}
-      setSetupView={() => undefined}
-      state={state}
-      status={status}
-    />
   );
 }
 
@@ -2947,10 +2972,14 @@ function ConnectAskPanel({
 function ConnectSettingsView({
   activeDevices,
   activeMainConnectUserPersonId,
-  canShowAdminItems,
+  clearReceiverGuide,
+  chooseGuidePreviewTarget,
+  guideMode,
   households,
   onRefresh,
+  receiverGuideId,
   selectedReceiverKey,
+  setGuideMode,
   setSelectedReceiverKey,
   setupView,
   setSetupView,
@@ -2959,10 +2988,17 @@ function ConnectSettingsView({
 }: {
   activeDevices: ConnectReceiverDevice[];
   activeMainConnectUserPersonId: string;
-  canShowAdminItems: boolean;
+  clearReceiverGuide: () => void;
+  chooseGuidePreviewTarget: (
+    highlight: ReceiverGuideRect,
+    targetReceiverSessionId?: string
+  ) => void;
+  guideMode: boolean;
   households: ConnectReceiverHousehold[];
   onRefresh: () => Promise<void>;
+  receiverGuideId: string;
   selectedReceiverKey: string;
+  setGuideMode: (value: boolean) => void;
   setSelectedReceiverKey: (value: string) => void;
   setupView: SetupView;
   setSetupView: (value: SetupView) => void;
@@ -2970,8 +3006,60 @@ function ConnectSettingsView({
   status: string;
 }) {
   const [primaryReceiverStatus, setPrimaryReceiverStatus] = useState("Ready.");
+  const [newHouseholdName, setNewHouseholdName] = useState("");
+  const [householdStatus, setHouseholdStatus] = useState("");
+  const [householdPending, setHouseholdPending] = useState(false);
+  const selectedHousehold = households[0] ?? null;
+  const householdLabel =
+    selectedHousehold?.displayName || selectedHousehold?.name || "Elizabeth and Robert";
+  const householdPeopleLabel =
+    selectedHousehold?.receiverPeople
+      ?.map((person) => personName(person))
+      .filter(Boolean)
+      .join(", ") || "No Connect participants assigned";
   const receiverLabel =
     activeDevices[0]?.name || activeDevices[0]?.receiverId || "No receiver selected";
+
+  async function createHousehold() {
+    const displayName = newHouseholdName.trim();
+
+    if (!displayName) {
+      setHouseholdStatus("Enter a household name first.");
+      return;
+    }
+
+    setHouseholdPending(true);
+    setHouseholdStatus("Adding household...");
+    try {
+      const response = await fetch("/api/connect/provisioning/households", {
+        body: JSON.stringify({
+          confirmedPrototypeWrite: true,
+          displayName,
+          operationReason: "Coordinator confirmed Connect household setup.",
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        ok?: boolean;
+      };
+
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `Household setup returned ${response.status}`);
+      }
+
+      setNewHouseholdName("");
+      setHouseholdStatus("Household added.");
+      await onRefresh();
+    } catch (error) {
+      setHouseholdStatus(
+        error instanceof Error ? error.message : "Household could not be added."
+      );
+    } finally {
+      setHouseholdPending(false);
+    }
+  }
 
   return (
     <section className="min-h-[calc(100vh-86px)] border-t border-[#d6e3f2] bg-[#f4f8fc]">
@@ -2982,29 +3070,97 @@ function ConnectSettingsView({
         </p>
         {setupView === "people" ? (
           <section className="max-w-[940px] rounded-lg border border-[#d6e3f2] bg-white p-6 shadow-sm">
-            <PrimaryReceiverUserPanel
-              currentPersonId={state.connectContext?.mainConnectUserPersonId ?? ""}
-              onRefresh={onRefresh}
-              people={state.connectContext?.people ?? []}
-              setStatus={setPrimaryReceiverStatus}
-              status={primaryReceiverStatus}
-            />
-          </section>
-        ) : (
-          <section className="max-w-[1040px] space-y-4">
-            <div className="rounded-lg border border-[#d6e3f2] bg-white p-6 shadow-sm">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.9fr)]">
               <PrimaryReceiverUserPanel
                 currentPersonId={state.connectContext?.mainConnectUserPersonId ?? ""}
                 onRefresh={onRefresh}
+                primaryHouseholdLabel={householdLabel}
                 people={state.connectContext?.people ?? []}
                 setStatus={setPrimaryReceiverStatus}
                 status={primaryReceiverStatus}
               />
+              <section>
+                <h3 className="text-sm font-black text-[#172f49]">Household</h3>
+                <p className="mt-1 text-sm font-semibold text-[#5f6e84]">
+                  {households.length
+                    ? households
+                        .map((household) => household.displayName || household.name || "Household")
+                        .join(" · ")
+                    : "No households yet."}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <label className="sr-only" htmlFor="new-connect-household">
+                    New household
+                  </label>
+                  <input
+                    className="min-h-11 min-w-0 flex-1 rounded-full border border-[#cbd9e7] bg-white px-4 text-sm font-semibold text-[#0f172a]"
+                    id="new-connect-household"
+                    onChange={(event) => setNewHouseholdName(event.target.value)}
+                    placeholder="Add household"
+                    value={newHouseholdName}
+                  />
+                  <button
+                    className="min-h-11 rounded-full border border-[#cbd9e7] bg-white px-5 text-sm font-black text-[#345d83] shadow-sm hover:bg-[#edf5fc] disabled:opacity-55"
+                    disabled={householdPending || !newHouseholdName.trim()}
+                    onClick={() => void createHousehold()}
+                    type="button"
+                  >
+                    {householdPending ? "Adding" : "Add"}
+                  </button>
+                </div>
+                {householdStatus ? (
+                  <p className="mt-3 text-sm font-semibold text-[#5f6e84]">
+                    {householdStatus}
+                  </p>
+                ) : null}
+              </section>
             </div>
+            <details className="mt-6 rounded-md border border-[#d6e3f2] bg-[#f8fafc] p-3">
+              <summary className="cursor-pointer text-sm font-black">
+                Advanced people diagnostics
+              </summary>
+              <p className="mt-2 text-sm text-[#5f6e84]">
+                Household, receiver, care-circle, and Main Connect User audio records are
+                summarized here for setup review.
+              </p>
+              <div className="mt-4 grid gap-4">
+                <CareCircleContext
+                  activeDevices={activeDevices}
+                  householdLabel={householdLabel}
+                  householdPeopleLabel={householdPeopleLabel}
+                  receiverLabel={receiverLabel}
+                />
+                <SettingsAudioSummary
+                  currentPersonId={activeMainConnectUserPersonId}
+                  state={state}
+                />
+                <AudioDiagnostics currentPersonId={activeMainConnectUserPersonId} />
+              </div>
+            </details>
+          </section>
+        ) : setupView === "guide" ? (
+          <ReceiverTroubleshootingView
+            activeDevices={activeDevices}
+            clearReceiverGuide={clearReceiverGuide}
+            chooseGuidePreviewTarget={chooseGuidePreviewTarget}
+            guideMode={guideMode}
+            receiverGuideId={receiverGuideId}
+            selectedReceiverKey={selectedReceiverKey}
+            selectedReceiverLabel={
+              activeDevices.find((device) => receiverKey(device) === selectedReceiverKey)?.name ||
+              activeDevices.find((device) => receiverKey(device) === selectedReceiverKey)
+                ?.receiverId ||
+              receiverLabel
+            }
+            setGuideMode={setGuideMode}
+            setSelectedReceiverKey={setSelectedReceiverKey}
+            status={status}
+          />
+        ) : (
+          <section className="max-w-[1040px]">
             <SetupPanel
               activeDevices={activeDevices}
               activeMainConnectUserPersonId={activeMainConnectUserPersonId}
-              canShowAdminItems={canShowAdminItems}
               households={households}
               onRefresh={onRefresh}
               selectedReceiverKey={selectedReceiverKey}
@@ -3025,12 +3181,14 @@ function PrimaryReceiverUserPanel({
   currentPersonId,
   onRefresh,
   people,
+  primaryHouseholdLabel,
   setStatus,
   status,
 }: {
   currentPersonId: string;
   onRefresh: () => Promise<void>;
   people: ConnectPersPerson[];
+  primaryHouseholdLabel: string;
   setStatus: (value: string) => void;
   status: string;
 }) {
@@ -3054,7 +3212,7 @@ function PrimaryReceiverUserPanel({
     setSavingPersonId(personId);
     setStatus(
       `Saving ${
-        person ? firstNameLabel(person.displayName) || "Main Receiver User" : "Main Receiver User"
+        person ? firstNameLabel(person.displayName) || "Main Connect User" : "Main Connect User"
       }...`
     );
 
@@ -3063,14 +3221,14 @@ function PrimaryReceiverUserPanel({
       await onRefresh();
       setStatus(
         person
-          ? `Ready. ${firstNameLabel(person.displayName) || "Main Receiver User"} is primary.`
+          ? `Ready. ${firstNameLabel(person.displayName) || "Main Connect User"} is primary.`
           : "Ready."
       );
     } catch (error) {
       setStatus(
         error instanceof Error
           ? error.message
-          : "Main Receiver User could not be saved."
+          : "Main Connect User could not be saved."
       );
     } finally {
       setSavingPersonId("");
@@ -3080,7 +3238,7 @@ function PrimaryReceiverUserPanel({
   return (
     <section>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-black text-[#172f49]">Main Receiver User</h3>
+        <h3 className="text-sm font-black text-[#172f49]">Main Connect User</h3>
         {!status.startsWith("Ready") ? (
           <span className="text-xs font-black text-[#5f6e84]">{status}</span>
         ) : null}
@@ -3120,6 +3278,22 @@ function PrimaryReceiverUserPanel({
             Add a Care VIP to choose a person.
           </span>
         )}
+
+        <span
+          aria-disabled="true"
+          className="inline-flex min-h-12 cursor-not-allowed items-center gap-3 rounded-full border border-[#d6e3f2] bg-white/40 px-4 text-sm font-black text-[#8a9aad]"
+          title="Household receiver mode is planned for future multi-user Receiver support."
+        >
+          <span className="grid h-7 w-7 place-items-center rounded-full bg-[#edf5fc]/60 text-xs text-[#8a9aad]">
+            HH
+          </span>
+          <span className="min-w-0 truncate">
+            Household{primaryHouseholdLabel ? `: ${primaryHouseholdLabel}` : ""}
+          </span>
+          <span className="rounded-full bg-[#edf5fc]/70 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[#7f8fa3]">
+            planned
+          </span>
+        </span>
       </div>
     </section>
   );
@@ -3138,8 +3312,8 @@ function SettingsAudioSummary({
   const pageSize = 3;
   const hasScopedPerson = Boolean(currentPersonId);
   const selectedPersonLabel = currentPersonId
-    ? "Main Receiver User"
-    : "Choose a Main Receiver User";
+    ? "Main Connect User"
+    : "Choose a Main Connect User";
   const detailItems = hasScopedPerson
     ? audioProfileDetailItems(state.audioProfile, null, selectedPersonLabel)
     : [];
@@ -3166,7 +3340,7 @@ function SettingsAudioSummary({
 
   async function runProfileAction(label: string, url: string) {
     if (!currentPersonId) {
-      setProfileStatus("Choose a Main Receiver User before running person diagnostics.");
+      setProfileStatus("Choose a Main Connect User before running person diagnostics.");
       return;
     }
 
@@ -3194,7 +3368,7 @@ function SettingsAudioSummary({
         <p className="text-sm font-black text-[#5f6e84]">
           {hasScopedPerson
             ? `${selectedPersonLabel}: ${hasAudioData ? "Scoped audio tuning loaded." : "No scoped audio tuning loaded yet."}`
-            : "Choose a Main Receiver User to load scoped audio tuning."}
+            : "Choose a Main Connect User to load scoped audio tuning."}
         </p>
         <p className="rounded-lg border border-[#cbd9e7] bg-white px-3 py-2 text-sm font-black text-[#172f49]">
           {selectedPersonLabel}
@@ -3202,7 +3376,7 @@ function SettingsAudioSummary({
       </div>
       {!hasScopedPerson ? (
         <p className="mt-4 rounded-lg border border-[#d6e3f2] bg-[#f8fbff] px-4 py-3 text-sm font-black text-[#5f6e84]">
-          Choose a Main Receiver User to view scoped audio profile diagnostics.
+          Choose a Main Connect User to view scoped audio profile diagnostics.
         </p>
       ) : null}
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -3261,7 +3435,7 @@ function SettingsAudioSummary({
             ))}
             {!visibleDetails.length ? (
               <p className="rounded-lg border border-[#d6e3f2] bg-white px-4 py-3 text-sm font-black text-[#5f6e84]">
-                No scoped playback review items loaded for the Main Receiver User.
+                No scoped playback review items loaded for the Main Connect User.
               </p>
             ) : null}
           </div>
@@ -3381,15 +3555,23 @@ function readableValue(value: unknown): string {
 
 function CareCircleContext({
   activeDevices,
+  householdLabel,
+  householdPeopleLabel,
   receiverLabel,
 }: {
   activeDevices: ConnectReceiverDevice[];
+  householdLabel: string;
+  householdPeopleLabel: string;
   receiverLabel: string;
 }) {
   const groups = [
     {
-      items: ["Main Receiver User Care Circle", "Membership verified by CarePland access"],
+      items: ["Main Connect User Care Circle", "Membership verified by CarePland access"],
       title: "Care circle",
+    },
+    {
+      items: [householdLabel, `People: ${householdPeopleLabel}`],
+      title: "Household",
     },
     {
       items: [
@@ -3474,7 +3656,7 @@ function AudioDiagnostics({ currentPersonId }: { currentPersonId: string }) {
 
   async function runPersonDiagnostic(action: (typeof personActions)[number]) {
     if (!currentPersonId) {
-      setDiagnosticStatus("Choose a Main Receiver User before running person diagnostics.");
+      setDiagnosticStatus("Choose a Main Connect User before running person diagnostics.");
       return;
     }
 
@@ -3522,7 +3704,7 @@ function AudioDiagnostics({ currentPersonId }: { currentPersonId: string }) {
       </div>
       <details className="rounded-lg border border-[#d6e3f2] bg-[#f8fbff] p-3" open>
         <summary className="cursor-pointer text-base font-black leading-tight text-[#172f49]">
-          Main Receiver User audio checks
+          Main Connect User audio checks
         </summary>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {personActions.map((action) => (
@@ -3580,7 +3762,6 @@ function SettingsContextCard({ items, title }: { items: string[]; title: string 
 function SetupPanel({
   activeDevices,
   activeMainConnectUserPersonId,
-  canShowAdminItems,
   households,
   onRefresh,
   selectedReceiverKey,
@@ -3592,7 +3773,6 @@ function SetupPanel({
 }: {
   activeDevices: ConnectReceiverDevice[];
   activeMainConnectUserPersonId: string;
-  canShowAdminItems: boolean;
   households: ConnectReceiverHousehold[];
   onRefresh: () => Promise<void>;
   selectedReceiverKey: string;
@@ -3606,13 +3786,16 @@ function SetupPanel({
   const [setupLink, setSetupLink] = useState<ReceiverSetupLink | null>(null);
   const [setupStatus, setSetupStatus] = useState("Setup links expire after 30 minutes.");
   const [receiverActionPending, setReceiverActionPending] = useState<string | null>(null);
+  const [newHouseholdName, setNewHouseholdName] = useState("");
+  const [peopleActionPending, setPeopleActionPending] = useState<"household" | null>(null);
   const [receiverSetupModalOpen, setReceiverSetupModalOpen] = useState(false);
   const [receiverPairingCode, setReceiverPairingCode] = useState("");
   const [receiverPairingPending, setReceiverPairingPending] = useState(false);
-  const [receiverDetailsOpen, setReceiverDetailsOpen] = useState(false);
   const setupPerson = state.connectContext?.people.find(
     (person) => person.id === activeMainConnectUserPersonId
   );
+  const [appearanceTheme, setAppearanceTheme] = useState("Mid-Century");
+  const [visualSkin, setVisualSkin] = useState("Modern");
   const [showRevokedDevices, setShowRevokedDevices] = useState(false);
   const [expandedReceiverDeviceId, setExpandedReceiverDeviceId] = useState("");
   const [receiverLabelDrafts, setReceiverLabelDrafts] = useState<Record<string, string>>({});
@@ -3641,16 +3824,144 @@ function SetupPanel({
   });
   const setupPendingDevice =
     allDevices.find((device) => device.status === "setup_pending") ?? selectedDevice;
+  const appearanceThemes: Record<
+    string,
+    {
+      accent: string;
+      accentBorder: string;
+      blue: string;
+      blueBorder: string;
+      buttonText: string;
+      cream: string;
+      frame: string;
+      panel: string;
+      surface: string;
+      text: string;
+    }
+  > = {
+    "Art Deco": {
+      accent: "#0f6f62",
+      accentBorder: "#07483f",
+      blue: "#244f70",
+      blueBorder: "#14354f",
+      buttonText: "#ffffff",
+      cream: "#f8ecd2",
+      frame: "#141c24",
+      panel: "#f5e0b4",
+      surface: "#fff8e8",
+      text: "#10201c",
+    },
+    "Classic Green": {
+      accent: "#1d6816",
+      accentBorder: "#0e3d0b",
+      blue: "#32699a",
+      blueBorder: "#1e4b75",
+      buttonText: "#ffffff",
+      cream: "#fbfaf2",
+      frame: "#20281f",
+      panel: "#edf5e6",
+      surface: "#fffdf5",
+      text: "#122018",
+    },
+    Custom: {
+      accent: "#1f6f1a",
+      accentBorder: "#0d4910",
+      blue: "#346a96",
+      blueBorder: "#1f4d73",
+      buttonText: "#ffffff",
+      cream: "#fffaf0",
+      frame: "#202424",
+      panel: "#eef5f2",
+      surface: "#ffffff",
+      text: "#122018",
+    },
+    "High Contrast": {
+      accent: "#005b00",
+      accentBorder: "#001f00",
+      blue: "#003f7d",
+      blueBorder: "#001f42",
+      buttonText: "#ffffff",
+      cream: "#ffffff",
+      frame: "#000000",
+      panel: "#ffffff",
+      surface: "#ffffff",
+      text: "#000000",
+    },
+    Library: {
+      accent: "#34512d",
+      accentBorder: "#24391f",
+      blue: "#3f6271",
+      blueBorder: "#2a4450",
+      buttonText: "#ffffff",
+      cream: "#fbf2dc",
+      frame: "#2b2620",
+      panel: "#efe3c7",
+      surface: "#fff9ed",
+      text: "#17231e",
+    },
+    "Mid-Century": {
+      accent: "#687847",
+      accentBorder: "#40552b",
+      blue: "#32697e",
+      blueBorder: "#23485f",
+      buttonText: "#ffffff",
+      cream: "#fff8ea",
+      frame: "#1f211f",
+      panel: "#f4e9ce",
+      surface: "#f9efd8",
+      text: "#17231e",
+    },
+    "Mission Control": {
+      accent: "#275f35",
+      accentBorder: "#133a1f",
+      blue: "#1e5f8d",
+      blueBorder: "#153f5d",
+      buttonText: "#ffffff",
+      cream: "#f4f7f5",
+      frame: "#111827",
+      panel: "#e9eef0",
+      surface: "#fbfbf8",
+      text: "#0f172a",
+    },
+    "Soft Cream": {
+      accent: "#5c6f40",
+      accentBorder: "#3d4d29",
+      blue: "#4c7891",
+      blueBorder: "#31566d",
+      buttonText: "#ffffff",
+      cream: "#fffaf0",
+      frame: "#756f62",
+      panel: "#fbf1dd",
+      surface: "#fffdf7",
+      text: "#17231e",
+    },
+    "Vintage Radio": {
+      accent: "#6f542e",
+      accentBorder: "#4a351b",
+      blue: "#2e6075",
+      blueBorder: "#1f4351",
+      buttonText: "#ffffff",
+      cream: "#fff1d1",
+      frame: "#2a2218",
+      panel: "#ead7ad",
+      surface: "#fff4da",
+      text: "#191f18",
+    },
+  };
+  const appearanceThemeNames = Object.keys(appearanceThemes);
+  const selectedAppearanceTheme =
+    appearanceThemes[appearanceTheme] ?? appearanceThemes["Mid-Century"];
+  const selectedHousehold = households[0] ?? null;
+  const householdLabel =
+    selectedHousehold?.displayName || selectedHousehold?.name || "No household selected";
+  const householdPeopleLabel =
+    selectedHousehold?.receiverPeople
+      ?.map((person) => personName(person))
+      .filter(Boolean)
+      .join(", ") || "No Connect participants assigned";
   const receiverLabel =
     selectedDevice ? receiverDisplayName(selectedDevice) : "No receiver selected";
   const receiverPairingCodeReady = browserReceiverPairingCodeReady(receiverPairingCode);
-  const publicReceiverUrl = "https://receiver.carepland.com";
-
-  useEffect(() => {
-    if (setupLink) {
-      setReceiverDetailsOpen(true);
-    }
-  }, [setupLink]);
 
   function receiverDisplayName(device: ConnectReceiverDevice) {
     return device.locationLabel || device.name || device.receiverId || "Receiver";
@@ -3662,7 +3973,7 @@ function SetupPanel({
 
   function openReceiverSetupModal() {
     if (!activeMainConnectUserPersonId) {
-      setSetupStatus("Choose a Main Receiver User before adding a Receiver.");
+      setSetupStatus("Choose a Main Connect User before adding a Receiver.");
       return;
     }
     setReceiverSetupModalOpen(true);
@@ -3677,7 +3988,7 @@ function SetupPanel({
 
   async function pairReceiverFromBrowser() {
     if (!activeMainConnectUserPersonId) {
-      setSetupStatus("Choose a Main Receiver User before pairing this Receiver.");
+      setSetupStatus("Choose a Main Connect User before pairing this Receiver.");
       return;
     }
     if (!receiverPairingCodeReady) {
@@ -3728,6 +4039,55 @@ function SetupPanel({
     } finally {
       setReceiverPairingPending(false);
     }
+  }
+
+  async function createHousehold() {
+    const displayName = newHouseholdName.trim();
+    if (!displayName) {
+      setSetupStatus("Enter a household name first.");
+      return;
+    }
+
+    setPeopleActionPending("household");
+    setSetupStatus("Adding household...");
+    try {
+      const response = await fetch("/api/connect/provisioning/households", {
+        body: JSON.stringify({
+          confirmedPrototypeWrite: true,
+          displayName,
+          operationReason: "Coordinator confirmed Connect household setup.",
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; ok?: boolean };
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `Household setup returned ${response.status}`);
+      }
+      setNewHouseholdName("");
+      setSetupStatus("Household added.");
+      await onRefresh();
+    } catch (error) {
+      setSetupStatus(error instanceof Error ? error.message : "Household could not be added.");
+    } finally {
+      setPeopleActionPending(null);
+    }
+  }
+
+  function receiverHouseholdName(receiverHouseholdId?: string) {
+    return (
+      households.find((household) => household.id === receiverHouseholdId)?.displayName ||
+      households.find((household) => household.id === receiverHouseholdId)?.name ||
+      selectedHousehold?.displayName ||
+      selectedHousehold?.name ||
+      "Unassigned household"
+    );
+  }
+
+  function receiverHouseholdPeopleLabel(receiverHouseholdId?: string) {
+    const household = households.find((item) => item.id === receiverHouseholdId);
+    const people = household?.receiverPeople?.map(personName).filter(Boolean) ?? [];
+    return people.length ? people.join(", ") : "No Connect participants assigned";
   }
 
   function receiverSetupStatus(device: ConnectReceiverDevice) {
@@ -3910,7 +4270,7 @@ function SetupPanel({
       return;
     }
     if (!activeMainConnectUserPersonId) {
-      setSetupStatus("Choose a Main Receiver User before creating a receiver setup link.");
+      setSetupStatus("Choose a Main Connect User before creating a receiver setup link.");
       return;
     }
 
@@ -3984,15 +4344,6 @@ function SetupPanel({
       setSetupStatus("Setup link copied.");
     } catch {
       setSetupStatus("Copy failed. Open the setup link and copy it from the browser.");
-    }
-  }
-
-  async function copyPublicReceiverLink() {
-    try {
-      await navigator.clipboard.writeText(publicReceiverUrl);
-      setSetupStatus("Receiver link copied.");
-    } catch {
-      setSetupStatus("Copy failed. Select the Receiver link and copy it from the browser.");
     }
   }
 
@@ -4101,8 +4452,8 @@ function SetupPanel({
               Coordinator
             </span>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-1 rounded-md bg-[#edf5fc] p-1">
-            {(["people", "receivers"] as SetupView[]).map((view) => (
+          <div className="mt-3 grid grid-cols-4 gap-1 rounded-md bg-[#edf5fc] p-1">
+            {(["people", "guide", "receivers", "appearance"] as SetupView[]).map((view) => (
               <button
                 className={`min-h-9 rounded-md px-2 text-xs font-black capitalize ${
                   setupView === view ? "bg-white text-[#172f49] shadow-sm" : "text-[#345d83]"
@@ -4125,8 +4476,15 @@ function SetupPanel({
       {setupView === "people" ? (
         <div className="mt-4 space-y-3">
           <Metric
+            detail="receiver households"
+            label="Households"
+            value={String(
+              state.provisioning?.totals?.receiverHouseholds ?? households.length
+            )}
+          />
+          <Metric
             detail="existing Pers people"
-            label="Receiver users"
+            label="Connect people"
             value={String(state.connectContext?.people.length ?? 0)}
           />
           <Metric
@@ -4140,10 +4498,32 @@ function SetupPanel({
             value={String(state.audioProfile?.summary?.total ?? 0)}
           />
           <div className="rounded-md border border-[#d6e3f2] bg-[#f8fafc] p-3">
-            <p className="text-sm font-black text-[#172f49]">Receiver Users</p>
+            <p className="text-sm font-black text-[#172f49]">Household setup</p>
+            <div className="mt-3 grid gap-2">
+              <label className="grid gap-1 text-xs font-black uppercase tracking-normal text-[#5f6e84]">
+                New household
+                <input
+                  className="min-h-10 rounded-md border border-[#cbd9e7] bg-white px-3 text-sm font-semibold normal-case text-[#0f172a]"
+                  onChange={(event) => setNewHouseholdName(event.target.value)}
+                  placeholder="Bedroom suite"
+                  value={newHouseholdName}
+                />
+              </label>
+              <button
+                className="min-h-10 rounded-md border border-[#cbd9e7] bg-white px-3 text-sm font-bold text-[#345d83] hover:bg-[#edf5fc] disabled:opacity-55"
+                disabled={peopleActionPending !== null}
+                onClick={() => void createHousehold()}
+                type="button"
+              >
+                {peopleActionPending === "household" ? "Adding" : "Add household"}
+              </button>
+            </div>
+          </div>
+          <div className="rounded-md border border-[#d6e3f2] bg-[#f8fafc] p-3">
+            <p className="text-sm font-black text-[#172f49]">Connect People</p>
             <p className="mt-1 text-xs font-semibold text-[#5f6e84]">
-              Receiver uses existing CarePland people. Add or edit people in Pers; Receiver
-              follows the global focus when one person is selected, and uses a receiver-local
+              Connect uses existing CarePland Pers people. Add or edit people in Pers; Connect
+              Home follows the global focus when one person is selected, and uses a Connect-local
               person when global focus is Everyone.
             </p>
             <div className="mt-3 grid gap-2">
@@ -4160,7 +4540,7 @@ function SetupPanel({
                       </span>
                       <span className="text-xs font-black uppercase tracking-normal text-[#5f6e84]">
                         {person.id === state.connectContext?.mainConnectUserPersonId
-                          ? "Main Receiver User"
+                          ? "Main Connect User"
                           : "CarePland person"}
                       </span>
                     </span>
@@ -4179,75 +4559,51 @@ function SetupPanel({
               )}
             </div>
           </div>
-          {canShowAdminItems ? (
-            <details className="rounded-md border border-[#d6e3f2] bg-[#f8fafc] p-3">
-              <summary className="cursor-pointer text-sm font-black">
-                Advanced receiver-user diagnostics
-              </summary>
-              <p className="mt-2 text-sm text-[#5f6e84]">
-                Receiver and care-circle records are summarized here for setup review.
-              </p>
-              <div className="mt-4 grid gap-4">
-                <CareCircleContext
-                  activeDevices={activeDevices}
-                  receiverLabel={receiverLabel}
-                />
-                <SettingsAudioSummary
-                  currentPersonId={activeMainConnectUserPersonId}
-                  state={state}
-                />
-                <AudioDiagnostics
-                  currentPersonId={activeMainConnectUserPersonId}
-                />
-              </div>
-            </details>
-          ) : null}
+          <details className="rounded-md border border-[#d6e3f2] bg-[#f8fafc] p-3">
+            <summary className="cursor-pointer text-sm font-black">
+              Advanced people diagnostics
+            </summary>
+            <p className="mt-2 text-sm text-[#5f6e84]">
+              Household, receiver, and care-circle records are summarized here
+              for setup review.
+            </p>
+            <div className="mt-4 grid gap-4">
+              <CareCircleContext
+                activeDevices={activeDevices}
+                householdLabel={householdLabel}
+                householdPeopleLabel={householdPeopleLabel}
+                receiverLabel={receiverLabel}
+              />
+              <SettingsAudioSummary
+                currentPersonId={activeMainConnectUserPersonId}
+                state={state}
+              />
+              <AudioDiagnostics
+                currentPersonId={activeMainConnectUserPersonId}
+              />
+            </div>
+          </details>
         </div>
       ) : null}
 
       {setupView === "receivers" ? (
         <div className="mt-4 space-y-4">
           <fieldset className="rounded-xl border border-[#d6e3f2] bg-white p-5">
-            <legend className="px-2 text-lg font-black text-[#5f6e84]">
-              Receiver Management
-            </legend>
-
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#b9d5ee] bg-[#f8fbff] p-4">
-              <div className="min-w-0">
-                <p className="text-sm font-black uppercase text-[#5f6e84]">Receiver link</p>
-                <a
-                  className="mt-1 block truncate text-xl font-black text-[#173150] hover:text-[#2f6f9f]"
-                  href={publicReceiverUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {publicReceiverUrl}
-                </a>
-              </div>
-              <button
-                aria-label="Copy Receiver link"
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-[#cbd9e7] bg-white text-[#173150] shadow-sm hover:bg-[#edf5fc]"
-                onClick={() => void copyPublicReceiverLink()}
-                title="Copy Receiver link"
-                type="button"
-              >
-                <svg
-                  aria-hidden="true"
-                  className="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  viewBox="0 0 24 24"
-                >
-                  <rect height="14" rx="2" width="14" x="8" y="8" />
-                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                </svg>
-              </button>
+            <legend className="px-2 text-lg font-black text-[#5f6e84]">Receivers</legend>
+            <div className="grid gap-3 md:grid-cols-3">
+              {[
+                ["What exists", "Receiver list, household assignment, and current status."],
+                ["What is working", "Online, last seen, and setup progress are shown here."],
+                ["What needs attention", "Create setup links, re-pair, or revoke receivers."],
+              ].map(([title, detail]) => (
+                <div className="rounded-xl border border-[#cbd9e7] bg-[#f8fbff] p-4" key={title}>
+                  <p className="text-lg font-black text-[#172f49]">{title}</p>
+                  <p className="mt-2 text-sm font-black text-[#5f6e84]">{detail}</p>
+                </div>
+              ))}
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-[minmax(220px,2fr)_minmax(180px,1fr)_auto_auto_auto]">
+            <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(220px,2fr)_minmax(180px,1fr)_auto_auto_auto]">
               <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
                 Receiver to call
                 <select
@@ -4326,7 +4682,7 @@ function SetupPanel({
                         Receiver Active Person
                       </p>
                       <p className="mt-1 text-2xl font-black text-[#172f49]">
-                        {setupPerson?.displayName || "No Main Receiver User selected"}
+                        {setupPerson?.displayName || "No Main Connect User selected"}
                       </p>
                       <p className="mt-2 text-sm font-semibold text-[#5f6e84]">
                         This Receiver will pair to the selected Connect person.
@@ -4446,6 +4802,10 @@ function SetupPanel({
               ) : null}
               {sortedVisibleDevices.map((device, index) => {
                 const deviceKey = receiverKey(device);
+                const previousDevice = sortedVisibleDevices[index - 1];
+                const showHouseholdHeader =
+                  index === 0 ||
+                  previousDevice?.receiverHouseholdId !== device.receiverHouseholdId;
                 const isExpanded = expandedReceiverDeviceId === device.id;
                 const presenceState = device.presence?.state || "offline";
                 const deviceTokens = receiverSetupTokens(device.id);
@@ -4453,6 +4813,16 @@ function SetupPanel({
 
                 return (
                   <div className="space-y-2" key={deviceKey}>
+                    {showHouseholdHeader ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#d6e3f2] bg-white px-4 py-3">
+                        <strong className="text-base font-black text-[#172f49]">
+                          {receiverHouseholdName(device.receiverHouseholdId)}
+                        </strong>
+                        <span className="text-sm font-black text-[#5f6e84]">
+                          {receiverHouseholdPeopleLabel(device.receiverHouseholdId)}
+                        </span>
+                      </div>
+                    ) : null}
                     <article
                       className={`rounded-xl border p-4 ${
                         deviceKey === selectedReceiverKey
@@ -4472,6 +4842,7 @@ function SetupPanel({
                           <span className="block text-sm font-semibold text-[#5f6e84]">
                             {device.locationLabel ? "Named" : "Unnamed"} ·{" "}
                             ID {receiverShortId(device)} ·{" "}
+                            {receiverHouseholdName(device.receiverHouseholdId)} ·{" "}
                             {receiverSetupStatus(device)} ·{" "}
                             {device.presence?.label || statusLabel(presenceState)}
                           </span>
@@ -4531,6 +4902,10 @@ function SetupPanel({
                       {isExpanded ? (
                         <div className="mt-4 rounded-lg border border-[#d6e3f2] bg-white p-4">
                           <div className="grid gap-3 sm:grid-cols-3">
+                            <MiniStatus
+                              label="Household"
+                              value={receiverHouseholdName(device.receiverHouseholdId)}
+                            />
                             <MiniStatus label="Setup tokens" value={String(deviceTokens.length)} />
                             <MiniStatus label="Audit events" value={String(deviceEvents.length)} />
                             <MiniStatus label="Receiver ID" value={receiverShortId(device)} />
@@ -4651,6 +5026,33 @@ function SetupPanel({
                               {receiverActionPending === device.id ? "Saving" : "Save name"}
                             </button>
                           </div>
+                          <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                            <label className="grid gap-2 text-sm font-black uppercase text-[#5f6e84]">
+                              Receiver household
+                              <select
+                                className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-semibold normal-case text-[#0f172a]"
+                                disabled
+                                value={device.receiverHouseholdId || ""}
+                              >
+                                {households.map((household) => (
+                                  <option key={household.id} value={household.id}>
+                                    {household.displayName || household.name || "Household"}
+                                  </option>
+                                ))}
+                                {!households.length ? <option>No household loaded</option> : null}
+                              </select>
+                            </label>
+                            <button
+                              className="self-end min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] opacity-60"
+                              disabled
+                              type="button"
+                            >
+                              Move
+                            </button>
+                          </div>
+                          <p className="mt-3 text-sm font-black text-[#5f6e84]">
+                            Moving a receiver keeps its device token but revokes active setup links for that device.
+                          </p>
                           <div className="mt-4 grid gap-4 sm:grid-cols-2">
                             <div>
                               <p className="text-sm font-black text-[#0f172a]">Setup history</p>
@@ -4684,209 +5086,312 @@ function SetupPanel({
               })}
             </div>
 
-            <details
-              className="mt-4 rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-3"
-              onToggle={(event) => setReceiverDetailsOpen(event.currentTarget.open)}
-              open={receiverDetailsOpen}
-            >
-              <summary className="cursor-pointer text-lg font-black text-[#173150]">
-                Receiver Details
-              </summary>
-              <div className="mt-3 rounded-xl border border-[#d6e3f2] bg-white p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <strong className="text-lg font-black text-[#172f49]">
-                    {setupPendingDevice
-                      ? receiverDisplayName(setupPendingDevice)
-                      : selectedDevice
-                        ? receiverDisplayName(selectedDevice)
-                        : "Receiver"}
-                  </strong>
-                  <span className="text-sm font-black text-[#5f6e84]">
-                    {setupPendingDevice?.status === "setup_pending" ? "Setup Pending" : "Setup progress"}
+            <div className="mt-4 rounded-xl border border-[#d6e3f2] bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <strong className="text-lg font-black text-[#172f49]">
+                  {setupPendingDevice
+                    ? receiverDisplayName(setupPendingDevice)
+                    : selectedDevice
+                      ? receiverDisplayName(selectedDevice)
+                      : "Receiver"}
+                </strong>
+                <span className="text-sm font-black text-[#5f6e84]">
+                  {setupPendingDevice?.status === "setup_pending" ? "Setup Pending" : "Setup progress"}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <MiniStatus
+                  label="Receiver device record"
+                  value={setupPendingDevice ? receiverDisplayName(setupPendingDevice) : "Not created"}
+                />
+                <MiniStatus
+                  label="Single-use setup link"
+                  value={setupLink?.setupCode ? setupLink.setupCode : "Not created"}
+                />
+                <MiniStatus
+                  label="Device token paired"
+                  value={setupPendingDevice?.pairedAt ? "Paired" : "Waiting for receiver"}
+                />
+                <MiniStatus
+                  label="Receiver heartbeat"
+                  value={setupPendingDevice?.lastSeenAt ? formatDateTime(setupPendingDevice.lastSeenAt) : "Not paired"}
+                />
+              </div>
+            </div>
+
+            {setupLink ? (
+              <div className="mt-4 rounded-md border border-[#d6e3f2] bg-[#f8fafc] p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-normal text-[#5f6e84]">
+                      Receiver setup code
+                    </p>
+                    <strong className="mt-1 block text-2xl text-[#172f49]">
+                      {setupLink.setupCode || "---"}
+                    </strong>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-2 text-xs font-black text-[#5f6e84]">
+                    {setupLink.expiresAt ? `Expires ${formatDateTime(setupLink.expiresAt)}` : "Expires soon"}
                   </span>
                 </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <MiniStatus
-                    label="Receiver device record"
-                    value={setupPendingDevice ? receiverDisplayName(setupPendingDevice) : "Not created"}
-                  />
-                  <MiniStatus
-                    label="Single-use setup link"
-                    value={setupLink?.setupCode ? setupLink.setupCode : "Not created"}
-                  />
-                  <MiniStatus
-                    label="Device token paired"
-                    value={setupPendingDevice?.pairedAt ? "Paired" : "Waiting for receiver"}
-                  />
-                  <MiniStatus
-                    label="Receiver heartbeat"
-                    value={setupPendingDevice?.lastSeenAt ? formatDateTime(setupPendingDevice.lastSeenAt) : "Not paired"}
-                  />
-                </div>
-              </div>
-
-              {setupLink ? (
-                <div className="mt-4 rounded-md border border-[#d6e3f2] bg-white p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-normal text-[#5f6e84]">
-                        Receiver setup code
-                      </p>
-                      <strong className="mt-1 block text-2xl text-[#172f49]">
-                        {setupLink.setupCode || "---"}
-                      </strong>
-                    </div>
-                    <span className="rounded-full bg-[#f8fafc] px-3 py-2 text-xs font-black text-[#5f6e84]">
-                      {setupLink.expiresAt ? `Expires ${formatDateTime(setupLink.expiresAt)}` : "Expires soon"}
-                    </span>
-                  </div>
-                  {setupLink.setupUrl ? (
-                    <div className="mt-3 grid gap-2">
+                {setupLink.setupUrl ? (
+                  <div className="mt-3 grid gap-2">
+                    <a
+                      className="truncate rounded-md border border-[#cbd9e7] bg-white px-3 py-2 text-xs font-semibold text-[#345d83] hover:bg-[#edf5fc]"
+                      href={setupLink.setupUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      {setupLink.setupUrl}
+                    </a>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        className="min-h-9 rounded-md border border-[#cbd9e7] bg-white px-3 text-xs font-black text-[#345d83] hover:bg-[#edf5fc]"
+                        onClick={() => void copySetupLink()}
+                        type="button"
+                      >
+                        Copy link
+                      </button>
                       <a
-                        className="truncate rounded-md border border-[#cbd9e7] bg-white px-3 py-2 text-xs font-semibold text-[#345d83] hover:bg-[#edf5fc]"
+                        className="grid min-h-9 place-items-center rounded-md bg-[#345d83] px-3 text-xs font-black text-white hover:bg-[#254a6d]"
                         href={setupLink.setupUrl}
                         rel="noreferrer"
                         target="_blank"
                       >
-                        {setupLink.setupUrl}
+                        Open
                       </a>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <button
-                          className="min-h-9 rounded-md border border-[#cbd9e7] bg-white px-3 text-xs font-black text-[#345d83] hover:bg-[#edf5fc]"
-                          onClick={() => void copySetupLink()}
-                          type="button"
-                        >
-                          Copy link
-                        </button>
-                        <a
-                          className="grid min-h-9 place-items-center rounded-md bg-[#345d83] px-3 text-xs font-black text-white hover:bg-[#254a6d]"
-                          href={setupLink.setupUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          Open
-                        </a>
-                      </div>
                     </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            <details className="mt-4 rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-3">
+              <summary className="cursor-pointer text-lg font-black text-[#173150]">
+                Provisioning diagnostics
+              </summary>
+              <div className="mt-3 rounded-lg border border-[#d6e3f2] bg-white p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-base font-black text-[#0f172a]">Provisioning events</p>
+                  <span className="text-sm font-black text-[#5f6e84]">
+                    {(state.provisioning?.auditEvents ?? []).length} recent
+                  </span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {(state.provisioning?.auditEvents ?? []).slice(0, 6).map((event) => (
+                    <div
+                      className="rounded-lg border border-[#d6e3f2] bg-white px-3 py-2"
+                      key={event.id || `${event.type}-${event.createdAt}`}
+                    >
+                      <p className="text-sm font-black text-[#172f49]">{shortAuditEvent(event)}</p>
+                      <p className="text-sm font-black text-[#5f6e84]">
+                        {formatDateTime(event.createdAt)}
+                      </p>
+                    </div>
+                  ))}
+                  {!(state.provisioning?.auditEvents ?? []).length ? (
+                    <p className="text-sm font-semibold text-[#5f6e84]">
+                      No provisioning events loaded.
+                    </p>
                   ) : null}
                 </div>
-              ) : null}
+              </div>
             </details>
             <p className="mt-3 text-sm font-black text-[#5f6e84]">
               Setup links are single-use and expire after 30 minutes.
             </p>
           </fieldset>
 
-          {canShowAdminItems ? (
-            <fieldset className="rounded-xl border border-[#bfd3e8] bg-[#f8fbff] p-5">
-              <legend className="px-2 text-lg font-black text-[#5f6e84]">
-                Administrator / Diagnostics
-              </legend>
-              <div className="space-y-3">
-                <details className="rounded-lg border border-[#d6e3f2] bg-white p-3">
-                  <summary className="cursor-pointer text-lg font-black text-[#173150]">
-                    Provisioning diagnostics
-                  </summary>
-                  <div className="mt-3 rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-base font-black text-[#0f172a]">Provisioning events</p>
-                      <span className="text-sm font-black text-[#5f6e84]">
-                        {(state.provisioning?.auditEvents ?? []).length} recent
-                      </span>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {(state.provisioning?.auditEvents ?? []).slice(0, 6).map((event) => (
-                        <div
-                          className="rounded-lg border border-[#d6e3f2] bg-white px-3 py-2"
-                          key={event.id || `${event.type}-${event.createdAt}`}
-                        >
-                          <p className="text-sm font-black text-[#172f49]">
-                            {shortAuditEvent(event)}
-                          </p>
-                          <p className="text-sm font-black text-[#5f6e84]">
-                            {formatDateTime(event.createdAt)}
-                          </p>
-                        </div>
-                      ))}
-                      {!(state.provisioning?.auditEvents ?? []).length ? (
-                        <p className="text-sm font-semibold text-[#5f6e84]">
-                          No provisioning events loaded.
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                </details>
-
-                <details className="rounded-lg border border-[#d6e3f2] bg-white p-3">
-                  <summary className="cursor-pointer text-lg font-black text-[#173150]">
-                    Local receiver server
-                  </summary>
-                  <div className="mt-3 grid gap-3">
-                    <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
-                      Server URL
-                      <input
-                        className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-semibold text-[#0f172a]"
-                        readOnly
-                        value="http://localhost:8790"
-                      />
-                    </label>
-                    <button
-                      className="min-h-11 justify-self-start rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc]"
-                      onClick={() => void onRefresh()}
-                      type="button"
-                    >
-                      Refresh receiver server
-                    </button>
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-[#9bc5ef] bg-white px-4 py-3">
-                      <span>
-                        <strong className="block text-base font-black text-[#0f172a]">
-                          {selectedDevice ? receiverDisplayName(selectedDevice) : "Receiver"} (Web)
-                        </strong>
-                        <span className="text-sm font-semibold text-[#5f6e84]">
-                          {selectedDevice?.presence?.label || statusLabel(selectedDevice?.presence?.state || "ringing")} ·{" "}
-                          {selectedDevice?.receiverId || connectPrototypeReceiverId}
-                        </span>
-                      </span>
-                      <span
-                        className={`h-4 w-4 rounded-full ${
-                          selectedDevice?.presence?.state === "online" ? "bg-[#2e9a67]" : "bg-[#bf7d1a]"
-                        }`}
-                      />
-                    </div>
-                    <p className="text-sm font-black text-[#5f6e84]">
-                      {activeDevices.length || (selectedDevice ? 1 : 0)} receiver found.
-                    </p>
-                  </div>
-                </details>
-
-                <details className="rounded-lg border border-[#d6e3f2] bg-white p-3">
-                  <summary className="cursor-pointer text-lg font-black text-[#173150]">
-                    Advanced Receiver Routing
-                  </summary>
-                  <div className="mt-3 grid gap-3">
-                    {[
-                      ["Living Room Echo", true],
-                      ["Kitchen Nest", true],
-                      ["Tablet", true],
-                      ["Phone bridge", false],
-                    ].map(([label, checked]) => (
-                      <label
-                        className="flex items-center gap-3 text-base font-black text-[#0f172a]"
-                        key={String(label)}
-                      >
-                        <input
-                          className="h-5 w-5 accent-[#6c9ac4]"
-                          defaultChecked={Boolean(checked)}
-                          type="checkbox"
-                        />
-                        {label}
-                      </label>
-                    ))}
-                  </div>
-                </details>
+          <fieldset className="rounded-xl border border-[#d6e3f2] bg-white p-5">
+            <legend className="px-2 text-lg font-black text-[#5f6e84]">Diagnostics</legend>
+            <details className="rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-3">
+              <summary className="cursor-pointer text-lg font-black text-[#173150]">
+                Local receiver server
+              </summary>
+              <div className="mt-3 grid gap-3">
+                <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
+                  Server URL
+                  <input
+                    className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-semibold text-[#0f172a]"
+                    readOnly
+                    value="http://localhost:8790"
+                  />
+                </label>
+                <button
+                  className="min-h-11 justify-self-start rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc]"
+                  onClick={() => void onRefresh()}
+                  type="button"
+                >
+                  Refresh receiver server
+                </button>
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-[#9bc5ef] bg-white px-4 py-3">
+                  <span>
+                    <strong className="block text-base font-black text-[#0f172a]">
+                      {selectedDevice ? receiverDisplayName(selectedDevice) : "Receiver"} (Web)
+                    </strong>
+                    <span className="text-sm font-semibold text-[#5f6e84]">
+                      {selectedDevice?.presence?.label || statusLabel(selectedDevice?.presence?.state || "ringing")} ·{" "}
+                      {selectedDevice?.receiverId || connectPrototypeReceiverId}
+                    </span>
+                  </span>
+                  <span
+                    className={`h-4 w-4 rounded-full ${
+                      selectedDevice?.presence?.state === "online" ? "bg-[#2e9a67]" : "bg-[#bf7d1a]"
+                    }`}
+                  />
+                </div>
+                <p className="text-sm font-black text-[#5f6e84]">
+                  {activeDevices.length || (selectedDevice ? 1 : 0)} receiver found.
+                </p>
               </div>
-            </fieldset>
-          ) : null}
+            </details>
+          </fieldset>
+
+          <fieldset className="rounded-xl border border-[#d6e3f2] bg-white p-5">
+            <legend className="px-2 text-lg font-black text-[#5f6e84]">
+              Advanced Receiver Routing
+            </legend>
+            <details className="rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-3">
+              <summary className="cursor-pointer text-lg font-black text-[#173150]">
+                Local receiver routing
+              </summary>
+              <div className="mt-3 grid gap-3">
+                {[
+                  ["Living Room Echo", true],
+                  ["Kitchen Nest", true],
+                  ["Tablet", true],
+                  ["Phone bridge", false],
+                ].map(([label, checked]) => (
+                  <label
+                    className="flex items-center gap-3 text-base font-black text-[#0f172a]"
+                    key={String(label)}
+                  >
+                    <input
+                      className="h-5 w-5 accent-[#6c9ac4]"
+                      defaultChecked={Boolean(checked)}
+                      type="checkbox"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </details>
+          </fieldset>
+        </div>
+      ) : null}
+
+      {setupView === "appearance" ? (
+        <div className={showTabs ? "mt-4" : ""}>
+          <div className="grid gap-6">
+            <label className="grid gap-3 text-2xl font-black text-[#5f6e84]">
+              Preset Theme
+              <select
+                className="min-h-14 rounded-xl border border-[#cbd9e7] bg-white px-5 text-xl font-normal text-[#0f172a]"
+                onChange={(event) => setAppearanceTheme(event.target.value)}
+                value={appearanceTheme}
+              >
+                {appearanceThemeNames.map((themeName) => (
+                  <option key={themeName}>{themeName}</option>
+                ))}
+              </select>
+            </label>
+
+            <section
+              className="rounded-xl border-[16px] p-4 shadow-sm"
+              style={{
+                backgroundColor: selectedAppearanceTheme.panel,
+                borderColor: selectedAppearanceTheme.frame,
+              }}
+            >
+              <div
+                className="rounded-xl border-4 p-5"
+                style={{
+                  backgroundColor: selectedAppearanceTheme.surface,
+                  borderColor: selectedAppearanceTheme.cream,
+                  color: selectedAppearanceTheme.text,
+                }}
+              >
+                <p className="text-lg font-black uppercase text-[#5f6e84]">Receiver</p>
+                <h3 className="text-3xl font-black">Call Andrew</h3>
+                <button
+                  className="mt-4 min-h-16 w-full rounded-xl border-4 text-2xl font-black shadow-sm"
+                  style={{
+                    backgroundColor: selectedAppearanceTheme.accent,
+                    borderColor: selectedAppearanceTheme.accentBorder,
+                    color: selectedAppearanceTheme.buttonText,
+                  }}
+                  type="button"
+                >
+                  Ask a question
+                </button>
+                <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_1fr]">
+                  <button
+                    className="min-h-16 rounded-xl border-4 text-2xl font-black shadow-sm"
+                    style={{
+                      backgroundColor: selectedAppearanceTheme.blue,
+                      borderColor: selectedAppearanceTheme.blueBorder,
+                      color: selectedAppearanceTheme.buttonText,
+                    }}
+                    type="button"
+                  >
+                    Message
+                  </button>
+                  <button
+                    className="min-h-16 rounded-xl border-4 text-2xl font-black shadow-sm"
+                    style={{
+                      backgroundColor: selectedAppearanceTheme.cream,
+                      borderColor: "#b9a77d",
+                      color: "#5f6e84",
+                    }}
+                    type="button"
+                  >
+                    Back
+                  </button>
+                  <button
+                    className="min-h-16 rounded-xl border-4 text-2xl font-black shadow-sm"
+                    style={{
+                      backgroundColor: selectedAppearanceTheme.frame,
+                      borderColor: "#111111",
+                      color: "#ffffff",
+                    }}
+                    type="button"
+                  >
+                    Mic
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <label className="grid gap-3 text-2xl font-black text-[#5f6e84]">
+              Visual Skin
+              <select
+                className="min-h-14 rounded-xl border border-[#cbd9e7] bg-white px-5 text-xl font-normal text-[#0f172a]"
+                onChange={(event) => setVisualSkin(event.target.value)}
+                value={visualSkin}
+              >
+                <option>Modern</option>
+                <option>Classic appliance</option>
+                <option>High contrast</option>
+              </select>
+            </label>
+
+            <div className="flex flex-wrap gap-4">
+              <button
+                className="min-h-16 rounded-xl bg-[#6c9ac4] px-7 text-2xl font-black text-white shadow-sm hover:bg-[#4779a8]"
+                type="button"
+              >
+                Save appearance
+              </button>
+              <button
+                className="min-h-16 rounded-xl border border-[#d6e3f2] bg-white px-7 text-2xl font-black text-[#0f172a] shadow-sm hover:bg-[#edf5fc]"
+                type="button"
+              >
+                Reset to default
+              </button>
+            </div>
+            <p className="text-xl font-black text-[#5f6e84]">
+              Previewing {appearanceTheme} receiver appearance.
+            </p>
+          </div>
         </div>
       ) : null}
     </section>
@@ -5060,8 +5565,6 @@ function ReceiverTroubleshootingView({
   }
 
   useEffect(() => {
-    // Receiver Guide is deprecated. Avoid recurring session discovery requests
-    // until the future guide experience is reintroduced intentionally.
     if (connectReceiverGuideDeprecated) return undefined;
     if (!guideMode) return undefined;
 
@@ -5069,11 +5572,6 @@ function ReceiverTroubleshootingView({
 
     async function refreshGuideSessions() {
       try {
-        recordConnectPollingRequest({
-          caller: "connect_dashboard_guide_sessions",
-          endpoint: receiverGuideEndpoint,
-          reason: "poll",
-        });
         const [selectedResponse, allResponse] = await Promise.all([
           fetch(`${receiverGuideEndpoint}?receiverId=${encodeURIComponent(receiverGuideId)}`, {
             cache: "no-store",
@@ -5119,7 +5617,7 @@ function ReceiverTroubleshootingView({
     void refreshGuideSessions();
     const timer = window.setInterval(() => {
       void refreshGuideSessions();
-    }, connectPollingIntervals.dashboardGuideSessionsMs);
+    }, 2000);
 
     return () => {
       cancelled = true;

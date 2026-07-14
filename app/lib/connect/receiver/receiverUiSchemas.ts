@@ -65,7 +65,7 @@ export const receiverUiSchemas: Record<ReceiverUiSchemaId, ReceiverUiSchema> = {
         { action: "messages", label: "Messages", tone: "blue", zone: "right_top" },
         { action: "appointments", label: "Appointment", tone: "blue", zone: "right_upper_middle" },
         { action: "ask", label: "Ask a Question", tone: "green", zone: "right_lower_middle" },
-        { action: "call_primary", label: "Call Andrew", tone: "green", zone: "right_bottom" },
+        { action: "call_primary", label: "Call Coordinator", tone: "green", zone: "right_bottom" },
         { action: "talk", label: "Talk", tone: "black", zone: "left_bottom" },
       ],
     },

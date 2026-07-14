@@ -15,6 +15,7 @@ import {
   isEligibleMainConnectUserPerson,
 } from "../mainConnectUserEligibility";
 import type { ConnectMainUserContext, ConnectPersPerson } from "../types";
+import { readPrimaryCoordinatorForCareCircle } from "./primaryCoordinator";
 
 type LocalConnectSettings = {
   main_connect_user_person_id: string | null;
@@ -101,11 +102,15 @@ export async function readConnectMainUserContext(
         person.id === settings.main_connect_user_person_id &&
         isEligibleMainConnectUserPerson(person)
     ) ?? null;
+  const primaryCoordinator = await readPrimaryCoordinatorForCareCircle(
+    mainConnectUserPerson?.careCircleId ?? people[0]?.careCircleId ?? null
+  );
 
   return {
     mainConnectUserPerson,
     mainConnectUserPersonId: mainConnectUserPerson?.id ?? null,
     people,
+    primaryCoordinator,
     source: mainConnectUserPerson ? source : "unset",
   };
 }
@@ -139,6 +144,7 @@ export async function updateConnectMainUserContextForUser(
     mainConnectUserPerson: person,
     mainConnectUserPersonId: person.id,
     people,
+    primaryCoordinator: await readPrimaryCoordinatorForCareCircle(person.careCircleId),
     source,
   } satisfies ConnectMainUserContext;
 }

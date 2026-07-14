@@ -18,6 +18,8 @@ export function GET(request: NextRequest) {
   const appointmentTitle = searchParams.get("appointmentTitle") || "Cardiology Follow-Up";
   const appointmentDay = searchParams.get("appointmentDay") || "Tomorrow";
   const appointmentTime = searchParams.get("appointmentTime") || "2 PM";
+  const primaryCoordinatorName =
+    searchParams.get("primaryCoordinatorName") || searchParams.get("coordinatorName") || "Care coordinator";
 
   return new Response(
     classicWebViewReceiverHtml({
@@ -26,6 +28,7 @@ export function GET(request: NextRequest) {
       appointmentTitle,
       displayName,
       locationLabel,
+      primaryCoordinatorName,
       runtimeContract,
     }),
     {
@@ -43,6 +46,7 @@ function classicWebViewReceiverHtml({
   appointmentTitle,
   displayName,
   locationLabel,
+  primaryCoordinatorName,
   runtimeContract,
 }: {
   appointmentDay: string;
@@ -50,12 +54,15 @@ function classicWebViewReceiverHtml({
   appointmentTitle: string;
   displayName: string;
   locationLabel: string;
+  primaryCoordinatorName: string;
   runtimeContract: ReceiverRuntimeContract;
 }) {
   const schemaClass = safeCssClass(`schema-${runtimeContract.layout.uiSchemaId}`);
   const scaleClass = safeCssClass(`scale-${runtimeContract.layout.scaleMode}`);
   const viewportWidth = runtimeContract.hardware.displayWidthPx || runtimeContract.hardware.displayWidthDp || 1024;
   const viewportHeight = runtimeContract.hardware.displayHeightPx || runtimeContract.hardware.displayHeightDp || 600;
+  const escapedPrimaryCoordinatorName = escapeHtml(primaryCoordinatorName);
+  const primaryCoordinatorNameJson = JSON.stringify(primaryCoordinatorName);
 
   return `<!doctype html>
 <html>
@@ -1061,7 +1068,7 @@ function classicWebViewReceiverHtml({
         <button class="homeActionButton blue" data-screen="messagesScreen">Messages</button>
         <button class="homeActionButton blue" data-screen="appointmentScreen">Appointment</button>
         <button class="homeActionButton" data-screen="askScreen">Ask a Question</button>
-        <button class="homeActionButton" id="callAndrewButton" type="button">Call Andrew</button>
+        <button class="homeActionButton" id="callPrimaryButton" type="button">Call ${escapedPrimaryCoordinatorName}</button>
       </div>
       <div class="receiverFooter">
         <div class="footerLogo"><span class="cpLogo">CP</span></div>
@@ -1091,7 +1098,7 @@ function classicWebViewReceiverHtml({
           </div>
           <div class="quickRow">
             <div class="quickCell"><button class="quickButton" data-talk="What time is my appointment?">Appointment time</button></div>
-            <div class="quickCell"><button class="quickButton" data-talk="Call Andrew">Call Andrew</button></div>
+            <div class="quickCell"><button class="quickButton" id="quickCallPrimaryButton" data-talk="Call ${escapedPrimaryCoordinatorName}">Call ${escapedPrimaryCoordinatorName}</button></div>
           </div>
         </div>
         <button class="sendButton" id="sendTalkButton">Send</button>
@@ -1118,7 +1125,7 @@ function classicWebViewReceiverHtml({
             <div class="quickCell"><button class="quickButton" data-question="I feel dizzy">I feel dizzy</button></div>
           </div>
         </div>
-        <button class="sendButton" id="sendQuestionButton">Send to Andrew</button>
+        <button class="sendButton" id="sendQuestionButton">Send to ${escapedPrimaryCoordinatorName}</button>
         <div class="sent" id="askStatus"></div>
       </div>
     </div>
@@ -1126,7 +1133,7 @@ function classicWebViewReceiverHtml({
 
   <div class="screen" id="callScreen">
     <div class="toolbar">
-      <div class="toolbarTitle">Andrew</div>
+      <div class="toolbarTitle" id="callToolbarTitle">${escapedPrimaryCoordinatorName}</div>
       <div class="toolbarAction"><button class="homeButton" data-screen="homeScreen">Go Home</button></div>
     </div>
     <div class="panelBody">
@@ -1211,6 +1218,7 @@ function classicWebViewReceiverHtml({
       <button class="activeLayout" type="button" role="menuitemradio" aria-checked="true" data-layout-choice="old">Old Web</button>
       <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="classic">Classic</button>
       <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="focus">Focus</button>
+      <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="ask_tell">Ask/Tell</button>
     </div>
   </div>
 
@@ -1314,6 +1322,7 @@ function classicWebViewReceiverHtml({
               deviceProfile: payload.deviceProfile || "",
               hardwareProfile: payload.hardwareProfile || "",
               mainConnectUserPersonId: payload.mainConnectUserPersonId || "",
+              primaryCoordinatorDisplayName: payload.primaryCoordinatorDisplayName || "",
               receiverDeviceId: payload.receiverDeviceId || "",
               receiverInstallId: payload.receiverInstallId || fallbackInstallIdValue(),
               receiverUrl: payload.receiverUrl || "",
@@ -1429,6 +1438,7 @@ function classicWebViewReceiverHtml({
         callPhase: "",
         cleaningSessionId: "",
         cleaningStartedAt: "",
+        primaryCoordinatorName: ${primaryCoordinatorNameJson},
         receiverDeviceId: "",
         receiverInstallId: "",
         pairingCode: "",
@@ -1459,6 +1469,21 @@ function classicWebViewReceiverHtml({
       function setText(id, value) {
         var element = document.getElementById(id);
         if (element) element.innerHTML = escapeHtml(text(value));
+      }
+      function currentPrimaryCoordinatorName() {
+        return text(receiverState.primaryCoordinatorName || "Care coordinator") || "Care coordinator";
+      }
+      function setPrimaryCoordinatorName(value) {
+        var name = text(value).replace(/^\\s+|\\s+$/g, "") || "Care coordinator";
+        receiverState.primaryCoordinatorName = name;
+        setText("callPrimaryButton", "Call " + name);
+        setText("sendQuestionButton", "Send to " + name);
+        setText("callToolbarTitle", name);
+        var quickButton = document.getElementById("quickCallPrimaryButton");
+        if (quickButton) {
+          quickButton.innerHTML = escapeHtml("Call " + name);
+          quickButton.setAttribute("data-talk", "Call " + name);
+        }
       }
       function setHtml(id, value) {
         var element = document.getElementById(id);
@@ -1644,10 +1669,12 @@ function classicWebViewReceiverHtml({
         });
       }
       function startReceiverGuideSync() {
+        // Receiver Guide is deprecated for now. Keep helper functions for the
+        // future guide rebuild, but do not poll /api/connect/receiver-guide from
+        // always-on classic appliance screens.
         readOrCreateGuideSessionId();
         if (guidePollTimer) window.clearInterval(guidePollTimer);
-        syncReceiverGuide();
-        guidePollTimer = window.setInterval(syncReceiverGuide, 2000);
+        guidePollTimer = null;
       }
       function updateClock() {
         var now = new Date();
@@ -1791,6 +1818,10 @@ function classicWebViewReceiverHtml({
         }
         if (choice === "focus") {
           window.location.assign(modernReceiverUrl("focus_v1"));
+          return;
+        }
+        if (choice === "ask_tell") {
+          window.location.assign(modernReceiverUrl("ask_tell"));
         }
       }
       function bindButtons() {
@@ -1851,8 +1882,9 @@ function classicWebViewReceiverHtml({
         document.getElementById("playSoundButton").onclick = function () {
           playSoundCheck();
         };
-        document.getElementById("callAndrewButton").onclick = function () {
-          startCallAndrew();
+        setPrimaryCoordinatorName(receiverState.primaryCoordinatorName);
+        document.getElementById("callPrimaryButton").onclick = function () {
+          startCallPrimary();
         };
         document.getElementById("answerCallButton").onclick = function () {
           answerActiveCall();
@@ -1899,6 +1931,7 @@ function classicWebViewReceiverHtml({
               deviceProfile: payload.deviceProfile || "",
               hardwareProfile: payload.hardwareProfile || "",
               mainConnectUserPersonId: payload.mainConnectUserPersonId || "",
+              primaryCoordinatorDisplayName: payload.primaryCoordinatorDisplayName || "",
               receiverDeviceId: payload.receiverDeviceId || "",
               receiverInstallId: payload.receiverInstallId || receiverState.receiverInstallId || "",
               receiverUrl: payload.receiverUrl || "",
@@ -1972,6 +2005,7 @@ function classicWebViewReceiverHtml({
             }
           }
         }
+        setPrimaryCoordinatorName(next.primaryCoordinatorDisplayName || receiverState.primaryCoordinatorName);
         return next;
       }
       function formatPairingCode(value) {
@@ -1989,6 +2023,7 @@ function classicWebViewReceiverHtml({
       }
       function saveReceiverBindingPayload(payload) {
         if (!payload || !payload.receiverDeviceId) return;
+        setPrimaryCoordinatorName(payload.primaryCoordinatorDisplayName || receiverState.primaryCoordinatorName);
         writeStoredBinding(payload);
         saveNativeBinding(payload);
         receiverState.receiverDeviceId = payload.receiverDeviceId || receiverState.receiverDeviceId;
@@ -2465,10 +2500,10 @@ function classicWebViewReceiverHtml({
           receiverId: receiverState.receiverDeviceId || "classic-webview-receiver",
           receiverInstallId: receiverState.receiverInstallId,
           source: "classic_webview_receiver_ask",
-          to: "Andrew"
+          to: currentPrimaryCoordinatorName()
         }, function (status, payload) {
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
-            setText("askStatus", "Sent to Andrew.");
+            setText("askStatus", "Sent to " + currentPrimaryCoordinatorName() + ".");
             loadMessages();
             return;
           }
@@ -2489,7 +2524,7 @@ function classicWebViewReceiverHtml({
         }
         setText("talkResult", "Checking...");
         jsonRequest("POST", "/api/connect/talk", {
-          contacts: [{ displayName: "Andrew", id: "contact-andrew" }],
+          contacts: [{ displayName: currentPrimaryCoordinatorName(), id: "primary-coordinator" }],
           inputText: body,
           personId: receiverState.personId,
           receiverDeviceId: receiverState.receiverDeviceId
@@ -2498,8 +2533,8 @@ function classicWebViewReceiverHtml({
           var response = result.display_response || result.spoken_response || payload.error || "";
           if (status >= 200 && status < 300 && payload && payload.ok !== false) {
             if (String(result.intent || "") === "connect_call_request" || String(result.proposed_action || "") === "request_call") {
-              setText("talkResult", response || "Calling Andrew.");
-              startCallAndrew();
+              setText("talkResult", response || "Calling " + currentPrimaryCoordinatorName() + ".");
+              startCallPrimary();
               return;
             }
             setText("talkResult", response || "Done.");
@@ -2511,30 +2546,12 @@ function classicWebViewReceiverHtml({
           setText("talkResult", response || "Talk could not process that yet.");
         });
       }
-      function startCallAndrew() {
+      function startCallPrimary() {
         showScreen("callScreen");
-        setText("callTitle", "Calling Andrew");
-        setText("callStatus", "Creating call...");
+        setText("callTitle", "Calls paused");
+        setText("callStatus", "Calling is currently paused while this feature is refined.");
         setVisible("answerCallButton", false);
         setVisible("closeCallButton", true);
-        if (!receiverState.personId) {
-          setText("callStatus", "Receiver is still connecting.");
-          return;
-        }
-        jsonRequest("POST", "/api/connect/calls", {
-          callerName: "Receiver",
-          mainConnectUserPersonId: receiverState.personId,
-          recipientName: "Andrew",
-          receiverId: receiverState.receiverDeviceId || "classic-webview-receiver",
-          state: "ringing"
-        }, function (status, payload) {
-          if (status >= 200 && status < 300 && payload && payload.ok !== false) {
-            receiverState.activeCallId = payload.call && payload.call.callId ? payload.call.callId : "";
-            setText("callStatus", "Call requested. Use the handset or speaker.");
-            return;
-          }
-          setText("callStatus", payload.error || "Could not start call.");
-        });
       }
       function callIsFromDashboard(call) {
         var callerName = text(call && (call.callerName || call.callerDisplayName)).toLowerCase();
@@ -2546,7 +2563,7 @@ function classicWebViewReceiverHtml({
         if (receiverState.callPhase === "answered" || receiverState.callPhase === "connected") return;
         receiverState.activeCallId = call.callId;
         receiverState.callPhase = "ringing";
-        var callerName = call.callerName || "Andrew";
+        var callerName = call.callerName || currentPrimaryCoordinatorName();
         showScreen("callScreen");
         setText("callTitle", "Call from " + callerName);
         setText("callStatus", "Tap Answer to talk.");
@@ -2658,7 +2675,7 @@ function classicWebViewReceiverHtml({
             receiverState.answeredCallId = activeCall.callId || receiverState.answeredCallId;
             receiverState.callPhase = activeCall.state;
             showScreen("callScreen");
-            setText("callTitle", "Connected with " + (activeCall.callerName || "Andrew"));
+            setText("callTitle", "Connected with " + (activeCall.callerName || currentPrimaryCoordinatorName()));
             setText("callStatus", "Use the handset or speaker.");
             setVisible("answerCallButton", false);
             setVisible("closeCallButton", true);
@@ -2666,9 +2683,10 @@ function classicWebViewReceiverHtml({
         });
       }
       function startIncomingCallPolling() {
+        // Connect calls are deprecated for now. Do not poll /api/connect/calls
+        // from always-on classic appliance screens.
         if (incomingCallPollTimer) window.clearInterval(incomingCallPollTimer);
-        loadIncomingCalls();
-        incomingCallPollTimer = window.setInterval(loadIncomingCalls, 3000);
+        incomingCallPollTimer = null;
       }
       function closeActiveCall() {
         if (!receiverState.activeCallId || !receiverState.personId) {
@@ -2815,7 +2833,8 @@ function classicWebViewReceiverHtml({
         loadMessages();
         startIncomingCallPolling();
       });
-      window.setInterval(function () {
+      function refreshClassicReceiverWhenActive() {
+        if (document.hidden) return;
         if (!receiverState.receiverDeviceId) return;
         connectNativeReceiver(function (binding) {
           if (!binding) return;
@@ -2824,7 +2843,11 @@ function classicWebViewReceiverHtml({
           loadMessages();
           startIncomingCallPolling();
         });
-      }, 60000);
+      }
+      // Classic Receiver does not idle poll. It refreshes authoritative
+      // content on startup and when the appliance browser becomes active again.
+      window.onfocus = refreshClassicReceiverWhenActive;
+      document.addEventListener("visibilitychange", refreshClassicReceiverWhenActive);
       updateFullscreenPrompt();
       markReady();
     }());

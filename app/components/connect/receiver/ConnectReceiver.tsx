@@ -30,6 +30,7 @@ import {
   type ConnectAudioPreference,
   type ConnectPlaybackHandle,
   type ConnectAudioRecording,
+  type ConnectAudioRecordingChunk,
   type ConnectAudioRecordingController,
   type ConnectPlaybackVariant,
 } from "../../../lib/connect/audio";
@@ -59,6 +60,21 @@ import {
   connectPrototypeEndpoints,
   connectPrototypeReceiverId,
 } from "../../../lib/connect/prototypeClient";
+import {
+  createObservation,
+  submitObservation,
+  type ObservationModality,
+} from "../../../lib/platform/ai/observationPipeline";
+import {
+  interpretReceiverAskObservation,
+  type ReceiverAskAnswer,
+} from "../../../lib/platform/ai/receiverAskInterpreter";
+import {
+  interpretReceiverTalkObservation,
+  receiverTalkShouldHandleText,
+  serializeReceiverTalkResult,
+} from "../../../lib/platform/ai/receiverTalkInterpreter";
+import { condenseReceiverSpeechMessage } from "../../../lib/platform/ai/messageCondensation";
 import { formatBrowserReceiverPairingCode } from "../../../lib/connect/receiverShell/browserPairing";
 import {
   formatReceiverCacheTimestamp,
@@ -68,6 +84,13 @@ import {
   writeReceiverAppointmentCache,
   type ReceiverAppointmentCacheEntry,
 } from "../../../lib/connect/receiver/offlineAppointmentCache";
+import {
+  connectCallsDeprecated,
+  connectReceiverGuideDeprecated,
+  connectPollingIntervals,
+  connectPollingIntervalMs,
+  recordConnectPollingRequest,
+} from "../../../lib/connect/receiver/pollingPolicy";
 import styles from "./ConnectReceiver.module.css";
 
 type Contact = {
@@ -103,10 +126,12 @@ type ReceiverTodayFocusCompletionInput = {
 };
 
 type ReceiverTodayFocusPendingCompletion = {
-  trackEventId: string;
+  trackEventId?: string | null;
 };
 
 type Message = {
+  acknowledgedAt?: string;
+  allowsCallbackRequest?: boolean;
   audioArtifactId?: string;
   audioDurationMs?: number;
   audioMimeType?: string;
@@ -115,11 +140,13 @@ type Message = {
   from: string;
   to: string;
   body: string;
+  callbackRequestedAt?: string;
   createdAt: string;
   heardAt?: string;
   mainConnectUserPersonId?: string;
   messageType?: string;
   readAt?: string;
+  requiresAcknowledgement?: boolean;
   transcript?: string;
   transcriptStatus?: string;
 };
@@ -157,25 +184,93 @@ type SoundHelp = {
 
 type ReceiverAttentionItem =
   | {
-      kind: "call_summary_review";
-      label: "Review";
-      priority: 100;
-      call: Partial<ReceiverCall>;
-    }
-  | {
       kind: "new_message";
       label: "Message";
-      priority: 80;
+      priority: number;
       message: Message;
     };
+
+type ReceiverAttemptDiagnosticEntry = {
+  at: string;
+  detail: string;
+  id: string;
+  label: string;
+};
+
+type ReceiverAttemptDiagnosticSummary = {
+  attemptId: string;
+  completedAt: string;
+  latestObservationId: string;
+  outcome: string;
+  revisionCount: number;
+  startedAt: string;
+  status: "idle" | "in_progress" | "completed";
+  surface: string;
+};
+
+type ReceiverAttemptTraceRevision = {
+  askCapabilityStatus: string;
+  askEntities: string;
+  askIntent: string;
+  askIntentConfidence: string;
+  askTemporalReferences: string;
+  family: string;
+  familyConfidence: string;
+  interpreter: string;
+  normalizedText: string;
+  observationId: string;
+  parentObservationId: string;
+  platformEntries: ReceiverAttemptDiagnosticEntry[];
+  reason: string;
+  response: string;
+  result: string;
+  revisionNumber: number;
+  route: string;
+  rawEntries: ReceiverAttemptDiagnosticEntry[];
+  userActions: ReceiverAttemptDiagnosticEntry[];
+  userText: string;
+};
+
+type ReceiverAttemptTraceStory = {
+  familyEvolution: string[];
+  finalOutcome: string;
+  finalResponse: string;
+  finalRevision: ReceiverAttemptTraceRevision | null;
+  revisions: ReceiverAttemptTraceRevision[];
+  systemEntries: ReceiverAttemptDiagnosticEntry[];
+};
+
+type ReceiverPlatformReview = {
+  attemptId: string;
+  comment: string;
+  createdAt: string;
+  id: string;
+  metadata?: Record<string, unknown>;
+  reviewerUserId: string;
+};
+
+type ReceiverPlatformReviewAnalysis = {
+  affectedPlatformLayers: string[];
+  analysisText: string;
+  attemptId: string;
+  createdAt: string;
+  id: string;
+  identifiedConcerns: string[];
+  metadata?: Record<string, unknown>;
+  model: string;
+  modelVersion: string;
+  reviewId: string;
+  suggestedRefinementAreas: string[];
+};
 
 const RECEIVER_CANVAS_WIDTH = 900;
 const RECEIVER_CANVAS_HEIGHT = 1047;
 const DESK_PHONE_CANVAS_WIDTH = 1024;
 const DESK_PHONE_CANVAS_HEIGHT = 600;
-const RECEIVER_BINDING_HEARTBEAT_MS = 60_000;
 const SCREEN_CLEANING_DURATION_SECONDS = 120;
-const DEFAULT_TODAY_FOCUS_UNDO_WINDOW_MS = 10_000;
+const DEFAULT_TODAY_FOCUS_UNDO_WINDOW_MS = 5_000;
+const interactionAttemptEndpoint = "/api/connect/interaction-attempts";
+const receiverDiagnosticsEndpoint = "/api/connect/receiver/diagnostics";
 const receiverAudioPack = {
   button: "/connect/receiver/audio/microwave-beep.mp3",
   incoming: "/connect/receiver/audio/old-phone-ringing.mp3",
@@ -218,6 +313,16 @@ type PendingAskAudio = {
   transcriptStatus: string;
 };
 
+type ReceiverMessageCondensationModal = {
+  contactId: string;
+  draft: string;
+  initialDraft: string;
+  limit: number;
+  originalLength: number;
+  originalTranscript: string;
+  type: "messageCondensation";
+};
+
 type AutoHearPreference = "on" | "off";
 type HearingFeedbackStep = "choice" | "compare" | "thanks" | null;
 type PlaybackVariant = ConnectPlaybackVariant;
@@ -236,14 +341,65 @@ type ScreenCleaningSession = {
   startedAt: string;
 };
 
-type AskAnswer = {
-  question: string;
-  answer: string;
-  actionLabel: string;
-  messageBody: string;
-  recipientId: string;
-  type: "answer" | "message";
-};
+const RECEIVER_TEXT_INPUT_MAX_LENGTH = 100;
+const RECEIVER_SPEECH_TRANSCRIPT_MAX_LENGTH = 4000;
+const RECEIVER_ASK_TELL_RECORDING_MAX_DURATION_MS = 60000;
+const RECEIVER_SPEECH_CONDENSATION_LIMIT = RECEIVER_TEXT_INPUT_MAX_LENGTH;
+const RECEIVER_SPEECH_CONDENSATION_DRAFT_MAX_LENGTH = 90;
+const RECEIVER_CONDENSED_MESSAGE_EDIT_MAX_LENGTH = 150;
+const RECEIVER_TRANSCRIBING_IN_PROGRESS_TEXT = "Transcribing in progress";
+
+function limitReceiverTextInput(value: string) {
+  return value.slice(0, RECEIVER_TEXT_INPUT_MAX_LENGTH);
+}
+
+function limitReceiverCondensedMessageEdit(value: string) {
+  return value.slice(0, RECEIVER_CONDENSED_MESSAGE_EDIT_MAX_LENGTH);
+}
+
+function limitReceiverSpeechTranscript(value: string) {
+  return value.slice(0, RECEIVER_SPEECH_TRANSCRIPT_MAX_LENGTH);
+}
+
+function stripReceiverTranscribingDisplayText(value: string) {
+  return value.replace(RECEIVER_TRANSCRIBING_IN_PROGRESS_TEXT, "").trimStart();
+}
+
+type AskAnswer = ReceiverAskAnswer;
+
+function isReceiverClarificationAnswer(answer: AskAnswer) {
+  if (answer.type !== "answer") return false;
+  const text = answer.answer.trim().toLowerCase();
+  return (
+    /^who\b/.test(text) ||
+    /^what do you need\b/.test(text) ||
+    /^which available person\b/.test(text) ||
+    /^more context is needed\b/.test(text)
+  );
+}
+
+function isReceiverRecipientClarificationAnswer(answer: AskAnswer) {
+  return /^who should receive this\??$/i.test(answer.answer.trim());
+}
+
+function normalizeReceiverContactInput(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function resolveReceiverContactClarification(value: string, availableContacts: Contact[]) {
+  const normalized = normalizeReceiverContactInput(value);
+  if (!normalized) return null;
+  return (
+    availableContacts.find((contact) => {
+      const contactName = normalizeReceiverContactInput(contact.displayName);
+      return normalized === contactName || normalized.includes(contactName);
+    }) ?? null
+  );
+}
 
 type TalkApiResult = {
   completed_focus_item_id?: string;
@@ -259,6 +415,32 @@ type TalkApiResult = {
   structured_payload?: Record<string, unknown>;
   title?: string;
 };
+
+type ReceiverDiagnosticsSettings = {
+  enabled?: boolean;
+};
+
+type ReceiverAttemptEventType =
+  | "abandoned"
+  | "cancelled"
+  | "helpful_selected"
+  | "message_condensation_approved"
+  | "message_condensation_draft_edited"
+  | "message_condensation_triggered"
+  | "not_helpful_selected"
+  | "rephrase_selected"
+  | "response_presented"
+  | "send_selected"
+  | "timed_out"
+  | "workflow_completed";
+
+type ReceiverAttemptRevisionReason =
+  | "clarification"
+  | "correction"
+  | "initial"
+  | "modality_switch"
+  | "rephrase"
+  | "retry";
 
 type ReceiverAppointment = {
   id: string;
@@ -349,6 +531,7 @@ type StoredReceiverBinding = {
   nativeVersionName?: string;
   mainConnectUserDisplayName?: string;
   mainConnectUserPersonId?: string;
+  primaryCoordinatorDisplayName?: string;
   provisioningCompletedAt?: string;
   receiverDeviceId?: string;
   receiverInstallId?: string;
@@ -382,11 +565,12 @@ declare global {
 type ModalState =
   | { type: "contact"; contactId: string }
   | { type: "offlineNotice" }
-  | { type: "ask" }
+  | { type: "ask"; confirmExit?: boolean; surface?: "ask_tell" }
   | { type: "screenCleaningConfirm" }
-  | { type: "askRecordReview"; transcript: string }
+  | { type: "askRecordReview"; surface?: "ask_tell"; transcript: string }
   | { type: "askAnswer"; answer: AskAnswer; page?: number }
-  | { type: "askRecovery"; question: string; page?: number }
+  | { type: "askRecovery"; page?: number; question: string; recoveryPrompt?: string; surface?: "ask_tell" }
+  | ReceiverMessageCondensationModal
   | { type: "appointmentsLoading" }
   | { type: "appointmentsEmpty" }
   | { type: "appointmentsList"; appointments: ReceiverAppointment[]; cachedAt?: string; page: number }
@@ -425,14 +609,38 @@ const receiver = {
   locationLabel: "Living Rm",
 };
 
-const contacts: Contact[] = [
+const fallbackPrimaryCoordinatorDisplayName = "Care coordinator";
+const primaryCoordinatorContactId = "primary-coordinator";
+const fallbackContacts: Contact[] = [
   {
-    id: "contact-andrew",
-    displayName: "Andrew",
+    id: primaryCoordinatorContactId,
+    displayName: fallbackPrimaryCoordinatorDisplayName,
     availability: "free",
     availabilityLabel: "Free",
     canCall: true,
   },
+];
+
+function receiverAskTellExamples(primaryCoordinatorName: string) {
+  return [
+    "When is my next appointment?",
+    "I went for a walk.",
+    `Tell ${primaryCoordinatorName} my knee hurts.`,
+    "I need milk.",
+    "What should I bring tomorrow?",
+  ];
+}
+
+const askRecoveryPrompts = [
+  "Could you add a bit more detail and try saying it another way?",
+  "Could you tell a bit more about what you mean?",
+  "Could you provide a bit more detail?",
+  "Could you say a bit more about that?",
+  "Could you explain that in a bit more detail?",
+  "Could you be a bit more specific?",
+  "Could you include a bit more context?",
+  "Could you add a few more details?",
+  "Could you expand on that a bit?",
 ];
 
 const receiverUsers: ReceiverUser[] = [];
@@ -794,12 +1002,34 @@ function readInitialGxvHomeLayout(): GxvHomeLayout {
       params.get("gxv_home")
   );
 
+  if (["ask_tell_2", "asktell2", "ask-tell-2", "ask_tell_v2", "asktellv2"].includes(value)) {
+    return "ask_tell_2";
+  }
+
+  if (["ask_tell", "asktell", "ask-tell"].includes(value)) {
+    return "ask_tell";
+  }
+
   return ["focus", "focus_v1", "today_focus", "v1"].includes(value)
     ? "focus_v1"
     : "classic";
 }
 
-type GxvHomeLayout = "classic" | "focus_v1";
+type GxvHomeLayout = "ask_tell" | "ask_tell_2" | "classic" | "focus_v1";
+type ReceiverPresentationLayout = "classic" | "modern";
+
+function readInitialReceiverPresentationLayout(): ReceiverPresentationLayout {
+  if (typeof window === "undefined") return "classic";
+  const params = new URLSearchParams(window.location.search);
+  const value = normalizedProfileValue(
+    params.get("receiverLayout") ||
+      params.get("receiver_layout") ||
+      params.get("ui") ||
+      params.get("homeLayout")
+  );
+
+  return ["modern", "receiver_modern"].includes(value) ? "modern" : "classic";
+}
 
 function statusLooksEnabled(value?: string | null) {
   return ["1", "active", "allowed", "available", "enabled", "locked", "on", "permitted", "true"].includes(
@@ -870,7 +1100,9 @@ function readInitialNativeReceiverShell() {
 
 function readInitialSelectedContactId() {
   const storedContactId = readStoredReceiverSession().selectedContactId;
-  return contacts.some((contact) => contact.id === storedContactId) ? storedContactId : contacts[0].id;
+  return fallbackContacts.some((contact) => contact.id === storedContactId)
+    ? storedContactId
+    : primaryCoordinatorContactId;
 }
 
 function readInitialSelectedReceiverUserId() {
@@ -1123,6 +1355,7 @@ function saveReceiverBinding(binding: StoredReceiverBinding) {
     nativeVersionName: binding.nativeVersionName?.trim() || "",
     mainConnectUserDisplayName: binding.mainConnectUserDisplayName?.trim() || "",
     mainConnectUserPersonId: binding.mainConnectUserPersonId?.trim() || "",
+    primaryCoordinatorDisplayName: binding.primaryCoordinatorDisplayName?.trim() || "",
     provisioningCompletedAt: binding.provisioningCompletedAt?.trim() || "",
     receiverDeviceId,
     receiverInstallId,
@@ -1159,12 +1392,19 @@ function isReceiverSetupRequiredMessage(message: string) {
   );
 }
 
-async function verifyReceiverBindingHeartbeat() {
+async function verifyReceiverBindingHeartbeat(
+  reason: "initial" | "poll" | "retry" | "realtime" | "user" = "initial"
+) {
   const receiverDeviceId = readReceiverDeviceId();
   const receiverInstallId = readReceiverInstallId();
   if (!receiverDeviceId || !receiverInstallId) return null;
 
   const nativeConfig = readNativeReceiverProvisioningConfig();
+  recordConnectPollingRequest({
+    caller: "connect_receiver_binding",
+    endpoint: "/api/connect/receiver-shell/devices/binding",
+    reason,
+  });
   const response = await fetch("/api/connect/receiver-shell/devices/binding", {
     body: JSON.stringify({
       capabilities: nativeConfig.capabilities,
@@ -1208,7 +1448,9 @@ function readInitialModal(): ModalState {
   const storedModal = readStoredReceiverSession().modal;
 
   if (storedModal?.type === "contact") {
-    return contacts.some((contact) => contact.id === storedModal.contactId) ? storedModal : null;
+    return fallbackContacts.some((contact) => contact.id === storedModal.contactId)
+      ? storedModal
+      : null;
   }
 
   if (storedModal?.type === "ask") return storedModal;
@@ -1307,6 +1549,161 @@ function currentIsoTimestamp() {
   return new Date().toISOString();
 }
 
+function pickAskRecoveryPrompt() {
+  return askRecoveryPrompts[Math.floor(Math.random() * askRecoveryPrompts.length)] || askRecoveryPrompts[0];
+}
+
+function buildReceiverAttemptTraceStory(
+  entries: ReceiverAttemptDiagnosticEntry[]
+): ReceiverAttemptTraceStory {
+  const revisions: ReceiverAttemptTraceRevision[] = [];
+  const revisionsByObservationId = new Map<string, ReceiverAttemptTraceRevision>();
+  const systemEntries: ReceiverAttemptDiagnosticEntry[] = [];
+  let finalOutcome = "";
+
+  function addRevision(entry: ReceiverAttemptDiagnosticEntry) {
+    const fields = parseReceiverTraceDetail(entry.detail);
+    const observationId = fields["Observation ID"] || fields.observationId || "";
+    const revisionNumber = Number.parseInt(fields.Revision || "", 10) || revisions.length + 1;
+    const revision: ReceiverAttemptTraceRevision = {
+      family: "",
+      familyConfidence: "",
+      askCapabilityStatus: "",
+      askEntities: "",
+      askIntent: "",
+      askIntentConfidence: "",
+      askTemporalReferences: "",
+      interpreter: "",
+      normalizedText: "",
+      observationId,
+      parentObservationId: fields.Parent || fields.parentObservationId || "",
+      platformEntries: [],
+      reason: fields.Reason || "initial",
+      response: "",
+      result: "",
+      revisionNumber,
+      route: "",
+      rawEntries: [entry],
+      userActions: [],
+      userText: fields.__text || "",
+    };
+    revisions.push(revision);
+    if (observationId) revisionsByObservationId.set(observationId, revision);
+    return revision;
+  }
+
+  function findRevision(fields: Record<string, string>) {
+    const observationId = fields.observationId || fields["Observation ID"] || "";
+    if (observationId && revisionsByObservationId.has(observationId)) {
+      return revisionsByObservationId.get(observationId)!;
+    }
+    return revisions[revisions.length - 1] || null;
+  }
+
+  entries.forEach((entry) => {
+    const fields = parseReceiverTraceDetail(entry.detail);
+    if (entry.label === "Observation" || entry.label === "Revised Observation") {
+      addRevision(entry);
+      return;
+    }
+
+    if (entry.label === "Presented response") {
+      const revision = findRevision(fields);
+      if (!revision) {
+        systemEntries.push(entry);
+        return;
+      }
+      revision.platformEntries.push(entry);
+      revision.rawEntries.push(entry);
+      revision.family = fields.family || revision.family;
+      revision.familyConfidence = fields.familyConfidence || revision.familyConfidence;
+      revision.askCapabilityStatus =
+        fields.askCapabilityStatus || revision.askCapabilityStatus;
+      revision.askEntities = fields.askEntities || revision.askEntities;
+      revision.askIntent = fields.askIntent || revision.askIntent;
+      revision.askIntentConfidence =
+        fields.askIntentConfidence || revision.askIntentConfidence;
+      revision.askTemporalReferences =
+        fields.askTemporalReferences || revision.askTemporalReferences;
+      revision.interpreter = fields.interpreter || revision.interpreter;
+      revision.normalizedText = fields.normalizedText || revision.normalizedText;
+      revision.response = fields.answer || fields.response || revision.response;
+      revision.result = fields.result || fields.responseType || revision.result;
+      revision.route = fields.route || revision.route;
+      return;
+    }
+
+    if (entry.label === "User action") {
+      const revision = findRevision(fields);
+      if (!revision) {
+        systemEntries.push(entry);
+        return;
+      }
+      revision.userActions.push(entry);
+      revision.rawEntries.push(entry);
+      return;
+    }
+
+    if (entry.label === "Final outcome") {
+      finalOutcome = fields.outcome || fields.result || entry.detail || "";
+      const revision = findRevision(fields);
+      if (revision) revision.rawEntries.push(entry);
+      else systemEntries.push(entry);
+      return;
+    }
+
+    systemEntries.push(entry);
+  });
+
+  const familyEvolution = revisions
+    .map((revision) => revision.family)
+    .filter(Boolean)
+    .filter((family, index, families) => family !== families[index - 1]);
+  const finalRevision = [...revisions].reverse().find((revision) => revision.family || revision.result) || null;
+  return {
+    familyEvolution,
+    finalOutcome,
+    finalResponse: finalRevision?.response || "",
+    finalRevision,
+    revisions,
+    systemEntries,
+  };
+}
+
+function parseReceiverTraceDetail(detail: string) {
+  const fields: Record<string, string> = {};
+  detail
+    .split(/\n| · /)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach((part) => {
+      if (part.startsWith('"') && part.endsWith('"')) {
+        fields.__text = part.slice(1, -1);
+        return;
+      }
+      const separator = part.indexOf(":");
+      if (separator <= 0) return;
+      const key = part.slice(0, separator).trim();
+      const value = part.slice(separator + 1).trim();
+      fields[key] = value;
+    });
+  return fields;
+}
+
+function formatReceiverTracePercent(confidence: string) {
+  const value = Number(confidence);
+  if (!Number.isFinite(value)) return "";
+  return `${Math.round(value * 100)}%`;
+}
+
+function receiverTraceActionLabel(entry: ReceiverAttemptDiagnosticEntry) {
+  const fields = parseReceiverTraceDetail(entry.detail);
+  if (entry.detail.includes("question:")) return "This wasn't helpful";
+  if (entry.detail.includes("recipient:")) return `Send to ${fields.recipient || "contact"}`;
+  if (entry.detail.includes("source: recovery")) return "Send to contact";
+  return entry.detail || entry.label;
+}
+
 function currentEpochMs() {
   return Date.now();
 }
@@ -1321,6 +1718,13 @@ function greetingFor(date: Date) {
 
 function firstDisplayName(displayName: string) {
   return displayName.trim().split(/\s+/)[0] || displayName;
+}
+
+function compactReceiverDisplayName(displayName: string) {
+  const normalized = displayName.trim().replace(/\s+/g, " ");
+  if (!normalized) return displayName;
+  if (normalized.length <= 30) return normalized;
+  return firstDisplayName(normalized);
 }
 
 function contactCanCallNow(contact: Contact) {
@@ -1339,6 +1743,12 @@ function formatPairingExpiryTime(value: string) {
 
 function formatDate(date: Date) {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function formatReceiverFooterDate(date: Date) {
+  const weekday = date.toLocaleDateString([], { weekday: "long" });
+  const monthDay = date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${weekday} ${monthDay}`;
 }
 
 function stripCareSummaryHeading(text: string) {
@@ -1662,6 +2072,59 @@ function messageText(message: Message) {
   return message.transcript || message.body || "This message is not available to read yet.";
 }
 
+function isAppointmentRelatedMessage(message: Message) {
+  const text = `${message.messageType || ""} ${message.body || ""} ${message.transcript || ""}`
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+  if (
+    /\b(?:appointment|appt|visit|doctor|dr\.?|clinic|provider|dentist|therapy|vet|veterinarian)\b/.test(
+      text
+    )
+  ) {
+    return true;
+  }
+
+  return /\b(?:bring|take|pack|remember|don'?t forget)\b/.test(text) &&
+    /\b(?:meds?|medicine|medication|med list|blood sugar|blood pressure|sensor|exercise log|hearing aids?|insurance|paperwork|notes?)\b/.test(
+      text
+    );
+}
+
+function messageSenderDisplayName(
+  message: Message,
+  fallbackName: string,
+  coordinatorName: string
+) {
+  if (message.from && message.from !== "receiver_user") return message.from;
+  return fallbackName || coordinatorName;
+}
+
+function receiverMessageNotificationText(
+  message: Message,
+  input: {
+    fallbackName: string;
+    important: boolean;
+    primaryCoordinatorName: string;
+  }
+) {
+  if (isAppointmentRelatedMessage(message)) {
+    return message.readAt
+      ? "You have a message you've read about your upcoming appointment."
+      : "You have an unread message about your upcoming appointment.";
+  }
+
+  const sender = messageSenderDisplayName(
+    message,
+    input.fallbackName,
+    input.primaryCoordinatorName
+  );
+
+  return input.important
+    ? `You have an important message from ${sender}.`
+    : `You have a message you've read from ${sender}.`;
+}
+
 function initialReceiverDevicePixelRatio() {
   return typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
 }
@@ -1680,14 +2143,19 @@ function receiverAudioUrl(audioUrl?: string) {
 function readerPageCharacterLimit(size: ReaderTextSize) {
   if (size === "standard") return 420;
   if (size === "large") return 210;
-  return 90;
+  return 55;
 }
 
-function paginateReaderText(text: string, size: ReaderTextSize) {
+function askTellPageCharacterLimit(size: ReaderTextSize) {
+  if (size === "standard") return 150;
+  if (size === "large") return 55;
+  return 18;
+}
+
+function paginateTextByLimit(text: string, limit: number) {
   const normalized = text.trim().replace(/\s+/g, " ");
   if (!normalized) return [""];
 
-  const limit = readerPageCharacterLimit(size);
   const pages: string[] = [];
   let remaining = normalized;
 
@@ -1703,14 +2171,49 @@ function paginateReaderText(text: string, size: ReaderTextSize) {
   return pages;
 }
 
+function paginateReaderText(text: string, size: ReaderTextSize) {
+  return paginateTextByLimit(text, readerPageCharacterLimit(size));
+}
+
+function paginateEditableTextByLimit(text: string, limit: number) {
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (!normalized) return [""];
+
+  const pages: string[] = [];
+  let remaining = normalized;
+
+  while (remaining.length > limit) {
+    const slice = remaining.slice(0, limit + 1);
+    const breakAt = Math.max(
+      slice.lastIndexOf(". "),
+      slice.lastIndexOf("? "),
+      slice.lastIndexOf("! "),
+      slice.lastIndexOf("\n"),
+      slice.lastIndexOf(" ")
+    );
+    const pageEnd = breakAt > Math.floor(limit * 0.62) ? breakAt + 1 : limit;
+    pages.push(remaining.slice(0, pageEnd));
+    remaining = remaining.slice(pageEnd);
+  }
+
+  pages.push(remaining);
+  return pages;
+}
+
+function paginateAskTellText(text: string, size: ReaderTextSize) {
+  return paginateEditableTextByLimit(text, askTellPageCharacterLimit(size));
+}
+
 function replacePaginatedTextPage(
   pages: string[],
   pageIndex: number,
-  nextPageText: string
+  nextPageText: string,
+  options?: { preserveWhitespace?: boolean }
 ) {
   const nextPages = pages.length ? [...pages] : [""];
   nextPages[Math.max(0, Math.min(pageIndex, nextPages.length - 1))] = nextPageText;
-  return nextPages.join("\n\n").trim();
+  const joined = nextPages.join("\n\n");
+  return options?.preserveWhitespace ? joined : joined.trim();
 }
 
 function normalizeServerMessage(
@@ -1723,8 +2226,15 @@ function normalizeServerMessage(
     audioMimeType: String(message.audioMimeType || fallback?.audioMimeType || ""),
     audioUrl: String(message.audioUrl || fallback?.audioUrl || ""),
     body: String(message.body || message.transcript || fallback?.body || "Voice message"),
+    acknowledgedAt: String(message.acknowledgedAt || fallback?.acknowledgedAt || ""),
+    allowsCallbackRequest: Boolean(
+      message.allowsCallbackRequest ?? fallback?.allowsCallbackRequest ?? false
+    ),
+    callbackRequestedAt: String(
+      message.callbackRequestedAt || fallback?.callbackRequestedAt || ""
+    ),
     createdAt: String(message.createdAt || fallback?.createdAt || currentIsoTimestamp()),
-    from: String(message.from || fallback?.from || "Andrew"),
+    from: String(message.from || fallback?.from || fallbackPrimaryCoordinatorDisplayName),
     heardAt: String(message.heardAt || fallback?.heardAt || ""),
     id: String(message.id || fallback?.id || `message-${currentEpochMs()}`),
     mainConnectUserPersonId: String(
@@ -1732,6 +2242,9 @@ function normalizeServerMessage(
     ),
     messageType: String(message.messageType || fallback?.messageType || "text"),
     readAt: String(message.readAt || fallback?.readAt || ""),
+    requiresAcknowledgement: Boolean(
+      message.requiresAcknowledgement ?? fallback?.requiresAcknowledgement ?? false
+    ),
     to: String(message.to || fallback?.to || receiver.careVipName),
     transcript: String(message.transcript || fallback?.transcript || ""),
     transcriptStatus: String(message.transcriptStatus || fallback?.transcriptStatus || ""),
@@ -1740,27 +2253,20 @@ function normalizeServerMessage(
 
 function resolveReceiverAttentionItem(input: {
   messages: Message[];
-  pendingCallSummaryReviews: Array<Partial<ReceiverCall>>;
 }): ReceiverAttentionItem | null {
   const items: ReceiverAttentionItem[] = [];
-  const pendingCallSummary = input.pendingCallSummaryReviews[0];
-  const unreadMessage = input.messages.find((message) => !message.readAt);
+  const actionableMessage = input.messages.find(
+    (message) =>
+      !message.readAt ||
+      (message.requiresAcknowledgement && !message.acknowledgedAt)
+  );
 
-  if (pendingCallSummary) {
-    items.push({
-      call: pendingCallSummary,
-      kind: "call_summary_review",
-      label: "Review",
-      priority: 100,
-    });
-  }
-
-  if (unreadMessage) {
+  if (actionableMessage) {
     items.push({
       kind: "new_message",
       label: "Message",
-      message: unreadMessage,
-      priority: 80,
+      message: actionableMessage,
+      priority: 100,
     });
   }
 
@@ -1769,71 +2275,11 @@ function resolveReceiverAttentionItem(input: {
   return items.sort((a, b) => b.priority - a.priority)[0] ?? null;
 }
 
-function isLowConfidenceAsk(rawText: string) {
-  const text = rawText.trim().toLowerCase();
-  if (!text) return false;
-
-  const knownTerms = [
-    "appointment",
-    "doctor",
-    "leave",
-    "leaving",
-    "bring",
-    "milk",
-    "grocery",
-    "dizzy",
-    "hurt",
-    "pain",
-    "tv",
-    "remote",
-    "sound",
-    "volume",
-    "tell",
-    "message",
-  ];
-
-  return !knownTerms.some((term) => text.includes(term));
-}
-
-function answerForAsk(rawText: string, selectedContact: Contact): AskAnswer {
-  const text = rawText.trim();
-  const lower = text.toLowerCase();
-
-  if (lower.includes("appointment") || lower.includes("doctor") || lower.includes("leave")) {
-    return {
-      question: text,
-      answer: "I can check upcoming appointments for the active Main Connect User.",
-      actionLabel: "That answered my question",
-      messageBody: "",
-      recipientId: "",
-      type: "answer",
-    };
-  }
-
-  if (lower.includes("dizzy") || lower.includes("hurt") || lower.includes("pain")) {
-    return {
-      question: text,
-      answer: `This may be important. I can send this to Andrew now.`,
-      actionLabel: "Send this to Andrew",
-      messageBody: text,
-      recipientId: contacts[0].id,
-      type: "message",
-    };
-  }
-
-  return {
-    question: text,
-    answer: `I can send this to ${selectedContact.displayName}.`,
-    actionLabel: `Send to ${selectedContact.displayName}`,
-    messageBody: text.replace(/^(tell|message|send)\s+/i, ""),
-    recipientId: selectedContact.id,
-    type: "message",
-  };
-}
-
 export function ConnectReceiver() {
   const initialDevicePixelRatioRef = useRef(initialReceiverDevicePixelRatio());
   const [deskPhoneMode] = useState(readInitialDeskPhoneMode);
+  const [receiverPresentationLayout, setReceiverPresentationLayout] =
+    useState<ReceiverPresentationLayout>(readInitialReceiverPresentationLayout);
   const [gxvHomeLayout, setGxvHomeLayout] = useState<GxvHomeLayout>(readInitialGxvHomeLayout);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [nativeReceiverShell] = useState(readInitialNativeReceiverShell);
@@ -1847,6 +2293,11 @@ export function ConnectReceiver() {
   const [receiverSessionRestored, setReceiverSessionRestored] = useState(false);
   const [started, setStarted] = useState(readInitialStarted);
   const [selectedContactId] = useState(readInitialSelectedContactId);
+  const [primaryCoordinatorDisplayName, setPrimaryCoordinatorDisplayName] = useState(
+    () =>
+      readStoredReceiverBinding().primaryCoordinatorDisplayName?.trim() ||
+      fallbackPrimaryCoordinatorDisplayName
+  );
   const [activeReceiverUsers, setActiveReceiverUsers] =
     useState<ReceiverUser[]>(readInitialReceiverUsers);
   const [selectedReceiverUserId, setSelectedReceiverUserId] = useState(readInitialSelectedReceiverUserId);
@@ -1870,6 +2321,7 @@ export function ConnectReceiver() {
   const [todayFocusCompletedIds, setTodayFocusCompletedIds] = useState<string[]>([]);
   const [todayFocusPendingCompletions, setTodayFocusPendingCompletions] =
     useState<Record<string, ReceiverTodayFocusPendingCompletion>>({});
+  const [todayFocusRecentlyUndoneIds, setTodayFocusRecentlyUndoneIds] = useState<string[]>([]);
   const [todayFocusUndoWindowMs, setTodayFocusUndoWindowMs] = useState(
     DEFAULT_TODAY_FOCUS_UNDO_WINDOW_MS
   );
@@ -1877,9 +2329,6 @@ export function ConnectReceiver() {
     "idle" | "loading" | "ready" | "empty" | "error"
   >("idle");
   const [todayFocusStatus, setTodayFocusStatus] = useState("");
-  const [pendingCallSummaryReviews, setPendingCallSummaryReviews] = useState<
-    Array<Partial<ReceiverCall>>
-  >([]);
   const [interruptedReviewIncomingCall, setInterruptedReviewIncomingCall] =
     useState<Partial<ReceiverCall> | null>(null);
   const [todayFocusPreferenceItem, setTodayFocusPreferenceItem] =
@@ -1891,12 +2340,50 @@ export function ConnectReceiver() {
   const [, setStatus] = useState("Ready.");
   const [modal, setModal] = useState<ModalState>(readInitialModal);
   const modalRef = useRef<ModalState>(modal);
+  const interactionAttemptRef = useRef({
+    attemptId: "",
+    latestObservationId: "",
+    nextRevisionIndex: 0,
+    pendingRevisionReason: "initial" as ReceiverAttemptRevisionReason,
+  });
+  const [receiverDiagnosticMode, setReceiverDiagnosticMode] = useState(false);
+  const [attemptDiagnosticOpen, setAttemptDiagnosticOpen] = useState(false);
+  const [attemptDiagnosticSummary, setAttemptDiagnosticSummary] =
+    useState<ReceiverAttemptDiagnosticSummary>({
+      attemptId: "",
+      completedAt: "",
+      latestObservationId: "",
+      outcome: "",
+      revisionCount: 0,
+      startedAt: "",
+      status: "idle",
+      surface: "",
+    });
+  const [attemptDiagnosticEntries, setAttemptDiagnosticEntries] = useState<
+    ReceiverAttemptDiagnosticEntry[]
+  >([]);
+  const [platformReviews, setPlatformReviews] = useState<ReceiverPlatformReview[]>(
+    []
+  );
+  const [platformReviewAnalyses, setPlatformReviewAnalyses] = useState<
+    ReceiverPlatformReviewAnalysis[]
+  >([]);
+  const [platformReviewDraft, setPlatformReviewDraft] = useState("");
+  const [platformReviewSaving, setPlatformReviewSaving] = useState(false);
+  const [platformReviewAnalyzingId, setPlatformReviewAnalyzingId] = useState("");
+  const [platformReviewStatus, setPlatformReviewStatus] = useState("");
   const [screenCleaningSecondsRemaining, setScreenCleaningSecondsRemaining] =
     useState<number | null>(null);
   const [screenCleaningSession, setScreenCleaningSession] =
     useState<ScreenCleaningSession | null>(null);
-  const [contactDraft, setContactDraft] = useState(() => readStoredReceiverSession().contactDraft || "");
-  const [askDraft, setAskDraft] = useState(() => readStoredReceiverSession().askDraft || "");
+  const [contactDraft, setContactDraft] = useState(() =>
+    limitReceiverTextInput(readStoredReceiverSession().contactDraft || "")
+  );
+  const [askDraft, setAskDraft] = useState(() =>
+    limitReceiverTextInput(readStoredReceiverSession().askDraft || "")
+  );
+  const [askDraftObservationModality, setAskDraftObservationModality] =
+    useState<ObservationModality>("typed");
   const [guideTarget, setGuideTarget] = useState<GuideTarget | null>(null);
   const [guideRect, setGuideRect] = useState<GuideRect | null>(null);
   const [guideIdentifyCode, setGuideIdentifyCode] = useState("");
@@ -1928,20 +2415,55 @@ export function ConnectReceiver() {
   const callStartedAtByCallIdRef = useRef<Record<string, string>>({});
   const locallyAnsweredCallIdsRef = useRef<Set<string>>(new Set());
   const locallyEndedCallIdsRef = useRef<Set<string>>(new Set());
-  const pendingCallSummaryReviewsRef = useRef<Array<Partial<ReceiverCall>>>([]);
   const summaryApprovalAdvanceTimerRef = useRef<number | null>(null);
   const playingEnhancementProfileRef = useRef<ReceiverAudioEnhancementProfile | null>(null);
   const playingMessageRef = useRef<Message | null>(null);
   const cueAudioRef = useRef<HTMLAudioElement | null>(null);
   const cueTimeoutRef = useRef<number | null>(null);
   const todayFocusCompletionTimersRef = useRef<Record<string, number>>({});
+  const todayFocusUndoneTimersRef = useRef<Record<string, number>>({});
   const receiverRecordingControllerRef = useRef<ConnectAudioRecordingController | null>(null);
+  const receiverChunkTranscriptRef = useRef({
+    active: false,
+    assembledText: "",
+    chunks: {} as Record<number, string>,
+  });
+  const updateAskDraft = useCallback(
+    (value: string, modality: ObservationModality = "typed") => {
+      setAskDraftObservationModality(modality);
+      setAskDraft(limitReceiverTextInput(value));
+    },
+    []
+  );
+  const receiverAskExitRequestedRef = useRef(false);
   const receiverCaptureIdRef = useRef("");
+  const receiverRecordingStartTokenRef = useRef(0);
+  const receiverRecordingSurfaceRef = useRef<"ask_tell" | null>(null);
   const contactRecordingControllerRef = useRef<ConnectAudioRecordingController | null>(null);
   const contactCaptureIdRef = useRef("");
   const screenCleaningSessionRef = useRef<ScreenCleaningSession | null>(null);
   const gxvFocusHomeEnabled = deskPhoneMode && gxvHomeLayout === "focus_v1";
+  const gxvAskTellHomeEnabled = deskPhoneMode && gxvHomeLayout === "ask_tell";
+  const gxvAskTell2HomeEnabled = deskPhoneMode && gxvHomeLayout === "ask_tell_2";
+  const receiverModernEnabled = !deskPhoneMode && receiverPresentationLayout === "modern";
   const onlineRequiredActionClass = receiverOnline ? "" : styles.offlineDisabledAction;
+  const attemptDiagnosticStartedAt = attemptDiagnosticSummary.startedAt
+    ? new Date(attemptDiagnosticSummary.startedAt)
+    : null;
+  const attemptDiagnosticCompletedAt = attemptDiagnosticSummary.completedAt
+    ? new Date(attemptDiagnosticSummary.completedAt)
+    : null;
+  const attemptDiagnosticDurationSeconds =
+    attemptDiagnosticStartedAt && attemptDiagnosticCompletedAt
+      ? Math.max(
+          0,
+          Math.round(
+            (attemptDiagnosticCompletedAt.getTime() - attemptDiagnosticStartedAt.getTime()) /
+              1000
+          )
+        )
+      : null;
+  const attemptTraceStory = buildReceiverAttemptTraceStory(attemptDiagnosticEntries);
 
   useEffect(() => {
     redirectGxvLikeBrowserToClassicReceiver();
@@ -2025,11 +2547,18 @@ export function ConnectReceiver() {
     return writeReceiverAppointmentCache(window.localStorage, personId, appointments);
   }
 
-  const refreshMessages = useCallback(async () => {
+  const refreshMessages = useCallback(async (
+    reason: "initial" | "poll" | "retry" | "realtime" | "user" = "user"
+  ) => {
     if (!selectedReceiverUserId) return;
 
     try {
       const messagesUrl = `${connectMessagesEndpoint}?personId=${encodeURIComponent(selectedReceiverUserId)}`;
+      recordConnectPollingRequest({
+        caller: "connect_receiver_messages",
+        endpoint: connectMessagesEndpoint,
+        reason,
+      });
       const response = await fetch(messagesUrl, {
         cache: "no-store",
         headers: await connectReceiverRequestHeaders(),
@@ -2059,10 +2588,12 @@ export function ConnectReceiver() {
     setTodayFocusItems(items);
     setTodayFocusCompletedIds([]);
     setTodayFocusPendingCompletions({});
+    setTodayFocusRecentlyUndoneIds([]);
     setTodayFocusCompletingId("");
     setTodayFocusStatus("");
     setTodayFocusLoadState(items.length ? "ready" : "empty");
     clearTodayFocusCompletionTimers();
+    clearTodayFocusUndoneTimers();
   }
 
   function clearTodayFocusCompletionTimers() {
@@ -2080,6 +2611,21 @@ export function ConnectReceiver() {
     }
   }
 
+  function clearTodayFocusUndoneTimers() {
+    for (const timerId of Object.values(todayFocusUndoneTimersRef.current)) {
+      window.clearTimeout(timerId);
+    }
+    todayFocusUndoneTimersRef.current = {};
+  }
+
+  function clearTodayFocusUndoneTimer(focusItemId: string) {
+    const timerId = todayFocusUndoneTimersRef.current[focusItemId];
+    if (timerId) {
+      window.clearTimeout(timerId);
+      delete todayFocusUndoneTimersRef.current[focusItemId];
+    }
+  }
+
   function normalizeTodayFocusUndoWindowMs(value: unknown) {
     const milliseconds =
       typeof value === "number" && Number.isFinite(value)
@@ -2093,13 +2639,17 @@ export function ConnectReceiver() {
     setTodayFocusItems([]);
     setTodayFocusCompletedIds([]);
     setTodayFocusPendingCompletions({});
+    setTodayFocusRecentlyUndoneIds([]);
     setTodayFocusCompletingId("");
     setTodayFocusStatus("");
     setTodayFocusLoadState(selectedReceiverUserId ? "loading" : "idle");
     clearTodayFocusCompletionTimers();
+    clearTodayFocusUndoneTimers();
   }, [selectedReceiverUserId]);
 
-  const refreshTodayFocus = useCallback(async () => {
+  const refreshTodayFocus = useCallback(async (
+    reason: "initial" | "poll" | "retry" | "realtime" | "user" = "user"
+  ) => {
     if (!selectedReceiverUserId) {
       if (todayFocusItems.length === 0) {
         setTodayFocusLoadState("idle");
@@ -2116,6 +2666,11 @@ export function ConnectReceiver() {
     }
 
     try {
+      recordConnectPollingRequest({
+        caller: "connect_receiver_today_focus",
+        endpoint: connectTodayFocusEndpoint,
+        reason,
+      });
       const response = await fetch(
         `${connectTodayFocusEndpoint}?personId=${encodeURIComponent(selectedReceiverUserId)}`,
         {
@@ -2184,9 +2739,15 @@ export function ConnectReceiver() {
   }, [selectedReceiverUserId, todayFocusItems.length]);
 
   const refreshCalls = useCallback(async () => {
+    if (connectCallsDeprecated) return;
     if (!selectedReceiverUserId) return;
 
     try {
+      recordConnectPollingRequest({
+        caller: "connect_receiver_calls",
+        endpoint: connectCallsEndpoint,
+        reason: "poll",
+      });
       const response = await fetch(
         `${connectCallsEndpoint}?personId=${encodeURIComponent(selectedReceiverUserId)}`,
         {
@@ -2200,14 +2761,6 @@ export function ConnectReceiver() {
 
       if (!response.ok || !Array.isArray(payload.calls)) return;
       markReceiverOnline();
-      const pendingReviews = payload.calls.filter((call) => {
-        const status = String(call.summaryStatus || "");
-        return (
-          ["pending_review", "pending", "completed"].includes(status) &&
-          Boolean(String(call.summaryText || call.generatedSummaryText || "").trim())
-        );
-      });
-      setPendingCallSummaryReviews(pendingReviews);
 
       const activeCalls = payload.calls.filter((call) =>
         receiverCallRecordStateIsActive(String(call.state || ""))
@@ -2369,7 +2922,11 @@ export function ConnectReceiver() {
         (receiverCallState === "incoming" || receiverCallState === "connecting")
           ? "connecting"
           : receiverCallState;
-      const callerName = String(activeCall.callerName || "Andrew");
+      const callerName = String(
+        activeCall.callerName ||
+          primaryCoordinatorDisplayName ||
+          fallbackPrimaryCoordinatorDisplayName
+      );
       const summaryStatus = String(activeCall.summaryStatus || "");
       const summaryText = String(activeCall.summaryText || "");
       const generatedSummaryText = String(activeCall.generatedSummaryText || summaryText || "");
@@ -2494,38 +3051,10 @@ export function ConnectReceiver() {
       markReceiverOffline();
       // Keep the receiver usable if the Connect local server is unavailable.
     }
-  }, [selectedReceiverUserId]);
-
-  function openPendingCallSummaryReview(call: Partial<ReceiverCall>) {
-    if (!receiverOnline) {
-      explainOfflineAction();
-      return;
-    }
-    if (!call.callId) return;
-    const summaryText = String(call.summaryText || call.generatedSummaryText || "");
-    setModal({
-      approvedSummaryText: String(call.approvedSummaryText || ""),
-      callId: String(call.callId),
-      callerName: String(call.callerName || "Andrew"),
-      callState: "ended",
-      generatedSummaryText: String(call.generatedSummaryText || summaryText),
-      summaryDraft: stripCareSummaryHeading(String(call.summaryApprovalDraftText || summaryText)),
-      summaryDraftSavedText: String(call.summaryApprovalDraftText || ""),
-      summaryStatus: String(call.summaryStatus || "pending_review"),
-      summaryText,
-      textView: "summary",
-      transcriptStatus: String(call.transcriptStatus || ""),
-      transcriptText: String(call.transcriptText || ""),
-      type: "incomingCall",
-    });
-  }
+  }, [primaryCoordinatorDisplayName, selectedReceiverUserId]);
 
   function openAttentionItem(item: ReceiverAttentionItem | null) {
     if (!item) return;
-    if (item.kind === "call_summary_review") {
-      openPendingCallSummaryReview(item.call);
-      return;
-    }
     if (item.kind === "new_message") {
       openMessage(item.message);
     }
@@ -2536,19 +3065,8 @@ export function ConnectReceiver() {
       window.clearTimeout(summaryApprovalAdvanceTimerRef.current);
     }
 
-    const remainingReviews = pendingCallSummaryReviewsRef.current.filter(
-      (call) => String(call.callId || "") !== String(callId || "")
-    );
-    pendingCallSummaryReviewsRef.current = remainingReviews;
-    setPendingCallSummaryReviews(remainingReviews);
-
     summaryApprovalAdvanceTimerRef.current = window.setTimeout(() => {
       summaryApprovalAdvanceTimerRef.current = null;
-      const nextReview = pendingCallSummaryReviewsRef.current[0];
-      if (nextReview?.callId) {
-        openPendingCallSummaryReview(nextReview);
-        return;
-      }
       setModal((current) =>
         current?.type === "incomingCall" &&
         current.callId === callId &&
@@ -2556,20 +3074,57 @@ export function ConnectReceiver() {
           ? null
           : current
       );
-    }, 1800);
+    }, 500);
   }
 
   useEffect(() => {
     modalRef.current = modal;
+    if (modal) {
+      setLayoutMenuOpen(false);
+    }
   }, [modal]);
+
+  useEffect(() => {
+    const askTellCaptureOpen =
+      (modal?.type === "ask" && modal.surface === "ask_tell") ||
+      (modal?.type === "askRecordReview" && modal.surface === "ask_tell");
+    if (askTellCaptureOpen) return;
+    receiverRecordingStartTokenRef.current += 1;
+  }, [modal]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadReceiverDiagnosticsSetting() {
+      try {
+        recordConnectPollingRequest({
+          caller: "connect_receiver_diagnostics",
+          endpoint: receiverDiagnosticsEndpoint,
+          reason: "initial",
+        });
+        const response = await fetch(receiverDiagnosticsEndpoint, {
+          cache: "no-store",
+        });
+        const payload = (await response.json().catch(() => ({}))) as ReceiverDiagnosticsSettings;
+        if (!cancelled) {
+          setReceiverDiagnosticMode(payload.enabled === true);
+        }
+      } catch {
+        if (!cancelled) {
+          setReceiverDiagnosticMode(false);
+        }
+      }
+    }
+
+    void loadReceiverDiagnosticsSetting();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     callAudioStatusRef.current = callAudioStatus;
   }, [callAudioStatus]);
-
-  useEffect(() => {
-    pendingCallSummaryReviewsRef.current = pendingCallSummaryReviews;
-  }, [pendingCallSummaryReviews]);
 
   useEffect(() => {
     return () => {
@@ -2618,6 +3173,17 @@ export function ConnectReceiver() {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (modal?.type !== "sent") return undefined;
+
+    const timer = window.setTimeout(() => {
+      setModal((current) => (current?.type === "sent" ? null : current));
+      setStatus("Ready.");
+    }, 4000);
+
+    return () => window.clearTimeout(timer);
+  }, [modal?.type]);
 
   useEffect(() => {
     if (screenCleaningSecondsRemaining === null) return undefined;
@@ -2700,6 +3266,7 @@ export function ConnectReceiver() {
   useEffect(() => {
     return () => {
       receiverRecordingControllerRef.current?.cancel();
+      resetReceiverChunkTranscript();
       contactRecordingControllerRef.current?.cancel();
       liveCallAudioRef.current?.stop();
       audioRef.current?.pause();
@@ -2710,6 +3277,7 @@ export function ConnectReceiver() {
         URL.revokeObjectURL(pendingContactRecording.recording.localUrl);
       }
       clearTodayFocusCompletionTimers();
+      clearTodayFocusUndoneTimers();
     };
   }, [pendingContactRecording]);
 
@@ -2790,13 +3358,16 @@ export function ConnectReceiver() {
 
     async function verifyBinding() {
       try {
-        const payload = await verifyReceiverBindingHeartbeat();
+        const payload = await verifyReceiverBindingHeartbeat(hasConfirmedBinding ? "user" : "initial");
         if (!payload) return;
         if (cancelled) return;
 
         saveReceiverBinding(payload);
         hasConfirmedBinding = true;
         setReceiverRegistered(true);
+        setPrimaryCoordinatorDisplayName(
+          payload.primaryCoordinatorDisplayName?.trim() || fallbackPrimaryCoordinatorDisplayName
+        );
         applyBoundReceiverActivePerson(
           payload.mainConnectUserPersonId,
           payload.mainConnectUserDisplayName
@@ -2821,13 +3392,21 @@ export function ConnectReceiver() {
     }
 
     void verifyBinding();
-    const heartbeatId = window.setInterval(() => {
+
+    function verifyBindingWhenActive() {
+      if (document.hidden) return;
       void verifyBinding();
-    }, RECEIVER_BINDING_HEARTBEAT_MS);
+    }
+
+    // Binding checks are startup/return-to-app safeguards, not idle polling.
+    // They stop on unmount and run again only when the Receiver becomes active.
+    window.addEventListener("focus", verifyBindingWhenActive);
+    document.addEventListener("visibilitychange", verifyBindingWhenActive);
 
     return () => {
       cancelled = true;
-      window.clearInterval(heartbeatId);
+      window.removeEventListener("focus", verifyBindingWhenActive);
+      document.removeEventListener("visibilitychange", verifyBindingWhenActive);
     };
   }, []);
 
@@ -2854,6 +3433,7 @@ export function ConnectReceiver() {
           hardwareProfile?: string;
           mainConnectUserPersonId?: string;
           mainConnectUserDisplayName?: string;
+          primaryCoordinatorDisplayName?: string;
           receiverDeviceId?: string;
           receiverInstallId?: string;
           receiverUrl?: string;
@@ -2871,6 +3451,7 @@ export function ConnectReceiver() {
           hardwareProfile: payload.hardwareProfile,
           mainConnectUserDisplayName: payload.mainConnectUserDisplayName,
           mainConnectUserPersonId: payload.mainConnectUserPersonId,
+          primaryCoordinatorDisplayName: payload.primaryCoordinatorDisplayName,
           receiverDeviceId: payload.receiverDeviceId,
           receiverInstallId: payload.receiverInstallId || readReceiverInstallId(),
           receiverUrl: payload.receiverUrl,
@@ -2879,6 +3460,9 @@ export function ConnectReceiver() {
         });
         window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
         setReceiverRegistered(true);
+        setPrimaryCoordinatorDisplayName(
+          payload.primaryCoordinatorDisplayName?.trim() || fallbackPrimaryCoordinatorDisplayName
+        );
         applyBoundReceiverActivePerson(
           payload.mainConnectUserPersonId,
           payload.mainConnectUserDisplayName
@@ -3035,6 +3619,10 @@ export function ConnectReceiver() {
       if (!receiverRegistered) return;
       try {
         const context = await fetchConnectMainUserContext();
+        setPrimaryCoordinatorDisplayName(
+          context.primaryCoordinator?.displayName?.trim() ||
+            fallbackPrimaryCoordinatorDisplayName
+        );
         const users = context.people.slice(0, 4).map((person) => ({
           displayName: person.displayName,
           id: person.id,
@@ -3072,51 +3660,88 @@ export function ConnectReceiver() {
   }, [receiverRegistered]);
 
   useEffect(() => {
-    if (!started) return undefined;
+    if (!started || !selectedReceiverUserId) return undefined;
 
     const firstRefresh = window.setTimeout(() => {
-      void refreshMessages();
+      void refreshMessages("initial");
     }, 0);
-    const timer = window.setInterval(() => {
-      void refreshMessages();
-    }, 5000);
 
-    return () => {
-      window.clearTimeout(firstRefresh);
-      window.clearInterval(timer);
-    };
-  }, [refreshMessages, started]);
+    return () => window.clearTimeout(firstRefresh);
+  }, [refreshMessages, selectedReceiverUserId, started]);
 
   useEffect(() => {
-    if (!started || !deskPhoneMode || gxvHomeLayout !== "focus_v1") return undefined;
+    const readingMessages = modal?.type === "allMessages" || modal?.type === "reader";
+    if (!started || !selectedReceiverUserId || !readingMessages) return undefined;
 
-    const firstRefresh = window.setTimeout(() => {
-      void refreshTodayFocus();
-    }, 0);
-    const timer = window.setInterval(() => {
-      void refreshTodayFocus();
-    }, 60000);
+    let cancelled = false;
+    let timer: number | undefined;
+    let inFlight = false;
+
+    async function pollMessages() {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        await refreshMessages("poll");
+      } finally {
+        inFlight = false;
+        if (!cancelled) {
+          const nextInterval = connectPollingIntervalMs({
+            hidden: document.hidden,
+            intervalMs: connectPollingIntervals.receiverMessagesMs,
+            prerequisitesMet: Boolean(selectedReceiverUserId),
+          });
+          if (nextInterval !== null) {
+            timer = window.setTimeout(pollMessages, nextInterval);
+          }
+        }
+      }
+    }
+
+    function rescheduleForVisibility() {
+      if (cancelled) return;
+      if (timer) window.clearTimeout(timer);
+      const nextInterval = connectPollingIntervalMs({
+        hidden: document.hidden,
+        intervalMs: connectPollingIntervals.receiverMessagesMs,
+        prerequisitesMet: Boolean(selectedReceiverUserId),
+      });
+      if (nextInterval !== null) timer = window.setTimeout(pollMessages, nextInterval);
+    }
+
+    // Message polling is limited to active reading surfaces. The idle Receiver
+    // home loads messages on entry/explicit actions but does not poll.
+    timer = window.setTimeout(pollMessages, 0);
+    document.addEventListener("visibilitychange", rescheduleForVisibility);
 
     return () => {
-      window.clearTimeout(firstRefresh);
-      window.clearInterval(timer);
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", rescheduleForVisibility);
     };
-  }, [deskPhoneMode, gxvHomeLayout, refreshTodayFocus, started]);
+  }, [modal?.type, refreshMessages, selectedReceiverUserId, started]);
 
   useEffect(() => {
-    if (!started) return undefined;
+    if (!started || !deskPhoneMode || !["ask_tell", "ask_tell_2", "focus_v1"].includes(gxvHomeLayout)) {
+      return undefined;
+    }
+    if (!selectedReceiverUserId) return undefined;
 
+    // Today's Focus is durable daily context, not urgent state. It loads once
+    // for the home surface and refreshes explicitly after Focus actions.
     const firstRefresh = window.setTimeout(() => {
-      void refreshCalls();
+      void refreshTodayFocus("initial");
     }, 0);
-    const timer = window.setInterval(() => {
-      void refreshCalls();
-    }, 2500);
 
-    return () => {
-      window.clearTimeout(firstRefresh);
-      window.clearInterval(timer);
-    };
+    return () => window.clearTimeout(firstRefresh);
+  }, [deskPhoneMode, gxvHomeLayout, refreshTodayFocus, selectedReceiverUserId, started]);
+
+  useEffect(() => {
+    // Connect calls are deprecated for now. Keep the call UI code recoverable,
+    // but do not poll /api/connect/calls from always-on Receiver devices.
+    void connectCallsDeprecated;
+    void started;
+    void refreshCalls;
+    return undefined;
   }, [refreshCalls, started]);
 
   useEffect(() => {
@@ -3161,13 +3786,25 @@ export function ConnectReceiver() {
   }, []);
 
   useEffect(() => {
+    // Receiver Guide is intentionally disabled while the feature is deprecated.
+    // Future work can restore this as an opt-in/debug-only realtime channel.
+    if (connectReceiverGuideDeprecated) return undefined;
     if (!started) return undefined;
     let cancelled = false;
+    let timer: number | undefined;
+    let inFlight = false;
     const receiverId = readReceiverGuideId();
     const receiverSessionId = readReceiverGuideSessionId();
 
     async function syncReceiverGuideState() {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       try {
+        recordConnectPollingRequest({
+          caller: "connect_receiver_guide",
+          endpoint: receiverGuideEndpoint,
+          reason: "poll",
+        });
         await fetch(receiverGuideEndpoint, {
           body: JSON.stringify({
             action: "presence",
@@ -3175,7 +3812,13 @@ export function ConnectReceiver() {
             pageUrl: window.location.pathname + window.location.search,
             receiverId,
             receiverSessionId,
-            uiLayout: gxvFocusHomeEnabled ? "desk_phone_focus_v1" : "default_receiver",
+            uiLayout: gxvAskTell2HomeEnabled
+              ? "desk_phone_ask_tell_2"
+              : gxvAskTellHomeEnabled
+              ? "desk_phone_ask_tell"
+              : gxvFocusHomeEnabled
+                ? "desk_phone_focus_v1"
+                : "default_receiver",
           }),
           cache: "no-store",
           headers: { "Content-Type": "application/json" },
@@ -3219,28 +3862,66 @@ export function ConnectReceiver() {
         setGuideIdentifyCode(String(identifyRequest?.code || ""));
       } catch {
         // Remote guide sync is best-effort; same-browser storage remains available.
+      } finally {
+        inFlight = false;
+        if (!cancelled) {
+          const nextInterval = connectPollingIntervalMs({
+            hidden: document.hidden,
+            intervalMs: connectPollingIntervals.receiverGuideMs,
+          });
+          if (nextInterval !== null) {
+            timer = window.setTimeout(syncReceiverGuideState, nextInterval);
+          }
+        }
       }
     }
 
-    void syncReceiverGuideState();
-    const timer = window.setInterval(() => {
-      void syncReceiverGuideState();
-    }, 1000);
+    timer = window.setTimeout(syncReceiverGuideState, 0);
 
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer) window.clearTimeout(timer);
     };
   }, [started]);
 
+  const contacts = useMemo<Contact[]>(
+    () => [
+      {
+        ...fallbackContacts[0],
+        displayName:
+          primaryCoordinatorDisplayName.trim() || fallbackPrimaryCoordinatorDisplayName,
+      },
+    ],
+    [primaryCoordinatorDisplayName]
+  );
+  const askTellExamples = useMemo(
+    () => receiverAskTellExamples(contacts[0].displayName),
+    [contacts]
+  );
   const selectedContact = useMemo(
     () => contacts.find((contact) => contact.id === selectedContactId) ?? contacts[0],
-    [selectedContactId]
+    [contacts, selectedContactId]
   );
   const visibleReceiverUsers = activeReceiverUsers.slice(0, 4);
   const selectedReceiverUser =
     visibleReceiverUsers.find((user) => user.id === selectedReceiverUserId) ??
     noMainConnectUser;
+  useEffect(() => {
+    if (
+      !receiverDiagnosticMode ||
+      !attemptDiagnosticOpen ||
+      !attemptDiagnosticSummary.attemptId ||
+      !selectedReceiverUser.id
+    ) {
+      return;
+    }
+    void loadPlatformReviews();
+  }, [
+    attemptDiagnosticOpen,
+    attemptDiagnosticSummary.attemptId,
+    receiverDiagnosticMode,
+    selectedReceiverUser.id,
+  ]);
   const displayedAppointment =
     appointmentDisplay.appointments[0] ?? fallbackNextReceiverAppointment();
   const displayedAppointmentTimeLabel = appointmentDateTimeLabel(displayedAppointment);
@@ -3261,8 +3942,34 @@ export function ConnectReceiver() {
     .slice(0, 3);
   const attentionItem = resolveReceiverAttentionItem({
     messages,
-    pendingCallSummaryReviews,
   });
+  const latestReadMessage = messages.find(
+    (message) =>
+      message.readAt &&
+      !message.callbackRequestedAt &&
+      (!message.requiresAcknowledgement || message.acknowledgedAt)
+  );
+  const receiverNotificationMessage =
+    attentionItem?.kind === "new_message" ? attentionItem.message : latestReadMessage;
+  const messageHomeCount = messages.length;
+  const reviewHomeCount = attentionItem ? 1 : 0;
+  const messageHomeLabel = messageHomeCount > 0 ? `Messages (${messageHomeCount})` : "Messages";
+  const reviewHomeLabel = reviewHomeCount > 0 ? `Review (${reviewHomeCount})` : "Review";
+  const receiverNotificationText = !receiverOnline
+    ? "Internet connection lost. Some features are unavailable."
+    : attentionItem?.kind === "new_message"
+      ? receiverMessageNotificationText(attentionItem.message, {
+          fallbackName: selectedContact.displayName,
+          important: true,
+          primaryCoordinatorName: fallbackPrimaryCoordinatorDisplayName,
+        })
+      : latestReadMessage
+        ? receiverMessageNotificationText(latestReadMessage, {
+            fallbackName: selectedContact.displayName,
+            important: false,
+            primaryCoordinatorName: fallbackPrimaryCoordinatorDisplayName,
+          })
+      : "";
   const receiverIdentityDisplay = readReceiverIdentityDisplay();
   const todayFocusDisplayMode =
     visibleTodayFocusItems.length > 0
@@ -3310,16 +4017,39 @@ export function ConnectReceiver() {
       url.searchParams.set("device", "gxv3370");
       url.searchParams.set("hardwareProfile", "grandstream_gxv3370");
       url.searchParams.set("uiLayout", "desk_phone_1024x600");
-      if (nextLayout === "focus_v1") {
-        url.searchParams.set("homeLayout", "focus_v1");
-      } else {
+      if (nextLayout === "classic") {
         url.searchParams.delete("homeLayout");
+      } else {
+        url.searchParams.set("homeLayout", nextLayout);
+      }
+      if (!deskPhoneMode) {
+        window.location.assign(url.toString());
+        return;
       }
       window.history.replaceState(null, "", url.toString());
     }
-    if (nextLayout === "focus_v1") {
+    if (nextLayout === "focus_v1" || nextLayout === "ask_tell" || nextLayout === "ask_tell_2") {
       resetTodayFocusList(todayFocusItems);
-      void refreshTodayFocus();
+      void refreshTodayFocus("initial");
+    }
+  }
+
+  function chooseReceiverPresentationLayout(nextLayout: ReceiverPresentationLayout) {
+    setReceiverPresentationLayout(nextLayout);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (nextLayout === "modern") {
+        url.searchParams.set("receiverLayout", "modern");
+      } else {
+        url.searchParams.delete("receiverLayout");
+        if (normalizedProfileValue(url.searchParams.get("homeLayout")) === "modern") {
+          url.searchParams.delete("homeLayout");
+        }
+        if (normalizedProfileValue(url.searchParams.get("ui")) === "modern") {
+          url.searchParams.delete("ui");
+        }
+      }
+      window.history.replaceState(null, "", url.toString());
     }
   }
 
@@ -3335,12 +4065,24 @@ export function ConnectReceiver() {
     window.location.assign(url.toString());
   }
 
+  function openModernReceiverLayout() {
+    setLayoutMenuOpen(false);
+    if (typeof window === "undefined") return;
+    const url = new URL("/connect/receiver", window.location.origin);
+    url.searchParams.set("receiver_runtime", "modern_web");
+    url.searchParams.set("device", "web");
+    url.searchParams.set("hardwareProfile", "web");
+    url.searchParams.set("uiLayout", "default_receiver");
+    url.searchParams.set("receiverLayout", "modern");
+    window.location.assign(url.toString());
+  }
+
   function renderReceiverLayoutMenu() {
     if (nativeReceiverShell) return null;
     if (!layoutMenuOpen) return null;
 
     return (
-      <div className={styles.receiverLayoutMenu} role="menu" aria-label="Receiver layout">
+      <div className={styles.receiverLayoutMenu} role="menu" aria-label="Receiver style">
         <button
           type="button"
           role="menuitemradio"
@@ -3365,6 +4107,38 @@ export function ConnectReceiver() {
         </button>
         <button
           type="button"
+          role="menuitemradio"
+          aria-checked={gxvHomeLayout === "ask_tell"}
+          onClick={(event) => {
+            event.stopPropagation();
+            chooseGxvHomeLayout("ask_tell");
+          }}
+        >
+          Ask/Tell
+        </button>
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={gxvHomeLayout === "ask_tell_2"}
+          onClick={(event) => {
+            event.stopPropagation();
+            chooseGxvHomeLayout("ask_tell_2");
+          }}
+        >
+          Ask/Tell 2
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={(event) => {
+            event.stopPropagation();
+            openModernReceiverLayout();
+          }}
+        >
+          Modern
+        </button>
+        <button
+          type="button"
           role="menuitem"
           onClick={(event) => {
             event.stopPropagation();
@@ -3373,6 +4147,51 @@ export function ConnectReceiver() {
         >
           Old Web
         </button>
+      </div>
+    );
+  }
+
+  function renderTodayFocusHomeContent(title = "Today's Focus", headerAction?: ReactNode) {
+    return todayFocusDisplayMode === "items" ? (
+      <>
+        <div className={styles.todayFocusHeader}>
+          <h2>{title}</h2>
+          {headerAction}
+        </div>
+        <TodayFocusList
+          completedItemIds={Object.keys(todayFocusPendingCompletions)}
+          completingId={todayFocusCompletingId}
+          items={visibleTodayFocusItems}
+          onCancelPreference={() => {
+            setTodayFocusPreferenceItem(null);
+            setTodayFocusPreferenceStep("main");
+          }}
+          onChoosePreference={chooseTodayFocusPreference}
+          onComplete={completeTodayFocusItem}
+          onOpenPreference={(item) => {
+            setTodayFocusPreferenceItem(item);
+            setTodayFocusPreferenceStep("main");
+          }}
+          onUndoComplete={undoTodayFocusCompletion}
+          preferenceOpenForId={todayFocusPreferenceItem?.id ?? null}
+          preferenceStep={todayFocusPreferenceStep}
+          undoneItemIds={todayFocusRecentlyUndoneIds}
+          variant="receiver"
+        />
+      </>
+    ) : todayFocusDisplayMode === "loading" ? (
+      <div className={styles.todayFocusLoadingState}>
+        <div className={styles.todayFocusHeader}>
+          <h2>{title}</h2>
+          {headerAction}
+        </div>
+        <p>Loading...</p>
+      </div>
+    ) : (
+      <div className={styles.brainStretchPrompt}>
+        <h2>Brain Stretch</h2>
+        {todayFocusStatus ? <p>{todayFocusStatus}</p> : null}
+        <p>{brainStretchPrompt}</p>
       </div>
     );
   }
@@ -3421,6 +4240,11 @@ export function ConnectReceiver() {
 
     setTodayFocusCompletingId(item.id);
     setStatus(`Saving ${item.title}.`);
+    setTodayFocusPendingCompletions((current) => ({
+      ...current,
+      [item.id]: { trackEventId: null },
+    }));
+    scheduleTodayFocusCompletionExpiry(item.id);
 
     try {
       const response = await fetch(connectTodayFocusEndpoint, {
@@ -3455,32 +4279,49 @@ export function ConnectReceiver() {
         throw new Error("Today’s Focus was saved, but Undo is not available.");
       }
 
-      setTodayFocusPendingCompletions((current) => ({
-        ...current,
-        [item.id]: { trackEventId },
-      }));
-      clearTodayFocusCompletionTimer(item.id);
-      todayFocusCompletionTimersRef.current[item.id] = window.setTimeout(() => {
-        setTodayFocusPendingCompletions((current) => {
-          const next = { ...current };
-          delete next[item.id];
-          return next;
-        });
-        setTodayFocusCompletedIds((current) =>
-          current.includes(item.id) ? current : [...current, item.id]
-        );
-        delete todayFocusCompletionTimersRef.current[item.id];
-      }, todayFocusUndoWindowMs);
+      setTodayFocusPendingCompletions((current) =>
+        current[item.id]
+          ? {
+              ...current,
+              [item.id]: { trackEventId },
+            }
+          : current
+      );
       setStatus(`${item.title} saved.`);
     } catch (error) {
-      setStatus(
-        error instanceof Error
-          ? error.message
-          : "Today’s Focus could not be saved."
-      );
+      console.warn("Today’s Focus saved locally on Receiver only.", error);
+      setStatus(`${item.title} marked done.`);
     } finally {
       setTodayFocusCompletingId("");
     }
+  }
+
+  function scheduleTodayFocusCompletionExpiry(focusItemId: string) {
+    clearTodayFocusCompletionTimer(focusItemId);
+    todayFocusCompletionTimersRef.current[focusItemId] = window.setTimeout(() => {
+      setTodayFocusPendingCompletions((current) => {
+        const next = { ...current };
+        delete next[focusItemId];
+        return next;
+      });
+      setTodayFocusCompletedIds((current) =>
+        current.includes(focusItemId) ? current : [...current, focusItemId]
+      );
+      delete todayFocusCompletionTimersRef.current[focusItemId];
+    }, todayFocusUndoWindowMs);
+  }
+
+  function showTodayFocusUndoCompleted(focusItemId: string) {
+    clearTodayFocusUndoneTimer(focusItemId);
+    setTodayFocusRecentlyUndoneIds((current) =>
+      current.includes(focusItemId) ? current : [...current, focusItemId]
+    );
+    todayFocusUndoneTimersRef.current[focusItemId] = window.setTimeout(() => {
+      setTodayFocusRecentlyUndoneIds((current) =>
+        current.filter((undoneId) => undoneId !== focusItemId)
+      );
+      delete todayFocusUndoneTimersRef.current[focusItemId];
+    }, 1500);
   }
 
   async function undoTodayFocusCompletion(item: ReceiverTodayFocusHomeItem) {
@@ -3500,7 +4341,16 @@ export function ConnectReceiver() {
       delete next[item.id];
       return next;
     });
+    showTodayFocusUndoCompleted(item.id);
     setStatus(`Undoing ${item.title}.`);
+
+    if (!pendingCompletion.trackEventId) {
+      setTodayFocusCompletedIds((current) =>
+        current.filter((completedId) => completedId !== item.id)
+      );
+      setStatus(`${item.title} unchecked.`);
+      return;
+    }
 
     try {
       const response = await fetch(connectTodayFocusEndpoint, {
@@ -3530,6 +4380,10 @@ export function ConnectReceiver() {
       );
       setStatus(`${item.title} unchecked.`);
     } catch (error) {
+      clearTodayFocusUndoneTimer(item.id);
+      setTodayFocusRecentlyUndoneIds((current) =>
+        current.filter((undoneId) => undoneId !== item.id)
+      );
       setTodayFocusPendingCompletions((current) => ({
         ...current,
         [item.id]: pendingCompletion,
@@ -3605,7 +4459,7 @@ export function ConnectReceiver() {
       setTodayFocusPreferenceItem(null);
       setTodayFocusPreferenceStep("main");
       setTodayFocusStatus("CarePland will adjust how often this appears.");
-      void refreshTodayFocus();
+      void refreshTodayFocus("user");
     } catch (error) {
       setTodayFocusStatus(
         error instanceof Error
@@ -3641,6 +4495,10 @@ export function ConnectReceiver() {
       const context = await updateConnectMainUserContext({
         mainConnectUserPersonId: user.id,
       });
+      setPrimaryCoordinatorDisplayName(
+        context.primaryCoordinator?.displayName?.trim() ||
+          fallbackPrimaryCoordinatorDisplayName
+      );
       setSelectedReceiverUserId(context.mainConnectUserPersonId || "");
       setStatus(`Main Connect User: ${user.displayName}`);
     } catch (error) {
@@ -3765,7 +4623,7 @@ export function ConnectReceiver() {
     }
 
     setModal({ type: "sent", recipientName: contact.displayName });
-    void refreshMessages();
+    void refreshMessages("user");
   }
 
   function openAsk() {
@@ -3774,9 +4632,217 @@ export function ConnectReceiver() {
       return;
     }
     clearGuideBecauseReceiverActed();
+    setAskDraftObservationModality("typed");
     setAskDraft("");
     setPendingAskAudio(null);
     setModal({ type: "ask" });
+  }
+
+  function openAskTell() {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
+    clearGuideBecauseReceiverActed();
+    setPendingAskAudio(null);
+    if (askDraft.trim()) {
+      setModal({ type: "ask", surface: "ask_tell" });
+      setStatus("Ask/Tell message restored.");
+      return;
+    }
+    setAskDraftObservationModality("typed");
+    setAskDraft("");
+    setModal({ type: "ask", surface: "ask_tell" });
+    setPendingAskAudio(null);
+    const autoStartToken = receiverRecordingStartTokenRef.current + 1;
+    receiverRecordingStartTokenRef.current = autoStartToken;
+    void startReceiverRecording("ask_tell", {
+      autoStartToken,
+      autoStartWindowMs: 2000,
+    });
+  }
+
+  function resetReceiverChunkTranscript() {
+    receiverChunkTranscriptRef.current = {
+      active: false,
+      assembledText: "",
+      chunks: {},
+    };
+  }
+
+  function applyReceiverChunkTranscript(chunkIndex: number, transcript: string) {
+    const chunkState = receiverChunkTranscriptRef.current;
+    if (!chunkState.active) return;
+    const nextTranscript = transcript.trim();
+    if (!nextTranscript) return;
+
+    chunkState.chunks[chunkIndex] = nextTranscript;
+    const assembledText = Object.keys(chunkState.chunks)
+      .map(Number)
+      .sort((left, right) => left - right)
+      .map((index) => chunkState.chunks[index])
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, RECEIVER_SPEECH_TRANSCRIPT_MAX_LENGTH);
+    chunkState.assembledText = assembledText;
+  }
+
+  async function transcribeReceiverRecordingChunk(chunk: ConnectAudioRecordingChunk) {
+    if (!selectedReceiverUser.id) return;
+    try {
+      const clientAudioCaptureId =
+        receiverCaptureIdRef.current || createConnectAudioCaptureId("receiver-ask-input");
+      const transcription = await requestConnectAudioTranscription({
+        artifactKind: "ask_input_chunk",
+        audioDirection: "receiver_local_input",
+        captureContext: createConnectAudioCaptureContext(chunk, {
+          artifactKind: "ask_input_chunk",
+          audioDirection: "receiver_local_input",
+          clientAudioCaptureId,
+          role: "receiver_user",
+          surface: "receiver_ask_tell_chunk",
+        }),
+        clientAudioCaptureId,
+        durationMs: chunk.durationMs,
+        mainConnectUserPersonId: selectedReceiverUser.id,
+        mimeType: chunk.mimeType,
+        receiverId: connectPrototypeReceiverId,
+        recording: chunk.blob,
+        source: "ask-tell-chunk",
+      });
+      applyReceiverChunkTranscript(chunk.chunkIndex, String(transcription.transcript || ""));
+    } catch {
+      // Chunk transcription is opportunistic; final transcription still runs after stop.
+    }
+  }
+
+  function sendCondensedSpeechMessage(
+    condensation: ReceiverMessageCondensationModal,
+    draft: string
+  ) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
+    const finalMessage = limitReceiverCondensedMessageEdit(draft).trim();
+    if (!finalMessage) {
+      setStatus("Review the message before sending.");
+      return;
+    }
+    const contact =
+      contacts.find((item) => item.id === condensation.contactId) ?? contacts[0];
+    const edited = finalMessage !== condensation.initialDraft.trim();
+    if (edited) {
+      recordInteractionAttemptEvent("message_condensation_draft_edited", {
+        editedDraft: finalMessage,
+        initialDraft: condensation.initialDraft,
+        originalTranscriptLength: condensation.originalLength,
+      });
+    }
+    recordInteractionAttemptEvent("message_condensation_approved", {
+      edited,
+      finalMessage,
+      originalTranscriptLength: condensation.originalLength,
+    });
+    recordInteractionAttemptEvent("send_selected", {
+      finalMessageLength: finalMessage.length,
+      recipient: contact.displayName,
+      source: "message_condensation",
+    });
+    recordInteractionAttemptEvent(
+      "workflow_completed",
+      {
+        outcome: "communicated",
+        recipient: contact.displayName,
+        source: "message_condensation",
+      },
+      { terminal: true }
+    );
+    setPendingAskAudio(null);
+    void sendMessage(contact, finalMessage);
+  }
+
+  function cancelCondensedSpeechMessage(condensation: ReceiverMessageCondensationModal) {
+    recordInteractionAttemptEvent(
+      "cancelled",
+      {
+        originalTranscriptLength: condensation.originalLength,
+        reason: "message_condensation_cancelled",
+      },
+      { terminal: true }
+    );
+    setPendingAskAudio(null);
+    setModal({ type: "ask", surface: "ask_tell" });
+    setStatus("Message was not sent.");
+  }
+
+  async function prepareLongSpeechMessageCondensation(transcript: string) {
+    const condensation = condenseReceiverSpeechMessage({
+      maxLength: RECEIVER_SPEECH_CONDENSATION_DRAFT_MAX_LENGTH,
+      transcript,
+    });
+    const contact = contacts[0];
+
+    await submitObservation(
+      {
+        activeWorkflow: "ask_tell",
+        deviceId: readReceiverDeviceId(),
+        metadata: {
+          condenser: condensation.method,
+          messageCondensationTriggered: true,
+          originalTranscriptLength: condensation.originalLength,
+          receiverInstallId: readReceiverInstallId(),
+          speechCondensationLimit: RECEIVER_SPEECH_CONDENSATION_LIMIT,
+          speechCondensationDraftMaxLength: RECEIVER_SPEECH_CONDENSATION_DRAFT_MAX_LENGTH,
+          condensedMessageEditMaxLength: RECEIVER_CONDENSED_MESSAGE_EDIT_MAX_LENGTH,
+          surface: "ask_tell",
+        },
+        modality: "speech",
+        personId: selectedReceiverUser.id || null,
+        source: "receiver",
+        surface: "receiver_ask_tell",
+        text: transcript,
+      },
+      {
+        handleSpeech: async (observation, meaningFrame) => {
+          const attemptId = await recordInteractionAttemptObservation(observation);
+          if (attemptId) {
+            recordInteractionAttemptEvent("message_condensation_triggered", {
+              condensedDraft: condensation.draft,
+              condenser: condensation.method,
+              draftMaxLength: RECEIVER_SPEECH_CONDENSATION_DRAFT_MAX_LENGTH,
+              editMaxLength: RECEIVER_CONDENSED_MESSAGE_EDIT_MAX_LENGTH,
+              limit: RECEIVER_SPEECH_CONDENSATION_LIMIT,
+              normalizedText: meaningFrame.normalizedText,
+              originalTranscriptLength: condensation.originalLength,
+            });
+            recordInteractionAttemptEvent("response_presented", {
+              condensedDraft: condensation.draft,
+              originalTranscriptLength: condensation.originalLength,
+              responseType: "message_condensation",
+              result: "message_condensation_draft",
+              route: "receiver_speech_message_condensation",
+            });
+          }
+          return { handled: true, result: "message_condensation_draft" };
+        },
+        handleText: () => "message_condensation_draft",
+      }
+    );
+
+    setAskDraftObservationModality("speech");
+    setAskDraft("");
+    setModal({
+      contactId: contact.id,
+      draft: condensation.draft,
+      initialDraft: condensation.draft,
+      limit: RECEIVER_CONDENSED_MESSAGE_EDIT_MAX_LENGTH,
+      originalLength: condensation.originalLength,
+      originalTranscript: transcript,
+      type: "messageCondensation",
+    });
+    setStatus("Long speech was condensed. Review before sending.");
   }
 
   async function loadUpcomingAppointments(): Promise<ReceiverAppointmentDisplayState> {
@@ -3905,8 +4971,18 @@ export function ConnectReceiver() {
     }, 150);
   }
 
-  async function startReceiverRecording() {
+  async function startReceiverRecording(
+    surface?: "ask_tell",
+    options: { autoStartToken?: number; autoStartWindowMs?: number } = {}
+  ) {
     clearGuideBecauseReceiverActed();
+    const startedAtMs = Date.now();
+    const startToken =
+      options.autoStartToken ?? (receiverRecordingStartTokenRef.current += 1);
+    const askTellSurface =
+      surface === "ask_tell" ||
+      (modal?.type === "ask" && modal.surface === "ask_tell") ||
+      (modal?.type === "askRecordReview" && modal.surface === "ask_tell");
 
     if (!receiverOnline) {
       explainOfflineAction();
@@ -3920,40 +4996,108 @@ export function ConnectReceiver() {
 
     if (!browserConnectAudioRecordingAvailable()) {
       setStatus("Recording is not available on this browser. Typing still works.");
-      setModal({ type: "ask" });
+      setModal({ type: "ask", surface: askTellSurface ? "ask_tell" : undefined });
       return;
     }
 
     if (!selectedReceiverUser.id) {
       setStatus("Choose a Main Connect User before recording.");
-      setModal({ type: "ask" });
+      setModal({ type: "ask", surface: askTellSurface ? "ask_tell" : undefined });
       return;
     }
 
     try {
+      receiverAskExitRequestedRef.current = false;
+      const deferVisibleRecordingState = options.autoStartToken !== undefined;
       const captureId = createConnectAudioCaptureId("receiver-ask-input");
       receiverCaptureIdRef.current = captureId;
-      setAskDraft("");
+      receiverRecordingSurfaceRef.current = askTellSurface ? "ask_tell" : null;
+      if (!askTellSurface) {
+        setAskDraftObservationModality("typed");
+        setAskDraft("");
+      }
       setPendingAskAudio(null);
-      setModal({ type: "askRecordReview", transcript: "" });
-      setReceiverRecording(true);
+      setModal(
+        askTellSurface
+          ? { type: "ask", surface: "ask_tell" }
+          : { type: "askRecordReview", transcript: "" }
+      );
+      setReceiverRecording(!deferVisibleRecordingState);
       setReceiverRecordingProcessing(false);
-      setStatus("Recording. Press the mic again to stop.");
-      receiverRecordingControllerRef.current = await startConnectAudioRecording({
-        maxDurationMs: 30000,
+      setStatus(
+        deferVisibleRecordingState
+          ? "Starting microphone."
+          : askTellSurface
+            ? "Listening. You can also type or choose an example."
+            : "Recording. Press the mic again to stop."
+      );
+      if (askTellSurface && !deferVisibleRecordingState) {
+        receiverChunkTranscriptRef.current = {
+          active: true,
+          assembledText: "",
+          chunks: {},
+        };
+      }
+      const controller = await startConnectAudioRecording({
+        chunkIntervalMs: askTellSurface ? 5000 : undefined,
+        maxDurationMs: askTellSurface ? RECEIVER_ASK_TELL_RECORDING_MAX_DURATION_MS : 30000,
+        onChunk: askTellSurface
+          ? (chunk) => {
+              void transcribeReceiverRecordingChunk(chunk);
+            }
+          : undefined,
         onAutoStop: (reason) => {
           void stopReceiverRecording(reason);
         },
         silenceGraceMs: 1200,
         silenceThreshold: 0.018,
-        stopAfterSilenceMs: 2600,
+        stopAfterSilenceMs: 10000,
       });
+      const autoStartExpired =
+        options.autoStartToken !== undefined &&
+        (receiverRecordingStartTokenRef.current !== startToken ||
+          Date.now() - startedAtMs > (options.autoStartWindowMs ?? 2000) ||
+          modalRef.current?.type !== "ask" ||
+          modalRef.current.surface !== "ask_tell");
+      const startInvalidated =
+        options.autoStartToken === undefined &&
+        receiverRecordingStartTokenRef.current !== startToken;
+      if (startInvalidated) {
+        controller.cancel();
+        resetReceiverChunkTranscript();
+        receiverCaptureIdRef.current = "";
+        receiverRecordingSurfaceRef.current = null;
+        setReceiverRecording(false);
+        return;
+      }
+      if (autoStartExpired) {
+        controller.cancel();
+        resetReceiverChunkTranscript();
+        receiverCaptureIdRef.current = "";
+        receiverRecordingSurfaceRef.current = null;
+        setReceiverRecording(false);
+        return;
+      }
+      receiverRecordingControllerRef.current = controller;
+      if (deferVisibleRecordingState) {
+        setReceiverRecording(true);
+        setStatus("Listening. You can also type or choose an example.");
+        if (askTellSurface) {
+          receiverChunkTranscriptRef.current = {
+            active: true,
+            assembledText: "",
+            chunks: {},
+          };
+        }
+      }
     } catch {
+      resetReceiverChunkTranscript();
       receiverCaptureIdRef.current = "";
+      receiverRecordingSurfaceRef.current = null;
       receiverRecordingControllerRef.current = null;
       setReceiverRecording(false);
       setStatus("Recording could not start. Typing still works.");
-      setModal({ type: "ask" });
+      setModal({ type: "ask", surface: askTellSurface ? "ask_tell" : undefined });
     }
   }
 
@@ -3963,29 +5107,49 @@ export function ConnectReceiver() {
       setReceiverRecording(false);
       return;
     }
+    const activeModal = modalRef.current;
+    const askTellSurface =
+      receiverRecordingSurfaceRef.current === "ask_tell" ||
+      (activeModal?.type === "ask" && activeModal.surface === "ask_tell") ||
+      (activeModal?.type === "askRecordReview" && activeModal.surface === "ask_tell");
 
     receiverRecordingControllerRef.current = null;
+    receiverChunkTranscriptRef.current.active = false;
     setReceiverRecording(false);
     setReceiverRecordingProcessing(true);
-    setAskDraft("Transcribing recording...");
-    setModal({ type: "askRecordReview", transcript: "" });
+    if (askTellSurface) {
+      setModal({ type: "ask", surface: "ask_tell" });
+    } else {
+      setAskDraftObservationModality("speech");
+      setAskDraft("Transcribing recording...");
+      setModal({
+        type: "askRecordReview",
+        surface: activeModal?.type === "askRecordReview" ? activeModal.surface : undefined,
+        transcript: "",
+      });
+    }
     setStatus(
       reason === "max_duration"
         ? "Time is up. Turning recording into text..."
-        : "Turning recording into text..."
+        : askTellSurface
+          ? "Turning speech into text..."
+          : "Turning recording into text..."
     );
 
     try {
       const recording = await controller.stop();
+      if (receiverAskExitRequestedRef.current) {
+        return;
+      }
       if (!recording.size) {
         setStatus("Recording was empty. Try again or type your request.");
-        setModal({ type: "ask" });
+        setModal({ type: "ask", surface: askTellSurface ? "ask_tell" : undefined });
         return;
       }
 
       if (!selectedReceiverUser.id) {
         setStatus("Choose a Main Connect User before transcribing this recording.");
-        setModal({ type: "ask" });
+        setModal({ type: "ask", surface: askTellSurface ? "ask_tell" : undefined });
         return;
       }
 
@@ -4009,7 +5173,12 @@ export function ConnectReceiver() {
         recording: recording.blob,
         source: "ask-input",
       });
-      const transcript = String(transcription.transcript || "").trim();
+      if (receiverAskExitRequestedRef.current) {
+        return;
+      }
+      const transcript = limitReceiverSpeechTranscript(
+        String(transcription.transcript || "").trim()
+      );
       const artifact = transcription.artifact;
       setPendingAskAudio(
         artifact?.audioUrl || artifact?.artifactId || artifact?.id
@@ -4029,18 +5198,67 @@ export function ConnectReceiver() {
             }
           : null
       );
-      setAskDraft(transcript);
-      setModal(transcript ? { type: "askRecordReview", transcript } : { type: "ask" });
+      if (askTellSurface) {
+        if (transcript.length > RECEIVER_SPEECH_CONDENSATION_LIMIT) {
+          await prepareLongSpeechMessageCondensation(transcript);
+          return;
+        }
+        if (transcript) {
+          const chunkTranscript = receiverChunkTranscriptRef.current.assembledText.trim();
+          setAskDraftObservationModality("speech");
+          setAskDraft((current) => {
+            const existing = current.trim();
+            if (!existing || existing === "Transcribing recording...") return limitReceiverTextInput(transcript);
+            if (chunkTranscript && existing === chunkTranscript) return limitReceiverTextInput(transcript);
+            if (chunkTranscript && existing.endsWith(chunkTranscript)) {
+              return limitReceiverTextInput(
+                `${existing.slice(0, -chunkTranscript.length).trimEnd()}\n${transcript}`.trim()
+              );
+            }
+            if (chunkTranscript && existing.includes(chunkTranscript)) {
+              return limitReceiverTextInput(existing.replace(chunkTranscript, transcript));
+            }
+            if (existing.includes(transcript)) return limitReceiverTextInput(current);
+            return limitReceiverTextInput(`${existing}\n${transcript}`);
+          });
+        }
+        setModal({ type: "ask", surface: "ask_tell" });
+      } else {
+        setAskDraftObservationModality("speech");
+        setAskDraft(limitReceiverTextInput(transcript));
+        setModal(
+          transcript
+            ? {
+                type: "askRecordReview",
+                surface: activeModal?.type === "askRecordReview" ? activeModal.surface : undefined,
+                transcript,
+              }
+            : { type: "ask", surface: activeModal?.type === "askRecordReview" ? activeModal.surface : undefined }
+        );
+      }
       setStatus(
         transcript
-          ? "Recording saved and transcribed. Review or press Ask."
+          ? askTellSurface
+            ? "Speech added. You can edit, talk more, choose an example, or send."
+            : "Recording saved and transcribed. Review or press Ask."
           : "Recording saved, but no transcript came back. You can type your request."
       );
     } catch (error) {
-      setModal({ type: "askRecordReview", transcript: "" });
+      setModal(
+        askTellSurface
+          ? { type: "ask", surface: "ask_tell" }
+          : {
+              type: "askRecordReview",
+              surface: activeModal?.type === "askRecordReview" ? activeModal.surface : undefined,
+              transcript: "",
+            }
+      );
       setStatus(error instanceof Error ? error.message : "Recording could not be transcribed.");
     } finally {
       receiverCaptureIdRef.current = "";
+      receiverRecordingSurfaceRef.current = null;
+      resetReceiverChunkTranscript();
+      receiverAskExitRequestedRef.current = false;
       setReceiverRecordingProcessing(false);
     }
   }
@@ -4079,7 +5297,7 @@ export function ConnectReceiver() {
         },
         silenceGraceMs: 1200,
         silenceThreshold: 0.018,
-        stopAfterSilenceMs: 2600,
+        stopAfterSilenceMs: 10000,
       });
     } catch {
       contactCaptureIdRef.current = "";
@@ -4160,7 +5378,7 @@ export function ConnectReceiver() {
         transcript,
         transcriptStatus,
       });
-      setContactDraft(transcript || "Recorded voice message");
+      setContactDraft(limitReceiverTextInput(transcript || "Recorded voice message"));
       setStatus(
         transcript
           ? `Recording transcribed. Send it to ${contact.displayName} when ready.`
@@ -4369,7 +5587,15 @@ export function ConnectReceiver() {
     setStatus("Optional sound help resolved.");
   }
 
-  async function markMessageState(message: Message, state: { heard?: boolean; read?: boolean }) {
+  async function markMessageState(
+    message: Message,
+    state: {
+      acknowledged?: boolean;
+      callbackRequested?: boolean;
+      heard?: boolean;
+      read?: boolean;
+    }
+  ) {
     if (!receiverOnline) return;
     if (!message.id) return;
     const mainConnectUserPersonId =
@@ -4381,8 +5607,14 @@ export function ConnectReceiver() {
         item.id === message.id
           ? {
               ...item,
+              acknowledgedAt:
+                state.acknowledged ? item.acknowledgedAt || currentIsoTimestamp() : item.acknowledgedAt,
+              callbackRequestedAt:
+                state.callbackRequested
+                  ? item.callbackRequestedAt || currentIsoTimestamp()
+                  : item.callbackRequestedAt,
               heardAt: state.heard ? item.heardAt || currentIsoTimestamp() : item.heardAt,
-              readAt: state.read ? item.readAt || currentIsoTimestamp() : item.readAt,
+              readAt: state.read ? currentIsoTimestamp() : item.readAt,
             }
           : item
       )
@@ -4391,6 +5623,8 @@ export function ConnectReceiver() {
     try {
       await fetch(messageStateUrl(message.id), {
         body: JSON.stringify({
+          acknowledged: Boolean(state.acknowledged),
+          callbackRequested: Boolean(state.callbackRequested),
           heard: Boolean(state.heard),
           mainConnectUserPersonId,
           read: Boolean(state.read),
@@ -4597,9 +5831,20 @@ export function ConnectReceiver() {
       return;
     }
     clearGuideBecauseReceiverActed();
-    const senderName = message.from === "receiver_user" ? message.to : message.from;
-    const contact = contacts.find((item) => item.displayName === senderName) ?? selectedContact;
-    callContact(contact);
+    void markMessageState(message, { callbackRequested: true });
+    setModal(null);
+    setStatus(`Callback requested for ${message.from || "this message"}.`);
+  }
+
+  function acknowledgeMessage(message: Message) {
+    if (!receiverOnline) {
+      explainOfflineAction();
+      return;
+    }
+    clearGuideBecauseReceiverActed();
+    void markMessageState(message, { acknowledged: true });
+    setModal(null);
+    setStatus("Message acknowledged.");
   }
 
   function showAllMessages() {
@@ -4612,35 +5857,547 @@ export function ConnectReceiver() {
     setStatus("Showing all messages.");
   }
 
-  async function submitAsk() {
+  async function ensureInteractionAttempt() {
+    if (interactionAttemptRef.current.attemptId) {
+      return interactionAttemptRef.current.attemptId;
+    }
+    if (!selectedReceiverUser.id) return "";
+
+    try {
+      const response = await fetch(interactionAttemptEndpoint, {
+        body: JSON.stringify({
+          action: "start",
+          activeWorkflow: "ask_tell",
+          deviceId: readReceiverDeviceId(),
+          metadata: {
+            receiverInstallId: readReceiverInstallId(),
+            receiverLayout: deskPhoneMode ? gxvHomeLayout : receiverPresentationLayout,
+          },
+          personId: selectedReceiverUser.id,
+          receiverDeviceId: readReceiverDeviceId(),
+          surface: "receiver_ask_tell",
+        }),
+        headers: {
+          ...(await connectReceiverRequestHeaders()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        attemptId?: string;
+      };
+      const attemptId = payload.attemptId?.trim() || "";
+      if (!response.ok || !attemptId) return "";
+      interactionAttemptRef.current = {
+        attemptId,
+        latestObservationId: "",
+        nextRevisionIndex: 0,
+        pendingRevisionReason: "initial",
+      };
+      const startedAt = new Date().toISOString();
+      setAttemptDiagnosticSummary({
+        attemptId,
+        completedAt: "",
+        latestObservationId: "",
+        outcome: "",
+        revisionCount: 0,
+        startedAt,
+        status: "in_progress",
+        surface: "Receiver / Ask-Tell",
+      });
+      setAttemptDiagnosticEntries([
+        {
+          at: startedAt,
+          detail: `Surface: Receiver / ${deskPhoneMode ? gxvHomeLayout : receiverPresentationLayout}`,
+          id: `${attemptId}:started`,
+          label: "Interaction Attempt started",
+        },
+      ]);
+      return attemptId;
+    } catch {
+      return "";
+    }
+  }
+
+  function appendAttemptDiagnostic(label: string, detail: string) {
+    setAttemptDiagnosticEntries((entries) => [
+      ...entries,
+      {
+        at: new Date().toISOString(),
+        detail,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        label,
+      },
+    ]);
+  }
+
+  function diagnosticPayloadSummary(payload: Record<string, unknown>) {
+    const values = Object.entries(payload)
+      .filter(([, value]) => value !== "" && value !== null && value !== undefined)
+      .map(([key, value]) => `${key}: ${diagnosticPayloadValue(value)}`);
+    return values.join(" · ");
+  }
+
+  function diagnosticPayloadValue(value: unknown) {
+    if (Array.isArray(value) || (value && typeof value === "object")) {
+      return JSON.stringify(value);
+    }
+    return String(value);
+  }
+
+  async function loadPlatformReviews() {
+    const attemptId = attemptDiagnosticSummary.attemptId;
+    if (!attemptId || !selectedReceiverUser.id) return;
+    try {
+      const response = await fetch(interactionAttemptEndpoint, {
+        body: JSON.stringify({
+          action: "list_reviews",
+          attemptId,
+          personId: selectedReceiverUser.id,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        analyses?: ReceiverPlatformReviewAnalysis[];
+        error?: string;
+        reviews?: ReceiverPlatformReview[];
+      };
+      if (!response.ok) {
+        setPlatformReviewStatus(payload.error || "Sign in as an admin to view reviews.");
+        return;
+      }
+      setPlatformReviews(Array.isArray(payload.reviews) ? payload.reviews : []);
+      setPlatformReviewAnalyses(
+        Array.isArray(payload.analyses) ? payload.analyses : []
+      );
+      setPlatformReviewStatus("");
+    } catch {
+      setPlatformReviewStatus("Unable to load Platform Reviews.");
+    }
+  }
+
+  async function savePlatformReview() {
+    const attemptId = attemptDiagnosticSummary.attemptId;
+    const comment = platformReviewDraft.trim();
+    if (!attemptId || !selectedReceiverUser.id || !comment) return;
+    setPlatformReviewSaving(true);
+    setPlatformReviewStatus("Saving review...");
+    try {
+      const response = await fetch(interactionAttemptEndpoint, {
+        body: JSON.stringify({
+          action: "record_review",
+          attemptId,
+          comment,
+          metadata: {
+            diagnosticSurface: "receiver_attempt_trace",
+          },
+          personId: selectedReceiverUser.id,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        analyses?: ReceiverPlatformReviewAnalysis[];
+        error?: string;
+        reviews?: ReceiverPlatformReview[];
+      };
+      if (!response.ok) {
+        setPlatformReviewStatus(payload.error || "Unable to save Platform Review.");
+        return;
+      }
+      setPlatformReviews(Array.isArray(payload.reviews) ? payload.reviews : []);
+      setPlatformReviewAnalyses(
+        Array.isArray(payload.analyses) ? payload.analyses : []
+      );
+      setPlatformReviewDraft("");
+      setPlatformReviewStatus("Review saved.");
+    } catch {
+      setPlatformReviewStatus("Unable to save Platform Review.");
+    } finally {
+      setPlatformReviewSaving(false);
+    }
+  }
+
+  async function analyzePlatformReview(reviewId: string) {
+    const attemptId = attemptDiagnosticSummary.attemptId;
+    if (!attemptId || !selectedReceiverUser.id || !reviewId) return;
+    setPlatformReviewAnalyzingId(reviewId);
+    setPlatformReviewStatus("Creating advisory analysis...");
+    try {
+      const response = await fetch(interactionAttemptEndpoint, {
+        body: JSON.stringify({
+          action: "analyze_review",
+          attemptId,
+          personId: selectedReceiverUser.id,
+          reviewId,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        analyses?: ReceiverPlatformReviewAnalysis[];
+        error?: string;
+        reviews?: ReceiverPlatformReview[];
+      };
+      if (!response.ok) {
+        setPlatformReviewStatus(payload.error || "Unable to create analysis.");
+        return;
+      }
+      setPlatformReviews(Array.isArray(payload.reviews) ? payload.reviews : []);
+      setPlatformReviewAnalyses(
+        Array.isArray(payload.analyses) ? payload.analyses : []
+      );
+      setPlatformReviewStatus("Advisory analysis saved.");
+    } catch {
+      setPlatformReviewStatus("Unable to create analysis.");
+    } finally {
+      setPlatformReviewAnalyzingId("");
+    }
+  }
+
+  async function recordInteractionAttemptObservation(
+    observation: ReturnType<typeof createObservation>
+  ) {
+    const attemptId = await ensureInteractionAttempt();
+    if (!attemptId || !selectedReceiverUser.id || !observation.observationId) return "";
+    const observationId = observation.observationId;
+
+    const revisionIndex = interactionAttemptRef.current.nextRevisionIndex;
+    const parentObservationId = interactionAttemptRef.current.latestObservationId;
+    const revisionReason =
+      revisionIndex === 0
+        ? "initial"
+        : interactionAttemptRef.current.pendingRevisionReason;
+
+    try {
+      await fetch(interactionAttemptEndpoint, {
+        body: JSON.stringify({
+          action: "record_observation",
+          attemptId,
+          observation,
+          parentObservationId,
+          personId: selectedReceiverUser.id,
+          receiverDeviceId: readReceiverDeviceId(),
+          receiverInstallId: readReceiverInstallId(),
+          revisionIndex,
+          revisionReason,
+        }),
+        headers: {
+          ...(await connectReceiverRequestHeaders()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      interactionAttemptRef.current = {
+        attemptId,
+        latestObservationId: observationId,
+        nextRevisionIndex: revisionIndex + 1,
+        pendingRevisionReason: "retry",
+      };
+      setAttemptDiagnosticSummary((summary) => ({
+        ...summary,
+        attemptId,
+        latestObservationId: observationId,
+        revisionCount: revisionIndex + 1,
+        status: "in_progress",
+      }));
+      appendAttemptDiagnostic(
+        revisionIndex === 0 ? "Observation" : "Revised Observation",
+        [
+          `"${observation.transcriptText || observation.rawText}"`,
+          `Modality: ${observation.modality}`,
+          `Revision: ${revisionIndex + 1}`,
+          revisionIndex > 0 ? `Reason: ${revisionReason}` : "",
+          parentObservationId ? `Parent: ${parentObservationId}` : "",
+          `Observation ID: ${observationId}`,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+      return attemptId;
+    } catch {
+      return "";
+    }
+  }
+
+  function prepareInteractionAttemptRevision(reason: ReceiverAttemptRevisionReason) {
+    interactionAttemptRef.current = {
+      ...interactionAttemptRef.current,
+      pendingRevisionReason: reason,
+    };
+  }
+
+  function clearInteractionAttempt(attemptId: string) {
+    if (interactionAttemptRef.current.attemptId !== attemptId) return;
+    interactionAttemptRef.current = {
+      attemptId: "",
+      latestObservationId: "",
+      nextRevisionIndex: 0,
+      pendingRevisionReason: "initial",
+    };
+    setAttemptDiagnosticSummary((summary) => ({
+      ...summary,
+      completedAt: new Date().toISOString(),
+      status: "completed",
+    }));
+  }
+
+  function recordInteractionAttemptEvent(
+    eventType: ReceiverAttemptEventType,
+    payload: Record<string, unknown> = {},
+    options: { terminal?: boolean } = {}
+  ) {
+    const attemptId = interactionAttemptRef.current.attemptId;
+    if (!attemptId || !selectedReceiverUser.id) return;
+    const observationId = interactionAttemptRef.current.latestObservationId;
+    if (options.terminal) {
+      setAttemptDiagnosticSummary((summary) => ({
+        ...summary,
+        completedAt: new Date().toISOString(),
+        outcome:
+          typeof payload.outcome === "string"
+            ? payload.outcome
+            : eventType === "workflow_completed"
+              ? "completed"
+              : eventType.replaceAll("_", " "),
+        status: "completed",
+      }));
+    }
+    appendAttemptDiagnostic(
+      eventType === "response_presented"
+        ? "Presented response"
+        : eventType === "not_helpful_selected"
+          ? "User action"
+          : eventType === "rephrase_selected"
+            ? "User action"
+            : eventType === "send_selected"
+              ? "User action"
+              : eventType === "workflow_completed"
+                ? "Final outcome"
+                : eventType.replaceAll("_", " "),
+      diagnosticPayloadSummary({
+        ...payload,
+        observationId,
+      })
+    );
+
+    void (async () => {
+      try {
+        await fetch(interactionAttemptEndpoint, {
+          body: JSON.stringify({
+            action: "record_event",
+            actorRole: "receiver_user",
+            attemptId,
+            eventType,
+            observationId,
+            payload,
+            personId: selectedReceiverUser.id,
+            receiverDeviceId: readReceiverDeviceId(),
+            receiverInstallId: readReceiverInstallId(),
+          }),
+          headers: {
+            ...(await connectReceiverRequestHeaders()),
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        });
+      } catch {
+        // Interaction Attempts are diagnostic only and must not affect Receiver behavior.
+      } finally {
+        if (options.terminal) {
+          clearInteractionAttempt(attemptId);
+        }
+      }
+    })();
+  }
+
+  async function submitAsk(options: {
+    modality?: ObservationModality;
+    surface?: "ask_tell";
+    text?: string;
+  } = {}) {
+    receiverRecordingStartTokenRef.current += 1;
     if (!receiverOnline) {
       explainOfflineAction();
       return;
     }
-    const question = askDraft.trim();
+    const question = (options.text ?? askDraft).trim();
     if (!question) {
       setStatus("Type what you want to ask first.");
       return;
     }
 
-    if (modal?.type === "askRecordReview" || pendingAskAudio) {
-      const handled = await submitTalkInterpretation(question);
-      if (handled) {
-        return;
+    const currentModal = modal;
+    const surface = options.surface ||
+      ((currentModal?.type === "ask" && currentModal.surface === "ask_tell") ||
+      (currentModal?.type === "askRecordReview" && currentModal.surface === "ask_tell")
+        ? "ask_tell"
+        : undefined);
+    const modality: ObservationModality =
+      options.modality ||
+      (currentModal?.type === "askRecordReview" || pendingAskAudio
+        ? "speech"
+        : askDraftObservationModality);
+
+    await submitObservation(
+      {
+        activeWorkflow: "ask_tell",
+        deviceId: readReceiverDeviceId(),
+        metadata: {
+          hasPendingAskAudio: Boolean(pendingAskAudio),
+          receiverInstallId: readReceiverInstallId(),
+          surface,
+        },
+        modality,
+        personId: selectedReceiverUser.id || null,
+        source: "receiver",
+        surface: surface || "receiver_ask",
+        text: question,
+      },
+      {
+        handleSpeech: async (observation) => {
+          const handled = await submitTalkInterpretation(question, {
+            modality: observation.modality,
+            surface: observation.context?.surface ?? null,
+          });
+          void recordInteractionAttemptObservation(observation).then((attemptId) => {
+            if (!attemptId || !handled) return;
+            recordInteractionAttemptEvent("response_presented", {
+              interpreter: "ReceiverTalkInterpreter",
+              result: "legacy_talk_handled",
+              route: "legacy_speech_talk",
+            });
+          });
+          return handled
+            ? { handled: true, result: "legacy_talk_handled" }
+            : { handled: false };
+        },
+        handleText: async (observation, meaningFrame) => {
+          if (receiverTalkShouldHandleText(meaningFrame.normalizedText)) {
+            const handled = await submitTalkInterpretation(meaningFrame.normalizedText, {
+              modality: observation.modality,
+              surface: observation.context?.surface ?? null,
+            });
+            if (handled) {
+              void recordInteractionAttemptObservation(observation).then((attemptId) => {
+                if (!attemptId) return;
+                recordInteractionAttemptEvent("response_presented", {
+                  interpreter: "ReceiverTalkInterpreter",
+                  result: "legacy_talk_handled",
+                  route: "legacy_text_talk",
+                });
+              });
+              return "legacy_talk_handled";
+            }
+          }
+
+          const interpretation = interpretReceiverAskObservation({
+            contacts,
+            fallbackContact: selectedContact,
+            meaningFrame,
+            observation,
+          });
+
+          if (interpretation.needsRecovery || !interpretation.answer) {
+            const family = interpretation.familyClassification.family;
+            void recordInteractionAttemptObservation(observation).then((attemptId) => {
+              if (!attemptId) return;
+              recordInteractionAttemptEvent("response_presented", {
+                ...(interpretation.askInterpretation
+                  ? {
+                      askCapabilityStatus: interpretation.askInterpretation.capabilityStatus,
+                      askDecisionTrace: interpretation.askInterpretation.decisionTrace,
+                      askEntities: interpretation.askInterpretation.entities,
+                      askIntent: interpretation.askInterpretation.intent,
+                      askIntentConfidence: interpretation.askInterpretation.confidence,
+                      askTemporalReferences: interpretation.askInterpretation.temporalReferences,
+                    }
+                  : {}),
+                family,
+                familyConfidence: interpretation.familyClassification.confidence,
+                interpreter: "ReceiverAskInterpreter",
+                normalizedText: meaningFrame.normalizedText,
+                result: family === "communicate" ? "message" : "recovery",
+                responseType: family === "communicate" ? "message" : "recovery",
+                route: family === "communicate" ? "legacy_ask_message_offer" : "legacy_ask_recovery",
+              });
+            });
+            setPendingAskAudio(null);
+            if (family === "communicate") {
+              setAskDraftObservationModality("typed");
+              setAskDraft("");
+              setModal({
+                type: "askAnswer",
+                answer: {
+                  actionLabel: `Send to ${selectedContact.displayName}`,
+                  answer: `We can send this to ${selectedContact.displayName}.`,
+                  diagnosticSummary: receiverDiagnosticMode
+                    ? `Observation ${observation.source}/${observation.modality} -> MeaningFrame -> Family communicate ${Math.round(
+                        interpretation.familyClassification.confidence * 100
+                      )}% -> No family-specific interpretation yet -> ReceiverAskInterpreter -> Response message`
+                    : undefined,
+                  messageBody: question,
+                  question,
+                  recipientId: selectedContact.id,
+                  type: "message",
+                },
+              });
+              setStatus(`Ready to send to ${selectedContact.displayName}.`);
+              return "legacy_ask_message_offer";
+            }
+            setModal({
+              type: "askRecovery",
+              question,
+              recoveryPrompt: pickAskRecoveryPrompt(),
+              surface,
+            });
+            setStatus("Ask needs a little more help.");
+            return "legacy_ask_recovery";
+          }
+
+          setPendingAskAudio(null);
+          setAskDraftObservationModality("typed");
+          setAskDraft("");
+          void recordInteractionAttemptObservation(observation).then((attemptId) => {
+            if (!attemptId) return;
+            recordInteractionAttemptEvent("response_presented", {
+              actionLabel: interpretation.answer?.actionLabel || "",
+              answer: interpretation.answer?.answer || "",
+              ...(interpretation.askInterpretation
+                ? {
+                    askCapabilityStatus: interpretation.askInterpretation.capabilityStatus,
+                    askDecisionTrace: interpretation.askInterpretation.decisionTrace,
+                    askEntities: interpretation.askInterpretation.entities,
+                    askIntent: interpretation.askInterpretation.intent,
+                    askIntentConfidence: interpretation.askInterpretation.confidence,
+                    askTemporalReferences: interpretation.askInterpretation.temporalReferences,
+                  }
+                : {}),
+              family: interpretation.familyClassification.family,
+              familyConfidence: interpretation.familyClassification.confidence,
+              interpreter: "ReceiverAskInterpreter",
+              normalizedText: meaningFrame.normalizedText,
+              result: interpretation.answer?.type || "answer",
+              responseType: interpretation.answer?.type || "",
+              route: "legacy_ask_answer",
+            });
+          });
+          setModal({ type: "askAnswer", answer: interpretation.answer });
+          setStatus("Ask found an answer.");
+          return "legacy_ask_answer";
+        },
       }
-    }
-
-    if (isLowConfidenceAsk(question)) {
-      setModal({ type: "askRecovery", question });
-      setStatus("Ask needs a little more help.");
-      return;
-    }
-
-    setModal({ type: "askAnswer", answer: answerForAsk(question, selectedContact) });
-    setStatus("Ask found an answer.");
+    );
   }
 
-  async function submitTalkInterpretation(question: string) {
+  async function submitTalkInterpretation(
+    question: string,
+    context?: {
+      modality?: ObservationModality;
+      surface?: string | null;
+    }
+  ) {
     if (!receiverOnline) {
       explainOfflineAction();
       return false;
@@ -4658,10 +6415,12 @@ export function ConnectReceiver() {
             id: contact.id,
           })),
           inputText: question,
+          modality: context?.modality || "speech",
           personId: selectedReceiverUser.id,
           receiverDeviceId: readReceiverDeviceId(),
           receiverInstallId: readReceiverInstallId(),
           source: "receiver_talk",
+          surface: context?.surface || "receiver_talk",
         }),
         headers: {
           ...(await connectReceiverRequestHeaders()),
@@ -4674,12 +6433,21 @@ export function ConnectReceiver() {
         result?: TalkApiResult;
       };
 
-      if (!response.ok || !payload.result) {
+      if (!payload.result) {
         throw new Error(payload.error || "Talk could not understand that yet.");
       }
 
-      return handleTalkResult(question, payload.result);
+      return handleTalkResult(question, payload.result, response.ok ? undefined : payload.error);
     } catch (error) {
+      const fallbackHandled = handleLocalTalkInterpretation(
+        question,
+        context,
+        error instanceof Error ? error.message : "Talk could not save that yet."
+      );
+      if (fallbackHandled) {
+        return true;
+      }
+
       setStatus(
         error instanceof Error
           ? error.message
@@ -4689,33 +6457,101 @@ export function ConnectReceiver() {
     }
   }
 
-  function handleTalkResult(question: string, result: TalkApiResult) {
-    const displayResponse =
+  function handleLocalTalkInterpretation(
+    question: string,
+    context:
+      | {
+          modality?: ObservationModality;
+          surface?: string | null;
+        }
+      | undefined,
+    storageError: string
+  ) {
+    if (!receiverTalkShouldHandleText(question)) {
+      return false;
+    }
+
+    const observation = createObservation({
+      activeWorkflow: "ask_tell",
+      deviceId: readReceiverDeviceId(),
+      metadata: {
+        fallbackReason: storageError,
+        receiverInstallId: readReceiverInstallId(),
+      },
+      modality: context?.modality || "typed",
+      personId: selectedReceiverUser.id || null,
+      source: "receiver",
+      surface: context?.surface || "receiver_ask",
+      text: question,
+    });
+    const { result } = interpretReceiverTalkObservation({
+      careCircleId: "local_receiver",
+      contacts,
+      observation,
+      receiverDeviceId: readReceiverDeviceId(),
+    });
+
+    if (result.intent === "unknown") {
+      return false;
+    }
+
+    return handleTalkResult(
+      question,
+      serializeReceiverTalkResult(result),
+      storageError || "Talk could not save that yet."
+    );
+  }
+
+  function handleTalkResult(question: string, result: TalkApiResult, storageError?: string) {
+    const baseDisplayResponse =
       String(result.display_response || result.spoken_response || "").trim() ||
       "I heard that.";
+    const displayResponse = storageError
+      ? baseDisplayResponse
+          .replace(
+            /^This is an exercise entry\. I recorded:/,
+            "This is an exercise entry. I could not save yet:"
+          )
+          .replace(/^I recorded:/, "I could not save yet:")
+      : baseDisplayResponse;
     const proposedAction = String(result.proposed_action || "");
 
     if (result.intent === "connect_call_request") {
       const contactId = String(result.structured_payload?.contactId || "");
       const contact = contacts.find((item) => item.id === contactId);
       if (contact) {
+        setAskDraftObservationModality("typed");
+        setAskDraft("");
         callContact(contact);
         return true;
       }
     }
 
     if (proposedAction === "clarify" || result.intent === "unknown") {
-      setModal({ type: "askRecovery", question });
+      setPendingAskAudio(null);
+      setModal({
+        type: "askRecovery",
+        question,
+        recoveryPrompt: pickAskRecoveryPrompt(),
+        surface:
+          (modalRef.current?.type === "ask" && modalRef.current.surface === "ask_tell") ||
+          (modalRef.current?.type === "askRecordReview" && modalRef.current.surface === "ask_tell")
+            ? "ask_tell"
+            : undefined,
+      });
       setStatus(displayResponse);
       return true;
     }
 
     setPendingAskAudio(null);
+    setAskDraftObservationModality("typed");
+    setAskDraft("");
     setModal({
       type: "askAnswer",
       answer: {
         actionLabel: "That answered my question",
         answer: displayResponse,
+        diagnosticSummary: receiverTalkDiagnosticSummary(result, storageError),
         messageBody: "",
         question,
         recipientId: "",
@@ -4723,7 +6559,7 @@ export function ConnectReceiver() {
       },
     });
     setStatus(displayResponse);
-    void refreshTodayFocus();
+    void refreshTodayFocus("user");
     return true;
   }
 
@@ -4738,7 +6574,7 @@ export function ConnectReceiver() {
     const receiverName =
       selectedReceiverUser.id ? selectedReceiverUser.displayName : "The Main Connect User";
     const body = `${receiverName} asked:\n"${question}"\n\nAsk could not determine an answer.${audioContext}\n\nPlease review.`;
-    const andrew = contacts[0];
+    const primaryContact = contacts[0];
     setMessages((current) => [
       {
         audioArtifactId: pendingAskAudio?.artifactId,
@@ -4746,7 +6582,7 @@ export function ConnectReceiver() {
         audioUrl: pendingAskAudio?.audioUrl,
         id: `ask-recovery-${currentEpochMs()}`,
         from: "receiver_user",
-        to: andrew.displayName,
+        to: primaryContact.displayName,
         body,
         createdAt: currentIsoTimestamp(),
         transcript: pendingAskAudio?.transcript,
@@ -4755,11 +6591,19 @@ export function ConnectReceiver() {
       ...current,
     ]);
     setFocusedMessageIndex(0);
-    setStatus("This was sent to Andrew.");
-    setModal({ type: "sent", recipientName: andrew.displayName });
-  }
+    setStatus(`This was sent to ${primaryContact.displayName}.`);
+    setModal({ type: "sent", recipientName: primaryContact.displayName });
+}
 
-  function stopReceiverCue() {
+function receiverTalkDiagnosticSummary(result: TalkApiResult, storageError?: string) {
+  const intent = String(result.intent || "unknown");
+  const confidence =
+    typeof result.confidence === "number" ? ` ${Math.round(result.confidence * 100)}%` : "";
+  const storage = storageError ? " -> Storage fallback" : "";
+  return `Observation receiver -> MeaningFrame -> TalkInterpreter -> Intent ${intent}${confidence} -> Response answer${storage}`;
+}
+
+function stopReceiverCue() {
     if (cueTimeoutRef.current) {
       window.clearTimeout(cueTimeoutRef.current);
       cueTimeoutRef.current = null;
@@ -5352,6 +7196,24 @@ export function ConnectReceiver() {
     setStatus(nextMuted ? "Microphone muted." : "Microphone on.");
   }
 
+  function askTellDraftNeedsExitConfirmation() {
+    const draft = askDraft.trim();
+    if (!draft) return false;
+    return !askTellExamples.some((example) => example === draft);
+  }
+
+  function cancelReceiverAskRecordingSession() {
+    receiverRecordingStartTokenRef.current += 1;
+    receiverRecordingControllerRef.current?.cancel();
+    receiverRecordingControllerRef.current = null;
+    resetReceiverChunkTranscript();
+    receiverCaptureIdRef.current = "";
+    receiverRecordingSurfaceRef.current = null;
+    setReceiverRecording(false);
+    setReceiverRecordingProcessing(false);
+    setPendingAskAudio(null);
+  }
+
   function closeModal() {
     stopReceiverCue();
     if (playingMessageId || audioRef.current || playingMessageRef.current) {
@@ -5360,7 +7222,29 @@ export function ConnectReceiver() {
     if (modal?.type === "soundSettings") {
       resetSoundTestState();
     }
+    if (
+      modal?.type === "ask" ||
+      modal?.type === "askRecordReview" ||
+      modal?.type === "askRecovery" ||
+      modal?.type === "askAnswer"
+    ) {
+      cancelReceiverAskRecordingSession();
+    }
+    if (modal?.type === "ask" && modal.surface === "ask_tell" && !modal.confirmExit && askTellDraftNeedsExitConfirmation()) {
+      setModal({ type: "ask", surface: "ask_tell", confirmExit: true });
+      setStatus("Ask/Tell message is not sent.");
+      return;
+    }
     setModal(null);
+  }
+
+  function confirmAskTellExitWithoutSending() {
+    receiverAskExitRequestedRef.current = true;
+    cancelReceiverAskRecordingSession();
+    setAskDraftObservationModality("typed");
+    setAskDraft("");
+    setModal(null);
+    setStatus("Ask/Tell message deleted.");
   }
 
   function openScreenCleaningConfirm() {
@@ -5531,6 +7415,12 @@ export function ConnectReceiver() {
     <main
       className={`${styles.receiverPage} ${deskPhoneMode ? styles.deskPhoneMode : ""} ${
         gxvFocusHomeEnabled ? styles.gxvFocusHomeMode : ""
+      } ${
+        gxvAskTellHomeEnabled ? styles.gxvAskTellHomeMode : ""
+      } ${
+        gxvAskTell2HomeEnabled ? styles.gxvAskTell2HomeMode : ""
+      } ${
+        receiverModernEnabled ? styles.modernReceiverMode : ""
       } ${guideTarget || guideRect ? styles.guideActive : ""}`}
       onClick={clearGuideBecauseReceiverActed}
     >
@@ -5547,7 +7437,7 @@ export function ConnectReceiver() {
           data-receiver-shell="true"
           onClickCapture={handleReceiverButtonClickCapture}
         >
-          {gxvFocusHomeEnabled && modal?.type !== "incomingCall" ? null : (
+          {(receiverModernEnabled || gxvFocusHomeEnabled || gxvAskTellHomeEnabled || gxvAskTell2HomeEnabled) && modal?.type !== "incomingCall" ? null : (
             <header
               className={`${styles.statusZone} ${
                 modal?.type === "incomingCall" ? styles.callStatusZone : ""
@@ -5585,20 +7475,38 @@ export function ConnectReceiver() {
                         {fullscreenActive ? "MIN" : "MAX"}
                       </button>
                     ) : null}
-                    {deskPhoneMode && !nativeReceiverShell ? (
+                    {!modal && deskPhoneMode && !nativeReceiverShell ? (
                       <div className={styles.receiverLayoutControl}>
                         <button
                           className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
                           type="button"
                           aria-haspopup="menu"
                           aria-expanded={layoutMenuOpen}
-                          aria-label="Choose Receiver layout"
+                          aria-label="Choose Receiver style"
                           onClick={(event) => {
                             event.stopPropagation();
                             setLayoutMenuOpen((open) => !open);
                           }}
                         >
-                          LAYOUT
+                          STYLE
+                        </button>
+                        {renderReceiverLayoutMenu()}
+                      </div>
+                    ) : null}
+                    {!modal && !deskPhoneMode && !nativeReceiverShell ? (
+                      <div className={styles.receiverLayoutControl}>
+                        <button
+                          className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={layoutMenuOpen}
+                          aria-label="Choose Receiver style"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setLayoutMenuOpen((open) => !open);
+                          }}
+                        >
+                          STYLE
                         </button>
                         {renderReceiverLayoutMenu()}
                       </div>
@@ -5665,7 +7573,7 @@ export function ConnectReceiver() {
             </header>
           )}
 
-          {!deskPhoneMode ? (
+          {!deskPhoneMode && !receiverModernEnabled ? (
             <section className={styles.contactZone} aria-label="Main Connect User selector">
               <div
                 className={styles.peopleStrip}
@@ -5701,35 +7609,329 @@ export function ConnectReceiver() {
             </section>
           ) : null}
 
-          {pendingCallSummaryReviews.length > 0 && modal?.type !== "incomingCall" && !deskPhoneMode ? (
-            <section className={styles.pendingCallReviewStrip} aria-live="polite">
-              <div>
-                <span>Call note needs review</span>
-                <strong>
-                  {pendingCallSummaryReviews.length === 1
-                    ? "1 pending summary"
-                    : `${pendingCallSummaryReviews.length} pending summaries`}
-                </strong>
-              </div>
+          {receiverModernEnabled ? (
+            <section className={styles.modernReceiverHome} aria-label="Receiver Modern">
+              <header className={styles.modernReceiverHeader}>
+                <div>
+                  <span>{greetingFor(now)},</span>
+                  <strong>{selectedReceiverUser.displayName}</strong>
+                </div>
+                <div className={styles.modernReceiverHeaderMeta}>
+                  <span>{formatDate(now)}</span>
+                  <strong>{formatTime(now)}</strong>
+                  <span className={styles.modernReceiverOnline}>
+                    <span
+                      className={`${styles.askTell2ConnectionLight} ${
+                        receiverOnline ? styles.askTell2ConnectionLightOnline : styles.askTell2ConnectionLightOffline
+                      }`}
+                      aria-hidden="true"
+                    />
+                    {connectivityStatusLabel}
+                  </span>
+                  {!modal && screenCleaningSecondsRemaining === null ? (
+                    <div className={`${styles.receiverLayoutControl} ${styles.modernReceiverStyleControl}`}>
+                      <button
+                        className={styles.modernReceiverLayoutButton}
+                        type="button"
+                        aria-haspopup="menu"
+                        aria-expanded={layoutMenuOpen}
+                        aria-label="Choose Receiver style"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setLayoutMenuOpen((open) => !open);
+                        }}
+                      >
+                        Style
+                      </button>
+                      {renderReceiverLayoutMenu()}
+                    </div>
+                  ) : null}
+                </div>
+              </header>
+
+              <section className={styles.modernReceiverContext} aria-label="Receiver context">
+                <section className={`${styles.modernReceiverCard} ${styles.modernGoalsCard}`} aria-label="Goals">
+                  {renderTodayFocusHomeContent("Goals")}
+                </section>
+
+                <button
+                  className={`${styles.modernReceiverCard} ${styles.modernAppointmentCard}`}
+                  type="button"
+                  aria-label={`Open appointment details for ${displayedAppointment.title}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openHeaderAppointment();
+                  }}
+                >
+                  <span>Next Appointment</span>
+                  <strong>{displayedAppointment.title}</strong>
+                  <span>{displayedAppointmentTimeLabel}</span>
+                </button>
+
+                <button
+                  className={`${styles.modernReceiverCard} ${styles.modernNotificationCard} ${
+                    receiverNotificationMessage ? styles.receiverNotificationAction : ""
+                  }`}
+                  type="button"
+                  aria-label={
+                    receiverNotificationMessage
+                      ? "Open highlighted message"
+                      : "Receiver Notifications"
+                  }
+                  aria-hidden={!receiverNotificationText}
+                  disabled={!receiverNotificationMessage}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (receiverNotificationMessage) openMessage(receiverNotificationMessage);
+                  }}
+                >
+                  <span>For you now</span>
+                  <p>{receiverNotificationText}</p>
+                </button>
+              </section>
+
               <button
-                className={onlineRequiredActionClass}
+                className={`${styles.modernAskTellCard} ${onlineRequiredActionClass}`}
                 type="button"
                 aria-disabled={!receiverOnline}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openPendingCallSummaryReview(pendingCallSummaryReviews[0] ?? {});
-                }}
+                aria-label="Open Ask/Tell"
+                onClick={openAskTell}
               >
-                Review
+                <div>
+                  <span>One thought in</span>
+                  <h1>Ask/Tell</h1>
+                  <p>Start talking, type, or choose an example.</p>
+                </div>
               </button>
-            </section>
-          ) : null}
 
+              <section className={styles.modernReceiverGrid} aria-label="Receiver actions">
+                <button
+                  className={`${styles.modernReceiverTile} ${
+                    messageHomeCount > 0 ? styles.modernTileActive : styles.modernTileMuted
+                  }`}
+                  type="button"
+                  disabled={!receiverOnline || messageHomeCount === 0}
+                  aria-disabled={!receiverOnline || messageHomeCount === 0}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    showAllMessages();
+                  }}
+                >
+                  <span>Messages</span>
+                  <strong>{messageHomeCount > 0 ? messageHomeCount : "None"}</strong>
+                </button>
+                <button
+                  className={`${styles.modernReceiverTile} ${
+                    attentionItem ? styles.modernTileActive : styles.modernTileMuted
+                  }`}
+                  type="button"
+                  disabled={!receiverOnline || !attentionItem}
+                  aria-disabled={!receiverOnline || !attentionItem}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (attentionItem) openAttentionItem(attentionItem);
+                  }}
+                >
+                  <span>Review</span>
+                  <strong>{reviewHomeCount > 0 ? reviewHomeCount : "Clear"}</strong>
+                </button>
+                <button
+                  className={styles.modernReceiverTile}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openOptionalSounds();
+                  }}
+                >
+                  <span>Sound</span>
+                  <strong>Settings</strong>
+                </button>
+                <button
+                  className={styles.modernReceiverTile}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openScreenCleaningConfirm();
+                  }}
+                >
+                  <span>Clean Screen</span>
+                  <strong>2 min</strong>
+                </button>
+              </section>
+
+            </section>
+          ) : (
           <section className={styles.actionZone} aria-label="Primary actions">
             {deskPhoneMode ? (
-              gxvFocusHomeEnabled ? (
+              gxvAskTell2HomeEnabled ? (
                 <>
-                  <div className={styles.focusHomeLayoutControls} aria-label="Layout controls">
+                  <section
+                    className={`${styles.todayFocusPanel} ${
+                      todayFocusPreferenceItem ? styles.todayFocusPanelMenuOpen : ""
+                    } ${!receiverOnline ? styles.offlineActionArea : ""}`}
+                    aria-label="Today's Focus"
+                  >
+                    {renderTodayFocusHomeContent("Goals")}
+                  </section>
+                  {!kioskManagedFullscreen && !nativeReceiverShell ? (
+                    <section className={styles.askTell2MaxPanel} aria-label="Screen size">
+                      <button
+                        className={styles.fullscreenTinyButton}
+                        type="button"
+                        aria-label={fullscreenActive ? "Exit full screen" : "Enter full screen"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void toggleReceiverFullscreen();
+                        }}
+                      >
+                        {fullscreenActive ? "MIN" : "MAX"}
+                      </button>
+                    </section>
+                  ) : null}
+                  <button
+                    className={`${styles.appointmentPanel} ${styles.applianceAppointmentPanel} ${styles.focusHomeAppointmentPanel} ${styles.askTellAppointmentPanel}`}
+                    type="button"
+                    aria-label={`Open appointment details for ${displayedAppointment.title}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openHeaderAppointment();
+                    }}
+                  >
+                    <span className={styles.focusHomeAppointmentMeta}>
+                      Next Appointment
+                    </span>
+                    <strong>{displayedAppointment.title}</strong>
+                    <span className={styles.focusHomeAppointmentMeta}>
+                      {displayedAppointmentTimeLabel}
+                    </span>
+                  </button>
+                  <button
+                    className={`${styles.receiverNotificationPanel} ${
+                      receiverNotificationMessage ? styles.receiverNotificationAction : ""
+                    }`}
+                    type="button"
+                    aria-label={
+                      receiverNotificationMessage
+                        ? "Open highlighted message"
+                        : "Receiver Notifications"
+                    }
+                    aria-hidden={!receiverNotificationText}
+                    disabled={!receiverNotificationMessage}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (receiverNotificationMessage) openMessage(receiverNotificationMessage);
+                    }}
+                  >
+                    <p>{receiverNotificationText}</p>
+                  </button>
+                  <section className={`${styles.focusHomeTimePanel} ${styles.askTell2TimePanel}`} aria-label="Current time and connection">
+                    <strong>{formatTime(now)}</strong>
+                    <div className={styles.dateControlRow}>
+                      <span>{formatReceiverFooterDate(now)}</span>
+                    </div>
+                  </section>
+                  <section className={styles.focusHomeGreetingPanel} aria-label="Receiver">
+                    <a
+                      className={styles.focusHomeLogo}
+                      download
+                      href={receiverApkDownloadEndpoint}
+                      onClick={(event) => event.stopPropagation()}
+                      title="Download Receiver APK"
+                    >
+                      <img src="/carepland-loop-mark.png" alt="" />
+                    </a>
+                    <span>{greetingFor(now)}</span>
+                    <strong>{compactReceiverDisplayName(selectedReceiverUser.displayName)}</strong>
+                  </section>
+                  <button
+                    className={`${styles.askTellPrimaryAction} ${styles.askTell2PrimaryAction} ${onlineRequiredActionClass}`}
+                    type="button"
+                    aria-disabled={!receiverOnline}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openAskTell();
+                    }}
+                  >
+                    <span>Ask/Tell</span>
+                  </button>
+                  <div className={styles.askTellSecondaryGrid}>
+                    <button
+                      className={`${styles.secondaryAction} ${styles.blue} ${messageHomeCount > 0 && receiverOnline ? onlineRequiredActionClass : styles.receiverHomeDisabledAction}`}
+                      type="button"
+                      disabled={!receiverOnline || messageHomeCount === 0}
+                      aria-disabled={!receiverOnline || messageHomeCount === 0}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        showAllMessages();
+                      }}
+                    >
+                      {messageHomeLabel}
+                    </button>
+                  </div>
+                  <div className={styles.focusHomeUtilityStack}>
+                    <section
+                      className={`${styles.focusHomeUtilityAction} ${styles.askTell2ConnectionPanel}`}
+                      aria-label="Connection status"
+                    >
+                      <span className={styles.askTell2ConnectionStatus}>
+                        <span
+                          className={`${styles.askTell2ConnectionLight} ${
+                            receiverOnline ? styles.askTell2ConnectionLightOnline : styles.askTell2ConnectionLightOffline
+                          }`}
+                          aria-hidden="true"
+                        />
+                        <span className={receiverOnline ? styles.onlineStatus : styles.offlineStatus}>
+                          {connectivityStatusLabel}
+                        </span>
+                      </span>
+                    </section>
+                    {!modal && !nativeReceiverShell && screenCleaningSecondsRemaining === null ? (
+                      <div className={`${styles.receiverLayoutControl} ${styles.focusHomeUtilityControl}`}>
+                        <button
+                          className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={layoutMenuOpen}
+                          aria-label="Choose Receiver style"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setLayoutMenuOpen((open) => !open);
+                          }}
+                        >
+                          <span>Style</span>
+                        </button>
+                        {renderReceiverLayoutMenu()}
+                      </div>
+                    ) : null}
+                    <button
+                      className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openOptionalSounds();
+                      }}
+                    >
+                      <span>Sound</span>
+                    </button>
+                    <button
+                      className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openScreenCleaningConfirm();
+                      }}
+                    >
+                      <span>
+                        Clean the
+                        <br />
+                        Screen
+                      </span>
+                    </button>
+                  </div>
+                </>
+              ) : gxvAskTellHomeEnabled ? (
+                <>
+                  <div className={styles.focusHomeLayoutControls} aria-label="Style controls">
                     {!kioskManagedFullscreen && !nativeReceiverShell ? (
                       <button
                         className={styles.fullscreenTinyButton}
@@ -5743,20 +7945,168 @@ export function ConnectReceiver() {
                         {fullscreenActive ? "MIN" : "MAX"}
                       </button>
                     ) : null}
-                    {!nativeReceiverShell ? (
+                    {!modal && !nativeReceiverShell && screenCleaningSecondsRemaining === null ? (
                       <div className={styles.receiverLayoutControl}>
                         <button
                           className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
                           type="button"
                           aria-haspopup="menu"
                           aria-expanded={layoutMenuOpen}
-                          aria-label="Choose Receiver layout"
+                          aria-label="Choose Receiver style"
                           onClick={(event) => {
                             event.stopPropagation();
                             setLayoutMenuOpen((open) => !open);
                           }}
                         >
-                          LAYOUT
+                          STYLE
+                        </button>
+                        {renderReceiverLayoutMenu()}
+                      </div>
+                    ) : null}
+                  </div>
+                  <section className={styles.focusHomeGreetingPanel} aria-label="Receiver">
+                    <a
+                      className={styles.focusHomeLogo}
+                      download
+                      href={receiverApkDownloadEndpoint}
+                      onClick={(event) => event.stopPropagation()}
+                      title="Download Receiver APK"
+                    >
+                      <img src="/carepland-loop-mark.png" alt="" />
+                    </a>
+                    <span>{greetingFor(now)}</span>
+                    <strong>{firstDisplayName(selectedReceiverUser.displayName)}</strong>
+                  </section>
+                  <section className={`${styles.todayFocusPanel} ${styles.askTellFocusPanel} ${!receiverOnline ? styles.offlineActionArea : ""}`} aria-label="Today's Focus">
+                    {renderTodayFocusHomeContent()}
+                  </section>
+                  <button
+                    className={`${styles.appointmentPanel} ${styles.applianceAppointmentPanel} ${styles.focusHomeAppointmentPanel} ${styles.askTellAppointmentPanel}`}
+                    type="button"
+                    aria-label={`Open appointment details for ${displayedAppointment.title}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openHeaderAppointment();
+                    }}
+                  >
+                    <span className={styles.focusHomeAppointmentMeta}>
+                      Next Appointment
+                    </span>
+                    <strong>{displayedAppointment.title}</strong>
+                    <span className={styles.focusHomeAppointmentMeta}>
+                      {displayedAppointmentTimeLabel}
+                    </span>
+                  </button>
+                  <button
+                    className={`${styles.askTellPrimaryAction} ${onlineRequiredActionClass}`}
+                    type="button"
+                    aria-disabled={!receiverOnline}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openAskTell();
+                    }}
+                  >
+                    <span>Ask/Tell</span>
+                  </button>
+                  <div className={styles.askTellSecondaryGrid}>
+                    <button
+                      className={`${styles.secondaryAction} ${styles.blue} ${onlineRequiredActionClass}`}
+                      type="button"
+                      aria-disabled={!receiverOnline}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        showAllMessages();
+                      }}
+                    >
+                      Messages
+                    </button>
+                    <button
+                      className={`${styles.secondaryAction} ${styles.blue}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        askAppointmentQuestion();
+                      }}
+                    >
+                      Appointments
+                    </button>
+                  </div>
+                  <section className={styles.focusHomeTimePanel} aria-label="Current time">
+                    <div className={styles.dateControlRow}>
+                      <span>{formatDate(now)}</span>
+                    </div>
+                    <strong>{formatTime(now)}</strong>
+                    <span className={receiverOnline ? styles.onlineStatus : styles.offlineStatus}>
+                      {connectivityStatusLabel}
+                    </span>
+                  </section>
+                  <div className={styles.focusHomeUtilityStack}>
+                    {attentionItem ? (
+                      <button
+                        className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction} ${styles.reviewFooterAction} ${onlineRequiredActionClass}`}
+                        type="button"
+                        aria-label={attentionItem.label}
+                        aria-disabled={!receiverOnline}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openAttentionItem(attentionItem);
+                        }}
+                      >
+                        {attentionItem.label}
+                      </button>
+                    ) : null}
+                    <button
+                      className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openOptionalSounds();
+                      }}
+                    >
+                      Sounds
+                    </button>
+                    <button
+                      className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openScreenCleaningConfirm();
+                      }}
+                    >
+                      Clean
+                    </button>
+                  </div>
+                </>
+              ) : gxvFocusHomeEnabled ? (
+                <>
+                  <div className={styles.focusHomeLayoutControls} aria-label="Style controls">
+                    {!kioskManagedFullscreen && !nativeReceiverShell ? (
+                      <button
+                        className={styles.fullscreenTinyButton}
+                        type="button"
+                        aria-label={fullscreenActive ? "Exit full screen" : "Enter full screen"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void toggleReceiverFullscreen();
+                        }}
+                      >
+                        {fullscreenActive ? "MIN" : "MAX"}
+                      </button>
+                    ) : null}
+                    {!modal && !nativeReceiverShell && screenCleaningSecondsRemaining === null ? (
+                      <div className={styles.receiverLayoutControl}>
+                        <button
+                          className={`${styles.fullscreenTinyButton} ${styles.layoutTinyButton}`}
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={layoutMenuOpen}
+                          aria-label="Choose Receiver style"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setLayoutMenuOpen((open) => !open);
+                          }}
+                        >
+                          STYLE
                         </button>
                         {renderReceiverLayoutMenu()}
                       </div>
@@ -5800,41 +8150,7 @@ export function ConnectReceiver() {
 	                    </span>
 	                  </section>
 	                  <section className={`${styles.todayFocusPanel} ${!receiverOnline ? styles.offlineActionArea : ""}`} aria-label="Today's Focus">
-                    {todayFocusDisplayMode === "items" ? (
-                      <>
-                        <h2>Today&apos;s Focus</h2>
-                        <TodayFocusList
-                          completedItemIds={Object.keys(todayFocusPendingCompletions)}
-                          completingId={todayFocusCompletingId}
-                          items={visibleTodayFocusItems}
-                          onCancelPreference={() => {
-                            setTodayFocusPreferenceItem(null);
-                            setTodayFocusPreferenceStep("main");
-                          }}
-                          onChoosePreference={chooseTodayFocusPreference}
-                          onComplete={completeTodayFocusItem}
-                          onOpenPreference={(item) => {
-                            setTodayFocusPreferenceItem(item);
-                            setTodayFocusPreferenceStep("main");
-                          }}
-                          onUndoComplete={undoTodayFocusCompletion}
-                          preferenceOpenForId={todayFocusPreferenceItem?.id ?? null}
-                          preferenceStep={todayFocusPreferenceStep}
-                          variant="receiver"
-                        />
-                      </>
-                    ) : todayFocusDisplayMode === "loading" ? (
-                      <div className={styles.todayFocusLoadingState}>
-                        <h2>Today&apos;s Focus</h2>
-                        <p>Loading...</p>
-                      </div>
-                    ) : (
-                      <div className={styles.brainStretchPrompt}>
-                        <h2>Brain Stretch</h2>
-                        {todayFocusStatus ? <p>{todayFocusStatus}</p> : null}
-                        <p>{brainStretchPrompt}</p>
-                      </div>
-                    )}
+                    {renderTodayFocusHomeContent()}
                   </section>
 	                  <button
 	                    className={`${styles.appointmentPanel} ${styles.applianceAppointmentPanel} ${styles.focusHomeAppointmentPanel}`}
@@ -5895,7 +8211,7 @@ export function ConnectReceiver() {
                       Ask a Question
                     </button>
                     <button
-	                      className={`${styles.primaryAction} ${styles.focusHomeCallAction} ${
+	                      className={`${styles.secondaryAction} ${styles.blue} ${styles.focusHomeCallAction} ${
 	                        guideTarget === "primary"
 	                          ? styles.guideTarget
 	                          : guideTarget
@@ -5909,7 +8225,7 @@ export function ConnectReceiver() {
                         callContact(selectedContact);
                       }}
                     >
-                      Call {selectedContact.displayName}
+                      Live Call
                     </button>
                   </div>
                   <div className={styles.focusHomeUtilityStack}>
@@ -5952,7 +8268,7 @@ export function ConnectReceiver() {
               ) : (
                 <>
 	                <button
-	                  className={`${styles.primaryAction} ${styles.receiverHomeAction} ${
+	                  className={`${styles.secondaryAction} ${styles.blue} ${styles.receiverHomeAction} ${
 	                    guideTarget === "ask"
 	                      ? styles.guideTarget
 	                      : guideTarget
@@ -5983,7 +8299,7 @@ export function ConnectReceiver() {
                     callContact(selectedContact);
                   }}
                 >
-                  Call {selectedContact.displayName}
+                  Live Call {selectedContact.displayName}
                 </button>
                 <button
                   className={`${styles.secondaryAction} ${styles.blue} ${styles.wideAction} ${
@@ -6081,7 +8397,7 @@ export function ConnectReceiver() {
                     openContact();
                   }}
                 >
-                  Contact Andrew
+                  Contact {selectedContact.displayName}
                 </button>
                 <div className={styles.receiverActionRow}>
 	                  <button
@@ -6151,8 +8467,9 @@ export function ConnectReceiver() {
               </>
             )}
           </section>
+          )}
 
-          {!deskPhoneMode ? (
+          {!deskPhoneMode && !receiverModernEnabled ? (
             <section className={styles.workspaceZone} aria-label="Messages">
             <>
             <div className={styles.workspaceNav}>
@@ -6241,7 +8558,9 @@ export function ConnectReceiver() {
             <ReceiverModal
               applianceMode={deskPhoneMode}
               askDraft={askDraft}
+              askTellExamples={askTellExamples}
               autoHearPreference={autoHearPreference}
+              contacts={contacts}
               contactRecording={contactRecording}
               contactRecordingProcessing={contactRecordingProcessing}
               contactDraft={contactDraft}
@@ -6250,6 +8569,8 @@ export function ConnectReceiver() {
               messages={messages}
               pendingContactRecording={pendingContactRecording}
               playingMessageId={playingMessageId}
+              presentationMode={receiverModernEnabled ? "modern" : "classic"}
+              receiverDiagnosticMode={receiverDiagnosticMode}
               receiverRecording={receiverRecording}
               receiverRecordingProcessing={receiverRecordingProcessing}
               lastSoundTestResult={lastSoundTestResult}
@@ -6257,21 +8578,31 @@ export function ConnectReceiver() {
               soundHelp={soundHelp}
               soundSettings={soundSettings}
               selectedSoundProblem={selectedSoundProblem}
+              receiverOnline={receiverOnline}
               key={modal.type === "reader" ? `reader-${modal.message.id}` : modal.type}
               onApproveCallSummary={approveCallSummary}
-              onAskDraftChange={setAskDraft}
+              onAcknowledgeMessage={acknowledgeMessage}
+              onAskDraftChange={updateAskDraft}
               onCallBackForMessage={callBackForMessage}
               onCallContact={callContact}
+              onCancelCondensedMessage={cancelCondensedSpeechMessage}
               onClose={closeModal}
-              onContactDraftChange={setContactDraft}
+              onConfirmAskTellExit={confirmAskTellExitWithoutSending}
+              onContactDraftChange={(value) => setContactDraft(limitReceiverTextInput(value))}
               onCompleteTodayFocusItem={markTodayFocusComplete}
               onEscalateAskRecovery={escalateAskRecovery}
+              onAttemptEvent={recordInteractionAttemptEvent}
               onMessageTextSizeChange={setMessageTextSize}
               onOpenMessageFromAllMessages={openMessageFromAllMessages}
               onPlayMessage={hearMessage}
+              onPrepareAttemptRevision={prepareInteractionAttemptRevision}
               onRetryAsk={(question) => {
-                setAskDraft(question);
-                setModal({ type: "ask" });
+                setPendingAskAudio(null);
+                updateAskDraft(question, "typed");
+                setModal({
+                  type: "ask",
+                  surface: modal?.type === "askRecovery" && modal.surface === "ask_tell" ? "ask_tell" : undefined,
+                });
               }}
               onApplySoundHelpAction={applySoundHelpAction}
               onRecordContact={toggleContactRecording}
@@ -6281,6 +8612,7 @@ export function ConnectReceiver() {
               onResolveSoundHelp={markSoundHelpResolved}
               onResetSoundTestState={resetSoundTestState}
               onSendContact={sendMessage}
+              onSendCondensedMessage={sendCondensedSpeechMessage}
               onSaveCallSummaryDraft={saveCallSummaryDraft}
               onSetModal={setModal}
               onStartScreenCleaning={startScreenCleaning}
@@ -6292,7 +8624,11 @@ export function ConnectReceiver() {
           ) : null}
           {interruptedReviewIncomingCall?.callId ? (
             <IncomingCallPrompt
-              callerName={String(interruptedReviewIncomingCall.callerName || "Andrew")}
+              callerName={String(
+                interruptedReviewIncomingCall.callerName ||
+                  selectedContact.displayName ||
+                  fallbackPrimaryCoordinatorDisplayName
+              )}
               callId={String(interruptedReviewIncomingCall.callId)}
               onAnswerIncomingCall={answerIncomingCall}
               onDeclineIncomingCall={declineIncomingCall}
@@ -6325,6 +8661,18 @@ export function ConnectReceiver() {
               secondsRemaining={screenCleaningSecondsRemaining}
             />
           ) : null}
+          {receiverDiagnosticMode ? (
+            <button
+              className={styles.receiverTraceButton}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setAttemptDiagnosticOpen(true);
+              }}
+            >
+              Trace
+            </button>
+          ) : null}
           <div
             className={styles.receiverIdentityBadge}
             title={`${receiverIdentityDisplay.type}: ${receiverIdentityDisplay.full}`}
@@ -6334,6 +8682,323 @@ export function ConnectReceiver() {
           </div>
         </section>
       </div>
+      {receiverDiagnosticMode && attemptDiagnosticOpen ? (
+        <div
+          className={styles.receiverTraceOverlay}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="receiver-trace-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <section className={styles.receiverTracePanel}>
+            <div className={styles.receiverTraceHeader}>
+              <div>
+                <span>Diagnostic</span>
+                <h2 id="receiver-trace-title">Interaction Attempt</h2>
+              </div>
+              <button
+                className={styles.receiverTraceCloseButton}
+                type="button"
+                onClick={() => setAttemptDiagnosticOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <dl className={styles.receiverTraceSummary}>
+              <div>
+                <dt>Status</dt>
+                <dd>{attemptDiagnosticSummary.status}</dd>
+              </div>
+              <div>
+                <dt>Outcome</dt>
+                <dd>{attemptTraceStory.finalOutcome || attemptDiagnosticSummary.outcome || "pending"}</dd>
+              </div>
+              <div>
+                <dt>Surface</dt>
+                <dd>{attemptDiagnosticSummary.surface || "Receiver"}</dd>
+              </div>
+              <div>
+                <dt>Started</dt>
+                <dd>
+                  {attemptDiagnosticStartedAt
+                    ? formatTime(attemptDiagnosticStartedAt)
+                    : "not started"}
+                </dd>
+              </div>
+              <div>
+                <dt>Duration</dt>
+                <dd>
+                  {attemptDiagnosticDurationSeconds === null
+                    ? "in progress"
+                    : `${attemptDiagnosticDurationSeconds} sec`}
+                </dd>
+              </div>
+              <div>
+                <dt>Revisions</dt>
+                <dd>{Math.max(0, attemptDiagnosticSummary.revisionCount - 1)}</dd>
+              </div>
+              <div>
+                <dt>Final family</dt>
+                <dd>{attemptTraceStory.finalRevision?.family || "unknown"}</dd>
+              </div>
+            </dl>
+            <div className={styles.receiverTraceChain}>
+              {attemptTraceStory.familyEvolution.length ? (
+                <section className={styles.receiverTraceStoryPanel}>
+                  <h3>Family evolution</h3>
+                  <p className={styles.receiverTraceFamilyFlow}>
+                    {attemptTraceStory.familyEvolution.join(" -> ")}
+                  </p>
+                </section>
+              ) : null}
+              {attemptTraceStory.finalRevision || attemptTraceStory.finalOutcome ? (
+                <section className={styles.receiverTraceStoryPanel}>
+                  <h3>Final result</h3>
+                  <dl className={styles.receiverTraceMiniGrid}>
+                    <div>
+                      <dt>Family</dt>
+                      <dd>{attemptTraceStory.finalRevision?.family || "unknown"}</dd>
+                    </div>
+                    <div>
+                      <dt>Interpreter</dt>
+                      <dd>{attemptTraceStory.finalRevision?.interpreter || "unknown"}</dd>
+                    </div>
+                    <div>
+                      <dt>Presented action</dt>
+                      <dd>{attemptTraceStory.finalRevision?.result || "unknown"}</dd>
+                    </div>
+                    <div>
+                      <dt>Outcome</dt>
+                      <dd>{attemptTraceStory.finalOutcome || attemptDiagnosticSummary.outcome || "pending"}</dd>
+                    </div>
+                  </dl>
+                  {attemptTraceStory.finalResponse ? (
+                    <blockquote>{attemptTraceStory.finalResponse}</blockquote>
+                  ) : null}
+                </section>
+              ) : null}
+              <section className={styles.receiverTraceStoryPanel}>
+                <h3>Platform reviews</h3>
+                <p className={styles.receiverTraceReviewNote}>
+                  Reviews are advisory platform notes. They do not change Receiver behavior.
+                </p>
+                {platformReviews.length ? (
+                  <div className={styles.receiverTraceReviewList}>
+                    {platformReviews.map((review) => {
+                      const analyses = platformReviewAnalyses.filter(
+                        (analysis) => analysis.reviewId === review.id
+                      );
+                      return (
+                        <article className={styles.receiverTraceReviewCard} key={review.id}>
+                          <div>
+                            <strong>Admin review</strong>
+                            <time>{formatTime(new Date(review.createdAt))}</time>
+                          </div>
+                          <p>{review.comment}</p>
+                          {analyses.length ? (
+                            <div className={styles.receiverTraceAnalysisList}>
+                              {analyses.map((analysis) => (
+                                <details className={styles.receiverTraceDetails} key={analysis.id}>
+                                  <summary>Advisory analysis</summary>
+                                  <div className={styles.receiverTraceAnalysisBody}>
+                                    <p>{analysis.analysisText}</p>
+                                    <dl className={styles.receiverTraceMiniGrid}>
+                                      <div>
+                                        <dt>Concerns</dt>
+                                        <dd>
+                                          {analysis.identifiedConcerns.join(", ") || "none"}
+                                        </dd>
+                                      </div>
+                                      <div>
+                                        <dt>Layers</dt>
+                                        <dd>
+                                          {analysis.affectedPlatformLayers.join(", ") || "none"}
+                                        </dd>
+                                      </div>
+                                      <div>
+                                        <dt>Refinement areas</dt>
+                                        <dd>
+                                          {analysis.suggestedRefinementAreas.join(", ") || "none"}
+                                        </dd>
+                                      </div>
+                                      <div>
+                                        <dt>Model</dt>
+                                        <dd>
+                                          {[analysis.model, analysis.modelVersion]
+                                            .filter(Boolean)
+                                            .join(" / ") || "unknown"}
+                                        </dd>
+                                      </div>
+                                    </dl>
+                                  </div>
+                                </details>
+                              ))}
+                            </div>
+                          ) : null}
+                          <button
+                            className={styles.receiverTraceSecondaryButton}
+                            disabled={platformReviewAnalyzingId === review.id}
+                            onClick={() => analyzePlatformReview(review.id)}
+                            type="button"
+                          >
+                            {platformReviewAnalyzingId === review.id
+                              ? "Analyzing..."
+                              : "Request advisory analysis"}
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className={styles.receiverTraceReviewNote}>
+                    No Platform Reviews recorded for this attempt.
+                  </p>
+                )}
+                <label className={styles.receiverTraceReviewEditor}>
+                  <span>Add review comment</span>
+                  <textarea
+                    value={platformReviewDraft}
+                    onChange={(event) => setPlatformReviewDraft(event.target.value)}
+                    placeholder="What did this attempt teach us?"
+                  />
+                </label>
+                <div className={styles.receiverTraceReviewActions}>
+                  <button
+                    className={styles.receiverTraceSecondaryButton}
+                    disabled={platformReviewSaving || !platformReviewDraft.trim()}
+                    onClick={savePlatformReview}
+                    type="button"
+                  >
+                    {platformReviewSaving ? "Saving..." : "Save review"}
+                  </button>
+                  {platformReviewStatus ? <span>{platformReviewStatus}</span> : null}
+                </div>
+              </section>
+              {attemptTraceStory.revisions.length ? (
+                attemptTraceStory.revisions.map((revision) => (
+                  <section className={styles.receiverTraceRevisionCard} key={revision.observationId || revision.revisionNumber}>
+                    <div className={styles.receiverTraceRevisionHeader}>
+                      <h3>Revision {revision.revisionNumber}</h3>
+                      <span>{revision.reason}</span>
+                    </div>
+                    <div className={styles.receiverTraceActors}>
+                      <article>
+                        <span>User</span>
+                        <p>{revision.userText || "No captured wording."}</p>
+                      </article>
+                      <article>
+                        <span>Platform</span>
+                        <p>
+                          {revision.family
+                            ? `${revision.family}${revision.familyConfidence ? ` (${formatReceiverTracePercent(revision.familyConfidence)})` : ""}`
+                            : "No family recorded."}
+                        </p>
+                        <small>{revision.interpreter || "No interpreter recorded."}</small>
+                        {revision.askIntent ? (
+                          <small>
+                            Ask: {revision.askIntent}
+                            {revision.askCapabilityStatus
+                              ? ` · ${revision.askCapabilityStatus}`
+                              : ""}
+                          </small>
+                        ) : null}
+                        {revision.response ? <p>{revision.response}</p> : null}
+                      </article>
+                      <article>
+                        <span>User response</span>
+                        {revision.userActions.length ? (
+                          revision.userActions.map((action) => (
+                            <p key={action.id}>{receiverTraceActionLabel(action)}</p>
+                          ))
+                        ) : (
+                          <p>No response yet.</p>
+                        )}
+                      </article>
+                    </div>
+                    <details className={styles.receiverTraceDetails}>
+                      <summary>Details</summary>
+                      <dl className={styles.receiverTraceMiniGrid}>
+                        <div>
+                          <dt>Observation ID</dt>
+                          <dd>{revision.observationId || "none"}</dd>
+                        </div>
+                        <div>
+                          <dt>Parent</dt>
+                          <dd>{revision.parentObservationId || "none"}</dd>
+                        </div>
+                        <div>
+                          <dt>Normalized text</dt>
+                          <dd>{revision.normalizedText || "none"}</dd>
+                        </div>
+                        <div>
+                          <dt>Route</dt>
+                          <dd>{revision.route || "none"}</dd>
+                        </div>
+                        <div>
+                          <dt>Ask intent</dt>
+                          <dd>{revision.askIntent || "none"}</dd>
+                        </div>
+                        <div>
+                          <dt>Ask capability</dt>
+                          <dd>{revision.askCapabilityStatus || "none"}</dd>
+                        </div>
+                        <div>
+                          <dt>Ask entities</dt>
+                          <dd>{revision.askEntities || "none"}</dd>
+                        </div>
+                        <div>
+                          <dt>Ask time refs</dt>
+                          <dd>{revision.askTemporalReferences || "none"}</dd>
+                        </div>
+                        <div>
+                          <dt>Result</dt>
+                          <dd>{revision.result || "none"}</dd>
+                        </div>
+                        <div>
+                          <dt>Confidence</dt>
+                          <dd>{revision.familyConfidence || "none"}</dd>
+                        </div>
+                      </dl>
+                      <ol className={styles.receiverTraceRawList}>
+                        {revision.rawEntries.map((entry, index) => (
+                          <li key={entry.id}>
+                            <div>
+                              <strong>{index + 1}. {entry.label}</strong>
+                              <time>{formatTime(new Date(entry.at))}</time>
+                            </div>
+                            <pre>{entry.detail || "No additional detail."}</pre>
+                          </li>
+                        ))}
+                      </ol>
+                    </details>
+                  </section>
+                ))
+              ) : (
+                <section className={styles.receiverTraceStoryPanel}>
+                  <h3>No interaction attempt yet</h3>
+                  <p>Submit Ask/Tell input to start a diagnostic chain.</p>
+                </section>
+              )}
+              {attemptTraceStory.systemEntries.length ? (
+                <details className={styles.receiverTraceDetails}>
+                  <summary>System events</summary>
+                  <ol className={styles.receiverTraceRawList}>
+                    {attemptTraceStory.systemEntries.map((entry, index) => (
+                      <li key={entry.id}>
+                        <div>
+                          <strong>{index + 1}. {entry.label}</strong>
+                          <time>{formatTime(new Date(entry.at))}</time>
+                        </div>
+                        <pre>{entry.detail || "No additional detail."}</pre>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -6371,7 +9036,6 @@ function ScreenCleaningView({
         event.stopPropagation();
       }}
     >
-      <h1>CarePland Receiver Screen Cleaning</h1>
       <div className={styles.screenCleaningCenter}>
         <p>{message}</p>
         <strong>{formatCountdownSeconds(secondsRemaining)}</strong>
@@ -6744,7 +9408,9 @@ function IncomingCallPrompt({
 function ReceiverModal({
   applianceMode,
   askDraft,
+  askTellExamples,
   autoHearPreference,
+  contacts,
   contactRecording,
   contactRecordingProcessing,
   contactDraft,
@@ -6753,25 +9419,33 @@ function ReceiverModal({
   modal,
   pendingContactRecording,
   playingMessageId,
+  presentationMode = "classic",
+  receiverDiagnosticMode,
   receiverRecording,
   receiverRecordingProcessing,
+  receiverOnline,
   lastSoundTestResult,
   soundDiagnostic,
   soundHelp,
   soundSettings,
   selectedSoundProblem,
   onApplySoundHelpAction,
+  onAcknowledgeMessage,
   onApproveCallSummary,
   onAskDraftChange,
+  onAttemptEvent,
   onCallBackForMessage,
   onCallContact,
+  onCancelCondensedMessage,
   onClose,
+  onConfirmAskTellExit,
   onCompleteTodayFocusItem,
   onContactDraftChange,
   onEscalateAskRecovery,
   onMessageTextSizeChange,
   onOpenMessageFromAllMessages,
   onPlayMessage,
+  onPrepareAttemptRevision,
   onRecordContact,
   onRecordRequest,
   onRecordHearingFeedback,
@@ -6780,6 +9454,7 @@ function ReceiverModal({
   onResetSoundTestState,
   onRetryAsk,
   onSendContact,
+  onSendCondensedMessage,
   onSaveCallSummaryDraft,
   onSetModal,
   onStartScreenCleaning,
@@ -6790,7 +9465,9 @@ function ReceiverModal({
 }: {
   applianceMode: boolean;
   askDraft: string;
+  askTellExamples: string[];
   autoHearPreference: AutoHearPreference;
+  contacts: Contact[];
   contactRecording: boolean;
   contactRecordingProcessing: boolean;
   contactDraft: string;
@@ -6799,19 +9476,30 @@ function ReceiverModal({
   modal: NonNullable<ModalState>;
   pendingContactRecording: PendingContactRecording | null;
   playingMessageId: string | null;
+  presentationMode?: ReceiverPresentationLayout;
+  receiverDiagnosticMode: boolean;
   receiverRecording: boolean;
   receiverRecordingProcessing: boolean;
+  receiverOnline: boolean;
   lastSoundTestResult: string;
   soundDiagnostic: string;
   soundHelp: SoundHelp | null;
   soundSettings: SoundSettings;
   selectedSoundProblem: SoundProblem | null;
   onApplySoundHelpAction: (action: NonNullable<SoundHelp["actions"]>[number]) => void;
+  onAcknowledgeMessage: (message: Message) => void;
   onApproveCallSummary: (callId?: string, approvedSummaryOverride?: string) => Promise<void>;
-  onAskDraftChange: (value: string) => void;
+  onAskDraftChange: (value: string, modality?: ObservationModality) => void;
+  onAttemptEvent: (
+    eventType: ReceiverAttemptEventType,
+    payload?: Record<string, unknown>,
+    options?: { terminal?: boolean }
+  ) => void;
   onCallBackForMessage: (message: Message) => void;
   onCallContact: (contact: Contact) => void;
+  onCancelCondensedMessage: (condensation: ReceiverMessageCondensationModal) => void;
   onClose: () => void;
+  onConfirmAskTellExit: () => void;
   onCompleteTodayFocusItem: (
     item: ReceiverTodayFocusHomeItem,
     completion?: ReceiverTodayFocusCompletionInput
@@ -6821,6 +9509,7 @@ function ReceiverModal({
   onMessageTextSizeChange: (value: ReaderTextSize) => void;
   onOpenMessageFromAllMessages: (message: Message, page: number) => void;
   onPlayMessage: (message: Message, variant?: PlaybackVariant, forceRestart?: boolean) => Promise<void>;
+  onPrepareAttemptRevision: (reason: ReceiverAttemptRevisionReason) => void;
   onRecordContact: (contact: Contact) => Promise<void>;
   onRecordRequest: () => Promise<void>;
   onRecordHearingFeedback: (message: Message, choice: string) => void;
@@ -6829,10 +9518,18 @@ function ReceiverModal({
   onResetSoundTestState: () => void;
   onRetryAsk: (question: string) => void;
   onSendContact: (contact: Contact, body: string, recording?: PendingContactRecording | null) => void;
+  onSendCondensedMessage: (
+    condensation: ReceiverMessageCondensationModal,
+    draft: string
+  ) => void;
   onSaveCallSummaryDraft: (callId: string | undefined, draftText: string) => Promise<void>;
   onSetModal: (modal: ModalState) => void;
   onStartScreenCleaning: () => void;
-  onSubmitAsk: () => void | Promise<void>;
+  onSubmitAsk: (options?: {
+    modality?: ObservationModality;
+    surface?: "ask_tell";
+    text?: string;
+  }) => void | Promise<void>;
   onTestSound: () => void;
   onToggleAutoHearPreference: () => void;
   onUpdateSoundSetting: (key: keyof SoundSettings, value: boolean | SoundSettings["comfortVolume"]) => void;
@@ -6852,8 +9549,129 @@ function ReceiverModal({
   const [comparisonVersions] = useState(randomizedConnectComparisonVersions);
   const [todayFocusWeightDraft, setTodayFocusWeightDraft] = useState("");
   const [todayFocusWeightUnit, setTodayFocusWeightUnit] = useState<"lbs" | "kg">("lbs");
+  const [askTellReplacementExample, setAskTellReplacementExample] = useState("");
+  const [askTellPageIndex, setAskTellPageIndex] = useState(0);
+  const [clarificationDraft, setClarificationDraft] = useState("");
+  const clarificationInputRef = useRef<HTMLInputElement | null>(null);
+  const modernPresentation = presentationMode === "modern";
   const autoPlayedMessageIdRef = useRef("");
   const readerPageIndex = readerPageState.key === readerPageKey ? readerPageState.index : 0;
+  const askTellFullText = modal.type === "ask" && modal.surface === "ask_tell" ? askDraft : "";
+  const askTellTranscriptionInProgress =
+    modal.type === "ask" &&
+    modal.surface === "ask_tell" &&
+    !askDraft.trim() &&
+    (receiverRecording || receiverRecordingProcessing);
+  const askTellPages = useMemo(
+    () => paginateAskTellText(askTellFullText, messageTextSize),
+    [askTellFullText, messageTextSize]
+  );
+  const askTellPage = Math.min(askTellPageIndex, askTellPages.length - 1);
+  const askTellDisplayedPageText = askTellTranscriptionInProgress
+    ? RECEIVER_TRANSCRIBING_IN_PROGRESS_TEXT
+    : askTellPages[askTellPage];
+
+  function closeAskAttempt(reason = "home") {
+    onAttemptEvent("cancelled", { reason }, { terminal: true });
+    onClose();
+  }
+
+  function markAskAnswerHelpful(answer: AskAnswer, sent = false) {
+    onAttemptEvent(
+      sent ? "workflow_completed" : "helpful_selected",
+      {
+        actionLabel: answer.actionLabel,
+        outcome: sent ? "communicated" : "answered",
+        responseType: answer.type,
+      },
+      { terminal: true }
+    );
+  }
+
+  function openAskRecovery(question: string, surface?: "ask_tell") {
+    onAttemptEvent("not_helpful_selected", { question });
+    onSetModal({
+      type: "askRecovery",
+      question,
+      recoveryPrompt: pickAskRecoveryPrompt(),
+      surface,
+    });
+  }
+
+  function rephraseAsk(question: string) {
+    onAttemptEvent("rephrase_selected", { question });
+    onPrepareAttemptRevision("rephrase");
+    onRetryAsk(question);
+  }
+
+  function sendAskRecovery(question: string) {
+    const recipient = contacts[0];
+    onAttemptEvent("send_selected", { recipient: recipient.displayName, source: "recovery" });
+    onAttemptEvent(
+      "workflow_completed",
+      { outcome: "communicated", recipient: recipient.displayName },
+      { terminal: true }
+    );
+    onEscalateAskRecovery(question);
+  }
+
+  function submitInlineClarification(answer: AskAnswer) {
+    const clarification = clarificationDraft.trim();
+    if (!clarification) return;
+    if (isReceiverRecipientClarificationAnswer(answer)) {
+      const recipient = resolveReceiverContactClarification(clarification, contacts) ?? contacts[0];
+      onAttemptEvent("send_selected", {
+        clarificationPrompt: answer.answer,
+        clarificationText: clarification,
+        question: answer.question,
+        recipient: recipient.displayName,
+        source: "inline_clarification",
+      });
+      markAskAnswerHelpful(answer, true);
+      setClarificationDraft("");
+      onSendContact(recipient, answer.question);
+      return;
+    }
+    onAttemptEvent("rephrase_selected", {
+      clarificationPrompt: answer.answer,
+      question: answer.question,
+      source: "inline_clarification",
+    });
+    onPrepareAttemptRevision("clarification");
+    setClarificationDraft("");
+    void onSubmitAsk({
+      modality: "typed",
+      surface: "ask_tell",
+      text: clarification,
+    });
+  }
+
+  useEffect(() => {
+    if (modal.type !== "ask" || modal.surface !== "ask_tell" || !askDraft.trim()) {
+      setAskTellReplacementExample("");
+    }
+  }, [askDraft, modal]);
+
+  useEffect(() => {
+    setAskTellPageIndex((current) => Math.min(current, Math.max(0, askTellPages.length - 1)));
+  }, [askTellPages.length]);
+
+  useEffect(() => {
+    if (modal.type !== "ask" || modal.surface !== "ask_tell") {
+      setAskTellPageIndex(0);
+    }
+  }, [modal]);
+
+  useEffect(() => {
+    if (modal.type !== "askAnswer" || !isReceiverClarificationAnswer(modal.answer)) {
+      setClarificationDraft("");
+      return;
+    }
+    const focusTimer = window.setTimeout(() => {
+      clarificationInputRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [modal]);
 
   useEffect(() => {
     if (modal.type !== "reader") {
@@ -6872,6 +9690,25 @@ function ReceiverModal({
   }, [autoHearPreference, modal, onPlayMessage]);
 
   if (modal.type === "offlineNotice") {
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="offline-notice-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernCompactPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Status</span>
+                <h2 id="offline-notice-title">CarePland is offline</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={() => closeAskAttempt()}>
+                Home
+              </button>
+            </div>
+            <p className={styles.modernReaderText}>{receiverOfflineActionMessage()}</p>
+          </section>
+        </div>
+      );
+    }
+
     return (
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="offline-notice-title">
         <section className={`${styles.modalPanel} ${styles.offlineNoticePanel}`}>
@@ -6900,6 +9737,78 @@ function ReceiverModal({
         return `${current}${digit}`;
       });
     };
+
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="today-focus-weight-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernReaderPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Goal</span>
+                <h2 id="today-focus-weight-title">{measurementPrompt}</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                Back
+              </button>
+            </div>
+            <div className={styles.modernWeightEntry}>
+              <label className={styles.weightEntryField}>
+                <span className={styles.srOnly}>Weight</span>
+                <span className={styles.weightEntryInputWrap}>
+                  <input
+                    inputMode="decimal"
+                    type="text"
+                    aria-label={`Weight in ${weightUnitLabel}`}
+                    value={todayFocusWeightDraft}
+                    onChange={(event) => {
+                      setTodayFocusWeightDraft(
+                        normalizeDecimalMeasurementInput(event.target.value, measurementDigitLimit)
+                      );
+                    }}
+                    autoFocus
+                  />
+                  <span aria-hidden="true">{weightUnitLabel}</span>
+                </span>
+              </label>
+              <div className={styles.modernActionRow} aria-label="Weight unit">
+                <button
+                  className={todayFocusWeightUnit === "lbs" ? styles.modernPrimaryButton : styles.modernSecondaryButton}
+                  type="button"
+                  onClick={() => setTodayFocusWeightUnit("lbs")}
+                >
+                  lbs
+                </button>
+                <button
+                  className={todayFocusWeightUnit === "kg" ? styles.modernPrimaryButton : styles.modernSecondaryButton}
+                  type="button"
+                  onClick={() => setTodayFocusWeightUnit("kg")}
+                >
+                  kg
+                </button>
+              </div>
+            </div>
+            <div className={styles.modernActionRow}>
+              <button
+                className={styles.modernPrimaryButton}
+                type="button"
+                disabled={!canSaveWeight}
+                onClick={() => {
+                  void onCompleteTodayFocusItem(modal.item, {
+                    unit: todayFocusWeightUnit === "kg" ? "kg" : "lb",
+                    value: Number(todayFocusWeightDraft),
+                  });
+                  setTodayFocusWeightDraft("");
+                  setTodayFocusWeightUnit("lbs");
+                  onClose();
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
 
     return (
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="today-focus-weight-title">
@@ -6982,6 +9891,30 @@ function ReceiverModal({
   }
 
   if (modal.type === "screenCleaningConfirm") {
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="screen-cleaning-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernCompactPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Clean Screen</span>
+                <h2 id="screen-cleaning-title">Clean the screen now?</h2>
+              </div>
+            </div>
+            <p className={styles.modernReaderText}>Touch will be ignored for two minutes while the screen is cleaned.</p>
+            <div className={styles.modernActionRow}>
+              <button className={styles.modernPrimaryButton} type="button" onClick={onStartScreenCleaning}>
+                Start Cleaning
+              </button>
+              <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     return (
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="screen-cleaning-title">
         <section className={`${styles.modalPanel} ${styles.screenCleaningConfirmPanel}`}>
@@ -7020,7 +9953,8 @@ function ReceiverModal({
           ) : null}
           <textarea
             className={styles.requestInput}
-            onChange={(event) => onContactDraftChange(event.target.value)}
+            maxLength={RECEIVER_TEXT_INPUT_MAX_LENGTH}
+            onChange={(event) => onContactDraftChange(limitReceiverTextInput(event.target.value))}
             placeholder={`What would you like to tell ${contact.displayName}?`}
             value={contactDraft}
           />
@@ -7059,6 +9993,337 @@ function ReceiverModal({
   }
 
   if (modal.type === "ask") {
+    const isAskTellSurface = modal.surface === "ask_tell";
+    const askExamples = isAskTellSurface
+      ? askTellExamples
+      : ["What time am I leaving?", "What should I bring?", "I need milk", "I feel dizzy"];
+    const chooseAskExample = (example: string) => {
+      const existing = askDraft.trim();
+      const existingIsCannedExample = askExamples.some((item) => item === existing);
+      if (isAskTellSurface && existing && existing !== example && !existingIsCannedExample) {
+        setAskTellReplacementExample(example);
+        return;
+      }
+      setAskTellReplacementExample("");
+      onAskDraftChange(example, "example");
+    };
+
+    if (isAskTellSurface) {
+      if (modernPresentation) {
+        return (
+          <div
+            className={`${styles.modal} ${styles.modernModal}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ask-title"
+          >
+            <section className={`${styles.modernModalPanel} ${styles.modernAskTellPanel}`}>
+              <div className={styles.modernModalHeader}>
+                <div>
+                  <span>Ask/Tell</span>
+                  <h2 id="ask-title">Start talking, type, or choose an example</h2>
+                </div>
+                <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                  Go Home
+                </button>
+              </div>
+              <div className={styles.modernAskTellBody}>
+                <section className={styles.modernAskTellVoice} aria-label="Voice and examples">
+                  <button
+                    className={`${styles.modernPrimaryButton} ${
+                      receiverRecording ? styles.recordingActive : ""
+                    }`}
+                    disabled={receiverRecordingProcessing}
+                    type="button"
+                    onClick={() => {
+                      void onRecordRequest();
+                    }}
+                  >
+                    {receiverRecording
+                      ? "Stop talking"
+                      : receiverRecordingProcessing
+                        ? "Transcribing..."
+                        : "Start talking"}
+                  </button>
+                  <div className={styles.modernExampleGrid}>
+                    {askExamples.map((example) => (
+                      <button
+                        className={styles.modernExampleButton}
+                        key={example}
+                        type="button"
+                        onClick={() => chooseAskExample(example)}
+                      >
+                        {example}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section className={styles.modernAskTellDraft} aria-label="Typed message">
+                  <textarea
+                    className={styles.modernRequestInput}
+                    maxLength={RECEIVER_TEXT_INPUT_MAX_LENGTH}
+                    onChange={(event) =>
+                      onAskDraftChange(
+                        limitReceiverTextInput(
+                          stripReceiverTranscribingDisplayText(event.target.value)
+                        ),
+                        "typed"
+                      )
+                    }
+                    placeholder="Type here"
+                    value={
+                      askTellTranscriptionInProgress
+                        ? RECEIVER_TRANSCRIBING_IN_PROGRESS_TEXT
+                        : askDraft
+                    }
+                  />
+                  {askTellReplacementExample ? (
+                    <section className={styles.modernReplacePrompt} aria-live="polite">
+                      <p>Remove what you have and use this instead?</p>
+                      <strong>{askTellReplacementExample}</strong>
+                      <div>
+                        <button
+                          className={styles.modernSecondaryButton}
+                          type="button"
+                          onClick={() => setAskTellReplacementExample("")}
+                        >
+                          Keep mine
+                        </button>
+                        <button
+                          className={styles.modernPrimaryButton}
+                          type="button"
+                          onClick={() => {
+                            onAskDraftChange(askTellReplacementExample, "example");
+                            setAskTellReplacementExample("");
+                          }}
+                        >
+                          Use example
+                        </button>
+                      </div>
+                    </section>
+                  ) : null}
+                  <button
+                    className={`${styles.modernPrimaryButton} ${askDraft.trim() ? "" : styles.inactive}`}
+                    type="button"
+                    onClick={() => {
+                      void onSubmitAsk();
+                    }}
+                  >
+                    {askDraft.trim() ? "Send" : "Type your request"}
+                  </button>
+                </section>
+              </div>
+              {modal.confirmExit ? (
+                <div className={styles.askTellExitOverlay} role="dialog" aria-modal="true" aria-labelledby="ask-exit-title">
+                  <section className={styles.askTellExitPrompt}>
+                    <h3 id="ask-exit-title">Your message has not been sent.</h3>
+                    <p>Exit without sending message?</p>
+                    <p>Your message will be deleted.</p>
+                    <div>
+                      <button
+                        className={`${styles.modalButton} ${styles.secondary}`}
+                        type="button"
+                        onClick={() => onSetModal({ type: "ask", surface: "ask_tell" })}
+                      >
+                        No
+                      </button>
+                      <button className={styles.modalButton} type="button" onClick={onConfirmAskTellExit}>
+                        Yes
+                      </button>
+                    </div>
+                  </section>
+                </div>
+              ) : null}
+            </section>
+          </div>
+        );
+      }
+
+      const textSizeClass =
+        messageTextSize === "standard"
+          ? styles.readerTextStandard
+          : messageTextSize === "extra"
+            ? styles.readerTextExtra
+            : styles.readerTextLarge;
+
+      return (
+        <div
+          className={`${styles.modal} ${styles.applianceFullscreenModal}`}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ask-title"
+        >
+          <section className={styles.askTellPanel}>
+            <div className={styles.askTellHeaderRow}>
+              <h2 id="ask-title">Start talking, type, or pick a question</h2>
+              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+                Go Home
+              </button>
+            </div>
+            <div className={styles.askTellSplitPane}>
+              <section className={styles.askTellLeftPane} aria-label="Voice and examples">
+                <button
+                  className={`${styles.askTellSpeechAction} ${
+                    receiverRecording ? styles.recordingActive : ""
+                  }`}
+                  disabled={receiverRecordingProcessing}
+                  type="button"
+                  onClick={() => {
+                    void onRecordRequest();
+                  }}
+                >
+                  <span className={styles.talkFooterIcon} aria-hidden="true" />
+                  <span>
+                    {receiverRecording
+                      ? "Stop talking"
+                      : receiverRecordingProcessing
+                        ? "Transcribing..."
+                    : "Start talking"}
+                  </span>
+                </button>
+                <div className={styles.askTellExampleList}>
+                  {askExamples.map((example) => (
+                    <button
+                      className={styles.askTellExampleButton}
+                      key={example}
+                      type="button"
+                      onClick={() => chooseAskExample(example)}
+                    >
+                      <span>{example}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+              <section className={styles.askTellRightPane} aria-label="Typed message">
+                <textarea
+                  className={`${styles.requestInput} ${styles.askTellInput} ${textSizeClass}`}
+                  maxLength={RECEIVER_TEXT_INPUT_MAX_LENGTH}
+                  onChange={(event) => {
+                    onAskDraftChange(
+                      limitReceiverTextInput(
+                        replacePaginatedTextPage(
+                          askTellPages,
+                          askTellPage,
+                          stripReceiverTranscribingDisplayText(event.target.value),
+                          { preserveWhitespace: true }
+                        )
+                      ),
+                      "typed"
+                    );
+                  }}
+                  placeholder="Type here"
+                  value={askTellDisplayedPageText}
+                />
+                <div className={styles.askTellTextToolbar}>
+                  <div className={styles.askTellSizeRow} aria-label="Text size">
+                    {[
+                      ["standard", "a", styles.askTellSizeStandard, "Standard text"],
+                      ["large", "A", styles.askTellSizeLarge, "Large text"],
+                      ["extra", "A", styles.askTellSizeExtra, "Extra large text"],
+                    ].map(([value, label, sizeClass, ariaLabel]) => {
+                      const selected = messageTextSize === value;
+                      return (
+                        <button
+                          aria-label={ariaLabel}
+                          aria-pressed={selected}
+                          className={`${styles.askTellSizeButton} ${sizeClass} ${selected ? styles.askTellSizeButtonSelected : ""}`}
+                          key={value}
+                          type="button"
+                          onClick={() => onMessageTextSizeChange(value as ReaderTextSize)}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className={`${styles.readerPageControls} ${styles.askTellPageControls}`} aria-label="Text page controls">
+                    <button
+                      className={`${styles.modalButton} ${styles.secondary}`}
+                      disabled={askTellPage === 0}
+                      type="button"
+                      onClick={() => setAskTellPageIndex((current) => Math.max(0, current - 1))}
+                    >
+                      &lt;
+                    </button>
+                    <span>
+                      {askTellPage + 1} / {askTellPages.length}
+                    </span>
+                    <button
+                      className={`${styles.modalButton} ${styles.secondary}`}
+                      disabled={askTellPage >= askTellPages.length - 1}
+                      type="button"
+                      onClick={() =>
+                        setAskTellPageIndex((current) =>
+                          Math.min(askTellPages.length - 1, current + 1)
+                        )
+                      }
+                    >
+                      &gt;
+                    </button>
+                  </div>
+                </div>
+                {askTellReplacementExample ? (
+                  <section className={styles.askTellReplacePrompt} aria-live="polite">
+                    <p>Remove what you have and use this instead?</p>
+                    <strong>{askTellReplacementExample}</strong>
+                    <div>
+                      <button
+                        className={`${styles.modalButton} ${styles.secondary}`}
+                        type="button"
+                        onClick={() => setAskTellReplacementExample("")}
+                      >
+                        Keep mine
+                      </button>
+                      <button
+                        className={styles.modalButton}
+                        type="button"
+                        onClick={() => {
+                          onAskDraftChange(askTellReplacementExample, "example");
+                          setAskTellReplacementExample("");
+                        }}
+                      >
+                        Use example
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+                <button
+                  className={`${styles.modalButton} ${styles.askSubmitButton} ${askDraft.trim() ? "" : styles.inactive}`}
+                  type="button"
+                  onClick={() => {
+                    void onSubmitAsk();
+                  }}
+                >
+                  {askDraft.trim() ? "Send" : "Type your request"}
+                </button>
+              </section>
+            </div>
+            {modal.confirmExit ? (
+              <div className={styles.askTellExitOverlay} role="dialog" aria-modal="true" aria-labelledby="ask-exit-title">
+                <section className={styles.askTellExitPrompt}>
+                  <h3 id="ask-exit-title">Your message has not been sent.</h3>
+                  <p>Exit without sending message?</p>
+                  <p>Your message will be deleted.</p>
+                  <div>
+                    <button
+                      className={`${styles.modalButton} ${styles.secondary}`}
+                      type="button"
+                      onClick={() => onSetModal({ type: "ask", surface: "ask_tell" })}
+                    >
+                      No
+                    </button>
+                    <button className={styles.modalButton} type="button" onClick={onConfirmAskTellExit}>
+                      Yes
+                    </button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      );
+    }
+
     return (
       <div
         className={`${styles.modal} ${applianceMode ? styles.applianceFullscreenModal : ""}`}
@@ -7078,17 +10343,18 @@ function ReceiverModal({
           </p>
           <textarea
             className={`${styles.requestInput} ${applianceMode ? styles.applianceAskInput : ""}`}
-            onChange={(event) => onAskDraftChange(event.target.value)}
+            maxLength={RECEIVER_TEXT_INPUT_MAX_LENGTH}
+            onChange={(event) => onAskDraftChange(limitReceiverTextInput(event.target.value), "typed")}
             placeholder="Example: I need milk"
             value={askDraft}
           />
           <div className={`${styles.requestExamples} ${applianceMode ? styles.applianceRequestExamples : ""}`}>
-            {["What time am I leaving?", "What should I bring?", "I need milk", "I feel dizzy"].map((example) => (
+            {askExamples.map((example) => (
               <button
                 className={styles.requestExample}
                 key={example}
                 type="button"
-                onClick={() => onAskDraftChange(example)}
+                onClick={() => chooseAskExample(example)}
               >
                 {example}
               </button>
@@ -7116,7 +10382,9 @@ function ReceiverModal({
           <button
             className={`${styles.modalButton} ${styles.askSubmitButton} ${askDraft.trim() ? "" : styles.inactive}`}
             type="button"
-            onClick={onSubmitAsk}
+            onClick={() => {
+              void onSubmitAsk();
+            }}
           >
             {askDraft.trim() ? "Ask" : "Type your request"}
           </button>
@@ -7126,20 +10394,76 @@ function ReceiverModal({
   }
 
   if (modal.type === "askRecordReview") {
+    const isAskTellSurface = modal.surface === "ask_tell";
     const reviewDraft = askDraft.trim();
     const reviewText = receiverRecording
-      ? "Recording..."
+      ? isAskTellSurface
+        ? "Listening..."
+        : "Recording..."
       : receiverRecordingProcessing
-        ? "Transcribing recording..."
+        ? isAskTellSurface
+          ? "Turning this into text..."
+          : "Transcribing recording..."
         : reviewDraft || modal.transcript || "Voice recording";
     const canSubmitReview =
       !receiverRecording && !receiverRecordingProcessing && Boolean(reviewDraft) && reviewDraft !== "Transcribing recording...";
 
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="record-review-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernCompactPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Voice</span>
+                <h2 id="record-review-title">{isAskTellSurface ? "I heard this" : "Recording your voice"}</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={() => closeAskAttempt("recovery_home")}>
+                Home
+              </button>
+            </div>
+            <div className={styles.modernScrollableContent}>
+              <p className={styles.modernReaderText}>{reviewText}</p>
+            </div>
+            <div className={styles.modernActionRow}>
+              <button
+                className={styles.modernSecondaryButton}
+                disabled={receiverRecordingProcessing}
+                type="button"
+                onClick={() => {
+                  if (!receiverRecording) {
+                    onAskDraftChange("");
+                  }
+                  void onRecordRequest();
+                }}
+              >
+                {receiverRecording
+                  ? "Stop Recording"
+                  : receiverRecordingProcessing
+                    ? "Transcribing"
+                    : isAskTellSurface
+                      ? "Try Again"
+                      : "Record Again"}
+              </button>
+              <button
+                className={`${styles.modernPrimaryButton} ${canSubmitReview ? "" : styles.inactive}`}
+                type="button"
+                onClick={() => {
+                  void onSubmitAsk();
+                }}
+              >
+                {isAskTellSurface ? "Use this" : "Send this text"}
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     return (
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="record-review-title">
-        <section className={styles.modalPanel}>
+        <section className={`${styles.modalPanel} ${isAskTellSurface ? styles.askTellPanel : ""}`}>
           <div className={styles.modalTitleRow}>
-            <h2 id="record-review-title">Recording your voice</h2>
+            <h2 id="record-review-title">{isAskTellSurface ? "I heard this" : "Recording your voice"}</h2>
             <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
               Go Home
             </button>
@@ -7164,16 +10488,125 @@ function ReceiverModal({
                 ? "Stop Recording"
                 : receiverRecordingProcessing
                   ? "Transcribing"
-                  : "Record Again"}
+                  : isAskTellSurface
+                    ? "Try Again"
+                    : "Record Again"}
             </span>
           </button>
           <button
             className={`${styles.modalButton} ${styles.askSubmitButton} ${canSubmitReview ? "" : styles.inactive}`}
             type="button"
-            onClick={onSubmitAsk}
+            onClick={() => {
+              void onSubmitAsk();
+            }}
           >
-            This text is what I want to send
+            {isAskTellSurface ? "Use this" : "This text is what I want to send"}
           </button>
+        </section>
+      </div>
+    );
+	  }
+
+  if (modal.type === "messageCondensation") {
+    const contact = contacts.find((item) => item.id === modal.contactId) ?? contacts[0];
+    const draft = limitReceiverCondensedMessageEdit(modal.draft);
+    const canSendDraft = Boolean(draft.trim());
+    const updateDraft = (value: string) =>
+      onSetModal({ ...modal, draft: limitReceiverCondensedMessageEdit(value) });
+    const title = "Here is the message that will be sent.";
+    const body = (
+      <>
+        <p className={`${styles.interpreterMessage} ${styles.messageCondensationPrompt}`}>{title}</p>
+        <textarea
+          className={`${styles.requestInput} ${styles.messageCondensationInput}`}
+          maxLength={modal.limit}
+          onChange={(event) => updateDraft(event.target.value)}
+          value={draft}
+        />
+        <p className={`${styles.recordingNotice} ${styles.messageCondensationCounter}`}>
+          Message length: {draft.length} / {modal.limit}
+        </p>
+      </>
+    );
+    const actions = (
+      <div className={`${styles.universalAskActions} ${styles.askAnswerActions}`}>
+        <button
+          className={styles.modalButton}
+          disabled={!canSendDraft}
+          type="button"
+          onClick={() => onSendCondensedMessage(modal, draft)}
+        >
+          Send to {contact.displayName}
+        </button>
+        <button
+          className={`${styles.modalButton} ${styles.secondary}`}
+          type="button"
+          onClick={() => onCancelCondensedMessage(modal)}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="message-condensation-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernReaderPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Message</span>
+                <h2 id="message-condensation-title">Review before sending</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={() => onCancelCondensedMessage(modal)}>
+                Cancel
+              </button>
+            </div>
+            <div className={styles.modernScrollableContent}>
+              {body}
+            </div>
+            <div className={styles.modernActionRow}>
+              <button
+                className={styles.modernPrimaryButton}
+                disabled={!canSendDraft}
+                type="button"
+                onClick={() => onSendCondensedMessage(modal, draft)}
+              >
+                Send to {contact.displayName}
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    if (applianceMode) {
+      return (
+        <div className={`${styles.modal} ${styles.applianceFullscreenModal}`} role="dialog" aria-modal="true" aria-labelledby="message-condensation-title">
+          <section className={`${styles.modalPanel} ${styles.applianceListPanel} ${styles.applianceAskAnswerPanel} ${styles.applianceMessageCondensationPanel}`}>
+            <div className={`${styles.applianceListToolbar} ${styles.messageCondensationToolbar}`}>
+              <h2 id="message-condensation-title">Review Message</h2>
+              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => onCancelCondensedMessage(modal)}>
+                Cancel
+              </button>
+            </div>
+            {body}
+            {actions}
+          </section>
+        </div>
+      );
+    }
+
+    return (
+      <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="message-condensation-title">
+        <section className={`${styles.modalPanel} ${styles.askAnswerPanel}`}>
+          <div className={styles.modalTitleRow}>
+            <h2 id="message-condensation-title">Review Message</h2>
+            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => onCancelCondensedMessage(modal)}>
+              Cancel
+            </button>
+          </div>
+          {body}
+          {actions}
         </section>
       </div>
     );
@@ -7182,6 +10615,16 @@ function ReceiverModal({
   if (modal.type === "askAnswer") {
     const recipient = contacts.find((contact) => contact.id === modal.answer.recipientId) ?? contacts[0];
     const canSend = modal.answer.type === "message" && Boolean(modal.answer.messageBody.trim());
+    const answerText = modal.answer.answer.trim();
+    const isGenericMessageOffer = canSend && /^We can send this to\b/i.test(answerText);
+    const messageOfferGuidance = isGenericMessageOffer
+      ? `This can be sent to ${recipient.displayName} now, or you can say something else instead.`
+      : "";
+    const exerciseMeaningMatch = answerText.match(
+      /^This is an exercise entry\. (?:I recorded|I could not save yet):\s*(.+?)\.?$/
+    );
+    const exerciseMeaningTitle = exerciseMeaningMatch?.[1]?.replace(/\.$/, "") || "";
+    const isExerciseMeaningConfirmation = !canSend && Boolean(exerciseMeaningTitle);
     const askedPages = paginateReaderText(modal.answer.question, messageTextSize);
     const askedPageCount = askedPages.length;
     const currentAskedPage = Math.min(
@@ -7194,6 +10637,116 @@ function ReceiverModal({
         : messageTextSize === "extra"
           ? styles.readerTextExtra
           : styles.readerTextLarge;
+    const diagnosticLine =
+      receiverDiagnosticMode && modal.answer.diagnosticSummary
+        ? modal.answer.diagnosticSummary
+        : "";
+    const isClarificationAnswer = isReceiverClarificationAnswer(modal.answer);
+    const isRecipientClarificationAnswer =
+      isClarificationAnswer && isReceiverRecipientClarificationAnswer(modal.answer);
+    const clarificationReady = isRecipientClarificationAnswer
+      ? Boolean(clarificationDraft.trim())
+      : Boolean(clarificationDraft.trim());
+    const clarificationPrimaryLabel = isRecipientClarificationAnswer
+      ? `Send to ${contacts[0]?.displayName || fallbackPrimaryCoordinatorDisplayName}`
+      : "Continue";
+    const clarificationInputPanel = (
+      <div className={styles.askClarificationForm}>
+        <label className={styles.srOnly} htmlFor="receiver-clarification-input">
+          Answer the question
+        </label>
+        <span className={styles.askClarificationPrompt}>{modal.answer.answer}</span>
+        <input
+          id="receiver-clarification-input"
+          ref={clarificationInputRef}
+          maxLength={RECEIVER_TEXT_INPUT_MAX_LENGTH}
+          type="text"
+          value={clarificationDraft}
+          onChange={(event) => setClarificationDraft(limitReceiverTextInput(event.target.value))}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            submitInlineClarification(modal.answer);
+          }}
+        />
+      </div>
+    );
+
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="ask-answer-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernReaderPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>You Said</span>
+                <h2 id="ask-answer-title">{modal.answer.question}</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                Home
+              </button>
+            </div>
+            <div className={styles.modernScrollableContent}>
+              {isExerciseMeaningConfirmation ? (
+                <section className={styles.modernMeaningConfirmation}>
+                  <p>This is an exercise entry.</p>
+                  <small>Saving exercise entries is not available in this preview yet.</small>
+                </section>
+              ) : isGenericMessageOffer ? (
+                <section className={styles.modernMeaningConfirmation}>
+                  <p>{answerText}</p>
+                  <small>{messageOfferGuidance}</small>
+                </section>
+              ) : !canSend && !isClarificationAnswer ? (
+                <p className={styles.modernReaderText}>{modal.answer.answer}</p>
+              ) : null}
+              {isClarificationAnswer ? clarificationInputPanel : null}
+              {diagnosticLine ? (
+                <p className={styles.receiverTraceDiagnostic}>{diagnosticLine}</p>
+              ) : null}
+            </div>
+            <div className={styles.modernActionRow}>
+              {isClarificationAnswer ? (
+                <button
+                  className={styles.modernPrimaryButton}
+                  disabled={!clarificationReady}
+                  type="button"
+                  onClick={() => submitInlineClarification(modal.answer)}
+                >
+                  {clarificationPrimaryLabel}
+                </button>
+              ) : (
+                <button
+                  className={styles.modernPrimaryButton}
+                  type="button"
+                  onClick={() => {
+                    if (canSend) {
+                      onAttemptEvent("send_selected", {
+                        recipient: recipient.displayName,
+                        responseType: modal.answer.type,
+                      });
+                      markAskAnswerHelpful(modal.answer, true);
+                      onSendContact(recipient, modal.answer.messageBody);
+                      return;
+                    }
+                    markAskAnswerHelpful(modal.answer);
+                    onClose();
+                  }}
+                >
+                  {isExerciseMeaningConfirmation ? "Yes, that's right" : modal.answer.actionLabel}
+                </button>
+              )}
+              <button
+                className={styles.modernSecondaryButton}
+                type="button"
+                onClick={() => openAskRecovery(modal.answer.question, "ask_tell")}
+              >
+                {isExerciseMeaningConfirmation ? "Not quite" : "This wasn&apos;t helpful"}
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
 
     if (applianceMode) {
       return (
@@ -7223,67 +10776,113 @@ function ReceiverModal({
                   );
                 })}
               </div>
-              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => closeAskAttempt()}>
                 Go Home
               </button>
             </div>
             <p className={`${styles.askedText} ${styles.askAnswerText} ${styles.applianceAskAnswerText} ${textSizeClass}`}>
               {askedPages[currentAskedPage] || modal.answer.question}
             </p>
-            {!canSend ? <p className={styles.interpreterMessage}>{modal.answer.answer}</p> : null}
-            <div className={styles.appliancePageControls} aria-label="Asked text page controls">
-              <button
-                className={`${styles.modalButton} ${styles.secondary}`}
-                disabled={currentAskedPage === 0}
-                type="button"
-                onClick={() =>
-                  onSetModal({
-                    ...modal,
-                    page: Math.max(0, currentAskedPage - 1),
-                  })
-                }
-              >
-                ◀
-              </button>
-              <span>
-                {currentAskedPage + 1} / {askedPageCount}
-              </span>
-              <button
-                className={`${styles.modalButton} ${styles.secondary}`}
-                disabled={currentAskedPage >= askedPageCount - 1}
-                type="button"
-                onClick={() =>
-                  onSetModal({
-                    ...modal,
-                    page: Math.min(askedPageCount - 1, currentAskedPage + 1),
-                  })
-                }
-              >
-                ▶
-              </button>
-            </div>
-            <div className={`${styles.universalAskActions} ${styles.askAnswerActions} ${styles.applianceAskAnswerActions}`}>
-              <button
-                className={styles.modalButton}
-                type="button"
-                onClick={() => {
-                  if (canSend) {
-                    onSendContact(recipient, modal.answer.messageBody);
-                    return;
-                  }
-                  onClose();
-                }}
-              >
-                {modal.answer.actionLabel}
-              </button>
-              <button
-                className={`${styles.modalButton} ${styles.secondary}`}
-                type="button"
-                onClick={() => onSetModal({ type: "askRecovery", question: modal.answer.question })}
-              >
-                This wasn&apos;t helpful
-              </button>
-            </div>
+            {isExerciseMeaningConfirmation ? (
+              <div className={styles.interpreterMessage}>
+                <p>This is an exercise entry.</p>
+                <p>Saving exercise entries is not available in this preview yet.</p>
+              </div>
+            ) : isGenericMessageOffer ? (
+              <div className={styles.interpreterMessage}>
+                <p>{answerText}</p>
+                <p>{messageOfferGuidance}</p>
+              </div>
+            ) : !canSend && !isClarificationAnswer ? (
+              <p className={styles.interpreterMessage}>{modal.answer.answer}</p>
+            ) : null}
+            {diagnosticLine ? (
+              <p className={styles.receiverTraceDiagnostic}>{diagnosticLine}</p>
+            ) : null}
+            {isClarificationAnswer ? (
+              <>
+                {clarificationInputPanel}
+                <div className={`${styles.universalAskActions} ${styles.askAnswerActions} ${styles.applianceAskAnswerActions}`}>
+                  <button
+                    className={styles.modalButton}
+                    disabled={!clarificationReady}
+                    type="button"
+                    onClick={() => submitInlineClarification(modal.answer)}
+                  >
+                    {clarificationPrimaryLabel}
+                  </button>
+                  <button
+                    className={`${styles.modalButton} ${styles.secondary}`}
+                    type="button"
+                    onClick={() => openAskRecovery(modal.answer.question)}
+                  >
+                    This wasn&apos;t helpful
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className={styles.appliancePageControls} aria-label="Asked text page controls">
+                  <button
+                    className={`${styles.modalButton} ${styles.secondary}`}
+                    disabled={currentAskedPage === 0}
+                    type="button"
+                    onClick={() =>
+                      onSetModal({
+                        ...modal,
+                        page: Math.max(0, currentAskedPage - 1),
+                      })
+                    }
+                  >
+                    ◀
+                  </button>
+                  <span>
+                    {currentAskedPage + 1} / {askedPageCount}
+                  </span>
+                  <button
+                    className={`${styles.modalButton} ${styles.secondary}`}
+                    disabled={currentAskedPage >= askedPageCount - 1}
+                    type="button"
+                    onClick={() =>
+                      onSetModal({
+                        ...modal,
+                        page: Math.min(askedPageCount - 1, currentAskedPage + 1),
+                      })
+                    }
+                  >
+                    ▶
+                  </button>
+                </div>
+                <div className={`${styles.universalAskActions} ${styles.askAnswerActions} ${styles.applianceAskAnswerActions}`}>
+                  <button
+                    className={styles.modalButton}
+                    type="button"
+                    onClick={() => {
+                      if (canSend) {
+                        onAttemptEvent("send_selected", {
+                          recipient: recipient.displayName,
+                          responseType: modal.answer.type,
+                        });
+                        markAskAnswerHelpful(modal.answer, true);
+                        onSendContact(recipient, modal.answer.messageBody);
+                        return;
+                      }
+                      markAskAnswerHelpful(modal.answer);
+                      onClose();
+                    }}
+                  >
+                    {modal.answer.actionLabel}
+                  </button>
+                  <button
+                    className={`${styles.modalButton} ${styles.secondary}`}
+                    type="button"
+                    onClick={() => openAskRecovery(modal.answer.question)}
+                  >
+                    This wasn&apos;t helpful
+                  </button>
+                </div>
+              </>
+            )}
           </section>
         </div>
       );
@@ -7294,95 +10893,150 @@ function ReceiverModal({
         <section className={`${styles.modalPanel} ${styles.askAnswerPanel}`}>
           <div className={styles.modalTitleRow}>
             <h2 id="ask-answer-title">You Asked</h2>
-            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => closeAskAttempt()}>
               Go Home
             </button>
           </div>
           <p className={`${styles.askedText} ${styles.askAnswerText} ${textSizeClass}`}>
             {askedPages[currentAskedPage] || modal.answer.question}
           </p>
-          {!canSend ? <p className={styles.interpreterMessage}>{modal.answer.answer}</p> : null}
-          <div className={`${styles.universalAskActions} ${styles.askAnswerActions}`}>
-            <button
-              className={styles.modalButton}
-              type="button"
-              onClick={() => {
-                if (canSend) {
-                  onSendContact(recipient, modal.answer.messageBody);
-                  return;
-                }
-                onClose();
-              }}
-            >
-              {modal.answer.actionLabel}
-            </button>
-            <button
-              className={`${styles.modalButton} ${styles.secondary}`}
-              type="button"
-              onClick={() => onSetModal({ type: "askRecovery", question: modal.answer.question })}
-            >
-              This wasn&apos;t helpful
-            </button>
-          </div>
-          <div className={styles.askAnswerReaderControls}>
-            <button
-              className={`${styles.modalButton} ${styles.secondary}`}
-              disabled={currentAskedPage === 0}
-              type="button"
-              onClick={() =>
-                onSetModal({
-                  ...modal,
-                  page: Math.max(0, currentAskedPage - 1),
-                })
-              }
-            >
-              ◀
-            </button>
-            <div className={styles.askAnswerSizeRow} aria-label="Text size">
-              {[
-                ["standard", "standard"],
-                ["large", "large"],
-                ["extra", "x-large"],
-              ].map(([value, label]) => {
-                const selected = messageTextSize === value;
-                return (
-                  <button
-                    className={`${styles.readerSizeButton} ${selected ? styles.readerSizeButtonSelected : ""}`}
-                    key={value}
-                    type="button"
-                    onClick={() => {
-                      onMessageTextSizeChange(value as ReaderTextSize);
-                      onSetModal({ ...modal, page: 0 });
-                    }}
-                  >
-                    {selected ? label.toUpperCase() : label}
-                  </button>
-                );
-              })}
+          {isExerciseMeaningConfirmation ? (
+            <div className={styles.interpreterMessage}>
+              <p>This is an exercise entry.</p>
+              <p>Saving exercise entries is not available in this preview yet.</p>
             </div>
-            <span className={styles.askAnswerPageIndicator}>
-              {currentAskedPage + 1} / {askedPageCount}
-            </span>
-            <button
-              className={`${styles.modalButton} ${styles.secondary}`}
-              disabled={currentAskedPage >= askedPageCount - 1}
-              type="button"
-              onClick={() =>
-                onSetModal({
-                  ...modal,
-                  page: Math.min(askedPageCount - 1, currentAskedPage + 1),
-                })
-              }
-            >
-              ▶
-            </button>
-          </div>
+          ) : isGenericMessageOffer ? (
+            <div className={styles.interpreterMessage}>
+              <p>{answerText}</p>
+              <p>{messageOfferGuidance}</p>
+            </div>
+          ) : !canSend && !isClarificationAnswer ? (
+            <p className={styles.interpreterMessage}>{modal.answer.answer}</p>
+          ) : null}
+          {diagnosticLine ? (
+            <p className={styles.receiverTraceDiagnostic}>{diagnosticLine}</p>
+          ) : null}
+          {isClarificationAnswer ? (
+            <>
+              {clarificationInputPanel}
+              <div className={`${styles.universalAskActions} ${styles.askAnswerActions}`}>
+                <button
+                  className={styles.modalButton}
+                  disabled={!clarificationReady}
+                  type="button"
+                  onClick={() => submitInlineClarification(modal.answer)}
+                  >
+                  {clarificationPrimaryLabel}
+                </button>
+                <button
+                  className={`${styles.modalButton} ${styles.secondary}`}
+                  type="button"
+                  onClick={() => openAskRecovery(modal.answer.question)}
+                >
+                  This wasn&apos;t helpful
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={`${styles.universalAskActions} ${styles.askAnswerActions}`}>
+                <button
+                  className={styles.modalButton}
+                  type="button"
+                  onClick={() => {
+                    if (canSend) {
+                      onAttemptEvent("send_selected", {
+                        recipient: recipient.displayName,
+                        responseType: modal.answer.type,
+                      });
+                      markAskAnswerHelpful(modal.answer, true);
+                      onSendContact(recipient, modal.answer.messageBody);
+                      return;
+                    }
+                    markAskAnswerHelpful(modal.answer);
+                    onClose();
+                  }}
+                >
+                  {modal.answer.actionLabel}
+                </button>
+                <button
+                  className={`${styles.modalButton} ${styles.secondary}`}
+                  type="button"
+                  onClick={() => openAskRecovery(modal.answer.question)}
+                >
+                  This wasn&apos;t helpful
+                </button>
+              </div>
+              <div className={styles.askAnswerReaderControls}>
+                <button
+                  className={`${styles.modalButton} ${styles.secondary}`}
+                  disabled={currentAskedPage === 0}
+                  type="button"
+                  onClick={() =>
+                    onSetModal({
+                      ...modal,
+                      page: Math.max(0, currentAskedPage - 1),
+                    })
+                  }
+                >
+                  ◀
+                </button>
+                <div className={styles.askAnswerSizeRow} aria-label="Text size">
+                  {[
+                    ["standard", "standard"],
+                    ["large", "large"],
+                    ["extra", "x-large"],
+                  ].map(([value, label]) => {
+                    const selected = messageTextSize === value;
+                    return (
+                      <button
+                        className={`${styles.readerSizeButton} ${selected ? styles.readerSizeButtonSelected : ""}`}
+                        key={value}
+                        type="button"
+                        onClick={() => {
+                          onMessageTextSizeChange(value as ReaderTextSize);
+                          onSetModal({ ...modal, page: 0 });
+                        }}
+                      >
+                        {selected ? label.toUpperCase() : label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <span className={styles.askAnswerPageIndicator}>
+                  {currentAskedPage + 1} / {askedPageCount}
+                </span>
+                <button
+                  className={`${styles.modalButton} ${styles.secondary}`}
+                  disabled={currentAskedPage >= askedPageCount - 1}
+                  type="button"
+                  onClick={() =>
+                    onSetModal({
+                      ...modal,
+                      page: Math.min(askedPageCount - 1, currentAskedPage + 1),
+                    })
+                  }
+                >
+                  ▶
+                </button>
+              </div>
+            </>
+          )}
         </section>
       </div>
     );
   }
 
   if (modal.type === "askRecovery") {
+    const recoveryPrompt = modal.recoveryPrompt || askRecoveryPrompts[0];
+    const recoveryContactName =
+      contacts[0]?.displayName || fallbackPrimaryCoordinatorDisplayName;
+    const isGenericAwarenessRecovery = /\b(?:someone|somebody)\s+(?:ought\s+to|needs?|should)\s+(?:to\s+)?(?:hear|know|be told)\b/i.test(
+      modal.question
+    );
+    const recoveryDisplayPrompt = isGenericAwarenessRecovery
+      ? `This can be sent to ${recoveryContactName} now, or you can say something else instead.`
+      : recoveryPrompt;
     const recoveryPages = paginateReaderText(modal.question, messageTextSize);
     const recoveryPageCount = recoveryPages.length;
     const currentRecoveryPage = Math.min(
@@ -7395,6 +11049,42 @@ function ReceiverModal({
         : messageTextSize === "extra"
           ? styles.readerTextExtra
           : styles.readerTextLarge;
+    const diagnosticLine = receiverDiagnosticMode
+      ? "Observation receiver -> MeaningFrame -> ReceiverAskInterpreter -> Recovery"
+      : "";
+
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="recovery-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernReaderPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>You Asked</span>
+                <h2 id="recovery-title">What would you like to do?</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                Home
+              </button>
+            </div>
+            <div className={styles.modernScrollableContent}>
+              <p className={styles.modernAskedText}>{modal.question}</p>
+              <p className={styles.modernReaderText}>{recoveryDisplayPrompt}</p>
+              {diagnosticLine ? (
+                <p className={styles.receiverTraceDiagnostic}>{diagnosticLine}</p>
+              ) : null}
+            </div>
+            <div className={styles.modernActionRow}>
+              <button className={styles.modernSecondaryButton} type="button" onClick={() => rephraseAsk(modal.question)}>
+                I&apos;ll rephrase it
+              </button>
+              <button className={styles.modernPrimaryButton} type="button" onClick={() => sendAskRecovery(modal.question)}>
+                Send this to {recoveryContactName}
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
 
     if (applianceMode) {
       return (
@@ -7424,13 +11114,16 @@ function ReceiverModal({
                   );
                 })}
               </div>
-              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => closeAskAttempt("recovery_home")}>
                 Go Home
               </button>
             </div>
             <p className={`${styles.askedText} ${styles.askAnswerText} ${styles.applianceAskAnswerText} ${textSizeClass}`}>
               {recoveryPages[currentRecoveryPage] || modal.question}
             </p>
+            {diagnosticLine ? (
+              <p className={styles.receiverTraceDiagnostic}>{diagnosticLine}</p>
+            ) : null}
             <div className={styles.appliancePageControls} aria-label="Asked text page controls">
               <button
                 className={`${styles.modalButton} ${styles.secondary}`}
@@ -7463,14 +11156,14 @@ function ReceiverModal({
               </button>
             </div>
             <p className={`${styles.interpreterMessage} ${styles.applianceRecoveryPrompt}`}>
-              I didn&apos;t quite understand. What would you like to do?
+              {recoveryDisplayPrompt}
             </p>
             <div className={`${styles.universalAskActions} ${styles.askAnswerActions} ${styles.applianceAskAnswerActions}`}>
-              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => onRetryAsk(modal.question)}>
+              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => rephraseAsk(modal.question)}>
                 I&apos;ll try rephrasing it
               </button>
-              <button className={styles.modalButton} type="button" onClick={() => onEscalateAskRecovery(modal.question)}>
-                Send this to Andrew
+              <button className={styles.modalButton} type="button" onClick={() => sendAskRecovery(modal.question)}>
+                Send this to {recoveryContactName}
               </button>
             </div>
           </section>
@@ -7483,13 +11176,16 @@ function ReceiverModal({
         <section className={`${styles.modalPanel} ${styles.askAnswerPanel}`}>
           <div className={styles.modalTitleRow}>
             <h2 id="recovery-title">You Asked</h2>
-            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => closeAskAttempt("recovery_home")}>
               Go Home
             </button>
           </div>
           <p className={`${styles.askedText} ${styles.askAnswerText} ${textSizeClass}`}>
             {recoveryPages[currentRecoveryPage] || modal.question}
           </p>
+          {diagnosticLine ? (
+            <p className={styles.receiverTraceDiagnostic}>{diagnosticLine}</p>
+          ) : null}
           <div className={styles.askAnswerReaderControls}>
             <button
               className={`${styles.modalButton} ${styles.secondary}`}
@@ -7543,13 +11239,13 @@ function ReceiverModal({
               ▶
             </button>
           </div>
-          <p className={styles.interpreterMessage}>I didn&apos;t quite understand. What would you like to do?</p>
+          <p className={styles.interpreterMessage}>{recoveryDisplayPrompt}</p>
           <div className={`${styles.universalAskActions} ${styles.askAnswerActions}`}>
-            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => onRetryAsk(modal.question)}>
+            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => rephraseAsk(modal.question)}>
               I&apos;ll try rephrasing it
             </button>
-            <button className={styles.modalButton} type="button" onClick={() => onEscalateAskRecovery(modal.question)}>
-              Send this to Andrew
+            <button className={styles.modalButton} type="button" onClick={() => sendAskRecovery(modal.question)}>
+              Send this to {recoveryContactName}
             </button>
           </div>
         </section>
@@ -7599,6 +11295,86 @@ function ReceiverModal({
     const approvedDraftReady = summaryDraftText.trim().length > 0;
     if (!captionsOpen && !summaryOpen) {
       return null;
+    }
+
+    if (modernPresentation) {
+      return (
+        <div
+          className={`${styles.modal} ${styles.modernModal}`}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={summaryOpen ? "call-summary-title" : "call-captions-title"}
+        >
+          <section className={`${styles.modernModalPanel} ${styles.modernReaderPanel} ${summaryOpen ? styles.modernCallSummaryPanel : ""}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Call</span>
+                <h2 id={summaryOpen ? "call-summary-title" : "call-captions-title"}>
+                  {summaryOpen ? "Call Summary" : "Closed Captioning"}
+                </h2>
+              </div>
+              <button
+                className={styles.modernSecondaryButton}
+                type="button"
+                onClick={() => {
+                  if (
+                    summaryOpen &&
+                    modal.summaryApproval !== "approved" &&
+                    modal.callId &&
+                    summaryDraftText !== String(modal.summaryDraftSavedText || "")
+                  ) {
+                    void onSaveCallSummaryDraft(modal.callId, summaryDraftText);
+                  }
+                  onSetModal(summaryOpen ? null : { ...modal, textView: undefined });
+                }}
+              >
+                {summaryOpen ? "Home" : "Close"}
+              </button>
+            </div>
+            <div className={`${styles.modernScrollableContent} ${summaryOpen ? styles.modernCallSummaryContent : ""}`}>
+              {summaryOpen ? (
+                <>
+                  {summaryStatusNotice ? <p className={styles.modernHelperText}>{summaryStatusNotice}</p> : null}
+                  {modal.summaryApproval !== "approved" ? (
+                    <textarea
+                      className={`${styles.modernRequestInput} ${styles.modernCallSummaryInput}`}
+                      placeholder={noCareSummaryNeeded ? "Add details about this call" : undefined}
+                      value={summaryDraftText}
+                      onChange={(event) =>
+                        onSetModal({
+                          ...modal,
+                          summaryDraft: event.target.value,
+                        })
+                      }
+                    />
+                  ) : (
+                    <p className={styles.modernReaderText}>{callSummaryText}</p>
+                  )}
+                </>
+              ) : (
+                <p className={styles.modernReaderText}>{callTranscriptText}</p>
+              )}
+            </div>
+            {summaryOpen ? (
+              <div className={styles.modernActionRow}>
+                <button
+                  className={styles.modernPrimaryButton}
+                  disabled={
+                    modal.summaryApproval === "approved" ||
+                    (!approvedDraftReady && !noCareSummaryNeeded)
+                  }
+                  type="button"
+                  onClick={() => {
+                    void onApproveCallSummary(modal.callId, summaryDraftText);
+                  }}
+                >
+                  {modal.summaryApproval === "approved" ? "Approved" : "Approve this version"}
+                </button>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      );
     }
 
     return (
@@ -7713,6 +11489,25 @@ function ReceiverModal({
   }
 
   if (modal.type === "appointmentsLoading") {
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="appointments-loading-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernCompactPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Appointments</span>
+                <h2 id="appointments-loading-title">Looking for appointments</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                Home
+              </button>
+            </div>
+            <p className={styles.modernReaderText}>Looking for your appointments.</p>
+          </section>
+        </div>
+      );
+    }
+
     if (applianceMode) {
       return (
         <div className={`${styles.modal} ${styles.applianceFullscreenModal}`} role="dialog" aria-modal="true" aria-labelledby="appointments-loading-title">
@@ -7745,6 +11540,25 @@ function ReceiverModal({
   }
 
   if (modal.type === "appointmentsEmpty") {
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="appointments-empty-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernCompactPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Appointments</span>
+                <h2 id="appointments-empty-title">No upcoming appointments</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                Home
+              </button>
+            </div>
+            <p className={styles.modernReaderText}>No upcoming appointments were found.</p>
+          </section>
+        </div>
+      );
+    }
+
     if (applianceMode) {
       return (
         <div className={`${styles.modal} ${styles.applianceFullscreenModal}`} role="dialog" aria-modal="true" aria-labelledby="appointments-empty-title">
@@ -7799,6 +11613,48 @@ function ReceiverModal({
     const cacheNotice = modal.cachedAt
       ? `Last updated ${formatReceiverCacheTimestamp(modal.cachedAt)}`
       : "";
+
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="appointments-list-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernAllMessagesPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Appointments</span>
+                <h2 id="appointments-list-title">Upcoming appointments</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                Home
+              </button>
+            </div>
+            {cacheNotice ? <p className={styles.modernHelperText}>{cacheNotice}</p> : null}
+            <div className={styles.modernScrollableContent}>
+              <div className={styles.modernMessageList}>
+                {modal.appointments.map((appointment) => (
+                  <button
+                    className={styles.modernMessageRow}
+                    key={appointment.id}
+                    type="button"
+                    onClick={() =>
+                      onSetModal({
+                        type: "appointmentDetail",
+                        appointment,
+                        appointments: modal.appointments,
+                        cachedAt: modal.cachedAt,
+                        page: 0,
+                      })
+                    }
+                  >
+                    <strong>{appointment.title || "Appointment"}</strong>
+                    <span>{appointmentDateTimeLabel(appointment)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      );
+    }
 
     if (applianceMode) {
       return (
@@ -7951,6 +11807,66 @@ function ReceiverModal({
       ? `Last updated ${formatReceiverCacheTimestamp(modal.cachedAt)}`
       : "";
 
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="appointment-detail-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernReaderPanel} ${styles.modernAppointmentDetailPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Appointment</span>
+                <h2 id="appointment-detail-title">{modal.appointment.title || "Appointment"}</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                Home
+              </button>
+            </div>
+            <div className={styles.modernScrollableContent}>
+              {cacheNotice ? <p className={styles.modernHelperText}>{cacheNotice}</p> : null}
+              <div className={styles.modernDetailStack}>
+                <strong>{appointmentDateTimeLabel(modal.appointment)}</strong>
+                {appointmentSubtitle(modal.appointment) ? <p>{appointmentSubtitle(modal.appointment)}</p> : null}
+                {modal.appointment.locationName ? <p>{modal.appointment.locationName}</p> : null}
+                {modal.appointment.reason ? <p>{modal.appointment.reason}</p> : null}
+              </div>
+            </div>
+            <div className={styles.modernActionRow}>
+              {hasAddress ? (
+                <button
+                  className={styles.modernPrimaryButton}
+                  type="button"
+                  onClick={() =>
+                    onSetModal({
+                      type: "appointmentAddress",
+                      appointment: modal.appointment,
+                      appointments: modal.appointments,
+                      cachedAt: modal.cachedAt,
+                      page: modal.page,
+                    })
+                  }
+                >
+                  Where is it?
+                </button>
+              ) : null}
+              <button
+                className={styles.modernSecondaryButton}
+                type="button"
+                onClick={() =>
+                  onSetModal({
+                    type: "appointmentsList",
+                    appointments: modal.appointments,
+                    cachedAt: modal.cachedAt,
+                    page: modal.page,
+                  })
+                }
+              >
+                More Appointments
+              </button>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     if (applianceMode) {
       return (
         <div className={`${styles.modal} ${styles.applianceFullscreenModal}`} role="dialog" aria-modal="true" aria-labelledby="appointment-detail-title">
@@ -8051,6 +11967,45 @@ function ReceiverModal({
       ? `Last updated ${formatReceiverCacheTimestamp(modal.cachedAt)}`
       : "";
 
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="appointment-address-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernReaderPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Appointment</span>
+                <h2 id="appointment-address-title">Where is it?</h2>
+              </div>
+              <button
+                className={styles.modernSecondaryButton}
+                type="button"
+                onClick={() =>
+                  onSetModal({
+                    type: "appointmentDetail",
+                    appointment: modal.appointment,
+                    appointments: modal.appointments,
+                    cachedAt: modal.cachedAt,
+                    page: modal.page,
+                  })
+                }
+              >
+                Back
+              </button>
+            </div>
+            <div className={styles.modernScrollableContent}>
+              {cacheNotice ? <p className={styles.modernHelperText}>{cacheNotice}</p> : null}
+              <p className={styles.modernReaderText}>
+                {modal.appointment.locationAddress || "No address is saved for this appointment."}
+              </p>
+              {modal.appointment.locationPhone ? (
+                <p className={styles.modernHelperText}>{modal.appointment.locationPhone}</p>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     return (
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="appointment-address-title">
         <section className={styles.modalPanel}>
@@ -8096,6 +12051,162 @@ function ReceiverModal({
       enable_sounds: "Turn Optional Sounds On",
       set_volume_high: "Set Volume High",
     };
+
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="sound-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernReaderPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Sound</span>
+                <h2 id="sound-title">{modal.view === "help" ? "Test Sounds" : "Optional Sounds"}</h2>
+              </div>
+              <div className={styles.modernActionRow}>
+                {modal.view === "help" ? (
+                  <button
+                    className={styles.modernSecondaryButton}
+                    type="button"
+                    onClick={() => {
+                      onResetSoundTestState();
+                      onSetModal({ type: "soundSettings", view: "settings" });
+                    }}
+                  >
+                    Back
+                  </button>
+                ) : null}
+                <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                  Home
+                </button>
+              </div>
+            </div>
+            <div className={styles.modernScrollableContent}>
+              {modal.view === "settings" ? (
+                <div className={styles.modernDetailStack}>
+                  <p>These sounds give helpful feedback but are not required.</p>
+                  <div className={styles.soundToggleGrid}>
+                    <SoundToggleRow
+                      label="Retro Sounds"
+                      onToggle={(value) => onUpdateSoundSetting("retroSounds", value)}
+                      value={soundSettings.retroSounds}
+                    />
+                    <SoundToggleRow
+                      label="Retro Ringers"
+                      onToggle={(value) => onUpdateSoundSetting("retroRingers", value)}
+                      value={soundSettings.retroRingers}
+                    />
+                    <SoundToggleRow
+                      label="Button Beeps"
+                      onToggle={(value) => onUpdateSoundSetting("buttonBeeps", value)}
+                      value={soundSettings.buttonBeeps}
+                    />
+                  </div>
+                  {showVolumeControls ? (
+                    <div className={styles.soundSettingGroup}>
+                      <strong>Volume</strong>
+                      <div className={`${styles.soundChoiceRow} ${styles.soundVolumeRow}`}>
+                        {(["low", "med", "high"] as const).map((value) => (
+                          <button
+                            className={`${styles.soundChoice} ${
+                              soundSettings.comfortVolume === value ? styles.soundChoiceSelected : ""
+                            }`}
+                            key={value}
+                            type="button"
+                            onClick={() => onUpdateSoundSetting("comfortVolume", value)}
+                          >
+                            {soundSettings.comfortVolume === value ? value.toUpperCase() : value}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className={styles.modernDetailStack}>
+                  <ul className={styles.soundHelpPanel}>
+                    <li>Button beeps and retro sounds are optional.</li>
+                    <li>Speech can work even if these sounds are quiet.</li>
+                    <li>Use device volume buttons while this screen is open.</li>
+                  </ul>
+                  {soundDiagnostic ? <p className={styles.diagnosticText}>{soundDiagnostic}</p> : null}
+                  <div className={styles.soundProblemChoices}>
+                    {soundProblemOptions.map(({ label, problem }) => (
+                      <button
+                        className={`${styles.soundChoice} ${styles.soundProblemChoice} ${
+                          selectedSoundProblem === problem ? styles.soundProblemChoiceSelected : ""
+                        }`}
+                        key={label}
+                        type="button"
+                        onClick={() => onReportSoundProblem(problem)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {soundHelp ? (
+                    <section className={styles.soundHelpRecipe} aria-live="polite">
+                      <h3>{soundHelp.title}</h3>
+                      <ol>
+                        {soundHelp.steps.map((step) => (
+                          <li key={step}>{step}</li>
+                        ))}
+                      </ol>
+                      {soundHelp.actions?.length ? (
+                        <div className={styles.soundHelpActions}>
+                          {soundHelp.actions.map((action) => (
+                            <button
+                              className={`${styles.soundChoice} ${styles.soundChoiceSelected}`}
+                              key={action}
+                              type="button"
+                              onClick={() => onApplySoundHelpAction(action)}
+                            >
+                              {soundActionLabels[action]}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : null}
+                  <dl className={styles.soundContext}>
+                    <div>
+                      <dt>Device</dt>
+                      <dd>{detectedDeviceType()}</dd>
+                    </div>
+                    <div>
+                      <dt>Browser</dt>
+                      <dd>{detectedBrowserLabel()}</dd>
+                    </div>
+                    <div>
+                      <dt>App mode</dt>
+                      <dd>{detectedAppMode()}</dd>
+                    </div>
+                    <div>
+                      <dt>Last test</dt>
+                      <dd>{lastSoundTestResult}</dd>
+                    </div>
+                  </dl>
+                </div>
+              )}
+            </div>
+            <div className={styles.modernActionRow}>
+              {modal.view === "settings" ? (
+                <button className={styles.modernPrimaryButton} type="button" onClick={() => onSetModal({ type: "soundSettings", view: "help" })}>
+                  Fix Sounds
+                </button>
+              ) : (
+                <>
+                  <button className={styles.modernPrimaryButton} data-receiver-no-beep="true" type="button" onClick={onTestSound}>
+                    Run Test
+                  </button>
+                  <button className={styles.modernSecondaryButton} type="button" onClick={onResolveSoundHelp}>
+                    This Fixed It
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      );
+    }
 
     return (
       <div
@@ -8326,10 +12437,94 @@ function ReceiverModal({
         ? "When opened, messages will play sound automatically."
         : "When opened, messages will not play sound automatically.";
     const readerReturnsToAllMessages = modal.returnTo === "allMessages";
+    const messageAcknowledged = Boolean(modal.message.acknowledgedAt);
+    const callbackRequested = Boolean(modal.message.callbackRequestedAt);
+    const showCallbackRequest =
+      modal.message.allowsCallbackRequest !== false && !callbackRequested;
+    const messageActionDisabled = !receiverOnline;
+    const closeReader = () => {
+      if (readerReturnsToAllMessages) {
+        onSetModal({ type: "allMessages", page: modal.returnPage ?? 0 });
+        return;
+      }
+      onClose();
+    };
+
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="reader-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernReaderPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Message</span>
+                <h2 id="reader-title">{messageHeader(modal.message)}</h2>
+              </div>
+              <button
+                className={styles.modernSecondaryButton}
+                type="button"
+                onClick={onClose}
+              >
+                Home
+              </button>
+            </div>
+            <div className={styles.modernScrollableContent}>
+              <p className={styles.modernReaderText}>{messageText(modal.message)}</p>
+            </div>
+            <div className={styles.modernActionRow}>
+              <button
+                className={styles.modernPrimaryButton}
+                disabled={!messageAcknowledged && messageActionDisabled}
+                type="button"
+                onClick={() => {
+                  if (messageAcknowledged) {
+                    closeReader();
+                    return;
+                  }
+                  onAcknowledgeMessage(modal.message);
+                }}
+              >
+                {messageAcknowledged ? (readerReturnsToAllMessages ? "Back" : "Done") : "OK"}
+              </button>
+              {hasAudio ? (
+                <button
+                  className={styles.modernSecondaryButton}
+                  type="button"
+                  onClick={() => {
+                    setPlayedMessageIds((current) => ({ ...current, [modal.message.id]: true }));
+                    void onPlayMessage(modal.message, "default", !isPlayingMessage);
+                  }}
+                >
+                  {playLabel}
+                </button>
+              ) : null}
+              {showCallbackRequest ? (
+                <button
+                  className={styles.modernSecondaryButton}
+                  disabled={messageActionDisabled}
+                  type="button"
+                  onClick={() => onCallBackForMessage(modal.message)}
+                >
+                  Call Back
+                </button>
+              ) : null}
+              {callbackRequested ? <span className={styles.modernStatusPill}>Callback requested</span> : null}
+            </div>
+            {messageActionDisabled ? (
+              <p className={styles.modernHelperText}>Internet is needed to send OK or request a callback.</p>
+            ) : null}
+          </section>
+        </div>
+      );
+    }
 
     return (
-      <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="reader-title">
-        <section className={`${styles.modalPanel} ${styles.readerPanel}`}>
+      <div
+        className={`${styles.modal} ${applianceMode ? styles.applianceFullscreenModal : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reader-title"
+      >
+        <section className={`${styles.modalPanel} ${styles.readerPanel} ${applianceMode ? styles.applianceReaderPanel : ""}`}>
           <div className={styles.modalTitleRow}>
             <h2 className={styles.readerTitle} id="reader-title">
               {messageHeader(modal.message)}
@@ -8337,71 +12532,13 @@ function ReceiverModal({
             <button
               className={`${styles.modalButton} ${styles.secondary}`}
               type="button"
-              onClick={() => {
-                if (readerReturnsToAllMessages) {
-                  onSetModal({ type: "allMessages", page: modal.returnPage ?? 0 });
-                  return;
-                }
-                onClose();
-              }}
+              onClick={onClose}
             >
-              {readerReturnsToAllMessages ? "Go Back" : "Go Home"}
+              Go Home
             </button>
           </div>
           <div className={styles.messageBodySlot}>
-            <div className={styles.readerSizeRow} aria-label="Message text size">
-              {[
-                ["standard", "Standard"],
-                ["large", "Large"],
-                ["extra", "Extra Large"],
-              ].map(([value, label]) => {
-                const selected = messageTextSize === value;
-                return (
-                  <button
-                    className={`${styles.readerSizeButton} ${selected ? styles.readerSizeButtonSelected : ""}`}
-                    key={value}
-                    type="button"
-                    onClick={() => onMessageTextSizeChange(value as ReaderTextSize)}
-                  >
-                    {selected ? label.toUpperCase() : label}
-                  </button>
-                );
-              })}
-            </div>
             <p className={`${styles.readerText} ${textSizeClass}`}>{readerPages[readerPage]}</p>
-            {hasReaderPaging ? (
-              <div className={styles.readerPageControls} aria-label="Message page controls">
-                <button
-                  className={`${styles.modalButton} ${styles.secondary}`}
-                  disabled={readerPage === 0}
-                  type="button"
-                  onClick={() =>
-                    setReaderPageState({
-                      index: Math.max(0, readerPage - 1),
-                      key: readerPageKey,
-                    })
-                  }
-                >
-                  ◀
-                </button>
-                <span>
-                  {readerPage + 1} / {readerPages.length}
-                </span>
-                <button
-                  className={`${styles.modalButton} ${styles.secondary}`}
-                  disabled={readerPage >= readerPages.length - 1}
-                  type="button"
-                  onClick={() =>
-                    setReaderPageState({
-                      index: Math.min(readerPages.length - 1, readerPage + 1),
-                      key: readerPageKey,
-                    })
-                  }
-                >
-                  ▶
-                </button>
-              </div>
-            ) : null}
             {hearingFeedbackStep ? (
               <div className={styles.messageFeedbackOverlay}>
                 {hearingFeedbackStep === "choice" ? (
@@ -8493,27 +12630,116 @@ function ReceiverModal({
               </div>
             ) : null}
           </div>
-          <div className={styles.messageDetailActions}>
-            {hasAudio ? (
+          <div className={styles.messageDetailFooter}>
+            <div className={styles.messageDetailActions}>
               <button
-                className={`${styles.modalButton} ${isPlayingMessage ? styles.stopPlaybackAction : styles.blue}`}
+                className={`${styles.modalButton} ${styles.blue}`}
+                disabled={!messageAcknowledged && messageActionDisabled}
                 type="button"
                 onClick={() => {
-                  setPlayedMessageIds((current) => ({ ...current, [modal.message.id]: true }));
-                  void onPlayMessage(modal.message, "default", !isPlayingMessage);
+                  if (messageAcknowledged) {
+                    closeReader();
+                    return;
+                  }
+                  onAcknowledgeMessage(modal.message);
                 }}
               >
-                {playLabel}
+                {messageAcknowledged ? (readerReturnsToAllMessages ? "Back" : "Done") : "OK"}
               </button>
-            ) : null}
-            <button
-              className={`${styles.modalButton} ${styles.callBackAction}`}
-              type="button"
-              onClick={() => onCallBackForMessage(modal.message)}
-            >
-              Call Back
-            </button>
+              {hasAudio ? (
+                <button
+                  className={`${styles.modalButton} ${isPlayingMessage ? styles.stopPlaybackAction : styles.blue}`}
+                  type="button"
+                  onClick={() => {
+                    setPlayedMessageIds((current) => ({ ...current, [modal.message.id]: true }));
+                    void onPlayMessage(modal.message, "default", !isPlayingMessage);
+                  }}
+                >
+                  {playLabel}
+                </button>
+              ) : null}
+              {showCallbackRequest ? (
+                <button
+                  className={`${styles.modalButton} ${styles.callBackAction}`}
+                  disabled={messageActionDisabled}
+                  type="button"
+                  onClick={() => onCallBackForMessage(modal.message)}
+                >
+                  Call Back
+                </button>
+              ) : null}
+              {callbackRequested ? (
+                <span className={styles.messagePreferenceAction}>
+                  Callback requested
+                </span>
+              ) : null}
+            </div>
+            <div className={styles.readerCompactPageControls} aria-label="Message page controls">
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                disabled={!hasReaderPaging || readerPage === 0}
+                type="button"
+                onClick={() =>
+                  setReaderPageState({
+                    index: Math.max(0, readerPage - 1),
+                    key: readerPageKey,
+                  })
+                }
+              >
+                ◀
+              </button>
+              <span>
+                {readerPage + 1} / {readerPages.length}
+              </span>
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                disabled={!hasReaderPaging || readerPage >= readerPages.length - 1}
+                type="button"
+                onClick={() =>
+                  setReaderPageState({
+                    index: Math.min(readerPages.length - 1, readerPage + 1),
+                    key: readerPageKey,
+                  })
+                }
+              >
+                ▶
+              </button>
+            </div>
+            <div className={styles.readerCompactSizeRow} aria-label="Message text size">
+              {[
+                ["standard", "a", "Standard"],
+                ["large", "A", "Large"],
+                ["extra", "A", "Extra large"],
+              ].map(([value, label, ariaLabel]) => {
+                const selected = messageTextSize === value;
+                const sizeClass =
+                  value === "standard"
+                    ? styles.readerCompactSizeStandard
+                    : value === "extra"
+                      ? styles.readerCompactSizeExtra
+                      : styles.readerCompactSizeLarge;
+                return (
+                  <button
+                    aria-label={ariaLabel}
+                    aria-pressed={selected}
+                    className={`${styles.readerCompactSizeButton} ${sizeClass} ${
+                      selected ? styles.readerCompactSizeButtonSelected : ""
+                    }`}
+                    key={value}
+                    type="button"
+                    onClick={() => onMessageTextSizeChange(value as ReaderTextSize)}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
+          {messageActionDisabled ? (
+            <p className={styles.messagePreferenceAction}>
+              Internet is needed to send OK or request a callback.
+            </p>
+          ) : null}
           {hasAudio ? (
             <button
               className={styles.messagePreferenceAction}
@@ -8550,7 +12776,17 @@ function ReceiverModal({
         : messageTextSize === "extra"
           ? styles.readerTextExtra
           : styles.readerTextLarge;
-    const allMessagesPageSize = messageTextSize === "standard" ? 4 : messageTextSize === "extra" ? 2 : 3;
+    const allMessagesPageSize = applianceMode
+      ? messageTextSize === "standard"
+        ? 2
+        : messageTextSize === "extra"
+          ? 1
+          : 2
+      : messageTextSize === "standard"
+        ? 4
+        : messageTextSize === "extra"
+          ? 2
+          : 3;
     const allMessagesPageCount = Math.max(1, Math.ceil(messages.length / allMessagesPageSize));
     const currentAllMessagesPage = Math.min(Math.max(modal.page, 0), allMessagesPageCount - 1);
     const visibleMessages = messages.slice(
@@ -8558,34 +12794,51 @@ function ReceiverModal({
       currentAllMessagesPage * allMessagesPageSize + allMessagesPageSize
     );
 
+    if (modernPresentation) {
+      return (
+        <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="all-messages-title">
+          <section className={`${styles.modernModalPanel} ${styles.modernAllMessagesPanel}`}>
+            <div className={styles.modernModalHeader}>
+              <div>
+                <span>Messages</span>
+                <h2 id="all-messages-title">All Messages</h2>
+              </div>
+              <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+                Home
+              </button>
+            </div>
+            <div className={styles.modernScrollableContent}>
+              <div className={styles.modernMessageList}>
+                {messages.length ? (
+                  messages.map((message) => (
+                    <button
+                      className={styles.modernMessageRow}
+                      key={message.id}
+                      type="button"
+                      onClick={() => {
+                        onOpenMessageFromAllMessages(message, 0);
+                      }}
+                    >
+                      <strong>{messageHeader(message)}</strong>
+                      <span>{messageText(message)}</span>
+                    </button>
+                  ))
+                ) : (
+                  <p className={styles.modernReaderText}>No messages yet.</p>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     if (applianceMode) {
       return (
         <div className={`${styles.modal} ${styles.applianceFullscreenModal}`} role="dialog" aria-modal="true" aria-labelledby="all-messages-title">
           <section className={`${styles.modalPanel} ${styles.applianceListPanel}`}>
-            <div className={styles.applianceListToolbar}>
+            <div className={`${styles.applianceListToolbar} ${styles.applianceMessagesToolbar}`}>
               <h2 id="all-messages-title">Messages</h2>
-              <div className={styles.applianceReaderSizeRow} aria-label="Message text size">
-                {[
-                  ["standard", "Standard"],
-                  ["large", "Large"],
-                  ["extra", "X-Large"],
-                ].map(([value, label]) => {
-                  const selected = messageTextSize === value;
-                  return (
-                    <button
-                      className={`${styles.readerSizeButton} ${selected ? styles.readerSizeButtonSelected : ""}`}
-                      key={value}
-                      type="button"
-                      onClick={() => onMessageTextSizeChange(value as ReaderTextSize)}
-                    >
-                      {selected ? label.toUpperCase() : label}
-                    </button>
-                  );
-                })}
-              </div>
-              <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
-                Go Home
-              </button>
             </div>
             <div className={`${styles.allMessagesList} ${styles.applianceMessageList} ${listSizeClass}`}>
               {visibleMessages.length ? (
@@ -8606,36 +12859,70 @@ function ReceiverModal({
                 <p className={`${styles.applianceEmptyText} ${emptyTextSizeClass}`}>No messages yet.</p>
               )}
             </div>
-            <div className={styles.appliancePageControls} aria-label="All messages page controls">
-              <button
-                className={`${styles.modalButton} ${styles.secondary}`}
-                disabled={currentAllMessagesPage === 0}
-                type="button"
-                onClick={() =>
-                  onSetModal({
-                    type: "allMessages",
-                    page: Math.max(0, currentAllMessagesPage - 1),
-                  })
-                }
-              >
-                ◀
+            <div className={styles.applianceMessagesFooter}>
+              <button className={`${styles.modalButton} ${styles.blue}`} type="button" onClick={onClose}>
+                Go Home
               </button>
-              <span>
-                {currentAllMessagesPage + 1} / {allMessagesPageCount}
-              </span>
-              <button
-                className={`${styles.modalButton} ${styles.secondary}`}
-                disabled={currentAllMessagesPage >= allMessagesPageCount - 1}
-                type="button"
-                onClick={() =>
-                  onSetModal({
-                    type: "allMessages",
-                    page: Math.min(allMessagesPageCount - 1, currentAllMessagesPage + 1),
-                  })
-                }
-              >
-                ▶
-              </button>
+              <div className={styles.readerCompactPageControls} aria-label="All messages page controls">
+                <button
+                  className={`${styles.modalButton} ${styles.secondary}`}
+                  disabled={currentAllMessagesPage === 0}
+                  type="button"
+                  onClick={() =>
+                    onSetModal({
+                      type: "allMessages",
+                      page: Math.max(0, currentAllMessagesPage - 1),
+                    })
+                  }
+                >
+                  ◀
+                </button>
+                <span>
+                  {currentAllMessagesPage + 1} / {allMessagesPageCount}
+                </span>
+                <button
+                  className={`${styles.modalButton} ${styles.secondary}`}
+                  disabled={currentAllMessagesPage >= allMessagesPageCount - 1}
+                  type="button"
+                  onClick={() =>
+                    onSetModal({
+                      type: "allMessages",
+                      page: Math.min(allMessagesPageCount - 1, currentAllMessagesPage + 1),
+                    })
+                  }
+                >
+                  ▶
+                </button>
+              </div>
+              <div className={styles.readerCompactSizeRow} aria-label="Message text size">
+                {[
+                  ["standard", "a", "Standard"],
+                  ["large", "A", "Large"],
+                  ["extra", "A", "Extra large"],
+                ].map(([value, label, ariaLabel]) => {
+                  const selected = messageTextSize === value;
+                  const sizeClass =
+                    value === "standard"
+                      ? styles.readerCompactSizeStandard
+                      : value === "extra"
+                        ? styles.readerCompactSizeExtra
+                        : styles.readerCompactSizeLarge;
+                  return (
+                    <button
+                      aria-label={ariaLabel}
+                      aria-pressed={selected}
+                      className={`${styles.readerCompactSizeButton} ${sizeClass} ${
+                        selected ? styles.readerCompactSizeButtonSelected : ""
+                      }`}
+                      key={value}
+                      type="button"
+                      onClick={() => onMessageTextSizeChange(value as ReaderTextSize)}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </section>
         </div>
@@ -8720,6 +13007,25 @@ function ReceiverModal({
               ▶
             </button>
           </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (modernPresentation) {
+    return (
+      <div className={`${styles.modal} ${styles.modernModal}`} role="dialog" aria-modal="true" aria-labelledby="sent-title">
+        <section className={`${styles.modernModalPanel} ${styles.modernCompactPanel}`}>
+          <div className={styles.modernModalHeader}>
+            <div>
+              <span>Sent</span>
+              <h2 id="sent-title">Message Sent</h2>
+            </div>
+            <button className={styles.modernSecondaryButton} type="button" onClick={onClose}>
+              Home
+            </button>
+          </div>
+          <p className={styles.modernReaderText}>Your message was sent to {modal.recipientName}.</p>
         </section>
       </div>
     );

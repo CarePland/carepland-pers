@@ -7,6 +7,7 @@ import {
   mergeConnectMessages,
   summarizeConnectMessages,
 } from "./messageScoping";
+import { groupMessagesByAppointment } from "../messageGrouping";
 import type { ConnectMessageRecord } from "../types";
 
 function message(
@@ -117,5 +118,48 @@ describe("Connect message scoping", () => {
       prototypeMessages: 0,
       total: 0,
     });
+  });
+
+  it("groups messages by appointment with general messages last", () => {
+    const groups = groupMessagesByAppointment([
+      message({
+        appointmentId: "appointment-2",
+        appointmentStartsAt: "2026-07-20T16:00:00.000Z",
+        appointmentTitle: "PT Session",
+        body: "Bring exercise papers",
+        createdAt: "2026-07-12T11:00:00.000Z",
+        id: "pt-older",
+      }),
+      message({
+        body: "Good morning",
+        createdAt: "2026-07-12T12:00:00.000Z",
+        id: "general",
+      }),
+      message({
+        appointmentId: "appointment-1",
+        appointmentStartsAt: "2026-07-18T16:00:00.000Z",
+        appointmentTitle: "Eye Exam",
+        body: "Bring glasses",
+        createdAt: "2026-07-12T10:00:00.000Z",
+        id: "eye-older",
+      }),
+      message({
+        appointmentId: "appointment-1",
+        appointmentStartsAt: "2026-07-18T16:00:00.000Z",
+        appointmentTitle: "Eye Exam",
+        body: "Bring Rx sunglasses",
+        createdAt: "2026-07-12T13:00:00.000Z",
+        id: "eye-newer",
+      }),
+    ]);
+
+    assert.deepEqual(
+      groups.map((group) => group.label),
+      ["Eye Exam", "PT Session", "General"]
+    );
+    assert.deepEqual(
+      groups[0]?.messages.map((item) => item.id),
+      ["eye-newer", "eye-older"]
+    );
   });
 });
