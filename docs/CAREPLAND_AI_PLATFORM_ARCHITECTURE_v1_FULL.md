@@ -16,6 +16,8 @@ Every service accepts structured input.
 Every service emits structured output.
 Every meaningful decision leaves an auditable Decision Trace.
 
+Users express intent; CarePland determines implementation.
+
 The objective is not to make AI appear intelligent.
 
 The objective is to make CarePland understandable, predictable, trustworthy, and extensible.
@@ -39,6 +41,68 @@ Users should not need to translate themselves into software.
 
 Instead, CarePland should translate ordinary caregiving language into structured information.
 
+CarePland should minimize the need for users to understand application structure, organizational
+hierarchy, or implementation details. Users express what they are trying to accomplish; CarePland
+determines the appropriate workflow, routing, and data model while preserving transparency through
+Decision Trace.
+
+## Meaning Over Modality
+
+This is analogous to CarePland's Import Anything paradigm: CarePland should extract meaning from
+inputs and convey meaning through outputs. The method of transmission is relevant only insofar as
+it helps capture or communicate meaning effectively.
+
+CCKL and HKL should normalize meaning, not merely text. Text, speech, OCR, photos, structured
+forms, SMS, voice memos, selected examples, and future wearable signals are edge modalities for
+observing underlying reality. Speech synthesis, text, notifications, emails, dashboards, and future
+surfaces are edge modalities for presenting responses.
+
+Architectural rule:
+
+- Input modality belongs at the capture edge.
+- Output modality belongs at the presentation edge.
+- The core platform should operate on structured meaning.
+
+The canonical direction is:
+
+```
+Input modality
+  │
+  ▼
+Observation
+  │
+  ▼
+Normalized / resolved meaning
+  │
+  ▼
+Interaction family
+  │
+  ▼
+Intent
+  │
+  ▼
+Workflow
+  │
+  ▼
+Structured result
+  │
+  ▼
+Presentation policy
+  │
+  ▼
+Output modality
+```
+
+Preserve source metadata for provenance, audit, accessibility, and presentation decisions, but do
+not allow modality to dictate core meaning or workflow unless the modality itself is materially
+relevant. Do not erase provenance. Do desource core interpretation.
+
+This does not remove modality from the Observation contract. Modality remains useful metadata. The
+goal is to prevent speech, text, OCR, message, example, or future input types from creating separate
+product logic after capture. Likewise, output should not preserve the source format by default:
+choose the output method that best conveys meaning to the recipient, subject to user preferences,
+consent, device capabilities, privacy, and accessibility.
+
 ---
 
 # Platform Constitution
@@ -55,6 +119,10 @@ These principles supersede implementation convenience.
 8. Clients are replaceable; platform services are shared.
 9. Historical reasoning is immutable.
 10. AI modules communicate using structured contracts rather than prose.
+11. User-facing surfaces expose intent, not implementation structure.
+12. Platform layers normalize shared meaning; input and output modalities remain edge adapters.
+13. Preserve source provenance, but desource core interpretation after capture.
+14. Interaction families describe human purpose before workflow selection.
 
 ---
 
@@ -62,6 +130,9 @@ These principles supersede implementation convenience.
 
 ```
 Input Surface
+      │
+      ▼
+Observation
       │
       ▼
 Transcription / Text Capture
@@ -120,10 +191,144 @@ Responsibilities
 
 Provides
 
+- Observation source
+- Modality, such as speech, typed text, example prompt, OCR, message, or document
 - Raw text
-- Transcript
+- Transcript when available
 - Surface context
 - Device metadata
+
+Input surfaces should submit Observations and then stop caring which downstream workflow is chosen. Receiver Ask/Tell, browser Ask, future SMS, phone bridges, facility kiosks, and Import Anything follow-up should share this boundary instead of duplicating routing logic.
+
+## Layer 1.5 – Observation
+
+Purpose
+
+Capture one user thought as the canonical platform input.
+
+Responsibilities
+
+- Preserve the active person/care subject
+- Preserve source, modality, surface, device, and capture metadata
+- Preserve raw text or transcript text
+- Avoid deciding intent or workflow
+- Provide one shared entry point for future AI platform routing
+
+Phase 1 may still hand off to legacy deterministic handlers such as Receiver Talk or local Ask behavior after Observation capture. That handoff is compatibility scaffolding, not a new product layer.
+
+---
+
+## Layer 1.6 – MeaningFrame
+
+Purpose
+
+Represent normalized meaning between Observation and IntentResult.
+
+Responsibilities
+
+- Preserve normalized text or transcript text
+- Preserve provenance from the Observation
+- Carry concept, household, person, contact, and temporal references when available
+- Carry ambiguity, confidence, and Decision Trace fragments when available
+- Avoid deciding intent, workflow, urgency, persistence, or output modality
+
+MeaningFrame is intentionally conservative. It represents CarePland's current normalized
+understanding of an Observation. It is not intended to contain workflow decisions,
+recommendations, or presentation choices. Those belong to later platform stages.
+
+The v1 MeaningFrame is intentionally sparse. Receiver Ask/Tell speech, typed text, and selected
+examples use it before shared deterministic interpreter adapters, but no new AI or expanded intent
+handling is introduced. Speech uses the Receiver Talk interpreter adapter, which wraps the existing
+deterministic Talk rules and preserves current Track write behavior.
+
+---
+
+## Layer 1.7 – Interaction Family
+
+Purpose
+
+Classify the human purpose of an Observation after MeaningFrame and before intent/workflow
+selection.
+
+Interaction Family answers the question: what is the person trying to accomplish?
+
+It must not answer: which API should run, which table should be written, which UI button was used,
+or which final workflow should execute.
+
+Canonical families
+
+| Family | Human purpose |
+| --- | --- |
+| Ask | Help me understand. |
+| Observe | I want you to know something happened. |
+| Need | Something needs attention or acquisition. |
+| Communicate | Someone else needs to know this. |
+| Remind | Help me remember later. |
+| Plan | Help me prepare or organize. |
+| Decide | Help me choose between options. |
+| Discover | Understand something I'm showing you. |
+| Express | Understand how I feel. |
+| Escalate | This needs immediate human attention. |
+
+Responsibilities
+
+- Classify the primary human-purpose family.
+- Preserve optional secondary families for compound utterances.
+- Preserve confidence, ambiguity, and clarification needs.
+- Emit Decision Trace rationale for why the family was chosen.
+- Avoid deciding workflow, persistence, write policy, or presentation.
+
+Examples
+
+- "When is my next appointment?" -> Ask.
+- "I went for a walk." -> Observe.
+- "My knee hurts." -> Observe, with possible Escalate depending on severity and context.
+- "I need milk." -> Need.
+- "Tell Andrew I'll be late." -> Communicate.
+- "Remind me to take my pills." -> Remind.
+- "Help me get ready for tomorrow." -> Plan.
+- "Should I call the doctor?" -> Decide.
+- "What is this letter?" with a document/photo/OCR input -> Discover.
+- "I'm worried about tomorrow." -> Express.
+- "I fell and need help now." -> Escalate.
+
+Architectural notes
+
+Interaction Family is an interpreter output and a workflow-selection input. It is not part of
+MeaningFrame because MeaningFrame should remain a conservative representation of normalized
+meaning, not a workflow-oriented classification. Interaction Family also does not replace
+IntentResult; intent remains the narrower downstream interpretation that can account for resolved
+meaning, family, permissions, workflow availability, device capabilities, and safety policy.
+
+Compound utterances should use primary and secondary families rather than proliferating special
+cases. For example, "I need milk, tell Andrew" may be primary Need with secondary Communicate.
+"Remind me to ask the doctor about my knee" may be primary Remind with secondary Plan or Ask.
+"I fell and need Andrew" may be primary Escalate with secondary Communicate and Observe.
+
+---
+
+## Layer 1.8 - Deterministic Ask Intent
+
+Purpose
+
+Refine Ask-family Receiver utterances into a small deterministic intent category before generic
+recovery.
+
+Responsibilities
+
+- Identify whether an Ask utterance is about appointments, past visit or health history, medication
+  status, household status, item location or status, upcoming plans, person/contact lookup, or a
+  truly unknown question.
+- Extract simple entities and temporal references when they can be found deterministically.
+- Emit Decision Trace details for the Ask intent, capability status, extracted entities, and matched
+  rules.
+- Return explicit `capability_missing` when the question is understood but the required data or
+  workflow is not available.
+
+This layer remains behavior-preserving and deterministic. It does not add prompts, model calls,
+workflow execution, persistence choices, or new user-facing capabilities. Its purpose is to avoid
+treating understood questions as generic recovery while preserving clear diagnostic evidence for
+future platform refinement.
 
 ---
 
@@ -299,6 +504,37 @@ Decision traces are immutable historical artifacts.
 
 ---
 
+## Layer 8 – Interaction Attempts And Platform Review
+
+Interaction Attempts connect Observations, MeaningFrames, Interaction Family classifications,
+Decision Traces, presented responses, user recovery actions, revisions, and final outcomes into
+one inspectable chain.
+
+They answer:
+
+What was the user trying to accomplish?
+
+How did the interpretation evolve?
+
+How did the user recover when the response was not useful?
+
+What ultimately happened?
+
+Platform Reviews are separate durable administrator artifacts attached to Interaction Attempts.
+They answer a different question:
+
+What did a platform reviewer learn from this interaction?
+
+The first review artifact is a freeform human comment. Optional advisory analyses may summarize
+likely concerns, affected platform layers, and possible refinement areas.
+
+Platform Reviews must never directly modify production behavior. They must not become interpreter
+memory, rewrite prompts, alter Interaction Family classification, influence workflow selection, or
+change Receiver behavior automatically. They are a durable body of architectural knowledge for
+future human-led refinement.
+
+---
+
 # Shared Vocabulary
 
 Observation
@@ -324,6 +560,15 @@ Product action.
 Decision Trace
 
 Machine-readable explanation.
+
+Interaction Attempt
+
+Diagnostic parent for one overall user effort across Observations, revisions, responses, and
+outcomes.
+
+Platform Review
+
+Administrator-authored learning artifact attached to an Interaction Attempt. Advisory only.
 
 Knowledge Candidate
 

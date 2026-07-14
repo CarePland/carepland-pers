@@ -10,13 +10,19 @@ import {
   receiverDeviceSetupRequiredBody,
 } from "@/app/lib/connect/context/server/personScopedAccess";
 import {
-  interpretTalkInput,
   talkResultShouldWrite,
   type TalkAppointment,
   type TalkContact,
   type TalkFocusItem,
-  type TalkInterpretationResult,
 } from "@/app/lib/personal/track/talkIntent";
+import {
+  createObservation,
+  type ObservationModality,
+} from "@/app/lib/platform/ai/observationPipeline";
+import {
+  interpretReceiverTalkObservation,
+  serializeReceiverTalkResult,
+} from "@/app/lib/platform/ai/receiverTalkInterpreter";
 import {
   type FocusCompletionType,
   focusCompletionTypes,
@@ -68,22 +74,33 @@ export async function POST(request: Request) {
       loadTalkFocusItems(supabase, personId, now),
       loadUpcomingAppointments(supabase, personId, now),
     ]);
-    const result = interpretTalkInput({
+    const observation = createObservation({
+      activeWorkflow: "ask_tell",
+      deviceId: receiverDeviceId,
+      metadata: {
+        receiverInstallId: stringValue(body.receiverInstallId) || undefined,
+        source: stringValue(body.source) || "receiver_talk",
+      },
+      modality: observationModalityFromBody(body.modality),
+      personId,
+      source: "receiver",
+      surface: stringValue(body.surface) || "receiver_talk",
+      text: inputText,
+    });
+    const { result } = interpretReceiverTalkObservation({
       appointments,
       careCircleId,
-      careSubjectId: personId,
       contacts: contactsFromBody(body.contacts),
       focusItems,
-      inputText,
       now,
+      observation,
       receiverDeviceId,
-      source: "receiver_talk",
     });
 
     if (!shouldCreateRecords || !talkResultShouldWrite(result)) {
       return NextResponse.json({
         ok: true,
-        result: publicTalkResult(result),
+        result: serializeReceiverTalkResult(result),
       });
     }
 
@@ -91,7 +108,7 @@ export async function POST(request: Request) {
     if (!eventDraft) {
       return NextResponse.json({
         ok: true,
-        result: publicTalkResult(result),
+        result: serializeReceiverTalkResult(result),
       });
     }
 
@@ -122,7 +139,7 @@ export async function POST(request: Request) {
           {
             error: "Talk Track storage is not available yet.",
             ok: false,
-            result: publicTalkResult(result),
+            result: serializeReceiverTalkResult(result),
           },
           { status: 503 }
         );
@@ -134,7 +151,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       result: {
-        ...publicTalkResult(result),
+        ...serializeReceiverTalkResult(result),
         completed_focus_item_id:
           result.completedFocusItemId || String(eventRow?.focus_item_id || "") || undefined,
         created_track_event_id: String(eventRow?.id || ""),
@@ -244,26 +261,9 @@ async function loadUpcomingAppointments(
   }));
 }
 
-function publicTalkResult(result: TalkInterpretationResult) {
-  return {
-    completed_focus_item_id: result.completedFocusItemId,
-    confidence: result.confidence,
-    created_track_event_id: result.createdTrackEventId,
-    decision_trace: result.decisionTrace,
-    display_response: result.displayResponse,
-    intent: result.intent,
-    needs_confirmation: result.needsConfirmation,
-    needs_review: result.needsReview,
-    proposed_action: result.proposedAction,
-    spoken_response: result.spokenResponse,
-    structured_payload: result.structuredPayload,
-    title: result.title,
-  };
-}
-
 function contactsFromBody(value: unknown): TalkContact[] {
   if (!Array.isArray(value)) {
-    return [{ displayName: "Andrew", id: "contact-andrew" }];
+    return [{ displayName: "Care coordinator", id: "primary-coordinator" }];
   }
 
   return value
@@ -294,6 +294,21 @@ function normalizeCompletionConfig(value: Record<string, unknown> | null | undef
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function observationModalityFromBody(value: unknown): ObservationModality {
+  const modality = stringValue(value);
+  return [
+    "document",
+    "example",
+    "message",
+    "ocr",
+    "speech",
+    "structured",
+    "typed",
+  ].includes(modality)
+    ? (modality as ObservationModality)
+    : "speech";
 }
 
 function isTrackStorageUnavailable(error: unknown) {

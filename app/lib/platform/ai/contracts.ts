@@ -75,6 +75,15 @@ export type Observation = {
     surface?: string | null;
   };
   metadata?: AiPlatformRecord;
+  modality?:
+    | "document"
+    | "example"
+    | "message"
+    | "ocr"
+    | "speech"
+    | "structured"
+    | "typed"
+    | (string & {});
   observedAt: string;
   observationId?: string;
   rawText?: string;
@@ -89,6 +98,54 @@ export type Observation = {
     | (string & {});
   structuredInput?: AiPlatformRecord;
   transcriptText?: string;
+};
+
+export type MeaningFrame = {
+  ambiguity: "high" | "low" | "medium" | "none";
+  confidence: number;
+  concepts: Concept[];
+  contactReferences: AiPlatformRecord[];
+  decisionTraceFragments: DecisionTrace[];
+  householdReferences: AiPlatformRecord[];
+  metadata?: AiPlatformRecord;
+  normalizedText: string;
+  observationId?: string;
+  personReferences: AiPlatformRecord[];
+  provenance: {
+    deviceId?: string | null;
+    modality?: Observation["modality"];
+    observedAt: string;
+    observationId?: string;
+    source: Observation["source"];
+    surface?: string | null;
+  };
+  temporalReferences: AiPlatformRecord[];
+};
+
+export type InteractionFamily =
+  | "ask"
+  | "contextual_response"
+  | "observe"
+  | "need"
+  | "communicate"
+  | "remind"
+  | "plan"
+  | "decide"
+  | "discover"
+  | "express"
+  | "escalate"
+  | "unclear";
+
+export type InteractionFamilyClassification<
+  TFamily extends InteractionFamily = InteractionFamily,
+> = {
+  candidateFamilies?: DecisionTraceCandidate<TFamily>[];
+  confidence: number;
+  decisionTrace?: DecisionTrace<"intent_router", TFamily>;
+  family: TFamily;
+  meaningFrame: MeaningFrame;
+  requiresClarification: boolean;
+  secondaryFamilies?: TFamily[];
 };
 
 export type Concept = {

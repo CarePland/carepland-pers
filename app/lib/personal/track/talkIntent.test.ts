@@ -17,6 +17,10 @@ describe("Talk intent interpretation", () => {
     assert.equal(result.trackEventDraft?.eventType, "activity.walking");
     assert.equal(result.trackEventDraft?.source, "talk_voice");
     assert.equal(result.trackEventDraft?.title, "Walked to mailbox");
+    assert.equal(
+      result.displayResponse,
+      "This is an exercise entry. I recorded: Walked to mailbox."
+    );
     assert.equal(result.structuredPayload.destination, "mailbox");
     assert.equal("interpretedFrom" in result.structuredPayload, false);
     assert.deepEqual(result.decisionTrace.matched_rules, ["talk.activity.walking.v1"]);

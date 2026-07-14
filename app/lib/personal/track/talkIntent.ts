@@ -655,6 +655,7 @@ function walkingActivityResult({
       matchedRules: ["talk.activity.walking.v1"],
     },
     eventType: "activity.walking",
+    displayResponse: `This is an exercise entry. I recorded: ${title}.`,
     intent: "track_event_activity",
     needsReview: false,
     note: null,
@@ -675,6 +676,7 @@ function trackEventResult({
   decisionContext,
   decision,
   eventType,
+  displayResponse,
   intent,
   needsReview,
   note,
@@ -694,6 +696,7 @@ function trackEventResult({
     matchedPhrases?: string[];
     matchedRules: string[];
   };
+  displayResponse?: string;
   eventType: string;
   intent: TalkIntent;
   needsReview: boolean;
@@ -738,9 +741,9 @@ function trackEventResult({
     value: value ?? null,
   };
 
-  const response = needsReview
+  const response = displayResponse || (needsReview
     ? "I heard that, but I need someone to review it before saving."
-    : `I recorded: ${title}.`;
+    : `I recorded: ${title}.`);
 
   return {
     confidence,

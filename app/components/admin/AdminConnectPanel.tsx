@@ -11,6 +11,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { createClient } from "@supabase/supabase-js";
 
 import {
   adminPanelsForArea,
@@ -43,6 +44,8 @@ import {
   saveConnectTheme,
   type ConnectTheme,
 } from "../../lib/connect/theme";
+import { createObservation } from "../../lib/platform/ai/observationPipeline";
+import { interpretReceiverAskObservation } from "../../lib/platform/ai/receiverAskInterpreter";
 import { AdminAiPanel } from "./AdminAiPanel";
 
 type ConnectAudioProfileEvent = {
@@ -343,6 +346,73 @@ type ConnectReviewQueueItem = {
   searchText: string;
 };
 
+type InteractionReviewQueueItem = {
+  attemptId: string;
+  careSubjectDisplayName: string;
+  familyEvolution: string[];
+  finalUserWording: string;
+  includeReasons: string[];
+  originalUserWording: string;
+  outcome: string;
+  reviewState: "analyzed" | "reviewed" | "unreviewed";
+  revisionCount: number;
+  startedAt: string;
+  status: string;
+  surface: string;
+};
+
+type InteractionAttemptDetail = {
+  events: Array<{
+    actorRole?: string;
+    createdAt?: string;
+    eventType?: string;
+    id?: string;
+    observationId?: string;
+    payload?: Record<string, unknown>;
+  }>;
+  observations: Array<{
+    createdAt?: string;
+    observationId?: string;
+    observationSnapshot?: {
+      rawText?: string;
+      transcriptText?: string;
+      modality?: string;
+      source?: string;
+    };
+    parentObservationId?: string;
+    revisionIndex?: number;
+    revisionReason?: string;
+  }>;
+  queueItem: InteractionReviewQueueItem | null;
+  reviewAnalyses: Array<{
+    affectedPlatformLayers?: string[];
+    analysisText?: string;
+    createdAt?: string;
+    identifiedConcerns?: string[];
+    reviewId?: string;
+    suggestedRefinementAreas?: string[];
+  }>;
+  reviews: Array<{
+    comment?: string;
+    createdAt?: string;
+    id?: string;
+  }>;
+};
+
+type BulkReceiverQuestionResult = {
+  actionLabel: string;
+  answer: string;
+  askCapabilityStatus: string;
+  askEntities: string;
+  askIntent: string;
+  family: string;
+  lineNumber: number;
+  needsRecovery: boolean;
+  question: string;
+  responseType: string;
+  secondaryFamilies: string;
+};
+
 const ConnectActionDraftContext = createContext<{
   draftResetVersion: number;
   setDraftActive: (draftId: string, active: boolean) => void;
@@ -377,6 +447,12 @@ const connectAudioReviewBundleDownloadEndpoint =
 const connectAudioTimelineEndpoint = connectPrototypeEndpoints.audioTimeline;
 const connectAdminAreaStorageKey = "carepland.admin.connect.activeArea.v1";
 const connectThemeStorageKey = "carepland.connect.receiver.theme.v2";
+const adminSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const adminSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const adminSupabase =
+  adminSupabaseUrl && adminSupabaseAnonKey
+    ? createClient(adminSupabaseUrl, adminSupabaseAnonKey)
+    : null;
 
 const defaultConnectTheme: ConnectTheme = {
   name: "Classic Green",
@@ -5074,12 +5150,549 @@ function ConnectAppearancePanel() {
 }
 
 function ConnectTraceArea() {
+  const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(false);
+  const [bulkQuestionInput, setBulkQuestionInput] = useState("");
+  const [bulkQuestionResults, setBulkQuestionResults] = useState<
+    BulkReceiverQuestionResult[]
+  >([]);
+  const [bulkQuestionStatus, setBulkQuestionStatus] = useState(
+    "Paste one Receiver Ask/Tell question per line."
+  );
+  const [queueItems, setQueueItems] = useState<InteractionReviewQueueItem[]>([]);
+  const [queueStatus, setQueueStatus] = useState("Loading Interaction Review Queue...");
+  const [loadingQueue, setLoadingQueue] = useState(false);
+  const [selectedAttemptDetail, setSelectedAttemptDetail] =
+    useState<InteractionAttemptDetail | null>(null);
+  const [detailStatus, setDetailStatus] = useState("");
+  const [status, setStatus] = useState("Loading receiver diagnostic mode...");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDiagnosticsSetting() {
+      try {
+        const response = await fetch("/api/connect/receiver/diagnostics", {
+          cache: "no-store",
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          enabled?: boolean;
+        };
+        if (cancelled) return;
+        setDiagnosticsEnabled(payload.enabled === true);
+        setStatus("Receiver diagnostic mode setting loaded.");
+      } catch {
+        if (!cancelled) setStatus("Receiver diagnostic mode setting unavailable.");
+      }
+    }
+
+    void loadDiagnosticsSetting();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    void loadInteractionReviewQueue();
+  }, []);
+
+  async function adminAuthHeaders() {
+    if (!adminSupabase) {
+      throw new Error("Supabase browser config is unavailable.");
+    }
+    const { data, error } = await adminSupabase.auth.getSession();
+    if (error) throw error;
+    const accessToken = data.session?.access_token ?? "";
+    if (!accessToken) {
+      throw new Error("Sign in as an admin to load Interaction Reviews.");
+    }
+    return { Authorization: `Bearer ${accessToken}` };
+  }
+
+  async function loadInteractionReviewQueue() {
+    setLoadingQueue(true);
+    setQueueStatus("Loading Interaction Review Queue...");
+    try {
+      const response = await fetch("/api/admin/connect/interaction-review-queue", {
+        cache: "no-store",
+        headers: await adminAuthHeaders(),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        items?: InteractionReviewQueueItem[];
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Interaction Review Queue unavailable.");
+      }
+      setQueueItems(Array.isArray(payload.items) ? payload.items : []);
+      setQueueStatus(
+        payload.items?.length
+          ? `${payload.items.length} attempts may merit review.`
+          : "No Interaction Attempts currently match the review queue."
+      );
+    } catch (error) {
+      setQueueStatus(
+        error instanceof Error
+          ? error.message
+          : "Interaction Review Queue unavailable."
+      );
+    } finally {
+      setLoadingQueue(false);
+    }
+  }
+
+  async function openInteractionAttemptDetail(attemptId: string) {
+    setDetailStatus("Loading attempt...");
+    try {
+      const response = await fetch(
+        `/api/admin/connect/interaction-review-queue?attemptId=${encodeURIComponent(attemptId)}`,
+        {
+          cache: "no-store",
+          headers: await adminAuthHeaders(),
+        }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        detail?: InteractionAttemptDetail;
+        error?: string;
+      };
+      if (!response.ok || !payload.detail) {
+        throw new Error(payload.error || "Interaction Attempt detail unavailable.");
+      }
+      setSelectedAttemptDetail(payload.detail);
+      setDetailStatus("");
+    } catch (error) {
+      setDetailStatus(
+        error instanceof Error
+          ? error.message
+          : "Interaction Attempt detail unavailable."
+      );
+    }
+  }
+
+  async function updateDiagnosticsSetting(enabled: boolean) {
+    setDiagnosticsEnabled(enabled);
+    setStatus(enabled ? "Enabling receiver diagnostic mode..." : "Disabling receiver diagnostic mode...");
+    try {
+      const response = await fetch("/api/connect/receiver/diagnostics", {
+        body: JSON.stringify({ enabled }),
+        headers: { "Content-Type": "application/json" },
+        method: "PUT",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        enabled?: boolean;
+      };
+      if (!response.ok) {
+        throw new Error("Receiver diagnostic mode could not be saved.");
+      }
+      setDiagnosticsEnabled(payload.enabled === true);
+      setStatus(
+        payload.enabled
+          ? "Receiver diagnostic mode enabled for Receiver result screens."
+          : "Receiver diagnostic mode disabled."
+      );
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Receiver diagnostic mode could not be saved."
+      );
+    }
+  }
+
+  function runBulkQuestionInterpretation() {
+    const lines = bulkQuestionInput
+      .split(/\r?\n/)
+      .map((line, index) => ({ lineNumber: index + 1, question: line.trim() }))
+      .filter((item) => item.question);
+    const fallbackContact = { displayName: "Andrew", id: "contact-andrew" };
+    const contacts = [fallbackContact];
+    const results = lines.map(({ lineNumber, question }) => {
+      const interpretation = interpretReceiverAskObservation({
+        contacts,
+        fallbackContact,
+        observation: createObservation({
+          modality: "typed",
+          source: "receiver",
+          surface: "admin_bulk_receiver_question_test",
+          text: question,
+        }),
+      });
+      return {
+        actionLabel: interpretation.answer?.actionLabel || "",
+        answer: interpretation.answer?.answer || "",
+        askCapabilityStatus:
+          interpretation.askInterpretation?.capabilityStatus || "",
+        askEntities: interpretation.askInterpretation
+          ? JSON.stringify(interpretation.askInterpretation.entities)
+          : "",
+        askIntent: interpretation.askInterpretation?.intent || "",
+        family: interpretation.familyClassification.family,
+        lineNumber,
+        needsRecovery: interpretation.needsRecovery,
+        question,
+        responseType: interpretation.answer?.type || "recovery",
+        secondaryFamilies:
+          interpretation.familyClassification.secondaryFamilies?.join(", ") || "",
+      };
+    });
+    setBulkQuestionResults(results);
+    setBulkQuestionStatus(
+      results.length
+        ? `Interpreted ${results.length} question${results.length === 1 ? "" : "s"}.`
+        : "Paste one question per line before running."
+    );
+  }
+
   return (
-    <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
-      ConnectAskInteraction traces, Ask recovery events, escalations,
-      corrections, and outcomes are registered here. The prototype currently
-      emits local trace shapes; durable Admin storage and review tools can attach
-      to this area as the extraction continues.
+    <div className="space-y-4">
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+        <label className="flex items-start gap-3 text-sm text-slate-700">
+          <input
+            checked={diagnosticsEnabled}
+            className="mt-1 h-4 w-4 accent-blue-700"
+            onChange={(event) => void updateDiagnosticsSetting(event.target.checked)}
+            type="checkbox"
+          />
+          <span>
+            <span className="block font-semibold text-slate-900">
+              Enable Receiver diagnostic mode
+            </span>
+            <span className="mt-1 block text-slate-600">
+              Shows temporary Observation, MeaningFrame, family, interpreter, and
+              response-path text on Receiver Ask/Tell result screens.
+            </span>
+          </span>
+        </label>
+        <p className="mt-3 text-xs font-semibold text-slate-500">{status}</p>
+      </div>
+      <div className="space-y-3 rounded-md border border-slate-200 bg-white p-4">
+        <div>
+          <h4 className="font-semibold text-slate-900">
+            Bulk Receiver Question Test
+          </h4>
+          <p className="mt-1 text-sm text-slate-600">
+            Paste one question per line to run the current Receiver Ask/Tell
+            family and deterministic interpretation path without creating
+            Interaction Attempts.
+          </p>
+        </div>
+        <textarea
+          className="min-h-36 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900"
+          onChange={(event) => setBulkQuestionInput(event.target.value)}
+          placeholder={"When is my next appointment?\nWhere are my glasses?\nShould I call Andrew?"}
+          value={bulkQuestionInput}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="rounded-md bg-slate-950 px-3 py-2 text-sm font-semibold text-white"
+            onClick={runBulkQuestionInterpretation}
+            type="button"
+          >
+            Run interpretation
+          </button>
+          <button
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+            onClick={() => {
+              setBulkQuestionInput("");
+              setBulkQuestionResults([]);
+              setBulkQuestionStatus("Paste one Receiver Ask/Tell question per line.");
+            }}
+            type="button"
+          >
+            Clear
+          </button>
+          <p className="text-xs font-semibold text-slate-500">
+            {bulkQuestionStatus}
+          </p>
+        </div>
+        {bulkQuestionResults.length ? (
+          <div className="overflow-x-auto rounded-md border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Line</th>
+                  <th className="px-3 py-2">Question</th>
+                  <th className="px-3 py-2">Family</th>
+                  <th className="px-3 py-2">Secondary</th>
+                  <th className="px-3 py-2">Ask intent</th>
+                  <th className="px-3 py-2">Capability</th>
+                  <th className="px-3 py-2">Entities</th>
+                  <th className="px-3 py-2">Route</th>
+                  <th className="px-3 py-2">Response</th>
+                  <th className="px-3 py-2">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {bulkQuestionResults.map((result) => (
+                  <tr key={`${result.lineNumber}-${result.question}`}>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-600">
+                      {result.lineNumber}
+                    </td>
+                    <td className="max-w-[240px] px-3 py-2 font-medium text-slate-900">
+                      <span className="line-clamp-2">{result.question}</span>
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">{result.family}</td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {result.secondaryFamilies || "—"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {result.askIntent || "—"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {result.askCapabilityStatus || "—"}
+                    </td>
+                    <td className="max-w-[220px] px-3 py-2 font-mono text-xs text-slate-600">
+                      <span className="line-clamp-2">{result.askEntities || "—"}</span>
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {result.needsRecovery ? "recovery" : result.responseType}
+                    </td>
+                    <td className="max-w-[280px] px-3 py-2 text-slate-700">
+                      <span className="line-clamp-2">{result.answer || "Needs clarification"}</span>
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {result.actionLabel || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
+      <div className="space-y-3 rounded-md border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="font-semibold text-slate-900">
+              Interaction Review Queue
+            </h4>
+            <p className="mt-1 text-sm text-slate-600">
+              Read-only list derived from Interaction Attempts, Events, Observations,
+              Platform Reviews, and Review Analyses.
+            </p>
+          </div>
+          <button
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+            disabled={loadingQueue}
+            onClick={() => void loadInteractionReviewQueue()}
+            type="button"
+          >
+            {loadingQueue ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+        <p className="text-xs font-semibold text-slate-500">{queueStatus}</p>
+        <div className="overflow-x-auto rounded-md border border-slate-200">
+          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2">Started</th>
+                <th className="px-3 py-2">Care subject</th>
+                <th className="px-3 py-2">Surface</th>
+                <th className="px-3 py-2">Original</th>
+                <th className="px-3 py-2">Final</th>
+                <th className="px-3 py-2">Revisions</th>
+                <th className="px-3 py-2">Family</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Review</th>
+                <th className="px-3 py-2">Open</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {queueItems.map((item) => (
+                <tr key={item.attemptId}>
+                  <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                    {formatConnectDate(item.startedAt)}
+                  </td>
+                  <td className="px-3 py-2 font-medium text-slate-900">
+                    {item.careSubjectDisplayName}
+                  </td>
+                  <td className="px-3 py-2 text-slate-700">{item.surface || "Receiver"}</td>
+                  <td className="max-w-[220px] px-3 py-2 text-slate-700">
+                    <span className="line-clamp-2">{item.originalUserWording || "—"}</span>
+                  </td>
+                  <td className="max-w-[220px] px-3 py-2 text-slate-700">
+                    <span className="line-clamp-2">{item.finalUserWording || "—"}</span>
+                  </td>
+                  <td className="px-3 py-2 text-slate-700">{item.revisionCount}</td>
+                  <td className="px-3 py-2 text-slate-700">
+                    {item.familyEvolution.length ? item.familyEvolution.join(" → ") : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-slate-700">
+                    {[item.status, item.outcome].filter(Boolean).join(" / ") || "—"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                        item.reviewState === "unreviewed"
+                          ? "bg-amber-50 text-amber-800"
+                          : item.reviewState === "analyzed"
+                            ? "bg-blue-50 text-blue-800"
+                            : "bg-emerald-50 text-emerald-800"
+                      }`}
+                    >
+                      {item.reviewState}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                      onClick={() => void openInteractionAttemptDetail(item.attemptId)}
+                      type="button"
+                    >
+                      Open
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {queueItems.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-6 text-center text-slate-500" colSpan={10}>
+                    No attempts to review.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        {detailStatus ? <p className="text-xs font-semibold text-slate-500">{detailStatus}</p> : null}
+      </div>
+      {selectedAttemptDetail ? (
+        <InteractionAttemptDetailDialog
+          detail={selectedAttemptDetail}
+          onClose={() => setSelectedAttemptDetail(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function InteractionAttemptDetailDialog({
+  detail,
+  onClose,
+}: {
+  detail: InteractionAttemptDetail;
+  onClose: () => void;
+}) {
+  const item = detail.queueItem;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4">
+      <section className="grid max-h-[calc(100vh-2rem)] w-full max-w-5xl grid-rows-[auto_minmax(0,1fr)] rounded-lg bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Interaction Attempt
+            </p>
+            <h4 className="text-xl font-semibold text-slate-950">
+              {item?.originalUserWording || "Attempt detail"}
+            </h4>
+            <p className="mt-1 text-sm text-slate-600">
+              {item
+                ? `${item.status || "unknown"} / ${item.outcome || "pending"} · ${item.reviewState}`
+                : "Attempt did not match the derived review queue."}
+            </p>
+          </div>
+          <button
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+            onClick={onClose}
+            type="button"
+          >
+            Close
+          </button>
+        </div>
+        <div className="space-y-4 overflow-auto p-4">
+          {item ? (
+            <dl className="grid gap-3 md:grid-cols-4">
+              <AdminTraceMetric label="Started" value={formatConnectDate(item.startedAt)} />
+              <AdminTraceMetric label="Surface" value={item.surface || "Receiver"} />
+              <AdminTraceMetric label="Revisions" value={String(item.revisionCount)} />
+              <AdminTraceMetric label="Family" value={item.familyEvolution.join(" → ") || "—"} />
+            </dl>
+          ) : null}
+          <section className="rounded-md border border-slate-200 p-3">
+            <h5 className="font-semibold text-slate-900">Revision timeline</h5>
+            <div className="mt-3 space-y-3">
+              {detail.observations.map((observation, index) => {
+                const observationId = observation.observationId || "";
+                const events = detail.events.filter(
+                  (event) => event.observationId === observationId
+                );
+                return (
+                  <article
+                    className="rounded-md border border-slate-200 bg-slate-50 p-3"
+                    key={observationId || index}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <strong className="text-slate-900">
+                        Revision {(observation.revisionIndex ?? index) + 1}
+                      </strong>
+                      <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-600">
+                        {observation.revisionReason || "initial"}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-slate-800">
+                      {observation.observationSnapshot?.rawText ||
+                        observation.observationSnapshot?.transcriptText ||
+                        "No captured wording."}
+                    </p>
+                    {events.length ? (
+                      <ol className="mt-3 space-y-2 text-xs text-slate-600">
+                        {events.map((event) => (
+                          <li className="rounded bg-white p-2" key={event.id}>
+                            <strong className="text-slate-800">{event.eventType}</strong>
+                            <span className="ml-2">{formatConnectDate(event.createdAt || "")}</span>
+                            {event.payload ? (
+                              <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] text-slate-600">
+                                {JSON.stringify(event.payload, null, 2)}
+                              </pre>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+          <section className="rounded-md border border-slate-200 p-3">
+            <h5 className="font-semibold text-slate-900">Platform reviews</h5>
+            {detail.reviews.length ? (
+              <div className="mt-3 space-y-3">
+                {detail.reviews.map((review) => {
+                  const analyses = detail.reviewAnalyses.filter(
+                    (analysis) => analysis.reviewId === review.id
+                  );
+                  return (
+                    <article className="rounded-md bg-slate-50 p-3" key={review.id}>
+                      <p className="text-sm font-semibold text-slate-800">{review.comment}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {formatConnectDate(review.createdAt || "")}
+                      </p>
+                      {analyses.map((analysis, index) => (
+                        <div className="mt-2 rounded bg-white p-2 text-xs text-slate-600" key={index}>
+                          <strong className="text-slate-800">Advisory analysis</strong>
+                          <p className="mt-1 whitespace-pre-wrap">{analysis.analysisText}</p>
+                        </div>
+                      ))}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-slate-600">No Platform Reviews yet.</p>
+            )}
+          </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AdminTraceMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm font-semibold text-slate-900">{value}</dd>
     </div>
   );
 }

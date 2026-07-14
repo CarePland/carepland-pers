@@ -8,6 +8,9 @@ import {
 } from "../../personal/recommendations";
 import type {
   DecisionTrace,
+  InteractionFamily,
+  InteractionFamilyClassification,
+  MeaningFrame,
   Observation,
   WorkflowSelection,
 } from "./contracts";
@@ -27,6 +30,82 @@ describe("AI platform contracts", () => {
     } satisfies Observation;
 
     assert.equal(observation.source, "receiver");
+  });
+
+  it("describes a MeaningFrame between Observation and IntentResult", () => {
+    const meaningFrame = {
+      ambiguity: "none",
+      confidence: 1,
+      concepts: [],
+      contactReferences: [],
+      decisionTraceFragments: [],
+      householdReferences: [],
+      normalizedText: "I need milk",
+      observationId: "obs-1",
+      personReferences: [],
+      provenance: {
+        modality: "typed",
+        observedAt: "2026-07-10T12:00:00.000Z",
+        observationId: "obs-1",
+        source: "receiver",
+        surface: "ask_tell",
+      },
+      temporalReferences: [],
+    } satisfies MeaningFrame;
+
+    assert.equal(meaningFrame.normalizedText, "I need milk");
+    assert.equal(meaningFrame.provenance.modality, "typed");
+  });
+
+  it("describes canonical interaction families as human-purpose classifications", () => {
+    const families = [
+      "ask",
+      "observe",
+      "need",
+      "communicate",
+      "remind",
+      "plan",
+      "decide",
+      "discover",
+      "express",
+      "escalate",
+      "contextual_response",
+      "unclear",
+    ] satisfies InteractionFamily[];
+
+    const classification = {
+      candidateFamilies: [
+        { confidence: 0.88, kind: "need" },
+        { confidence: 0.42, kind: "communicate", rejectionReason: "No recipient was named." },
+      ],
+      confidence: 0.88,
+      family: "need",
+      meaningFrame: {
+        ambiguity: "low",
+        confidence: 0.9,
+        concepts: [],
+        contactReferences: [],
+        decisionTraceFragments: [],
+        householdReferences: [],
+        normalizedText: "I need milk",
+        observationId: "obs-need-1",
+        personReferences: [],
+        provenance: {
+          modality: "typed",
+          observedAt: "2026-07-10T12:00:00.000Z",
+          observationId: "obs-need-1",
+          source: "receiver",
+          surface: "ask_tell",
+        },
+        temporalReferences: [],
+      },
+      requiresClarification: false,
+      secondaryFamilies: [],
+    } satisfies InteractionFamilyClassification<"need" | "communicate">;
+
+    assert.equal(families.length, 12);
+    assert.equal(classification.family, "need");
+    assert.equal(classification.meaningFrame.normalizedText, "I need milk");
   });
 
   it("maps a recommendation candidate to the platform workflow contract", () => {

@@ -10,6 +10,14 @@ Not just to the developer. To future versions of CarePland itself.
 
 That means every interpreted action produces an auditable decision artifact.
 
+Users express intent; CarePland determines implementation.
+
+CarePland should minimize the need for users to understand application structure, organizational
+hierarchy, or implementation details. Users express what they are trying to accomplish; CarePland
+determines the appropriate workflow, routing, and data model while preserving transparency through
+Decision Trace. This principle applies across Receiver, Import Anything, OCR, CarePrep, Ask,
+Recommendations, Connect, and public/registrar website experiences.
+
 ## Requirement
 
 CarePland AI features must be explainable, auditable, and continuously improvable. An interpreted request should not simply return an intent. It should produce a structured decision record describing what decision was made and why.
