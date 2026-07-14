@@ -304,15 +304,30 @@ export function normalizeImportAnythingDraft(
     ),
     notes: arrayFromUnknown(draft.notes).map((item) => {
       const match = matchedAppointment(item, matchedIds);
+      const locationAddress = stringFromUnknown(item.location_address);
+      const providerOrganization = stringFromUnknown(
+        item.provider_organization
+      );
 
       return {
+        appointment_reason: stringFromUnknown(item.appointment_reason),
         appointment_title: stringFromUnknown(item.appointment_title),
         followups: textListFromUnknown(item.followups),
+        location_address: locationAddress,
+        location_name: normalizeLocationName({
+          locationAddress,
+          locationName: stringFromUnknown(item.location_name),
+          providerOrganization,
+        }),
+        location_phone: stringFromUnknown(item.location_phone),
         matched_appointment_id: match.id,
         person_assignment: normalizePersonAssignment(
           item.person_assignment,
           matchedCareSubjectIds
         ),
+        provider_name: stringFromUnknown(item.provider_name),
+        provider_organization: providerOrganization,
+        starts_at_local: stringFromUnknown(item.starts_at_local),
         summary: stringFromUnknown(item.summary),
         takeaways: textListFromUnknown(item.takeaways),
         ...reviewFields(item, match.unknownId),

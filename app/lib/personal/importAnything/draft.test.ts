@@ -248,6 +248,42 @@ describe("Import Anything draft normalization", () => {
     );
   });
 
+  it("keeps appointment details found on unmatched Visit Notes", () => {
+    const draft = normalizeImportAnythingDraft({
+      notes: [
+        {
+          appointment_reason: "Follow-up after labs",
+          appointment_title: "Primary care visit",
+          confidence: 0.93,
+          location_address: "1425 Harbor View Blvd, Suffolk, VA",
+          location_name: "1425 Harbor View Blvd, Suffolk, VA",
+          location_phone: "555-0100",
+          matched_appointment_id: "",
+          needs_review: true,
+          provider_name: "Dr. Smith",
+          provider_organization: "Suffolk Family Medicine",
+          source_excerpt: "Visit note text.",
+          starts_at_local: "2026-07-01T09:30",
+          summary: "Discussed lab results.",
+          takeaways: ["Repeat labs later."],
+        },
+      ],
+    });
+
+    const notes = draft.notes as Array<Record<string, unknown>>;
+    assert.equal(notes[0]?.appointment_reason, "Follow-up after labs");
+    assert.equal(notes[0]?.appointment_title, "Primary care visit");
+    assert.equal(notes[0]?.starts_at_local, "2026-07-01T09:30");
+    assert.equal(notes[0]?.provider_name, "Dr. Smith");
+    assert.equal(notes[0]?.provider_organization, "Suffolk Family Medicine");
+    assert.equal(notes[0]?.location_name, "Suffolk Family Medicine");
+    assert.equal(
+      notes[0]?.location_address,
+      "1425 Harbor View Blvd, Suffolk, VA"
+    );
+    assert.equal(notes[0]?.location_phone, "555-0100");
+  });
+
   it("bounds item counts, strings, confidence, and review lists", () => {
     const draft = normalizeImportAnythingDraft({
       import_summary: "s".repeat(maxImportAnythingDraftSummaryChars + 10),

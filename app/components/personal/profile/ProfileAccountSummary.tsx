@@ -70,6 +70,7 @@ type ProfileAccountSummaryProps = {
   seedingSampleData: boolean;
   sendingPasswordReset: boolean;
   setPlanHelpExpanded: (updater: (isExpanded: boolean) => boolean) => void;
+  showHeading?: boolean;
 };
 
 export function ProfileAccountSummary({
@@ -106,6 +107,7 @@ export function ProfileAccountSummary({
   seedingSampleData,
   sendingPasswordReset,
   setPlanHelpExpanded,
+  showHeading = true,
 }: ProfileAccountSummaryProps) {
   const pendingDeactivateSubject = pendingDeactivateCareVipId
     ? careSubjects.find((subject) => subject.id === pendingDeactivateCareVipId)
@@ -113,15 +115,21 @@ export function ProfileAccountSummary({
 
   return (
     <section>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="break-words pt-1 text-xl font-semibold text-slate-950">
-            Your CarePland Account
-          </h2>
+      {showHeading ? (
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="break-words pt-1 text-xl font-semibold text-slate-950">
+              Your CarePland Account
+            </h2>
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <div className="mt-3 grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 md:min-h-[14rem] md:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]">
+      <div
+        className={`${
+          showHeading ? "mt-3" : ""
+        } grid overflow-hidden rounded-md bg-white ring-1 ring-slate-200 md:min-h-[14rem] md:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_18rem]`}
+      >
         <section className="relative p-4 after:absolute after:inset-x-4 after:bottom-0 after:h-px after:bg-slate-200 md:order-1 md:after:hidden">
           <div className="flex h-7 items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">

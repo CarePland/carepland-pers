@@ -166,6 +166,42 @@ describe("unsavedChanges", () => {
     assert.equal(hasAnyUnsavedWork(changes), false);
   });
 
+  it("summarizes appointment message drafts for sign-out", () => {
+    const changes = buildEmptySignOutChanges({
+      appointmentMessageDraft: {
+        allowsCallbackRequest: true,
+        appointmentId: "appointment-1",
+        requiresAcknowledgement: true,
+        text: "Please bring the insurance card.",
+      },
+      appointmentsById: new Map([
+        [
+          "appointment-1",
+          {
+            id: "appointment-1",
+            location_address: null,
+            location_name: null,
+            location_phone: null,
+            provider_name: null,
+            provider_organization: null,
+            reason: null,
+            starts_at: null,
+            status: "scheduled",
+            title: "Eye Exam",
+          },
+        ],
+      ]),
+    });
+
+    assert.deepEqual(changes, [
+      {
+        detail: "Eye Exam",
+        key: "appointment-message-appointment-1",
+        label: "Appointment message",
+      },
+    ]);
+  });
+
   it("summarizes profile and new appointment work for sign-out", () => {
     const changes = buildEmptySignOutChanges({
       hasUnsavedProfileChanges: true,

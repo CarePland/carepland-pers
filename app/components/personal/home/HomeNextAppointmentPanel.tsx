@@ -180,7 +180,7 @@ export function HomeNextAppointmentPanel({
                 {title}
               </span>
               <span className="mt-1 flex flex-wrap items-center gap-2">
-                <span className="min-w-0 truncate text-4xl font-semibold text-slate-950">
+                <span className="min-w-0 truncate text-2xl font-semibold text-slate-950">
                   {appointment.title || "Untitled appointment"}
                 </span>
                 {canShowCarePrep ? (
@@ -207,7 +207,7 @@ export function HomeNextAppointmentPanel({
                 {appointment.is_sample_data ? <DemoPill /> : null}
               </span>
               {appointment.provider_name ? (
-                <p className="mt-3 text-xl text-[#767676]">
+                <p className="mt-2 text-base text-[#767676]">
                   {appointment.provider_name}
                 </p>
               ) : null}
@@ -231,17 +231,19 @@ export function HomeNextAppointmentPanel({
         <div className="text-left md:min-w-64 md:text-right">
           {appointment ? (
             <>
-              <div className="flex flex-wrap items-center gap-3 text-2xl font-medium text-slate-700 md:justify-end">
+              <div className="flex flex-wrap items-center gap-3 text-lg font-medium text-slate-700 md:justify-end">
                 {canShowNotes ? (
                   <button
                     aria-expanded={addNotesOpen}
                     className="inline-flex items-center gap-1.5 rounded-md px-1 py-1 text-sm font-semibold text-blue-800 transition hover:bg-blue-50 hover:text-blue-950"
                     onClick={toggleAddNotes}
-                    title={addNotesOpen ? "Close notes" : "Add notes"}
+                    title={
+                      addNotesOpen ? "Close visit notes" : "Add visit notes"
+                    }
                     type="button"
                   >
                     <PencilSquareIcon className="h-4 w-4" />
-                    <span>Add Notes</span>
+                    <span>Add Visit Notes</span>
                   </button>
                 ) : null}
                 <span className="hidden md:inline">

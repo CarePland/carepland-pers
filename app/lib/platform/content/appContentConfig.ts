@@ -24,10 +24,10 @@ export const appContentDefaults = {
   careprep_manual_limit_message:
     "You have used this month's manual CarePrep generations. Plan changes are not wired up yet, but support can help while account changes are still handled manually.",
   careprep_refresh_not_ready_message:
-    "CarePrep can't be run yet because you have no additional appointments to consider.",
+    "CarePrep is already up to date for this appointment. Add or save new Visit Notes, then try again.",
   careprep_auto_success_message:
     "CarePrep generated for {appointmentTitle}.",
-  connect_receiver_undo_seconds: "10",
+  connect_receiver_undo_seconds: "5",
   health_focus_context_frequency_labels:
     "Once = Once\nA Few Times = A Few Times;Few\nOccasionally = Occasionally\nFairly Often = Fairly Often;Often\nFrequent = Frequent\nMost Visits = Most Visits;Most",
   health_focus_context_recency_labels:

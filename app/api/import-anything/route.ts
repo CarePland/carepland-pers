@@ -169,18 +169,32 @@ const importAnythingOutputSchema = {
       items: {
         additionalProperties: false,
         properties: {
+          appointment_reason: { type: "string" },
           appointment_title: { type: "string" },
           confidence: { type: "number" },
           followups: { items: { type: "string" }, type: "array" },
+          location_address: { type: "string" },
+          location_name: { type: "string" },
+          location_phone: { type: "string" },
           matched_appointment_id: { type: "string" },
           needs_review: { type: "boolean" },
           person_assignment: importAnythingPersonAssignmentSchema,
+          provider_name: { type: "string" },
+          provider_organization: { type: "string" },
           source_excerpt: { type: "string" },
+          starts_at_local: { type: "string" },
           summary: { type: "string" },
           takeaways: { items: { type: "string" }, type: "array" },
         },
         required: [
           "appointment_title",
+          "appointment_reason",
+          "starts_at_local",
+          "provider_name",
+          "provider_organization",
+          "location_name",
+          "location_address",
+          "location_phone",
           "matched_appointment_id",
           "person_assignment",
           "summary",
@@ -301,7 +315,7 @@ const importAnythingOutputSchema = {
 };
 
 const importAnythingSystemPrompt =
-  "You analyze healthcare-related import content for CarePland Personal. The user may provide screenshots, OCR text, PDFs represented by source notes, copied portal text, reminders, instructions, or visit documents. Use only the supplied text. Do not invent facts. Before assigning ownership to individual findings, first identify all distinct people/entities referenced in ownership_clusters. The source may contain multiple people or pets. Each cluster needs a stable cluster_id such as cluster_rob_robson, display_name, entity_type such as person or cat, and matching details if it maps to an existing Care VIP. Do not create ownership clusters from sender signatures, message authors, reminder senders, or sign-offs such as '-Emily' unless the text also says that person is the patient or visit owner. Then identify appointments, providers, locations, medications or medication changes, visit notes, follow-up instructions, questions to ask, tasks/reminders, and CarePrep-relevant information. A currently focused Care VIP may be supplied as context only; do not treat it as mandatory ownership. Set the top-level person_assignment to the best overall batch clue, but every extracted item must include its own person_assignment that refers to one ownership cluster by cluster_id. Do not use the highest-confidence overall person as a fallback owner for unrelated findings. For each item person_assignment, set matched_care_subject_id only when that specific item is supported by the text or strong local context. If an item names a person who is not an existing candidate, put that name in suggested_new_person_name. If an item's ownership confidence is below 0.85 or ambiguous, leave cluster_id and matched_care_subject_id empty, set needs_review true, and prefer Unassigned over assigning to the wrong person. For Practice and Location lines, put the clinic/practice/business name in location_name and put street/city/state text in location_address. If only Practice is named, use it as provider_organization and location_name; do not copy a street address into location_name. Import summary should be qualitative and must not include numeric counts; the UI calculates counts separately. When existing appointment candidates are supplied, set matched_appointment_id only if the match is high confidence and directly supported by the text. When saved provider candidates are supplied, set matched_provider_id only if the import text clearly appears to refer to that saved provider for the same inferred or matched Care VIP; add a short provider_match_note explaining the clue. If uncertain, leave matched ids empty and set needs_review true. Existing manually entered records must not be changed by this workflow. Every item should be safe for user review before commit.";
+  "You analyze healthcare-related import content for CarePland Personal. The user may provide screenshots, OCR text, PDFs represented by source notes, copied portal text, reminders, instructions, or visit documents. Use only the supplied text. Do not invent facts. Before assigning ownership to individual findings, first identify all distinct people/entities referenced in ownership_clusters. The source may contain multiple people or pets. Each cluster needs a stable cluster_id such as cluster_rob_robson, display_name, entity_type such as person or cat, and matching details if it maps to an existing Care VIP. Do not create ownership clusters from sender signatures, message authors, reminder senders, or sign-offs such as '-Emily' unless the text also says that person is the patient or visit owner. Then identify appointments, providers, locations, medications or medication changes, visit notes, follow-up instructions, questions to ask, tasks/reminders, and CarePrep-relevant information. A currently focused Care VIP may be supplied as context only; do not treat it as mandatory ownership. Set the top-level person_assignment to the best overall batch clue, but every extracted item must include its own person_assignment that refers to one ownership cluster by cluster_id. Do not use the highest-confidence overall person as a fallback owner for unrelated findings. For each item person_assignment, set matched_care_subject_id only when that specific item is supported by the text or strong local context. If an item names a person who is not an existing candidate, put that name in suggested_new_person_name. If an item's ownership confidence is below 0.85 or ambiguous, leave cluster_id and matched_care_subject_id empty, set needs_review true, and prefer Unassigned over assigning to the wrong person. For Practice and Location lines, put the clinic/practice/business name in location_name and put street/city/state text in location_address. If only Practice is named, use it as provider_organization and location_name; do not copy a street address into location_name. Import summary should be qualitative and must not include numeric counts; the UI calculates counts separately. When existing appointment candidates are supplied, set matched_appointment_id only if the match is high confidence and directly supported by the text. If visit notes describe a real visit but do not match an existing appointment, keep the note item, leave matched_appointment_id empty, set needs_review true, and include any directly supported appointment_title, appointment_reason, starts_at_local, provider, practice, and location fields so the user can approve creating the missing appointment. When saved provider candidates are supplied, set matched_provider_id only if the import text clearly appears to refer to that saved provider for the same inferred or matched Care VIP; add a short provider_match_note explaining the clue. If uncertain, leave matched ids empty and set needs_review true. Existing manually entered records must not be changed by this workflow. Every item should be safe for user review before commit.";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {

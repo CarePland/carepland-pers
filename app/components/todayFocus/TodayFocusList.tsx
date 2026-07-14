@@ -34,6 +34,7 @@ type TodayFocusListProps = {
     action: TodayFocusCadencePreferenceAction,
     cadence?: TodayFocusCadencePreferenceCadence
   ) => void;
+  undoneItemIds?: string[];
   variant?: "receiver" | "home";
 };
 
@@ -44,7 +45,7 @@ const mainPreferenceOptions: Array<{
   { action: "show_less_often", label: "Show this less often" },
   { action: "hide_until_next_appointment", label: "Hide until my next appointment" },
   { action: "snooze_30_days", label: "Snooze for 30 days" },
-  { action: "stop_suggesting", label: "Stop suggesting this" },
+  { action: "stop_suggesting", label: "Remove this goal" },
 ];
 
 const cadenceOptions: Array<{
@@ -69,6 +70,7 @@ export function TodayFocusList({
   onUndoComplete,
   preferenceOpenForId = null,
   preferenceStep = "main",
+  undoneItemIds = [],
   variant = "home",
 }: TodayFocusListProps) {
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -104,6 +106,8 @@ export function TodayFocusList({
         const preferenceOpen = item.id === preferenceOpenForId;
         const completed = completedItemIds.includes(item.id);
         const active = completed || item.id === completingId;
+        const recentlyUndone = undoneItemIds.includes(item.id);
+        const showUndo = completed && Boolean(onUndoComplete);
 
         return (
           <li
@@ -126,18 +130,49 @@ export function TodayFocusList({
               >
                 <span className="today-focus-checkbox" aria-hidden="true" />
                 <span className="today-focus-title">{item.title}</span>
-                {completed ? (
+                {recentlyUndone ? (
+                  <span className="today-focus-undone-overlay" aria-live="polite">
+                    Undo completed
+                  </span>
+                ) : null}
+                {completed && variant !== "receiver" ? (
                   <span className="today-focus-undo-label">Undo</span>
                 ) : null}
               </button>
               <button
                 aria-expanded={preferenceOpen}
-                aria-label={`Adjust how often CarePland shows ${item.title}`}
-                className="today-focus-preference-button"
-                onClick={() => onOpenPreference(item)}
+                aria-label={
+                  showUndo
+                    ? `Undo completing ${item.title}`
+                    : variant === "receiver"
+                      ? `Snooze or adjust how often CarePland shows ${item.title}`
+                      : `Adjust how often CarePland shows ${item.title}`
+                }
+                className={`today-focus-preference-button ${
+                  variant === "receiver"
+                    ? showUndo
+                      ? "today-focus-undo-button"
+                      : "today-focus-snooze-button"
+                    : ""
+                }`}
+                onClick={() =>
+                  showUndo && onUndoComplete
+                    ? onUndoComplete(item)
+                    : onOpenPreference(item)
+                }
                 type="button"
               >
-                ×
+                {showUndo ? (
+                  <span className="today-focus-undo-label">Undo</span>
+                ) : variant === "receiver" ? (
+                  <span className="today-focus-snooze-mark" aria-hidden="true">
+                    <span>Z</span>
+                    <span>z</span>
+                    <span>z</span>
+                  </span>
+                ) : (
+                  "×"
+                )}
               </button>
             </div>
             {preferenceOpen ? (

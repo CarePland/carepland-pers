@@ -123,16 +123,29 @@ import {
 } from "./components/personal/home/HomeContextPanel";
 import { HomeNextAppointmentPanel } from "./components/personal/home/HomeNextAppointmentPanel";
 import {
+  AppointmentMessageComposer,
+  type AppointmentMessageComposerDraft,
+} from "./components/personal/messages/AppointmentMessageComposer";
+import {
+  AppointmentMessagesSection,
+  RecentMessagesPanel,
+  type PersonalMessage,
+} from "./components/personal/messages/RecentMessagesPanel";
+import {
   CarePlandTopNav,
   type CarePlandFocusOption,
 } from "./components/shared/CarePlandTopNav";
 import { InlineConfirmation } from "./components/shared/InlineConfirmation";
+import { ManagedCareVipHelp } from "./components/shared/ManagedCareVipHelp";
 import {
   CalendarIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   EllipsisVerticalIcon,
+  EnvelopeIcon,
   MapPinIcon,
+  MessageCircleIcon,
+  PaperAirplaneIcon,
   PencilSquareIcon,
   RefreshCircleIcon,
 } from "./components/shared/icons";
@@ -169,6 +182,18 @@ import {
   type AppointmentDetailsDraft,
   type IntakeReviewDraftContent,
 } from "./lib/personal/editor/editorState";
+import {
+  normalizeAppointmentCommunicationInventory,
+} from "./lib/personal/appointments/communicationSummary";
+import {
+  buildHomeMessageSummary,
+  homeMessageSummaryModelVersion,
+} from "./lib/personal/messages/homeMessageSummary";
+import {
+  buildWhatToKnowDisplayModel,
+  type WhatToKnowDisplayItem,
+  type WhatToKnowSourceType,
+} from "./lib/personal/appointments/whatToKnow";
 import {
   appointmentModifierHasUnsavedChanges,
   buildUnsavedSignOutChanges,
@@ -208,6 +233,11 @@ import {
 } from "./lib/personal/appointments/calendarImport";
 import { buildImportAnythingProviderUpserts } from "./lib/personal/importAnything/providers";
 import {
+  applyImportAnythingIdentityResolutions,
+  importAnythingUnresolvedDetectedIdentities,
+  type ImportAnythingIdentityResolutionDecision,
+} from "./lib/personal/importAnything/identityResolution";
+import {
   importAnythingOwnerMismatchNotice,
 } from "./lib/personal/importAnything/ownership";
 import { maxImportAnythingSourceSummaries } from "./lib/personal/importAnything/request";
@@ -245,6 +275,10 @@ import {
   normalizeAppSessionSettings,
   sessionIdleTimeoutHours,
 } from "./lib/platform/sessionSettings";
+import {
+  adminItemsVisibilityChangedEvent,
+  readShowAdminItemsPreference,
+} from "./lib/platform/adminItemsVisibility";
 import type { AvatarPerson } from "./lib/platform/avatar";
 
 type Appointment = {
@@ -319,6 +353,11 @@ type HomeTodayFocusGroup = {
   subjectName: string;
 };
 
+type HomeMessageGroup = {
+  messages: PersonalMessage[];
+  subjectId: string;
+};
+
 type HomeAtAGlanceSummary = {
   historySections: Array<{
     estimates?: string[];
@@ -389,6 +428,53 @@ type CarePrepGuidance = {
   edited_from_guidance_id: string | null;
   ai_generated_guidance_id: string | null;
 };
+
+type AppointmentCommunicationSummaryRow = {
+  appointment_id: string;
+  generation_status: string | null;
+  summary_items: unknown;
+  summary_version: number | null;
+};
+
+type DetailListItem =
+  | string
+  | (WhatToKnowDisplayItem & {
+      sourceTypes?: WhatToKnowSourceType[];
+    });
+
+function mergeLoadedAppointmentCommunicationSummaries({
+  appointmentIds,
+  currentSummaries,
+  loadedSummaries,
+}: {
+  appointmentIds: string[];
+  currentSummaries: AppointmentCommunicationSummaryRow[];
+  loadedSummaries: AppointmentCommunicationSummaryRow[];
+}) {
+  const loadedByAppointmentId = new Map(
+    loadedSummaries.map((summary) => [summary.appointment_id, summary])
+  );
+  const appointmentIdSet = new Set(appointmentIds);
+  const merged = currentSummaries.filter((summary) => {
+    if (!appointmentIdSet.has(summary.appointment_id)) {
+      return true;
+    }
+
+    if (loadedByAppointmentId.has(summary.appointment_id)) {
+      return false;
+    }
+
+    return normalizeAppointmentCommunicationInventory(summary.summary_items).items.some(
+      (item) => item.status === "active"
+    );
+  });
+
+  for (const summary of loadedSummaries) {
+    merged.push(summary);
+  }
+
+  return merged;
+}
 
 type AiInstructionSet = {
   id: string;
@@ -580,6 +666,7 @@ type ImportAnythingItemKind =
   | "task";
 type ImportAnythingReviewStatus = "approved" | "needs_review" | "rejected";
 type ImportAnythingReviewItem = {
+  createsNewAppointment: boolean;
   confidence: number;
   fields: Record<string, string>;
   id: string;
@@ -622,6 +709,21 @@ type ImportAnythingOwnershipCluster = {
   suggestedNewPersonName: string;
 };
 
+type ImportAnythingIdentityResolutionChoice = {
+  action: "" | "create" | "leave_unresolved" | "match";
+  clusterId: string;
+  createName: string;
+  detectedName: string;
+  editingPetSpecies: boolean;
+  managedByHousehold: boolean;
+  matchedCareSubjectId: string;
+  otherPetType: string;
+  petKind: ImportAnythingPetKind;
+  subjectType: string;
+};
+
+type ImportAnythingPetKind = "cat" | "dog" | "other";
+
 type ImageTextExtractionResult = {
   errorMessage?: string;
   extractedCount: number;
@@ -663,6 +765,7 @@ type AppointmentsPageViewState = {
   activeAppointmentPanel?: AppointmentPanel | null;
   appointmentView?: AppointmentView;
   expandedCarePrepIds?: Record<string, boolean>;
+  expandedMessagesAppointmentId?: string | null;
   expandedVisitNotesAppointmentId?: string | null;
   scrollY?: number;
   selectedSubjectId?: string;
@@ -676,6 +779,7 @@ type AppointmentsSessionSnapshot = {
 };
 
 type StoredDraftState = {
+  appointmentMessageDraft?: AppointmentMessageComposerDraft | null;
   appointmentDrafts?: Record<string, typeof emptyAppointmentDraft>;
   bulkAppointmentDrafts?: BulkAppointmentDraft[];
   bulkAppointmentSummary?: string;
@@ -688,6 +792,8 @@ type StoredDraftState = {
   confirmingImportAnythingSaveAll?: boolean;
   importAnythingReviewOpen?: boolean;
   importAnythingItems?: ImportAnythingReviewItem[];
+  importAnythingIdentityResolutionChoices?: ImportAnythingIdentityResolutionChoice[];
+  importAnythingIdentityResolutionOpen?: boolean;
   importAnythingOwnershipClusters?: ImportAnythingOwnershipCluster[];
   importAnythingOwnerPersonId?: string;
   importAnythingPersonAssignment?: ImportAnythingPersonAssignment | null;
@@ -784,6 +890,47 @@ function isManagedByHouseholdSubject(
   subject?: Pick<CareSubject, "managed_by_household" | "subject_type"> | null
 ) {
   return Boolean(subject?.managed_by_household) || isPetSubjectType(subject?.subject_type);
+}
+
+function importAnythingPetKindFromSubjectType(
+  subjectType?: string | null
+): ImportAnythingPetKind {
+  const normalizedSubjectType = subjectType?.trim().toLowerCase() ?? "";
+
+  if (normalizedSubjectType === "dog") {
+    return "dog";
+  }
+
+  if (normalizedSubjectType === "pet" || normalizedSubjectType.startsWith("pet:")) {
+    return "other";
+  }
+
+  return "cat";
+}
+
+function importAnythingPetLabel(kind: ImportAnythingPetKind, otherValue: string) {
+  if (kind === "cat") {
+    return "Cat";
+  }
+
+  if (kind === "dog") {
+    return "Dog";
+  }
+
+  return otherValue.trim() || "Pet";
+}
+
+function importAnythingPetSubjectType(
+  kind: ImportAnythingPetKind,
+  otherValue: string
+) {
+  if (kind === "cat" || kind === "dog") {
+    return kind;
+  }
+
+  const customType = otherValue.trim();
+
+  return customType ? `pet:${customType}` : "pet";
 }
 
 function careSubjectDisplayLabel(subject: CareSubject) {
@@ -1154,6 +1301,57 @@ function getErrorMessage(error: unknown): string {
   }
 
   return String(error || "Something went wrong.");
+}
+
+function importAnythingAppointmentChoiceLabel(appointment: Appointment) {
+  const dateLabel = appointment.starts_at
+    ? formatDate(appointment.starts_at)
+    : "Date not saved";
+  const title = appointment.title?.trim() || "Appointment";
+  const context = [
+    appointment.provider_name,
+    appointment.provider_organization,
+    appointment.location_name,
+  ]
+    .map((value) => value?.trim() ?? "")
+    .filter(Boolean)
+    .join(" • ");
+
+  return [dateLabel, title, context].filter(Boolean).join(" · ");
+}
+
+async function parseApiResponse<T>(
+  response: Response,
+  fallbackMessage: string
+): Promise<T> {
+  const responseText = await response.text();
+  let parsedBody: unknown = {};
+
+  if (responseText.trim()) {
+    try {
+      parsedBody = JSON.parse(responseText);
+    } catch {
+      if (!response.ok) {
+        throw new Error(responseText.trim() || fallbackMessage);
+      }
+
+      throw new Error(fallbackMessage);
+    }
+  }
+
+  if (!response.ok) {
+    const errorMessage =
+      parsedBody &&
+      typeof parsedBody === "object" &&
+      "error" in parsedBody &&
+      typeof parsedBody.error === "string"
+        ? parsedBody.error
+        : responseText.trim() || fallbackMessage;
+
+    throw new Error(errorMessage);
+  }
+
+  return parsedBody as T;
 }
 
 async function withTimeout<T>(
@@ -1833,7 +2031,7 @@ function DetailList({
   showBullets = true,
 }: {
   emptyLabel: string;
-  items: string[];
+  items: DetailListItem[];
   showBullets?: boolean;
 }) {
   if (items.length === 0) {
@@ -1842,16 +2040,38 @@ function DetailList({
 
   return (
     <ul className="mt-2 space-y-2 text-slate-700">
-      {items.map((item) => (
-        <li className="flex gap-2" key={item}>
-          <span
-            className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${
-              showBullets ? "bg-blue-500" : "invisible"
-            }`}
-          />
-          <span>{item}</span>
-        </li>
-      ))}
+      {items.map((item) => {
+        const detail =
+          typeof item === "string"
+            ? { key: item, sourceLabel: "", sourceTypes: [] as string[], text: item }
+            : item;
+        const fromMessages = detail.sourceTypes?.includes("communication");
+        const visibleText =
+          fromMessages && detail.sourceLabel
+            ? `${detail.sourceLabel}: ${detail.text}`
+            : detail.text;
+
+        return (
+          <li className="flex gap-2" key={detail.key}>
+            <span
+              className={`mt-2 h-1.5 w-1.5 shrink-0 rounded-full ${
+                showBullets ? "bg-blue-500" : "invisible"
+              }`}
+            />
+            <span className="inline-flex min-w-0 items-baseline gap-1.5">
+              {fromMessages ? (
+                <MessageCircleIcon
+                  className="relative top-0.5 h-3.5 w-3.5 shrink-0 text-blue-500"
+                />
+              ) : null}
+              {fromMessages ? (
+                <span className="sr-only">From messages: </span>
+              ) : null}
+              <span>{visibleText}</span>
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -2124,6 +2344,7 @@ function importAnythingReviewItem(
   const itemPersonAssignment = importAnythingPersonAssignmentFromUnknown(
     item.person_assignment
   );
+  const matchedAppointmentId = stringFromUnknown(item.matched_appointment_id);
   const hasConfidentOwner =
     Boolean(itemPersonAssignment?.clusterId) &&
     (itemPersonAssignment?.confidence ?? 0) >= 0.85 &&
@@ -2132,10 +2353,11 @@ function importAnythingReviewItem(
 
   return {
     confidence,
+    createsNewAppointment: false,
     fields,
     id: `${kind}-${index}-${title}`,
     kind,
-    matchedAppointmentId: stringFromUnknown(item.matched_appointment_id),
+    matchedAppointmentId,
     matchedProviderId: stringFromUnknown(item.matched_provider_id),
     needsReview: itemNeedsReview,
     ownerClusterId: hasConfidentOwner
@@ -2224,8 +2446,15 @@ function importAnythingItemsFromDraft(
 
   arrayFromUnknown(draft.notes).forEach((item, index) => {
     const fields = {
+      appointmentReason: stringFromUnknown(item.appointment_reason),
       appointmentTitle: stringFromUnknown(item.appointment_title),
       followups: asTextList(item.followups).join("\n"),
+      locationAddress: stringFromUnknown(item.location_address),
+      locationName: stringFromUnknown(item.location_name),
+      locationPhone: stringFromUnknown(item.location_phone),
+      providerName: stringFromUnknown(item.provider_name),
+      providerOrganization: stringFromUnknown(item.provider_organization),
+      startsAt: stringFromUnknown(item.starts_at_local),
       summary: stringFromUnknown(item.summary),
       takeaways: asTextList(item.takeaways).join("\n"),
     };
@@ -2307,7 +2536,30 @@ function importAnythingItemsFromDraft(
     );
   });
 
-  return items;
+  return items.map((item) => {
+    if (item.kind !== "note" || item.matchedAppointmentId) {
+      return item;
+    }
+
+    const supportsExtractedAppointment = items.some(
+      (candidate) =>
+        candidate.kind === "appointment" &&
+        importAnythingFindSupportingNotes(candidate, items).some(
+          (supportItem) => supportItem.id === item.id
+        )
+    );
+
+    if (supportsExtractedAppointment) {
+      return item;
+    }
+
+    return {
+      ...item,
+      createsNewAppointment: true,
+      needsReview: true,
+      status: "needs_review",
+    };
+  });
 }
 
 function importAnythingSummaryCounts(items: ImportAnythingReviewItem[]) {
@@ -2322,6 +2574,17 @@ function importAnythingSummaryCounts(items: ImportAnythingReviewItem[]) {
     questions: items.filter((item) => item.kind === "question").length,
     tasks: items.filter((item) => item.kind === "task").length,
   };
+}
+
+function importAnythingNewAppointmentNoteCount(
+  items: ImportAnythingReviewItem[]
+) {
+  return items.filter(
+    (item) =>
+      item.kind === "note" &&
+      item.createsNewAppointment &&
+      item.status !== "rejected"
+  ).length;
 }
 
 function normalizedImportAnythingText(value: string) {
@@ -2374,9 +2637,12 @@ function importAnythingStagingItems(items: ImportAnythingReviewItem[]) {
     items
       .filter((item) => item.kind === "appointment")
       .flatMap((item) =>
-        importAnythingFindSupportingNotes(item, items).map(
-          (supportItem) => supportItem.id
-        )
+        importAnythingFindSupportingNotes(item, items)
+          .filter(
+            (supportItem) =>
+              !supportItem.needsReview && supportItem.status !== "needs_review"
+          )
+          .map((supportItem) => supportItem.id)
       )
   );
 
@@ -2411,6 +2677,12 @@ function importAnythingDeterministicSummary(
   const itemParts = [
     counts.appointments
       ? pluralizeCount(counts.appointments, "appointment")
+      : "",
+    importAnythingNewAppointmentNoteCount(items)
+      ? pluralizeCount(
+          importAnythingNewAppointmentNoteCount(items),
+          "appointment from Visit Notes"
+        )
       : "",
     counts.tasks ? pluralizeCount(counts.tasks, "task") : "",
     counts.medicationChanges
@@ -2809,6 +3081,16 @@ export function CarePlandPers({
   const [importAnythingItems, setImportAnythingItems] = useState<
     ImportAnythingReviewItem[]
   >(initialDraftState?.importAnythingItems ?? []);
+  const [
+    importAnythingIdentityResolutionOpen,
+    setImportAnythingIdentityResolutionOpen,
+  ] = useState(initialDraftState?.importAnythingIdentityResolutionOpen ?? false);
+  const [
+    importAnythingIdentityResolutionChoices,
+    setImportAnythingIdentityResolutionChoices,
+  ] = useState<ImportAnythingIdentityResolutionChoice[]>(
+    initialDraftState?.importAnythingIdentityResolutionChoices ?? []
+  );
   const [
     importAnythingOwnershipClusters,
     setImportAnythingOwnershipClusters,
@@ -3235,6 +3517,20 @@ export function CarePlandPers({
     useState<string | null>(
       initialAppointmentsPageViewState?.expandedVisitNotesAppointmentId ?? null
     );
+  const [expandedMessagesAppointmentId, setExpandedMessagesAppointmentId] =
+    useState<string | null>(
+      initialAppointmentsPageViewState?.expandedMessagesAppointmentId ??
+        initialDraftState?.appointmentMessageDraft?.appointmentId ??
+        null
+    );
+  const [activeMessageComposerAppointmentId, setActiveMessageComposerAppointmentId] =
+    useState<string | null>(
+      initialDraftState?.appointmentMessageDraft?.appointmentId ?? null
+    );
+  const [appointmentMessageDraft, setAppointmentMessageDraft] =
+    useState<AppointmentMessageComposerDraft | null>(
+      initialDraftState?.appointmentMessageDraft ?? null
+    );
 	  const [pendingModifierSwitch, setPendingModifierSwitch] =
 	    useState<PendingModifierSwitch | null>(null);
 	  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
@@ -3303,6 +3599,7 @@ export function CarePlandPers({
       activeAppointmentPanel,
       appointmentView,
       expandedCarePrepIds,
+      expandedMessagesAppointmentId,
       expandedVisitNotesAppointmentId,
       scrollY: typeof window === "undefined" ? 0 : window.scrollY,
       selectedSubjectId,
@@ -3313,6 +3610,7 @@ export function CarePlandPers({
     activeAppointmentPanel,
     appointmentView,
     expandedCarePrepIds,
+    expandedMessagesAppointmentId,
     expandedVisitNotesAppointmentId,
     selectedSubjectId,
   ]);
@@ -3512,8 +3810,14 @@ export function CarePlandPers({
     HomeTodayFocusGroup[]
   >([]);
   const [homeTodayFocusLoading, setHomeTodayFocusLoading] = useState(false);
+  const [homeMessageGroups, setHomeMessageGroups] = useState<HomeMessageGroup[]>(
+    []
+  );
+  const [homeMessagesLoading, setHomeMessagesLoading] = useState(false);
   const [showHomeAtAGlanceTest, setShowHomeAtAGlanceTest] = useState(false);
   const [homeAtAGlanceExpanded, setHomeAtAGlanceExpanded] = useState(false);
+  const [showAdminItems, setShowAdminItems] = useState(true);
+  const canShowAdminItems = isAdmin && showAdminItems;
   const [selectedHealthFocusTopic, setSelectedHealthFocusTopic] =
     useState<HealthFocusTopicSummary | null>(null);
   const [healthFocusTopicDetail, setHealthFocusTopicDetail] =
@@ -3523,13 +3827,38 @@ export function CarePlandPers({
   const healthFocusDetailCacheRef = useRef<
     Map<string, HealthFocusTopicDetailData>
   >(new Map());
+
+  useEffect(() => {
+    function syncShowAdminItems() {
+      const enabled = readShowAdminItemsPreference();
+      setShowAdminItems(enabled);
+
+      if (!enabled) {
+        setShowHomeAtAGlanceTest(false);
+        setHomeAtAGlanceExpanded(false);
+      }
+    }
+
+    syncShowAdminItems();
+    window.addEventListener(adminItemsVisibilityChangedEvent, syncShowAdminItems);
+    window.addEventListener("storage", syncShowAdminItems);
+
+    return () => {
+      window.removeEventListener(adminItemsVisibilityChangedEvent, syncShowAdminItems);
+      window.removeEventListener("storage", syncShowAdminItems);
+    };
+  }, []);
+
   const healthFocusDetailPrefetchingRef = useRef<Set<string>>(new Set());
   const healthFocusBackfillAttemptedRef = useRef(new Set<string>());
+  const appointmentMessagePrepBackfillAttemptedRef = useRef(new Set<string>());
   const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
   const [entitlement, setEntitlement] =
     useState<CareCircleEntitlement>(defaultEntitlement);
   const [notes, setNotes] = useState<AppointmentNote[]>([]);
   const [guidance, setGuidance] = useState<CarePrepGuidance[]>([]);
+  const [appointmentCommunicationSummaries, setAppointmentCommunicationSummaries] =
+    useState<AppointmentCommunicationSummaryRow[]>([]);
   const [carePrepHistory, setCarePrepHistory] = useState<CarePrepHistoryRow[]>(
     []
   );
@@ -3890,8 +4219,22 @@ export function CarePlandPers({
 	  }, [notes]);
 
 	  const appointmentsById = useMemo(() => {
-	    return new Map(appointments.map((appointment) => [appointment.id, appointment]));
-	  }, [appointments]);
+    return new Map(
+      [...appointmentPool, ...appointments].map((appointment) => [
+        appointment.id,
+        appointment,
+      ])
+    );
+	  }, [appointmentPool, appointments]);
+
+  const communicationItemsByAppointment = useMemo(() => {
+    return new Map(
+      appointmentCommunicationSummaries.map((summary) => [
+        summary.appointment_id,
+        normalizeAppointmentCommunicationInventory(summary.summary_items).items,
+      ])
+    );
+  }, [appointmentCommunicationSummaries]);
 
   const guidanceByAppointment = useMemo(() => {
     return new Map(
@@ -3947,6 +4290,19 @@ export function CarePlandPers({
   const canUseMultipleCareVips = careVipLimit > 1;
   const canFilterCareVips = careSubjects.length > 1;
   const canAddCareVip = careSubjects.length < careVipLimit;
+  const importAnythingIdentityResolutionReady =
+    importAnythingIdentityResolutionChoices.length > 0 &&
+    importAnythingIdentityResolutionChoices.every((choice) => {
+      if (choice.action === "match") {
+        return Boolean(choice.matchedCareSubjectId);
+      }
+
+      if (choice.action === "create") {
+        return Boolean(choice.createName.trim());
+      }
+
+      return choice.action === "leave_unresolved";
+    });
   const carePlandFocusOptions = useMemo<CarePlandFocusOption[]>(() => {
     return [
       {
@@ -4046,6 +4402,7 @@ export function CarePlandPers({
   const unsavedSignOutChanges = useMemo(() => {
     return buildUnsavedSignOutChanges({
       adminRecommendationsReviewDraft: adminRecommendationsReviewDraftSummary,
+      appointmentMessageDraft,
       appointmentDrafts,
       appointmentsById,
       askConversationComplete,
@@ -4083,6 +4440,7 @@ export function CarePlandPers({
     });
   }, [
 	    adminRecommendationsReviewDraftSummary,
+    appointmentMessageDraft,
 	    appointmentDrafts,
 	    appointmentsById,
 	    askConversationComplete,
@@ -4161,6 +4519,8 @@ export function CarePlandPers({
     setCarePrepDrafts({});
     setEditingCarePrepIds({});
     setPendingCarePrepCloseId(null);
+    setActiveMessageComposerAppointmentId(null);
+    setAppointmentMessageDraft(null);
     setBulkAppointmentDrafts([]);
     setBulkAppointmentSummary("");
     setImportAnythingOwnerPersonId("");
@@ -4873,6 +5233,7 @@ export function CarePlandPers({
     }
 
     writeStoredJson(window.sessionStorage, appDraftStateStorageKey, {
+      appointmentMessageDraft,
       appointmentDrafts,
       bulkAppointmentDrafts,
       bulkAppointmentSummary,
@@ -4884,6 +5245,8 @@ export function CarePlandPers({
       confirmingImportAnythingSaveAll,
       importAnythingIntakeItemId,
       importAnythingItems,
+      importAnythingIdentityResolutionChoices,
+      importAnythingIdentityResolutionOpen,
       importAnythingNewPersonName,
       importAnythingOwnerPersonId,
       importAnythingOwnershipClusters,
@@ -4906,6 +5269,7 @@ export function CarePlandPers({
       textIntakeValue,
     } satisfies StoredDraftState);
   }, [
+    appointmentMessageDraft,
     appointmentDrafts,
     bulkAppointmentDrafts,
     bulkAppointmentSummary,
@@ -4917,6 +5281,8 @@ export function CarePlandPers({
     confirmingImportAnythingSaveAll,
     importAnythingIntakeItemId,
     importAnythingItems,
+    importAnythingIdentityResolutionChoices,
+    importAnythingIdentityResolutionOpen,
     importAnythingNewPersonName,
     importAnythingOwnerPersonId,
     importAnythingOwnershipClusters,
@@ -5352,6 +5718,7 @@ export function CarePlandPers({
     if (appointmentIds.length === 0) {
       setNotes([]);
       setGuidance([]);
+      setAppointmentCommunicationSummaries([]);
       applyAppointmentSelection([], appointmentViewRef.current, selectedSubjectIdRef.current, []);
       setAppointmentDetailsHydrated(true);
       return;
@@ -5361,6 +5728,7 @@ export function CarePlandPers({
       const [
         { data: noteRows, error: notesError },
         { data: guidanceRows, error: guidanceError },
+        { data: communicationSummaryRows, error: communicationSummaryError },
       ] = await Promise.all([
         supabase
           .from("appointment_notes")
@@ -5377,6 +5745,10 @@ export function CarePlandPers({
           .in("appointment_id", appointmentIds)
           .or("is_current.eq.true,review_status.eq.draft")
           .order("generated_at", { ascending: true }),
+        supabase
+          .from("appointment_communication_summaries")
+          .select("appointment_id,summary_items,summary_version,generation_status")
+          .in("appointment_id", appointmentIds),
       ]);
 
       if (notesError) {
@@ -5387,12 +5759,29 @@ export function CarePlandPers({
         throw guidanceError;
       }
 
+      if (communicationSummaryError) {
+        console.warn(
+          "Unable to load appointment communication summaries.",
+          communicationSummaryError
+        );
+      }
+
       const loadedGuidanceRows = guidanceRows ?? [];
       const currentPool = appointmentPoolRef.current.length
         ? appointmentPoolRef.current
         : loadedAppointments;
+      const loadedCommunicationSummaryRows = communicationSummaryError
+        ? []
+        : ((communicationSummaryRows ?? []) as AppointmentCommunicationSummaryRow[]);
       setNotes(noteRows ?? []);
       setGuidance(loadedGuidanceRows);
+      setAppointmentCommunicationSummaries((currentSummaries) =>
+        mergeLoadedAppointmentCommunicationSummaries({
+          appointmentIds,
+          currentSummaries,
+          loadedSummaries: loadedCommunicationSummaryRows,
+        })
+      );
       applyAppointmentSelection(
         currentPool,
         appointmentViewRef.current,
@@ -5688,6 +6077,316 @@ export function CarePlandPers({
     // loadHomeTodayFocus intentionally uses current auth/session and subject state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [careSubjects, mainTab, selectedSubjectId, signedInEmail]);
+
+  async function loadHomeMessages() {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      setHomeMessageGroups([]);
+      return;
+    }
+
+    const subjectsToLoad =
+      selectedSubjectId === ALL_SUBJECTS
+        ? mainTab === "appointments"
+          ? careSubjects
+          : []
+        : careSubjects.filter((item) => item.id === selectedSubjectId);
+
+    if (subjectsToLoad.length === 0) {
+      setHomeMessageGroups([]);
+      return;
+    }
+
+    setHomeMessagesLoading(true);
+
+    try {
+      const results = await Promise.allSettled(
+        subjectsToLoad.map(async (subject) => {
+          const response = await fetch(
+            `/api/personal/messages?personId=${encodeURIComponent(subject.id)}&limit=30`,
+            {
+              cache: "no-store",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+              },
+            }
+          );
+          const result = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            messages?: PersonalMessage[];
+            ok?: boolean;
+          };
+
+          if (!response.ok || result.ok === false) {
+            console.warn("Unable to load Home messages", {
+              error: result.error || response.statusText,
+              personId: subject.id,
+              status: response.status,
+            });
+            return null;
+          }
+
+          return {
+            messages: result.messages ?? [],
+            subjectId: subject.id,
+          } satisfies HomeMessageGroup;
+        })
+      );
+
+      setHomeMessageGroups(
+        results
+          .map((result) =>
+            result.status === "fulfilled" ? result.value : null
+          )
+          .filter((group): group is HomeMessageGroup => Boolean(group))
+      );
+    } catch (error) {
+      console.warn("Unable to load Home messages", error);
+      setHomeMessageGroups([]);
+    } finally {
+      setHomeMessagesLoading(false);
+    }
+  }
+
+  async function submitHomeMessageSummaryFeedback({
+    decisionTrace,
+    keyPoints,
+    personId,
+    sourceMessageIds,
+    summary,
+    userComment,
+  }: {
+    decisionTrace: Record<string, unknown>;
+    keyPoints: Array<Record<string, unknown>>;
+    personId: string;
+    sourceMessageIds: string[];
+    summary: string;
+    userComment: string;
+  }) {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      throw new Error("Please sign in before sending summary feedback.");
+    }
+
+    const response = await fetch("/api/personal/messages/summary-feedback", {
+      body: JSON.stringify({
+        decisionTrace,
+        keyPoints,
+        personId,
+        sourceMessageIds,
+        summary,
+        summaryModelVersion: homeMessageSummaryModelVersion,
+        userComment,
+      }),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      ok?: boolean;
+    };
+
+    if (!response.ok || result.ok === false) {
+      throw new Error(result.error || "Unable to send summary feedback.");
+    }
+  }
+
+  useEffect(() => {
+    if (!signedInEmail || (mainTab !== "home" && mainTab !== "appointments")) {
+      return;
+    }
+
+    void loadHomeMessages();
+    // loadHomeMessages intentionally uses current auth/session and subject state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [careSubjects, mainTab, selectedSubjectId, signedInEmail]);
+
+  useEffect(() => {
+    if (!signedInEmail || mainTab !== "appointments" || appointments.length === 0) {
+      return;
+    }
+
+    void rebuildMissingAppointmentMessagePrepSummaries();
+    // rebuildMissingAppointmentMessagePrepSummaries intentionally uses current
+    // appointment, message, and summary state to backfill only visible gaps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    appointmentCommunicationSummaries,
+    appointments,
+    homeMessageGroups,
+    mainTab,
+    signedInEmail,
+  ]);
+
+  async function rebuildMissingAppointmentMessagePrepSummaries() {
+    const candidates = appointments
+      .map((appointment) => {
+        if (!appointment.care_subject_id) return null;
+        const messages =
+          homeMessageGroups
+            .find((group) => group.subjectId === appointment.care_subject_id)
+            ?.messages.filter((message) => message.appointmentId === appointment.id) ?? [];
+        if (messages.length === 0) return null;
+        const existingSummary = appointmentCommunicationSummaries.find(
+          (summary) => summary.appointment_id === appointment.id
+        );
+        const hasActiveMessagePrepItems = normalizeAppointmentCommunicationInventory(
+          existingSummary?.summary_items
+        ).items.some((item) => item.status === "active");
+        if (hasActiveMessagePrepItems) return null;
+        const messageFingerprint = messages
+          .map((message) => message.id)
+          .filter(Boolean)
+          .sort()
+          .join(",");
+        const attemptKey = `${appointment.id}:${messageFingerprint}`;
+        if (appointmentMessagePrepBackfillAttemptedRef.current.has(attemptKey)) {
+          return null;
+        }
+
+        return {
+          appointmentId: appointment.id,
+          attemptKey,
+          personId: appointment.care_subject_id,
+        };
+      })
+      .filter(
+        (
+          candidate
+        ): candidate is {
+          appointmentId: string;
+          attemptKey: string;
+          personId: string;
+        } => Boolean(candidate)
+      )
+      .slice(0, 3);
+
+    if (candidates.length === 0) return;
+
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      console.warn("Unable to rebuild MessagePrep summaries.", sessionError);
+      return;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+    if (!accessToken) return;
+
+    for (const candidate of candidates) {
+      appointmentMessagePrepBackfillAttemptedRef.current.add(candidate.attemptKey);
+      try {
+        const summary = await requestAppointmentMessagePrepRebuild({
+          accessToken,
+          appointmentId: candidate.appointmentId,
+          personId: candidate.personId,
+        });
+        if (!summary) {
+          continue;
+        }
+
+        setAppointmentCommunicationSummaries((currentSummaries) => {
+          const others = currentSummaries.filter(
+            (currentSummary) => currentSummary.appointment_id !== summary.appointment_id
+          );
+          return [...others, summary];
+        });
+      } catch (error) {
+        console.warn("Unable to rebuild MessagePrep summary.", error);
+      }
+    }
+  }
+
+  function appointmentViewForAppointment(appointment: Appointment): AppointmentView {
+    if (appointment.status === "archived") {
+      return "archived";
+    }
+
+    if (appointment.current_note_id) {
+      return "logged";
+    }
+
+    return "upcoming";
+  }
+
+  function openMessageAppointment(message: PersonalMessage) {
+    const appointmentId = message.appointmentId;
+
+    if (!appointmentId) {
+      openMessagesPage();
+      return;
+    }
+
+    const appointment = appointmentPool.find((item) => item.id === appointmentId);
+
+    if (!appointment) {
+      openMessagesPage();
+      return;
+    }
+
+    const nextView = appointmentViewForAppointment(appointment);
+
+    const nextSubjectId = appointment.care_subject_id || selectedSubjectId;
+
+    setSelectedSubjectId(nextSubjectId);
+    updatePersonalRoute("appointments");
+    setMainTab("appointments");
+    setAppointmentView(nextView);
+    setPendingModifierSwitch(null);
+    setPendingAppointmentPanelView(null);
+    setActiveAppointmentPanel(null);
+    setMessage("");
+    applyAppointmentSelection(appointmentPool, nextView, nextSubjectId);
+    setExpandedVisitNotesAppointmentId(appointment.id);
+    saveAppointmentsViewState({
+      appointmentView: nextView,
+      expandedVisitNotesAppointmentId: appointment.id,
+      selectedSubjectId: nextSubjectId,
+    });
+
+    window.setTimeout(() => {
+      document
+        .getElementById(`appointment-${appointment.id}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
+
+  function openMessagesPage(appointment?: Pick<Appointment, "care_subject_id" | "id">) {
+    if (!appointment?.id) {
+      window.location.assign("/connect/dashboard");
+      return;
+    }
+
+    const params = new URLSearchParams({
+      appointmentId: appointment.id,
+    });
+
+    if (appointment.care_subject_id) {
+      params.set("personId", appointment.care_subject_id);
+    }
+
+    window.location.assign(`/connect/dashboard?${params}`);
+  }
 
   async function handleHomeContextQuestion(
     question: string,
@@ -8320,13 +9019,27 @@ export function CarePlandPers({
   }
 
   function startAppointmentPanel(panel: AppointmentPanel) {
+    const onlyImportSourceNamesRemain =
+      activeAppointmentPanel === "quickAdd" &&
+      panel !== "quickAdd" &&
+      importAnythingSources.length > 0 &&
+      importAnythingItems.length === 0 &&
+      bulkAppointmentDrafts.length === 0 &&
+      !textIntakeDraft &&
+      !textIntakeValue.trim();
+
     if (
       activeAppointmentPanel === "quickAdd" &&
       panel !== "quickAdd" &&
-      importAnythingPanelHasUnfinishedWork
+      importAnythingPanelHasUnfinishedWork &&
+      !onlyImportSourceNamesRemain
     ) {
       setPendingImportLeaveAction({ kind: "appointmentPanel", panel });
       return;
+    }
+
+    if (onlyImportSourceNamesRemain) {
+      resetImportAnythingReview();
     }
 
     applyAppointmentPanel(panel);
@@ -11615,18 +12328,18 @@ export function CarePlandPers({
   }
 
   async function handleExtractImageText(
-    files: FileList | null,
+    files: FileList | File[] | null,
     target: "appointmentNotes" | "quickAdd" = "quickAdd",
     scope: "appointments" | "importAnything" = "appointments"
   ): Promise<ImageTextExtractionResult> {
-    const images = files ? Array.from(files) : [];
+    const images = Array.isArray(files) ? files : files ? Array.from(files) : [];
 
     if (images.length === 0) {
       return { extractedCount: 0 };
     }
 
     setExtractingImageText(true);
-    setFileImportStatus("Uploading and importing, please wait...");
+    setFileImportStatus("Importing image text...");
     setMessage("");
 
     try {
@@ -11660,11 +12373,10 @@ export function CarePlandPers({
         },
         method: "POST",
       });
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error ?? "Image text extraction failed.");
-      }
+      const result = await parseApiResponse<{ extractedText?: unknown }>(
+        response,
+        "Image text extraction failed."
+      );
 
       const extractedText =
         typeof result.extractedText === "string"
@@ -11709,6 +12421,8 @@ export function CarePlandPers({
   function resetImportAnythingReview() {
     setImportAnythingIntakeItemId(null);
     setImportAnythingItems([]);
+    setImportAnythingIdentityResolutionChoices([]);
+    setImportAnythingIdentityResolutionOpen(false);
     setImportAnythingNewPersonName("");
     setImportAnythingOwnershipClusters([]);
     setImportAnythingPersonAssignment(null);
@@ -11760,7 +12474,7 @@ export function CarePlandPers({
       return;
     }
 
-    setFileImportStatus("Reviewing files, please wait...");
+    setFileImportStatus("Importing files...");
     setMessage("");
     setImportAnythingIntakeItemId(null);
     setImportAnythingItems([]);
@@ -11795,6 +12509,7 @@ export function CarePlandPers({
       }
 
       if (pdfFiles.length > 0) {
+        setFileImportStatus("Importing PDF text...");
         const { data: sessionData, error: sessionError } =
           await supabase.auth.getSession();
 
@@ -11820,11 +12535,10 @@ export function CarePlandPers({
           },
           method: "POST",
         });
-        const result = await response.json();
-
-        if (!response.ok) {
-          throw new Error(result.error ?? "PDF text extraction failed.");
-        }
+        const result = await parseApiResponse<{ extractedText?: unknown }>(
+          response,
+          "PDF text extraction failed."
+        );
 
         const extractedText =
           typeof result.extractedText === "string"
@@ -11872,10 +12586,8 @@ export function CarePlandPers({
       }
 
       if (imageFiles.length > 0) {
-        const transfer = new DataTransfer();
-        imageFiles.forEach((file) => transfer.items.add(file));
         const imageResult = await handleExtractImageText(
-          transfer.files,
+          imageFiles,
           "quickAdd",
           "importAnything"
         );
@@ -11928,7 +12640,7 @@ export function CarePlandPers({
     event.preventDefault();
     event.stopPropagation();
 
-    if (extractingImageText) {
+    if (extractingImageText || fileImportStatus) {
       importAnythingDragDepthRef.current = 0;
       setImportAnythingDragActive(false);
       return;
@@ -11954,7 +12666,7 @@ export function CarePlandPers({
     importAnythingDragDepthRef.current = 0;
     setImportAnythingDragActive(false);
 
-    if (extractingImageText) {
+    if (extractingImageText || fileImportStatus) {
       return;
     }
 
@@ -11965,7 +12677,7 @@ export function CarePlandPers({
     event.preventDefault();
     event.stopPropagation();
 
-    if (extractingImageText) {
+    if (extractingImageText || fileImportStatus) {
       appointmentNotesDragDepthRef.current = 0;
       setAppointmentNotesDragActive(false);
       return;
@@ -11991,7 +12703,7 @@ export function CarePlandPers({
     appointmentNotesDragDepthRef.current = 0;
     setAppointmentNotesDragActive(false);
 
-    if (extractingImageText) {
+    if (extractingImageText || fileImportStatus) {
       return;
     }
 
@@ -12060,11 +12772,10 @@ export function CarePlandPers({
           },
           method: "POST",
         });
-        const result = await response.json();
-
-        if (!response.ok) {
-          throw new Error(result.error ?? "PDF text extraction failed.");
-        }
+        const result = await parseApiResponse<{ extractedText?: unknown }>(
+          response,
+          "PDF text extraction failed."
+        );
 
         const extractedText =
           typeof result.extractedText === "string"
@@ -12095,10 +12806,8 @@ export function CarePlandPers({
       }
 
       if (imageFiles.length > 0) {
-        const transfer = new DataTransfer();
-        imageFiles.forEach((file) => transfer.items.add(file));
         const imageResult = await handleExtractImageText(
-          transfer.files,
+          imageFiles,
           "appointmentNotes"
         );
 
@@ -12187,21 +12896,21 @@ export function CarePlandPers({
         },
         method: "POST",
       });
-      const result = (await response.json()) as {
+      const result = await parseApiResponse<{
         careSubjectId?: string;
         draft?: unknown;
         error?: string;
         intakeItemId?: string;
         personAssignment?: unknown;
-      };
-
-      if (!response.ok) {
-        throw new Error(result.error ?? "Import Anything review failed.");
-      }
+      }>(response, "Import Anything review failed.");
 
       const reviewItems = importAnythingItemsFromDraft(result.draft);
       const ownershipClusters =
         importAnythingOwnershipClustersFromDraft(result.draft);
+      const unresolvedIdentities = importAnythingUnresolvedDetectedIdentities({
+        clusters: ownershipClusters,
+        items: reviewItems,
+      });
       const personAssignment =
         importAnythingPersonAssignmentFromUnknown(result.personAssignment) ??
         importAnythingPersonAssignmentFromUnknown(
@@ -12227,8 +12936,25 @@ export function CarePlandPers({
       setConfirmingImportAnythingSaveAll(false);
       setEditingImportAnythingItemIds({});
       setViewingImportAnythingSourceItemId(null);
+      setImportAnythingIdentityResolutionChoices(
+        unresolvedIdentities.map((identity) => ({
+          action: "",
+          clusterId: identity.clusterId,
+          createName: identity.suggestedNewPersonName || identity.displayName,
+          detectedName: identity.displayName,
+          editingPetSpecies: false,
+          managedByHousehold: false,
+          matchedCareSubjectId: "",
+          otherPetType: "",
+          petKind: "cat",
+          subjectType: "other",
+        }))
+      );
+      setImportAnythingIdentityResolutionOpen(
+        unresolvedIdentities.length > 0
+      );
       setImportAnythingOwnershipClusters(ownershipClusters);
-      setImportAnythingReviewOpen(false);
+      setImportAnythingReviewOpen(unresolvedIdentities.length === 0);
       setImportAnythingSummary(
         importAnythingDeterministicSummary(reviewItems, ownershipClusters)
       );
@@ -12252,47 +12978,190 @@ export function CarePlandPers({
     }
   }
 
+  function updateImportAnythingIdentityResolutionChoice(
+    clusterId: string,
+    updates: Partial<ImportAnythingIdentityResolutionChoice>
+  ) {
+    setImportAnythingIdentityResolutionChoices((currentChoices) =>
+      currentChoices.map((choice) =>
+        choice.clusterId === clusterId ? { ...choice, ...updates } : choice
+      )
+    );
+  }
+
+  async function completeImportAnythingIdentityResolution() {
+    if (importAnythingIdentityResolutionChoices.length === 0) {
+      setImportAnythingIdentityResolutionOpen(false);
+      setImportAnythingReviewOpen(true);
+      return;
+    }
+
+    const incompleteChoice = importAnythingIdentityResolutionChoices.find(
+      (choice) =>
+        !choice.action ||
+        (choice.action === "match" && !choice.matchedCareSubjectId) ||
+        (choice.action === "create" && !choice.createName.trim())
+    );
+
+    if (incompleteChoice) {
+      setMessage("Resolve each detected person before reviewing the import.");
+      return;
+    }
+
+    const createChoices = importAnythingIdentityResolutionChoices.filter(
+      (choice) => choice.action === "create"
+    );
+
+    if (careSubjects.length + createChoices.length > careVipLimit) {
+      setMessage(
+        "This household already has the maximum number of Care VIPs."
+      );
+      return;
+    }
+
+    setSavingImportAnything(true);
+    setMessage("");
+
+    try {
+      const { careCircleId } = await getPrimaryCareContext();
+      const decisions: ImportAnythingIdentityResolutionDecision[] = [];
+      const createdSubjects: CareSubject[] = [];
+
+      for (const choice of importAnythingIdentityResolutionChoices) {
+        if (choice.action === "match") {
+          decisions.push({
+            action: "match",
+            clusterId: choice.clusterId,
+            matchedCareSubjectId: choice.matchedCareSubjectId,
+          });
+          continue;
+        }
+
+        if (choice.action === "leave_unresolved") {
+          decisions.push({
+            action: "leave_unresolved",
+            clusterId: choice.clusterId,
+          });
+          continue;
+        }
+
+        const displayName = choice.createName.trim();
+        const subjectType = choice.subjectType.trim() || "other";
+        const isPet = isPetSubjectType(subjectType);
+        const { data: newSubject, error } = await supabase
+          .from("care_subjects")
+          .insert({
+            care_circle_id: careCircleId,
+            display_name: displayName,
+            is_active: true,
+            is_default: careSubjects.length + createdSubjects.length === 0,
+            managed_by_household: isPet ? true : choice.managedByHousehold,
+            subject_type: subjectType,
+          })
+          .select(
+            "id,care_circle_id,display_name,subject_type,is_default,is_active,managed_by_household"
+          )
+          .single();
+
+        if (error) {
+          throw error;
+        }
+
+        const createdSubjectBase = {
+          avatarAltText: null,
+          avatarEmoji: null,
+          avatarIsDefault: false,
+          avatarType: "initials",
+          avatarUrl: null,
+          care_circle_id: newSubject.care_circle_id,
+          display_name: newSubject.display_name,
+          id: newSubject.id,
+          is_active: newSubject.is_active,
+          is_default: newSubject.is_default,
+          managed_by_household: newSubject.managed_by_household ?? false,
+          subject_type: newSubject.subject_type,
+        } satisfies CareSubject;
+        const defaultAvatarEmoji = defaultPetAvatarEmoji(createdSubjectBase);
+        const createdSubject = {
+          ...createdSubjectBase,
+          avatarEmoji: defaultAvatarEmoji,
+          avatarIsDefault: Boolean(defaultAvatarEmoji),
+        } satisfies CareSubject;
+
+        createdSubjects.push(createdSubject);
+        decisions.push({
+          action: "create",
+          clusterId: choice.clusterId,
+          createdCareSubjectId: newSubject.id,
+        });
+      }
+
+      if (createdSubjects.length > 0) {
+        setCareSubjects((currentSubjects) =>
+          [...currentSubjects, ...createdSubjects].sort((a, b) => {
+            if (a.is_default !== b.is_default) {
+              return a.is_default ? -1 : 1;
+            }
+
+            return a.display_name.localeCompare(b.display_name);
+          })
+        );
+      }
+
+      const resolvedItems = applyImportAnythingIdentityResolutions({
+        decisions,
+        items: importAnythingItems,
+      });
+
+      setImportAnythingItems(resolvedItems);
+      const resolvedClusters = importAnythingOwnershipClusters.map((cluster) => {
+          const decision = decisions.find(
+            (item) => item.clusterId === cluster.clusterId
+          );
+          const matchedCareSubjectId =
+            decision?.action === "match"
+              ? decision.matchedCareSubjectId ?? ""
+              : decision?.action === "create"
+                ? decision.createdCareSubjectId ?? ""
+                : "";
+
+          return matchedCareSubjectId
+            ? { ...cluster, matchedCareSubjectId }
+            : cluster;
+        });
+
+      setImportAnythingOwnershipClusters(resolvedClusters);
+      setImportAnythingSummary(
+        importAnythingDeterministicSummary(resolvedItems, resolvedClusters)
+      );
+      setImportAnythingIdentityResolutionOpen(false);
+      setImportAnythingReviewOpen(true);
+      setMessage(
+        createdSubjects.length > 0
+          ? "Care VIP created and import ownership resolved."
+          : "Import ownership resolved."
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingImportAnything(false);
+    }
+  }
+
   function setImportAnythingItemStatus(
     itemId: string,
     status: ImportAnythingReviewStatus
   ) {
     setImportAnythingItems((currentItems) =>
-      currentItems.map((item) => {
-        if (item.id !== itemId) {
-          return item;
-        }
-
-        if (
-          status === "approved" &&
-          !item.ownerCareSubjectId &&
-          !item.ownerNewPersonName &&
-          item.ownerDetectedName
-        ) {
-          const detectedOwnerKey = normalizedImportAnythingText(
-            item.ownerDetectedName
-          );
-          const matchedSubject = careSubjects.find(
-            (subject) =>
-              normalizedImportAnythingText(subject.display_name) ===
-              detectedOwnerKey
-          );
-
-          if (matchedSubject) {
-            return {
+      currentItems.map((item) =>
+        item.id === itemId
+          ? {
               ...item,
-              ownerCareSubjectId: matchedSubject.id,
               status,
-              userReviewed: true,
-            };
-          }
-        }
-
-        return {
-          ...item,
-          status,
-          userReviewed: status === "approved" ? true : item.userReviewed,
-        };
-      })
+              userReviewed: status === "approved" ? true : item.userReviewed,
+            }
+          : item
+      )
     );
   }
 
@@ -12370,31 +13239,36 @@ export function CarePlandPers({
     );
   }
 
-  function importAnythingItemWithLikelyOwnerConfirmed(
-    item: ImportAnythingReviewItem
-  ): ImportAnythingReviewItem {
-    if (
-      item.ownerCareSubjectId ||
-      item.ownerNewPersonName ||
-      !item.ownerDetectedName
-    ) {
-      return item;
-    }
+  function updateImportAnythingItemAppointment(
+    itemId: string,
+    appointmentId: string
+  ) {
+    const matchedAppointment = appointmentId
+      ? appointmentsById.get(appointmentId)
+      : null;
 
-    const detectedOwnerKey = normalizedImportAnythingText(item.ownerDetectedName);
-    const matchedSubject = careSubjects.find(
-      (subject) =>
-        normalizedImportAnythingText(subject.display_name) === detectedOwnerKey
+    setImportAnythingItems((currentItems) =>
+      currentItems.map((item) => {
+        if (item.id !== itemId) {
+          return item;
+        }
+
+        const shouldCreateNewAppointment =
+          item.kind === "note" && !matchedAppointment;
+
+        return {
+          ...item,
+          createsNewAppointment: shouldCreateNewAppointment,
+          matchedAppointmentId: matchedAppointment?.id ?? "",
+          ownerCareSubjectId:
+            matchedAppointment?.care_subject_id ?? item.ownerCareSubjectId,
+          ownerNewPersonName: matchedAppointment
+            ? ""
+            : item.ownerNewPersonName,
+          userReviewed: true,
+        };
+      })
     );
-
-    if (!matchedSubject) {
-      return item;
-    }
-
-    return {
-      ...item,
-      ownerCareSubjectId: matchedSubject.id,
-    };
   }
 
   async function handleCommitImportAnythingReview(
@@ -12413,47 +13287,12 @@ export function CarePlandPers({
     setMessage("");
 
     try {
+      if (importAnythingIdentityResolutionOpen) {
+        throw new Error("Resolve detected people before saving this import.");
+      }
+
       const { careCircleId, userId } = await getPrimaryCareContext();
-      const newPersonNames = Array.from(
-        new Map(
-          approvedItems
-            .map((item) => item.ownerNewPersonName.trim())
-            .filter(Boolean)
-            .map((name) => [name.toLowerCase(), name])
-        ).values()
-      );
-
-      if (
-        newPersonNames.length > 0 &&
-        careSubjects.length + newPersonNames.length > entitlement.max_active_subjects
-      ) {
-        throw new Error(
-          `${entitlement.plan_name} allows ${entitlement.max_active_subjects} active Care VIP.`
-        );
-      }
-
       const createdSubjectIdsByName = new Map<string, string>();
-
-      for (const newPersonName of newPersonNames) {
-        const { data: newSubject, error } = await supabase
-          .from("care_subjects")
-          .insert({
-            care_circle_id: careCircleId,
-            display_name: newPersonName,
-            is_active: true,
-            is_default:
-              careSubjects.length + createdSubjectIdsByName.size === 0,
-            subject_type: "other",
-          })
-          .select("id")
-          .single();
-
-        if (error) {
-          throw error;
-        }
-
-        createdSubjectIdsByName.set(newPersonName.toLowerCase(), newSubject.id);
-      }
 
       const { data: sessionData, error: sessionError } =
         await supabase.auth.getSession();
@@ -12475,9 +13314,9 @@ export function CarePlandPers({
       let reviewedOnly = 0;
       const generatedAt = new Date().toISOString();
       const careSubjectIdForItem = (item: ImportAnythingReviewItem) =>
-        item.ownerCareSubjectId.trim() ||
-        createdSubjectIdsByName.get(item.ownerNewPersonName.trim().toLowerCase()) ||
-        "";
+        subjectsById.has(item.ownerCareSubjectId.trim())
+          ? item.ownerCareSubjectId.trim()
+          : "";
       const approvedItemsWithOwners = approvedItems.map((item) => ({
         careSubjectId: careSubjectIdForItem(item),
         item,
@@ -12524,6 +13363,52 @@ export function CarePlandPers({
           item.kind === "question" ||
           item.kind === "task") &&
         Boolean(item.matchedAppointmentId);
+      const supportingNoteAppointmentIds = new Map<string, string>();
+      const createAppointmentForImportItem = async (
+        item: ImportAnythingReviewItem,
+        careSubjectId: string
+      ) => {
+        const startsAtDate = item.fields.startsAt
+          ? new Date(item.fields.startsAt)
+          : null;
+        const startsAt =
+          startsAtDate && !Number.isNaN(startsAtDate.getTime())
+            ? startsAtDate.toISOString()
+            : null;
+        const { data: appointment, error } = await supabase
+          .from("appointments")
+          .insert({
+            care_circle_id: careCircleId,
+            care_subject_id: careSubjectId,
+            location_address: item.fields.locationAddress?.trim() || null,
+            location_name: item.fields.locationName?.trim() || null,
+            location_phone: item.fields.locationPhone?.trim() || null,
+            owner_user_id: userId,
+            provider_name: item.fields.providerName?.trim() || null,
+            provider_organization:
+              item.fields.providerOrganization?.trim() || null,
+            reason:
+              item.fields.appointmentReason?.trim() ||
+              (item.kind === "note" ? "Imported Visit Notes" : null),
+            source: "manual",
+            starts_at: startsAt,
+            status: item.kind === "note" ? "completed" : "scheduled",
+            title:
+              item.fields.appointmentTitle?.trim() ||
+              item.fields.appointmentReason?.trim() ||
+              (item.kind === "note"
+                ? item.title?.trim() || "Imported visit notes"
+                : "Imported appointment"),
+          })
+          .select("id")
+          .single();
+
+        if (error) {
+          throw error;
+        }
+
+        return appointment.id as string;
+      };
 
       if (providerUpserts.length > 0) {
         const { error } = await supabase
@@ -12568,50 +13453,57 @@ export function CarePlandPers({
 
         if (item.kind === "appointment") {
           if (item.matchedAppointmentId) {
+            for (const supportItem of importAnythingFindSupportingNotes(
+              item,
+              approvedItems
+            )) {
+              supportingNoteAppointmentIds.set(
+                supportItem.id,
+                item.matchedAppointmentId
+              );
+            }
             reviewedOnly += 1;
             continue;
           }
 
-          const startsAtDate = item.fields.startsAt
-            ? new Date(item.fields.startsAt)
-            : null;
-          const startsAt =
-            startsAtDate && !Number.isNaN(startsAtDate.getTime())
-              ? startsAtDate.toISOString()
-              : null;
+          const appointmentId = await createAppointmentForImportItem(
+            item,
+            careSubjectId
+          );
 
-          const { error } = await supabase.from("appointments").insert({
-            care_circle_id: careCircleId,
-            care_subject_id: careSubjectId,
-            location_address: item.fields.locationAddress?.trim() || null,
-            location_name: item.fields.locationName?.trim() || null,
-            location_phone: item.fields.locationPhone?.trim() || null,
-            owner_user_id: userId,
-            provider_name: item.fields.providerName?.trim() || null,
-            provider_organization:
-              item.fields.providerOrganization?.trim() || null,
-            reason: item.fields.appointmentReason?.trim() || null,
-            source: "manual",
-            starts_at: startsAt,
-            status: "scheduled",
-            title:
-              item.fields.appointmentTitle?.trim() ||
-              item.fields.appointmentReason?.trim() ||
-              "Imported appointment",
-          });
-
-          if (error) {
-            throw error;
+          for (const supportItem of importAnythingFindSupportingNotes(
+            item,
+            approvedItems
+          )) {
+            supportingNoteAppointmentIds.set(supportItem.id, appointmentId);
           }
 
           createdAppointments += 1;
           continue;
         }
 
-        if (item.kind === "note" && item.matchedAppointmentId) {
+        if (item.kind === "note") {
+          let appointmentId =
+            item.matchedAppointmentId ||
+            supportingNoteAppointmentIds.get(item.id) ||
+            "";
+
+          if (!appointmentId && item.createsNewAppointment) {
+            appointmentId = await createAppointmentForImportItem(
+              item,
+              careSubjectId
+            );
+            createdAppointments += 1;
+          }
+
+          if (!appointmentId) {
+            reviewedOnly += 1;
+            continue;
+          }
+
           const response = await fetch("/api/appointment-notes", {
             body: JSON.stringify({
-              appointmentId: item.matchedAppointmentId,
+              appointmentId,
               followups: linesToList(item.fields.followups ?? ""),
               inputText: item.sourceExcerpt || textIntakeValue,
               restoreIfArchived: false,
@@ -12734,7 +13626,7 @@ export function CarePlandPers({
 
   function handleConfirmAllImportAnything() {
     const confirmedItems = importAnythingItems.map((item) => ({
-      ...importAnythingItemWithLikelyOwnerConfirmed(item),
+      ...item,
       status: "approved" as const,
       userReviewed: true,
     }));
@@ -12971,6 +13863,30 @@ export function CarePlandPers({
     });
   }
 
+  function setMessagesExpandedForAppointment(
+    appointmentId: string,
+    expanded: boolean
+  ) {
+    const nextAppointmentId = expanded ? appointmentId : null;
+
+    setExpandedMessagesAppointmentId(nextAppointmentId);
+    if (!expanded) {
+      setActiveMessageComposerAppointmentId((currentAppointmentId) =>
+        currentAppointmentId === appointmentId ? null : currentAppointmentId
+      );
+    }
+    saveAppointmentsViewState({
+      expandedMessagesAppointmentId: nextAppointmentId,
+    });
+  }
+
+  function openAppointmentMessageComposer(appointment: Appointment) {
+    setActiveMessageComposerAppointmentId((currentAppointmentId) =>
+      currentAppointmentId === appointment.id ? null : appointment.id
+    );
+    setMessagesExpandedForAppointment(appointment.id, true);
+  }
+
   function setCarePrepExpandedForAppointment(
     appointmentId: string,
     expanded: boolean
@@ -12989,15 +13905,26 @@ export function CarePlandPers({
     });
   }
 
-  function appointmentHasCarePrepAvailable(appointmentId: string) {
+  function appointmentHasWhatToKnowAvailable(appointmentId: string) {
     const prep = guidanceByAppointment.get(appointmentId);
     const draft = draftGuidanceByAppointment.get(appointmentId);
+    const whatToKnow = buildWhatToKnowDisplayModel({
+      carePrep: {
+        bring_list: asTextList(prep?.bring_list),
+        key_questions: asTextList(prep?.key_questions),
+        med_review: asTextList(prep?.med_review),
+        next_steps: asTextList(prep?.next_steps),
+        since_last_visit: asTextList(prep?.since_last_visit),
+        watchouts: asTextList(prep?.watchouts),
+      },
+      communicationItems: communicationItemsByAppointment.get(appointmentId) ?? [],
+    });
 
-    return Boolean(prep?.summary || draft?.summary);
+    return Boolean(prep?.summary || draft?.summary || whatToKnow.hasItems);
   }
 
   function openCarePrepPanel(appointment: Appointment) {
-    if (appointmentHasCarePrepAvailable(appointment.id)) {
+    if (appointmentHasWhatToKnowAvailable(appointment.id)) {
       setCarePrepExpandedForAppointment(appointment.id, true);
       return;
     }
@@ -13008,6 +13935,7 @@ export function CarePlandPers({
   function requestCarePrepPanel(appointment: Appointment) {
     if (expandedCarePrepIds[appointment.id]) {
       setCarePrepExpandedForAppointment(appointment.id, false);
+      setMessagesExpandedForAppointment(appointment.id, false);
       return;
     }
 
@@ -14066,11 +14994,46 @@ export function CarePlandPers({
     }
 
     return result as {
+      alreadyUpToDate?: boolean;
       appointmentId?: string;
       generationMode?: CarePrepGenerationMode;
       guidanceId?: string;
       message?: string;
     };
+  }
+
+  async function requestAppointmentMessagePrepRebuild({
+    accessToken,
+    appointmentId,
+    personId,
+  }: {
+    accessToken: string;
+    appointmentId: string;
+    personId: string;
+  }) {
+    const response = await fetch("/api/personal/appointments/messageprep/rebuild", {
+      body: JSON.stringify({
+        appointmentId,
+        personId,
+      }),
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      ok?: boolean;
+      summary?: AppointmentCommunicationSummaryRow | null;
+    };
+
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error ?? "MessagePrep refresh failed.");
+    }
+
+    return result.summary ?? null;
   }
 
   async function triggerAutoCarePrepAfterNotes({
@@ -14293,6 +15256,110 @@ export function CarePlandPers({
         return nextErrors;
       });
       setMessage(result.message ?? "CarePrep generated with AI.");
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setCarePrepGenerationErrors((currentErrors) => ({
+        ...currentErrors,
+        [appointment.id]: message,
+      }));
+      setMessage(message);
+    } finally {
+      setGeneratingCarePrepForId(null);
+    }
+  }
+
+  function canRefreshCarePrepForAppointment(appointment: Appointment) {
+    const isFutureOrUndated =
+      !appointment.starts_at ||
+      new Date(appointment.starts_at) >= startOfToday();
+
+    return (
+      appointment.status !== "archived" &&
+      !appointment.current_note_id &&
+      isFutureOrUndated
+    );
+  }
+
+  async function handleRefreshWhatToKnow(appointment: Appointment) {
+    setGeneratingCarePrepForId(appointment.id);
+    setCarePrepGenerationErrors((currentErrors) => {
+      const nextErrors = { ...currentErrors };
+      delete nextErrors[appointment.id];
+      return nextErrors;
+    });
+    setMessage("");
+
+    try {
+      if (!appointment.care_subject_id) {
+        throw new Error("This appointment needs a Care VIP before What to Know can refresh.");
+      }
+
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData.session?.access_token;
+
+      if (!accessToken) {
+        throw new Error("Please sign in before refreshing What to Know.");
+      }
+
+      let refreshError = "";
+      let messagePrepSummary: AppointmentCommunicationSummaryRow | null = null;
+
+      if (canRefreshCarePrepForAppointment(appointment)) {
+        try {
+          await requestCarePrepGeneration(appointment.id, "manual");
+        } catch (error) {
+          refreshError = getErrorMessage(error);
+        }
+      }
+
+      try {
+        messagePrepSummary = await requestAppointmentMessagePrepRebuild({
+          accessToken,
+          appointmentId: appointment.id,
+          personId: appointment.care_subject_id,
+        });
+      } catch (error) {
+        const messagePrepError = getErrorMessage(error);
+        refreshError = refreshError
+          ? `${refreshError} ${messagePrepError}`
+          : messagePrepError;
+      }
+
+      if (messagePrepSummary) {
+        setAppointmentCommunicationSummaries((currentSummaries) => {
+          const others = currentSummaries.filter(
+            (summary) => summary.appointment_id !== messagePrepSummary?.appointment_id
+          );
+          return [...others, messagePrepSummary as AppointmentCommunicationSummaryRow];
+        });
+      }
+
+      await loadHomeMessages();
+      await loadAppointments();
+      await hydrateAppointmentDetails([appointment]);
+      setCarePrepExpandedForAppointment(appointment.id, true);
+
+      if (refreshError) {
+        setCarePrepGenerationErrors((currentErrors) => ({
+          ...currentErrors,
+          [appointment.id]: refreshError,
+        }));
+        setMessage(refreshError);
+        return;
+      }
+
+      setCarePrepGenerationErrors((currentErrors) => {
+        const nextErrors = { ...currentErrors };
+        delete nextErrors[appointment.id];
+        return nextErrors;
+      });
+      setMessage("What to Know refreshed.");
     } catch (error) {
       const message = getErrorMessage(error);
       setCarePrepGenerationErrors((currentErrors) => ({
@@ -14658,7 +15725,7 @@ export function CarePlandPers({
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error ?? "CarePrep review failed.");
+        throw new Error(result.error ?? "What to Know review failed.");
       }
 
       setCarePrepDrafts((currentDrafts) => {
@@ -14668,7 +15735,7 @@ export function CarePlandPers({
       });
       await loadAppointments();
       setCarePrepExpandedForAppointment(appointmentId, true);
-      setMessage(result.message ?? "CarePrep reviewed.");
+      setMessage(result.message ?? "What to Know reviewed.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -15049,6 +16116,27 @@ export function CarePlandPers({
       notesReminderAppointment,
       selectedSubjectId,
     });
+    const activeHomeMessages =
+      selectedSubjectId === ALL_SUBJECTS
+        ? []
+        : homeMessageGroups.find((group) => group.subjectId === selectedSubjectId)
+            ?.messages ?? [];
+    const activeHomeMessageSummaryResult =
+      selectedSubjectId === ALL_SUBJECTS
+        ? null
+        : buildHomeMessageSummary([
+            {
+              messages: activeHomeMessages,
+              personId: selectedSubjectId,
+              personName:
+                careSubjects.find((subject) => subject.id === selectedSubjectId)
+                  ?.display_name || "this Care VIP",
+            },
+          ]);
+    const activeHomeMessageSummary =
+      activeHomeMessageSummaryResult?.individualSummaries[0]?.summary ?? "";
+    const activeHomeMessageIndividualSummary =
+      activeHomeMessageSummaryResult?.individualSummaries[0] ?? null;
 
     return (
       <div className="mt-1 space-y-2">
@@ -15098,7 +16186,7 @@ export function CarePlandPers({
           />
         ) : (
           <>
-            {isAdmin ? (
+            {canShowAdminItems ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2 text-sm text-slate-700">
                 <label className="inline-flex cursor-pointer items-center gap-2 font-semibold text-blue-900">
                   <input
@@ -15360,7 +16448,50 @@ export function CarePlandPers({
               </HomeNextAppointmentPanel>
             )}
 
-            {isAdmin && showHomeAtAGlanceTest ? (
+            <RecentMessagesPanel
+              action={
+                selectedSubjectId === ALL_SUBJECTS ? null : (
+                  <button
+                    className="rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 transition hover:border-blue-200 hover:bg-blue-100"
+                    onClick={() => openMessagesPage()}
+                    type="button"
+                  >
+                    View all messages
+                  </button>
+                )
+              }
+              emptyLabel={
+                selectedSubjectId === ALL_SUBJECTS
+                  ? "Choose a Care VIP to see recent messages."
+                  : "No recent messages for this Care VIP yet."
+              }
+              formatDate={formatDate}
+              loading={homeMessagesLoading}
+              messages={activeHomeMessages}
+              onOpenAppointmentMessage={openMessageAppointment}
+              onOpenMessage={() => openMessagesPage()}
+              onSummaryFeedback={
+                selectedSubjectId !== ALL_SUBJECTS &&
+                activeHomeMessageSummaryResult &&
+                activeHomeMessageIndividualSummary
+                  ? ({ userComment }) =>
+                      submitHomeMessageSummaryFeedback({
+                        decisionTrace:
+                          activeHomeMessageSummaryResult.decisionTrace,
+                        keyPoints: activeHomeMessageIndividualSummary.keyPoints,
+                        personId: selectedSubjectId,
+                        sourceMessageIds:
+                          activeHomeMessageIndividualSummary.sourceMessageIds,
+                        summary: activeHomeMessageIndividualSummary.summary,
+                        userComment,
+                      })
+                  : undefined
+              }
+              summary={activeHomeMessageSummary}
+              title="Messages"
+            />
+
+            {canShowAdminItems && showHomeAtAGlanceTest ? (
               <section className="space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -16357,6 +17488,7 @@ export function CarePlandPers({
               sendingPasswordReset,
               setPlanHelpExpanded,
             }}
+            canShowAdminItems={canShowAdminItems}
             contactDetailsProps={{
               accountPersonId: ACCOUNT_PROFILE_PERSON_ID,
               hasUnsavedProfileChanges,
@@ -17473,7 +18605,7 @@ export function CarePlandPers({
                 {activeAppointmentPanel === "quickAdd" ? (
                   <section
                     className={`transition-colors ${
-                      importAnythingDragActive
+                      importAnythingDragActive || fileImportStatus
                         ? "rounded-md bg-blue-50/70 p-4"
                         : ""
                     }`}
@@ -17497,7 +18629,8 @@ export function CarePlandPers({
                       </div>
                       {importAnythingItems.length === 0 ? (
                         <button
-                          className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 hover:text-blue-900"
+                          className="rounded-md px-2 py-1 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 hover:text-blue-900 disabled:cursor-not-allowed disabled:text-slate-400"
+                          disabled={Boolean(fileImportStatus)}
                           onClick={() => startAppointmentPanel("add")}
                           type="button"
                         >
@@ -17541,13 +18674,17 @@ export function CarePlandPers({
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div
                               className={`inline-flex rounded-md border border-dashed px-4 py-3 text-base font-semibold transition-colors ${
-                                importAnythingDragActive
+                                fileImportStatus
+                                  ? "border-blue-300 bg-white text-blue-900"
+                                  : importAnythingDragActive
                                   ? "border-blue-300 bg-white text-blue-900"
                                   : "border-blue-100 bg-blue-50/40 text-blue-800"
                               }`}
                             >
-                              {extractingImageText
-                                ? "Reviewing files..."
+                              {fileImportStatus
+                                ? "Importing files..."
+                                : extractingImageText
+                                ? "Importing files..."
                                 : importAnythingDragActive
                                   ? "Drop files here."
                                   : "Drag files here"}
@@ -17555,7 +18692,7 @@ export function CarePlandPers({
                             <div className="flex flex-col items-end gap-2">
                               <label
                                 className={`rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100 ${
-                                  extractingImageText
+                                  extractingImageText || fileImportStatus
                                     ? "cursor-not-allowed opacity-60"
                                     : "cursor-pointer"
                                 }`}
@@ -17567,7 +18704,7 @@ export function CarePlandPers({
                             <input
                               accept=".pdf,.txt,.md,.csv,.log,text/plain,text/csv,text/markdown,application/pdf,image/gif,image/jpeg,image/png,image/webp"
                               className="sr-only"
-                              disabled={extractingImageText}
+                              disabled={extractingImageText || Boolean(fileImportStatus)}
                               id="import-anything-files"
                               multiple
                               onChange={(event) => {
@@ -17577,13 +18714,17 @@ export function CarePlandPers({
                               type="file"
                             />
                           </div>
-                          {extractingImageText || processingImportAnything ? (
+                          {fileImportStatus ||
+                          extractingImageText ||
+                          processingImportAnything ? (
                             <div
                               aria-live="polite"
                               className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900"
                               role="status"
                             >
-                              {extractingImageText
+                              {fileImportStatus
+                                ? fileImportStatus
+                                : extractingImageText
                                 ? "Importing files..."
                                 : "Reviewing everything found..."}
                             </div>
@@ -17614,13 +18755,18 @@ export function CarePlandPers({
                       <button
                         className={gentlePrimaryButtonClass}
                         disabled={
+                          Boolean(fileImportStatus) ||
                           processingImportAnything ||
                           (importAnythingItems.length === 0 &&
                             !textIntakeValue.trim())
                         }
                         onClick={() => {
                           if (importAnythingItems.length > 0) {
-                            setImportAnythingReviewOpen(true);
+                            if (importAnythingIdentityResolutionOpen) {
+                              setImportAnythingReviewOpen(false);
+                            } else {
+                              setImportAnythingReviewOpen(true);
+                            }
                             return;
                           }
 
@@ -17636,7 +18782,9 @@ export function CarePlandPers({
                         <button
                           className={gentleSecondaryButtonClass}
                           disabled={
-                            processingImportAnything || savingImportAnything
+                            processingImportAnything ||
+                            savingImportAnything ||
+                            importAnythingIdentityResolutionOpen
                           }
                           onClick={() =>
                             setConfirmingImportAnythingSaveAll(true)
@@ -17670,6 +18818,23 @@ export function CarePlandPers({
                                 .appointments === 1
                                 ? ""
                                 : "s"}
+                            </li>
+                          ) : null}
+                          {importAnythingNewAppointmentNoteCount(
+                            importAnythingItems
+                          ) > 0 ? (
+                            <li>
+                              •{" "}
+                              {importAnythingNewAppointmentNoteCount(
+                                importAnythingItems
+                              )}{" "}
+                              appointment
+                              {importAnythingNewAppointmentNoteCount(
+                                importAnythingItems
+                              ) === 1
+                                ? ""
+                                : "s"}{" "}
+                              from Visit Notes
                             </li>
                           ) : null}
                           {importAnythingSummaryCounts(importAnythingItems)
@@ -17712,6 +18877,419 @@ export function CarePlandPers({
                           >
                             Cancel
                           </button>
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {importAnythingItems.length > 0 &&
+                    importAnythingIdentityResolutionOpen ? (
+                      <section className="mt-5 rounded-md border border-amber-100 bg-white p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          {!canAddCareVip ? (
+                            <p className="rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950">
+                              This household already has the maximum number of
+                              Care VIPs.
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div className="mt-4 space-y-4">
+                          {importAnythingIdentityResolutionChoices.map(
+                            (choice) => (
+                              <section
+                                className="py-2"
+                                key={choice.clusterId}
+                              >
+                                <div>
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                    Potential Care VIP
+                                  </p>
+                                  <h4 className="mt-1 text-lg font-semibold text-slate-950">
+                                    {choice.detectedName}
+                                  </h4>
+                                  <p className="mt-1 text-sm text-slate-600">
+                                    Choose how to handle this unrecognized name.
+                                  </p>
+                                </div>
+
+                                <div className="mt-4 grid gap-3">
+                                  <label className="flex items-start gap-3 py-1 text-sm text-slate-700">
+                                    <input
+                                      checked={choice.action === "match"}
+                                      className="mt-1"
+                                      onChange={() =>
+                                        updateImportAnythingIdentityResolutionChoice(
+                                          choice.clusterId,
+                                          { action: "match" }
+                                        )
+                                      }
+                                      type="radio"
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="font-semibold text-slate-900">
+                                        Match to an existing Care VIP
+                                      </span>
+                                      {choice.action === "match" ? (
+                                        <select
+                                          className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                                          onChange={(event) =>
+                                            updateImportAnythingIdentityResolutionChoice(
+                                              choice.clusterId,
+                                              {
+                                                matchedCareSubjectId:
+                                                  event.target.value,
+                                              }
+                                            )
+                                          }
+                                          value={choice.matchedCareSubjectId}
+                                        >
+                                          <option value="">
+                                            Choose a Care VIP
+                                          </option>
+                                          {careSubjects.map((subject) => (
+                                            <option
+                                              key={subject.id}
+                                              value={subject.id}
+                                            >
+                                              {careSubjectDisplayLabel(subject)}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      ) : null}
+                                    </span>
+                                  </label>
+
+                                  {canAddCareVip ? (
+                                    <div className="py-1 text-sm text-slate-700">
+                                      <label className="flex items-start gap-3">
+                                        <input
+                                          checked={choice.action === "create"}
+                                          className="mt-1"
+                                          onChange={() =>
+                                            updateImportAnythingIdentityResolutionChoice(
+                                              choice.clusterId,
+                                              { action: "create" }
+                                            )
+                                          }
+                                          type="radio"
+                                        />
+                                        <span className="font-semibold text-slate-900">
+                                          Create new Care VIP
+                                        </span>
+                                      </label>
+                                      {choice.action === "create" ? (
+                                        <div className="ml-7 mt-3 space-y-3">
+                                          <label className="block w-full max-w-[44rem] text-sm font-medium text-slate-700">
+                                            Name
+                                            <input
+                                              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                                              onChange={(event) =>
+                                                updateImportAnythingIdentityResolutionChoice(
+                                                  choice.clusterId,
+                                                  {
+                                                    createName:
+                                                      event.target.value,
+                                                  }
+                                                )
+                                              }
+                                              value={choice.createName}
+                                            />
+                                          </label>
+                                          <div className="ml-1 flex flex-wrap items-center gap-x-5 gap-y-3">
+                                            <span className="inline-flex items-center gap-1.5">
+                                              <label
+                                                className={`inline-flex items-center gap-2 text-sm font-semibold ${
+                                                  isPetSubjectType(choice.subjectType)
+                                                    ? "cursor-not-allowed text-slate-400"
+                                                    : "text-slate-600"
+                                                }`}
+                                                title={
+                                                  isPetSubjectType(choice.subjectType)
+                                                    ? "Pets are Managed Care VIPs."
+                                                    : "Managed Care VIP"
+                                                }
+                                              >
+                                                <input
+                                                  checked={
+                                                    isPetSubjectType(
+                                                      choice.subjectType
+                                                    ) ||
+                                                    choice.managedByHousehold
+                                                  }
+                                                  className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-300"
+                                                  disabled={isPetSubjectType(
+                                                    choice.subjectType
+                                                  )}
+                                                  onChange={(event) =>
+                                                    updateImportAnythingIdentityResolutionChoice(
+                                                      choice.clusterId,
+                                                      {
+                                                        managedByHousehold:
+                                                          event.target.checked,
+                                                      }
+                                                    )
+                                                  }
+                                                  type="checkbox"
+                                                />
+                                                <span>Managed Care VIP</span>
+                                              </label>
+                                              <ManagedCareVipHelp
+                                                tooltipId={`import-anything-managed-care-vip-help-${choice.clusterId}`}
+                                              />
+                                            </span>
+                                            {isPetSubjectType(choice.subjectType) ? (
+                                              <>
+                                                {!choice.editingPetSpecies ? (
+                                                  <>
+                                                    <span className="text-sm font-semibold text-slate-600">
+                                                      {importAnythingPetLabel(
+                                                        choice.petKind,
+                                                        choice.otherPetType
+                                                      )}
+                                                    </span>
+                                                    <button
+                                                      className="text-sm font-semibold text-slate-500 hover:text-slate-800"
+                                                      onClick={() =>
+                                                        updateImportAnythingIdentityResolutionChoice(
+                                                          choice.clusterId,
+                                                          {
+                                                            editingPetSpecies:
+                                                              true,
+                                                          }
+                                                        )
+                                                      }
+                                                      type="button"
+                                                    >
+                                                      Change Species
+                                                    </button>
+                                                    <button
+                                                      className="text-sm font-semibold text-slate-500 hover:text-rose-700"
+                                                      onClick={() =>
+                                                        updateImportAnythingIdentityResolutionChoice(
+                                                          choice.clusterId,
+                                                          {
+                                                            editingPetSpecies:
+                                                              false,
+                                                            managedByHousehold:
+                                                              false,
+                                                            subjectType: "other",
+                                                          }
+                                                        )
+                                                      }
+                                                      type="button"
+                                                    >
+                                                      Not a Pet
+                                                    </button>
+                                                  </>
+                                                ) : (
+                                                  <div className="flex flex-wrap items-center gap-2">
+                                                    {[
+                                                      ["cat", "Cat"],
+                                                      ["dog", "Dog"],
+                                                      ["other", "Other"],
+                                                    ].map(([kind, label]) => (
+                                                      <button
+                                                        aria-pressed={
+                                                          choice.petKind === kind
+                                                        }
+                                                        className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                                                          choice.petKind === kind
+                                                            ? "bg-blue-100 text-blue-950 ring-1 ring-blue-200"
+                                                            : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-blue-50 hover:text-blue-900"
+                                                        }`}
+                                                        key={kind}
+                                                        onClick={() => {
+                                                          const petKind =
+                                                            kind as ImportAnythingPetKind;
+
+                                                          updateImportAnythingIdentityResolutionChoice(
+                                                            choice.clusterId,
+                                                            {
+                                                              editingPetSpecies:
+                                                                petKind ===
+                                                                "other",
+                                                              managedByHousehold:
+                                                                true,
+                                                              petKind,
+                                                              subjectType:
+                                                                importAnythingPetSubjectType(
+                                                                  petKind,
+                                                                  choice.otherPetType
+                                                                ),
+                                                            }
+                                                          );
+                                                        }}
+                                                        type="button"
+                                                      >
+                                                        {label}
+                                                      </button>
+                                                    ))}
+                                                    {choice.petKind === "other" ? (
+                                                      <input
+                                                        className="min-h-9 w-32 rounded-full border border-slate-300 px-3 py-1.5 text-sm text-slate-800"
+                                                        onChange={(event) =>
+                                                          updateImportAnythingIdentityResolutionChoice(
+                                                            choice.clusterId,
+                                                            {
+                                                              otherPetType:
+                                                                event.target.value,
+                                                              subjectType:
+                                                                importAnythingPetSubjectType(
+                                                                  "other",
+                                                                  event.target
+                                                                    .value
+                                                                ),
+                                                            }
+                                                          )
+                                                        }
+                                                        placeholder="Type"
+                                                        value={choice.otherPetType}
+                                                      />
+                                                    ) : null}
+                                                    <button
+                                                      className="text-sm font-semibold text-slate-500 hover:text-slate-800"
+                                                      onClick={() =>
+                                                        updateImportAnythingIdentityResolutionChoice(
+                                                          choice.clusterId,
+                                                          {
+                                                            editingPetSpecies:
+                                                              false,
+                                                          }
+                                                        )
+                                                      }
+                                                      type="button"
+                                                    >
+                                                      Save type
+                                                    </button>
+                                                  </div>
+                                                )}
+                                              </>
+                                            ) : (
+                                              <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600">
+                                                <input
+                                                  checked={false}
+                                                  className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600"
+                                                  onChange={(event) => {
+                                                    if (event.target.checked) {
+                                                      updateImportAnythingIdentityResolutionChoice(
+                                                        choice.clusterId,
+                                                        {
+                                                          managedByHousehold:
+                                                            true,
+                                                          petKind:
+                                                            importAnythingPetKindFromSubjectType(
+                                                              choice.subjectType
+                                                            ),
+                                                          subjectType:
+                                                            importAnythingPetSubjectType(
+                                                              importAnythingPetKindFromSubjectType(
+                                                                choice.subjectType
+                                                              ),
+                                                              choice.otherPetType
+                                                            ),
+                                                        }
+                                                      );
+                                                    }
+                                                  }}
+                                                  type="checkbox"
+                                                />
+                                                <span>This is a pet</span>
+                                              </label>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+
+                                  <label className="flex items-start gap-3 py-1 text-sm text-slate-700">
+                                    <input
+                                      checked={
+                                        choice.action === "leave_unresolved"
+                                      }
+                                      className="mt-1"
+                                      onChange={() =>
+                                        updateImportAnythingIdentityResolutionChoice(
+                                          choice.clusterId,
+                                          { action: "leave_unresolved" }
+                                        )
+                                      }
+                                      type="radio"
+                                    />
+                                    <span>
+                                      <span className="font-semibold text-slate-900">
+                                        Leave unresolved for now
+                                      </span>
+                                      <span className="mt-1 block text-slate-600">
+                                        Imported objects will remain unresolved
+                                        in Review and cannot be saved to another
+                                        person automatically.
+                                      </span>
+                                    </span>
+                                  </label>
+                                </div>
+                              </section>
+                            )
+                          )}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            className={gentlePrimaryButtonClass}
+                            disabled={
+                              savingImportAnything ||
+                              !importAnythingIdentityResolutionReady
+                            }
+                            onClick={() =>
+                              void completeImportAnythingIdentityResolution()
+                            }
+                            type="button"
+                          >
+                            {savingImportAnything
+                              ? "Resolving..."
+                              : "Continue to Review"}
+                          </button>
+                          <button
+                            className={gentleSecondaryButtonClass}
+                            disabled={savingImportAnything}
+                            onClick={() =>
+                              setConfirmingDiscardImportAnythingReview(true)
+                            }
+                            type="button"
+                          >
+                            Discard import
+                          </button>
+                          {confirmingDiscardImportAnythingReview ? (
+                            <span className="inline-flex items-center gap-2 text-sm text-slate-600">
+                              <span>Are you sure?</span>
+                              <button
+                                className="font-semibold text-rose-700 transition hover:text-rose-900"
+                                onClick={() => {
+                                  resetImportAnythingReview();
+                                  setConfirmingDiscardImportAnythingReview(
+                                    false
+                                  );
+                                  setMessage(
+                                    "Import Anything review discarded."
+                                  );
+                                }}
+                                type="button"
+                              >
+                                Yes
+                              </button>
+                              <button
+                                className="font-semibold text-blue-700 transition hover:text-blue-900"
+                                onClick={() =>
+                                  setConfirmingDiscardImportAnythingReview(
+                                    false
+                                  )
+                                }
+                                type="button"
+                              >
+                                No
+                              </button>
+                            </span>
+                          ) : null}
                         </div>
                       </section>
                     ) : null}
@@ -17915,32 +19493,36 @@ export function CarePlandPers({
                               const isEditingImportItem =
                                 editingImportAnythingItemIds[item.id] ?? false;
                               const needsOwnerChoice =
-                                !item.ownerCareSubjectId &&
-                                !item.ownerNewPersonName;
+                                !item.ownerCareSubjectId;
                               const likelyOwnerLabel =
                                 item.ownerDetectedName ||
                                 item.ownerNewPersonName ||
                                 "Unknown";
                               const needsOwnerConfirmation =
                                 needsOwnerChoice && item.ownerDetectedName;
-                              const likelyOwnerCareSubjectId =
-                                needsOwnerConfirmation
-                                  ? careSubjects.find(
-                                      (subject) =>
-                                        normalizedImportAnythingText(
-                                          subject.display_name
-                                        ) ===
-                                        normalizedImportAnythingText(
-                                          item.ownerDetectedName
-                                        )
-                                    )?.id ?? ""
-                                  : "";
+                              const likelyOwnerCareSubjectId = "";
                               const itemOwnerLabel = item.ownerCareSubjectId
                                 ? subjectsById.get(item.ownerCareSubjectId)
                                     ?.display_name ?? "Existing Care VIP"
-                                : item.ownerNewPersonName ||
-                                  item.ownerDetectedName ||
+                                : item.ownerDetectedName ||
                                   "Unassigned";
+                              const appointmentOwnerCandidateId =
+                                item.ownerCareSubjectId || likelyOwnerCareSubjectId;
+                              const importAnythingAppointmentChoices =
+                                appointmentPool.filter((appointment) => {
+                                  if (appointment.deleted_at) {
+                                    return false;
+                                  }
+
+                                  if (!appointmentOwnerCandidateId) {
+                                    return true;
+                                  }
+
+                                  return (
+                                    appointment.care_subject_id ===
+                                    appointmentOwnerCandidateId
+                                  );
+                                });
                               const providerLabel =
                                 item.fields.providerName ||
                                 (item.kind === "provider" ? item.title : "");
@@ -17961,6 +19543,10 @@ export function CarePlandPers({
                                 viewingImportAnythingSourceItemId === item.id;
                               const shouldShowItemSummary =
                                 item.kind !== "appointment" && item.summary;
+                              const createsNewAppointmentFromNote =
+                                item.kind === "note" &&
+                                item.createsNewAppointment &&
+                                !item.matchedAppointmentId;
                               const isHumanApproved =
                                 item.status === "approved" &&
                                 item.userReviewed === true;
@@ -18143,6 +19729,67 @@ export function CarePlandPers({
                                   </div>
                                   </>
                                   )}
+
+                                  {showImportItemDetails &&
+                                  createsNewAppointmentFromNote ? (
+                                    <section className="mt-5 rounded-md border border-amber-100 bg-amber-50/70 px-4 py-3 text-sm text-amber-950">
+                                      <p className="font-semibold">
+                                        This looks like a new appointment.
+                                      </p>
+                                      <p className="mt-1">
+                                        If you approve it, CarePland will create
+                                        an appointment and save these Visit Notes
+                                        to it.
+                                      </p>
+                                    </section>
+                                  ) : null}
+
+                                  {showImportItemDetails &&
+                                  item.kind === "note" ? (
+                                    <section className="mt-4 rounded-md border border-blue-100 bg-blue-50/40 px-4 py-3">
+                                      <label className="block text-sm font-semibold text-slate-900">
+                                        Attach these Visit Notes to
+                                        <select
+                                          className="mt-2 w-full rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm"
+                                          onChange={(event) =>
+                                            updateImportAnythingItemAppointment(
+                                              item.id,
+                                              event.target.value
+                                            )
+                                          }
+                                          value={item.matchedAppointmentId}
+                                        >
+                                          <option value="">
+                                            Create a new appointment from these
+                                            notes
+                                          </option>
+                                          {importAnythingAppointmentChoices.map(
+                                            (appointment) => (
+                                              <option
+                                                key={appointment.id}
+                                                value={appointment.id}
+                                              >
+                                                {importAnythingAppointmentChoiceLabel(
+                                                  appointment
+                                                )}
+                                              </option>
+                                            )
+                                          )}
+                                        </select>
+                                      </label>
+                                      {item.matchedAppointmentId ? (
+                                        <p className="mt-2 text-sm text-slate-600">
+                                          These notes will be saved to the
+                                          selected appointment.
+                                        </p>
+                                      ) : (
+                                        <p className="mt-2 text-sm text-slate-600">
+                                          Keep this selected when the visit is
+                                          missing from CarePland.
+                                        </p>
+                                      )}
+                                    </section>
+                                  ) : null}
 
                                   {showImportItemDetails &&
                                   shouldShowItemSummary ? (
@@ -18344,24 +19991,10 @@ export function CarePlandPers({
                                             ))}
                                           </select>
                                         </label>
-                                        <label className="block text-sm font-medium text-slate-700">
-                                          Or create new person
-                                          <input
-                                            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                                            onChange={(event) =>
-                                              updateImportAnythingItemOwner(
-                                                item.id,
-                                                {
-                                                  ownerNewPersonName:
-                                                    event.target.value,
-                                                }
-                                              )
-                                            }
-                                            placeholder="New Care VIP name"
-                                            type="text"
-                                            value={item.ownerNewPersonName}
-                                          />
-                                        </label>
+                                        <p className="rounded-md border border-amber-100 bg-white px-3 py-2 text-sm font-medium text-amber-950">
+                                          Leave unassigned if this should not be
+                                          attached to an existing Care VIP.
+                                        </p>
                                       </div>
 
                                       {(item.fields.providerOrganization !== undefined ||
@@ -18604,9 +20237,7 @@ export function CarePlandPers({
                                               item.ownerCareSubjectId
                                             )?.display_name ?? "existing Care VIP"
                                           }. `
-                                        : item.ownerNewPersonName
-                                          ? `Possible new Care VIP: ${item.ownerNewPersonName}. `
-                                          : "Save as unassigned unless you choose someone. "}
+                                        : "Unresolved until you choose someone. "}
                                       Confidence:{" "}
                                       {Math.round(item.ownerConfidence * 100)}%.
                                     </p>
@@ -18642,21 +20273,10 @@ export function CarePlandPers({
                                       ))}
                                     </select>
                                   </label>
-                                  <label className="block text-sm font-medium text-slate-700">
-                                    Or create new person
-                                    <input
-                                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                                      onChange={(event) =>
-                                        updateImportAnythingItemOwner(item.id, {
-                                          ownerNewPersonName:
-                                            event.target.value,
-                                        })
-                                      }
-                                      placeholder="New Care VIP name"
-                                      type="text"
-                                      value={item.ownerNewPersonName}
-                                    />
-                                  </label>
+                                  <p className="rounded-md border border-amber-100 bg-white px-3 py-2 text-sm font-medium text-amber-950">
+                                    Leave unassigned if this should not be
+                                    attached to an existing Care VIP.
+                                  </p>
                                 </div>
                               </div>
                               <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -18760,8 +20380,21 @@ export function CarePlandPers({
                 const carePrepDraft = draftGuidanceByAppointment.get(
                   appointment.id
                 );
+                const appointmentCommunicationItems =
+                  communicationItemsByAppointment.get(appointment.id) ?? [];
+                const whatToKnow = buildWhatToKnowDisplayModel({
+                  carePrep: {
+                    bring_list: asTextList(prep?.bring_list),
+                    key_questions: asTextList(prep?.key_questions),
+                    med_review: asTextList(prep?.med_review),
+                    next_steps: asTextList(prep?.next_steps),
+                    since_last_visit: asTextList(prep?.since_last_visit),
+                    watchouts: asTextList(prep?.watchouts),
+                  },
+                  communicationItems: appointmentCommunicationItems,
+                });
                 const hasCarePrepAvailable = Boolean(
-                  prep?.summary || carePrepDraft?.summary
+                  prep?.summary || carePrepDraft?.summary || whatToKnow.hasItems
                 );
                 const carePrepGenerationError =
                   carePrepGenerationErrors[appointment.id];
@@ -18779,26 +20412,27 @@ export function CarePlandPers({
                   Boolean(carePrepDraft);
                 const takeaways = asTextList(note?.takeaways);
                 const followups = asTextList(note?.followups);
-                const bringList = asTextList(prep?.bring_list);
-	                const questions = asTextList(prep?.key_questions);
-	                const watchouts = asTextList(prep?.watchouts);
-	                const medReview = asTextList(prep?.med_review);
-	                const sinceLastVisit = asTextList(prep?.since_last_visit);
-	                const carePrepTopSections = [
-	                  { icon: "👜", items: bringList, label: "Bring" },
-	                  { icon: "❓", items: questions, label: "Ask" },
-	                ].filter((section) => section.items.length > 0);
-	                const carePrepWatchForSection =
-	                  watchouts.length > 0
-	                    ? { icon: "👁", items: watchouts, label: "Watch for" }
-	                    : null;
-	                const carePrepTopGridClassName =
-	                  carePrepTopSections.length === 1
-	                    ? "flex flex-col gap-4"
-	                    : "grid gap-4 md:grid-cols-[max-content_minmax(0,1fr)] md:gap-x-12";
-	                const draftValues = carePrepDraft
-	                  ? carePrepFormValues(appointment.id, carePrepDraft)
-	                  : emptyCarePrepDraft;
+                const bringList = whatToKnow.categories.bring_list;
+                const questions = whatToKnow.categories.key_questions;
+                const watchouts = whatToKnow.categories.watchouts;
+                const medReview = whatToKnow.categories.med_review;
+                const sinceLastVisit = whatToKnow.categories.since_last_visit;
+                const nextSteps = whatToKnow.categories.next_steps;
+                const whatToKnowTopSections = [
+                  { icon: "👜", items: bringList, label: "Bring" },
+                  { icon: "❓", items: questions, label: "Ask" },
+                ].filter((section) => section.items.length > 0);
+                const whatToKnowWatchForSection =
+                  watchouts.length > 0
+                    ? { icon: "👁", items: watchouts, label: "Watch for" }
+                    : null;
+                const whatToKnowTopGridClassName =
+                  whatToKnowTopSections.length === 1
+                    ? "flex flex-col gap-4"
+                    : "grid gap-4 md:grid-cols-[max-content_minmax(0,1fr)] md:gap-x-12";
+                const draftValues = carePrepDraft
+                  ? carePrepFormValues(appointment.id, carePrepDraft)
+                  : emptyCarePrepDraft;
                 const hasReviewCarePrepEdits = carePrepDraft
                   ? hasCarePrepDraftChanges(appointment.id, carePrepDraft)
                   : false;
@@ -18850,11 +20484,11 @@ export function CarePlandPers({
                       ? "add"
                       : null;
                 const shouldShowCarePrepControl =
-                  shouldShowCarePrep &&
-                  (hasCarePrepAvailable ||
-                    canGenerateCarePrep ||
-                    generatingCarePrepForId === appointment.id ||
-                    carePrepGenerationError);
+                  hasCarePrepAvailable ||
+                  (shouldShowCarePrep &&
+                    (canGenerateCarePrep ||
+                      generatingCarePrepForId === appointment.id ||
+                      carePrepGenerationError));
                 const shouldShowAddNotesControl =
                   !isArchived && canPasteContextualNotes;
                 const shouldShowAppointmentFocusControls =
@@ -18876,14 +20510,35 @@ export function CarePlandPers({
                   (canOpenAppointmentLocation
                     ? appointment.location_address?.trim() ?? ""
                     : "");
-		                const appointmentSubjectRecord = appointment.care_subject_id
-		                  ? subjectsById.get(appointment.care_subject_id) ?? null
-		                  : null;
-		                const appointmentSubject =
-		                  appointmentSubjectRecord?.display_name ?? "";
-		                const pendingModifierHasUnsavedChanges =
-		                  pendingModifierSwitch?.appointmentId === appointment.id &&
-		                  hasUnsavedAppointmentModifierChanges(
+                const appointmentSubjectRecord = appointment.care_subject_id
+                  ? subjectsById.get(appointment.care_subject_id) ?? null
+                  : null;
+                const appointmentSubject =
+                  appointmentSubjectRecord?.display_name ?? "";
+                const appointmentMessages = appointment.care_subject_id
+                  ? homeMessageGroups
+                      .find((group) => group.subjectId === appointment.care_subject_id)
+                      ?.messages.filter(
+                        (message) => message.appointmentId === appointment.id
+                      ) ?? []
+                  : [];
+                const appointmentMessageCount = appointmentMessages.length;
+                const appointmentMessageLabel = `${appointmentMessageCount} ${
+                  appointmentMessageCount === 1 ? "Message" : "Messages"
+                }`;
+                const isMessagesExpanded =
+                  expandedMessagesAppointmentId === appointment.id;
+                const isMessageComposerOpen =
+                  activeMessageComposerAppointmentId === appointment.id;
+                const toggleMessagesExpansion = () => {
+                  setMessagesExpandedForAppointment(
+                    appointment.id,
+                    !isMessagesExpanded
+                  );
+                };
+                const pendingModifierHasUnsavedChanges =
+                  pendingModifierSwitch?.appointmentId === appointment.id &&
+                  hasUnsavedAppointmentModifierChanges(
 		                    appointment,
 		                    activeModifier
 		                  );
@@ -18998,8 +20653,8 @@ export function CarePlandPers({
                         </div>
                       ) : null}
                     </div>
-                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-                      <div className="min-w-0 pr-12">
+                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                      <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <h2
                             className={`text-2xl font-semibold ${
@@ -19012,7 +20667,7 @@ export function CarePlandPers({
                           </h2>
                           {shouldShowCarePrepControl ? (
                             <button
-                              className="inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-lg font-semibold leading-none text-blue-900 transition hover:text-blue-700 disabled:opacity-60"
+                              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-1 py-1 text-lg font-semibold leading-none text-blue-900 transition hover:text-blue-700 disabled:opacity-60"
                               disabled={
                                 generatingCarePrepForId === appointment.id
                               }
@@ -19036,6 +20691,85 @@ export function CarePlandPers({
                               )}
                             </button>
                           ) : null}
+                          {isCarePrepExpanded ? (
+                            <div className="flex shrink-0 items-center gap-1">
+                              {prep?.summary &&
+                              !isArchived &&
+                              !isEditingCarePrep ? (
+                                <>
+                                  <button
+                                    aria-label="Edit What to Know"
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400"
+                                    onClick={() =>
+                                      startEditingCarePrep(appointment.id, prep)
+                                    }
+                                    title="Edit What to Know"
+                                    type="button"
+                                  >
+                                    <PencilSquareIcon className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    aria-label="Refresh What to Know"
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400"
+                                    disabled={
+                                      generatingCarePrepForId ===
+                                      appointment.id
+                                    }
+                                    onClick={() =>
+                                      handleRefreshWhatToKnow(appointment)
+                                    }
+                                    title="Refresh What to Know"
+                                    type="button"
+                                  >
+                                    <RefreshCircleIcon className="h-4 w-4" />
+                                  </button>
+                                </>
+                              ) : null}
+                              {appointmentMessageCount > 0 ? (
+                                <button
+                                  aria-expanded={isMessagesExpanded}
+                                  aria-label={`${appointmentMessageLabel} for ${
+                                    appointment.title?.trim() ||
+                                    "this appointment"
+                                  }`}
+                                  className="inline-flex h-7 items-center justify-center gap-1 rounded-full px-1.5 text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400"
+                                  disabled={homeMessagesLoading}
+                                  onClick={toggleMessagesExpansion}
+                                  title={
+                                    isMessagesExpanded
+                                      ? "Close related messages"
+                                      : "Open related messages"
+                                  }
+                                  type="button"
+                                >
+                                  <EnvelopeIcon className="h-4 w-4" />
+                                  <span className="text-xs font-semibold leading-none">
+                                    {appointmentMessageCount}
+                                  </span>
+                                </button>
+                              ) : null}
+                              {appointmentMessageCount === 0 ? (
+                                <button
+                                  aria-label={`Send message about ${
+                                    appointment.title?.trim() ||
+                                    "this appointment"
+                                  }`}
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  onClick={() =>
+                                    openAppointmentMessageComposer(appointment)
+                                  }
+                                  title={
+                                    isMessageComposerOpen
+                                      ? "Close message composer"
+                                      : "Send message"
+                                  }
+                                  type="button"
+                                >
+                                  <PaperAirplaneIcon className="h-4 w-4" />
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
                           {shouldShowVisitNotesHeaderControl ? (
                             <button
                               className="inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-lg font-semibold leading-none text-blue-900 transition hover:text-blue-700 disabled:opacity-60"
@@ -19054,38 +20788,6 @@ export function CarePlandPers({
                                 <ChevronRightIcon className="h-5 w-5" />
                               )}
                             </button>
-                          ) : null}
-                          {isCarePrepExpanded &&
-                          prep?.summary &&
-                          !isArchived &&
-                          !isEditingCarePrep ? (
-                            <div className="flex items-center gap-1">
-                              <button
-                                aria-label="Edit CarePrep"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400"
-                                onClick={() =>
-                                  startEditingCarePrep(appointment.id, prep)
-                                }
-                                title="Edit CarePrep"
-                                type="button"
-                              >
-                                <PencilSquareIcon className="h-4 w-4" />
-                              </button>
-                              <button
-                                aria-label="Refresh CarePrep"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:text-slate-400"
-                                disabled={
-                                  generatingCarePrepForId === appointment.id
-                                }
-                                onClick={() =>
-                                  handleGenerateCarePrep(appointment)
-                                }
-                                title="Refresh CarePrep"
-                                type="button"
-                              >
-                                <RefreshCircleIcon className="h-4 w-4" />
-                              </button>
-                            </div>
                           ) : null}
                           {note &&
                           shouldShowVisitNotesHeaderControl &&
@@ -19137,13 +20839,13 @@ export function CarePlandPers({
                               }
                               title={
                                 isContextualTextIntake
-                                  ? "Close notes"
-                                  : "Add notes"
+                                  ? "Close visit notes"
+                                  : "Add visit notes"
                               }
                               type="button"
                             >
                               <PencilSquareIcon className="h-4 w-4" />
-                              <span>Add Notes</span>
+                              <span>Add Visit Notes</span>
                             </button>
                           ) : null}
                           <span className="inline-flex items-center gap-2">
@@ -19233,6 +20935,76 @@ export function CarePlandPers({
                           </div>
                         </div>
                       </section>
+                    ) : null}
+
+                    {isMessageComposerOpen ? (
+                      <div className="order-20 mt-4">
+                        {appointment.care_subject_id ? (
+                          <AppointmentMessageComposer
+                            appointmentId={appointment.id}
+                            initialDraft={
+                              appointmentMessageDraft?.appointmentId === appointment.id
+                                ? appointmentMessageDraft
+                                : null
+                            }
+                            onDraftChange={(draft) =>
+                              setAppointmentMessageDraft((currentDraft) =>
+                                draft ??
+                                (currentDraft?.appointmentId === appointment.id
+                                  ? null
+                                  : currentDraft)
+                              )
+                            }
+                            onCancel={() =>
+                              setActiveMessageComposerAppointmentId(null)
+                            }
+                            onSent={async () => {
+                              setAppointmentMessageDraft(null);
+                              setMessagesExpandedForAppointment(appointment.id, true);
+                              await loadHomeMessages();
+                              await hydrateAppointmentDetails([appointment]);
+                            }}
+                            personId={appointment.care_subject_id}
+                            recipientName={appointmentSubject || "Receiver"}
+                          />
+                        ) : (
+                          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium text-amber-800">
+                            Choose a Care VIP for this appointment before sending a message.
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {isMessagesExpanded ? (
+                      <div className="order-20 mt-4">
+                        <AppointmentMessagesSection
+                          firstMessageAction={
+                            appointmentMessageCount > 0 ? (
+                              <button
+                                aria-label={`Send message about ${
+                                  appointment.title?.trim() ||
+                                  "this appointment"
+                                }`}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                onClick={() =>
+                                  openAppointmentMessageComposer(appointment)
+                                }
+                                title={
+                                  isMessageComposerOpen
+                                    ? "Close message composer"
+                                    : "Send message"
+                                }
+                                type="button"
+                              >
+                                <PaperAirplaneIcon className="h-4 w-4" />
+                              </button>
+                            ) : null
+                          }
+                          formatDate={formatDate}
+                          loading={homeMessagesLoading}
+                          messages={appointmentMessages}
+                        />
+                      </div>
                     ) : null}
 
                     {isContextualTextIntake && canPasteContextualNotes ? (
@@ -19664,17 +21436,16 @@ export function CarePlandPers({
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <h3 className="text-lg font-semibold text-blue-900">
-                              Review new CarePrep
+                              Review What to Know
                             </h3>
                             <p className="mt-1 text-sm text-blue-800">
-                              AI prepared this version. Accept it as-is, or edit
-                              it and save your version.
+                              You can make changes or accept as-is.
                             </p>
                           </div>
                           <button
                             className={gentleSmallBlueButtonClass}
                             disabled={generatingCarePrepForId === appointment.id}
-                            onClick={() => handleGenerateCarePrep(appointment)}
+                            onClick={() => handleRefreshWhatToKnow(appointment)}
                             type="button"
                           >
                             {generatingCarePrepForId === appointment.id
@@ -19822,7 +21593,7 @@ export function CarePlandPers({
                           >
                             {savingCarePrepForId === appointment.id
                               ? "Accepting..."
-                              : "Accept CarePrep"}
+                              : "Accept What to Know"}
                           </button>
                           <button
                             className={`${gentleSoftBlueButtonClass} text-sm`}
@@ -19840,7 +21611,7 @@ export function CarePlandPers({
                             type="button"
                             title={
                               hasReviewCarePrepEdits
-                                ? "Save your edited CarePrep version."
+                                ? "Save your edited What to Know version."
                                 : "Make an edit before saving an edited version."
                             }
                           >
@@ -19947,8 +21718,8 @@ export function CarePlandPers({
                     ) : null}
 
                     {shouldShowAppointmentFocusControls ? (
-                      <section className="order-20 mt-5">
-                        <div className="flex flex-wrap items-center justify-between gap-2 py-1">
+                      <section className="order-20 mt-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 py-0.5">
                           <div className="flex flex-wrap items-center gap-3">
                             {shouldShowCarePrepControl &&
                             isCarePrepExpanded ? (
@@ -19969,8 +21740,8 @@ export function CarePlandPers({
                         ) : null}
                         {shouldShowCarePrepControl &&
                         isCarePrepExpanded &&
-                        prep?.summary ? (
-                          <div className="mt-3 overflow-hidden">
+                        hasCarePrepAvailable ? (
+                          <div className="mt-1 overflow-hidden">
                             {isEditingCarePrep ? (
                               <div className="grid gap-4 border-t border-blue-100/70 p-4">
                             {shouldWarnBeforeClosingCarePrepEdit && prep ? (
@@ -20096,21 +21867,26 @@ export function CarePlandPers({
                             <div className="flex flex-wrap gap-3">
                               <button
                                 className={`${gentlePrimaryButtonClass} text-sm`}
-                                disabled={savingCarePrepForId === appointment.id}
-                                onClick={() =>
-                                  saveCurrentCarePrepEdit(appointment.id, prep)
-                                }
+                                disabled={savingCarePrepForId === appointment.id || !prep}
+                                onClick={() => {
+                                  if (prep) {
+                                    void saveCurrentCarePrepEdit(appointment.id, prep);
+                                  }
+                                }}
                                 type="button"
                               >
                                 {savingCarePrepForId === appointment.id
                                   ? "Saving..."
-                                  : "Save CarePrep edit"}
+                                  : "Save What to Know edit"}
                               </button>
                               <button
                                 className={`${gentleSecondaryButtonClass} text-sm`}
-                                onClick={() =>
-                                  requestCloseCarePrepEdit(appointment.id, prep)
-                                }
+                                disabled={!prep}
+                                onClick={() => {
+                                  if (prep) {
+                                    requestCloseCarePrepEdit(appointment.id, prep);
+                                  }
+                                }}
                                 type="button"
                               >
                                 Cancel
@@ -20120,51 +21896,55 @@ export function CarePlandPers({
                         ) : (
                           <div className="pb-4 pt-0">
                             <div className="grid gap-4">
-                              <section className="py-1">
-                                <p className="text-slate-700">
-                                  {prep.summary}
-                                </p>
-                              </section>
+                              {prep?.summary ? (
+                                <section className="py-1">
+                                  <p className="text-slate-700">
+                                    {prep.summary}
+                                  </p>
+                                </section>
+                              ) : null}
 
-	                              {carePrepTopSections.length > 0 ? (
-	                                <div className={carePrepTopGridClassName}>
-	                                  {carePrepTopSections.map((section) => (
-	                                    <section
-	                                      className="min-w-0 px-2 py-1 sm:px-3"
-	                                      key={section.label}
-	                                    >
-	                                      <h4 className="font-semibold text-slate-900">
-	                                        <span aria-hidden="true">
-	                                          {section.icon}
-	                                        </span>{" "}
-	                                        {section.label}
-	                                      </h4>
-	                                      <DetailList
-	                                        emptyLabel=""
-	                                        items={section.items}
-	                                        showBullets={false}
-	                                      />
-	                                    </section>
-	                                  ))}
-	                                </div>
-	                              ) : null}
-	                              {carePrepWatchForSection ? (
-	                                <section className="min-w-0 px-2 py-1 sm:px-3">
-	                                  <h4 className="font-semibold text-slate-900">
-	                                    <span aria-hidden="true">
-	                                      {carePrepWatchForSection.icon}
-	                                    </span>{" "}
-	                                    {carePrepWatchForSection.label}
-	                                  </h4>
-	                                  <DetailList
-	                                    emptyLabel=""
-	                                    items={carePrepWatchForSection.items}
-	                                    showBullets={false}
-	                                  />
-	                                </section>
-	                              ) : null}
+                              {whatToKnowTopSections.length > 0 ? (
+                                <div className={whatToKnowTopGridClassName}>
+                                  {whatToKnowTopSections.map((section) => (
+                                    <section
+                                      className="min-w-0 px-2 py-1 sm:px-3"
+                                      key={section.label}
+                                    >
+                                      <h4 className="font-semibold text-slate-900">
+                                        <span aria-hidden="true">
+                                          {section.icon}
+                                        </span>{" "}
+                                        {section.label}
+                                      </h4>
+                                      <DetailList
+                                        emptyLabel=""
+                                        items={section.items}
+                                        showBullets={false}
+                                      />
+                                    </section>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {whatToKnowWatchForSection ? (
+                                <section className="min-w-0 px-2 py-1 sm:px-3">
+                                  <h4 className="font-semibold text-slate-900">
+                                    <span aria-hidden="true">
+                                      {whatToKnowWatchForSection.icon}
+                                    </span>{" "}
+                                    {whatToKnowWatchForSection.label}
+                                  </h4>
+                                  <DetailList
+                                    emptyLabel=""
+                                    items={whatToKnowWatchForSection.items}
+                                    showBullets={false}
+                                  />
+                                </section>
+                              ) : null}
 
-                            {(medReview.length > 0 || sinceLastVisit.length > 0) && (
+                            {(medReview.length > 0 ||
+                              sinceLastVisit.length > 0 ||
+                              nextSteps.length > 0) && (
                               <div className="grid gap-4 md:grid-cols-2">
                                 <section className="px-2 py-1 sm:px-3">
                                   <h4 className="font-semibold text-slate-900">
@@ -20189,6 +21969,19 @@ export function CarePlandPers({
                                     showBullets={false}
                                   />
                                 </section>
+                                {nextSteps.length > 0 ? (
+                                  <section className="px-2 py-1 sm:px-3">
+                                    <h4 className="font-semibold text-slate-900">
+                                      <span aria-hidden="true">✓</span>{" "}
+                                      Next steps
+                                    </h4>
+                                    <DetailList
+                                      emptyLabel=""
+                                      items={nextSteps}
+                                      showBullets={false}
+                                    />
+                                  </section>
+                                ) : null}
                               </div>
                             )}
                             </div>

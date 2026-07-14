@@ -38,6 +38,11 @@ type BuildUnsavedSignOutChangesInput = {
     hasReviewNote: boolean;
     selectedCount: number;
   } | null;
+  appointmentMessageDraft?: {
+    appointmentId: string;
+    hasRecording?: boolean;
+    text?: string;
+  } | null;
   appointmentDrafts: Record<string, AppointmentDetailsDraft>;
   appointmentsById: Map<string, AppointmentSummarySource>;
   askConversationComplete: boolean;
@@ -69,6 +74,7 @@ type BuildUnsavedSignOutChangesInput = {
 
 export function buildUnsavedSignOutChanges({
   adminRecommendationsReviewDraft,
+  appointmentMessageDraft,
   appointmentDrafts,
   appointmentsById,
   askConversationComplete,
@@ -133,6 +139,20 @@ export function buildUnsavedSignOutChanges({
       detail: newCareVipName.trim(),
       key: "care-vip",
       label: "New Care VIP",
+    });
+  }
+
+  if (
+    appointmentMessageDraft?.appointmentId &&
+    (appointmentMessageDraft.text?.trim() || appointmentMessageDraft.hasRecording)
+  ) {
+    addChange({
+      detail: appointmentLabel(
+        appointmentMessageDraft.appointmentId,
+        "Appointment"
+      ),
+      key: `appointment-message-${appointmentMessageDraft.appointmentId}`,
+      label: "Appointment message",
     });
   }
 

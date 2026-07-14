@@ -794,28 +794,15 @@ export async function POST(request: NextRequest) {
         supabase as unknown as AppContentReader,
         "careprep_refresh_not_ready_message"
       );
-      const latestGuidanceDate = latestGuidance?.generated_at
-        ? new Date(String(latestGuidance.generated_at))
-        : null;
-      const latestGuidanceDateText =
-        latestGuidanceDate && !Number.isNaN(latestGuidanceDate.getTime())
-          ? latestGuidanceDate.toLocaleString("en-US", {
-              dateStyle: "medium",
-              timeStyle: "short",
-            })
-          : "an earlier run";
-      const detailMessage = `Target: ${appointmentLabel(
-        appointment
-      )}. Last CarePrep from ${latestGuidanceDateText} considered ${
-        previousPastAppointmentCount ?? 0
-      } prior appointment(s); current context has ${currentPastAppointmentCount}. No newer saved Visit Notes were found among the prior appointments CarePrep uses.`;
-
-      throw new Error(
-        `${
+      return NextResponse.json({
+        appointmentId: appointment.id,
+        alreadyUpToDate: true,
+        generationMode,
+        guidanceId: latestGuidance?.id,
+        message:
           refreshNotReadyMessage ||
-          "CarePrep can't be run yet because you have no additional appointments to consider."
-        } ${detailMessage}`
-      );
+          "CarePrep is already up to date for this appointment. Add or save new Visit Notes, then try again.",
+      });
     }
 
     if (generationMode !== "auto_home") {

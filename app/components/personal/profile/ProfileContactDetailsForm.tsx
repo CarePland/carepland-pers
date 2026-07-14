@@ -4,6 +4,7 @@ import {
   ManagedByHouseholdHeart,
   PersonAvatar,
 } from "../../shared/PersonAvatar";
+import { ManagedCareVipHelp } from "../../shared/ManagedCareVipHelp";
 import { gentleSmallSecondaryButtonClass } from "../../shared/uiStyles";
 
 type TimeZoneOption = {
@@ -751,31 +752,36 @@ function SelectedPersonAvatarControls({
                 </>
               ) : null}
               {onUpdateManagedByHousehold ? (
-                <label
-                  className={`inline-flex shrink-0 items-center gap-2 text-sm font-semibold ${
-                    managedByHouseholdLocked
-                      ? "cursor-not-allowed text-slate-400"
-                      : "text-slate-600"
-                  }`}
-                  title={
-                    managedByHouseholdLocked
-                      ? "Pets are managed by household."
-                      : "This person is primarily managed by the household."
-                  }
-                >
-                  <input
-                    checked={managedByHouseholdChecked}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-300"
-                    disabled={
-                      managedByHouseholdLocked || managedByHouseholdPending
+                <span className="inline-flex shrink-0 items-center gap-1.5">
+                  <label
+                    className={`inline-flex items-center gap-2 text-sm font-semibold ${
+                      managedByHouseholdLocked
+                        ? "cursor-not-allowed text-slate-400"
+                        : "text-slate-600"
+                    }`}
+                    title={
+                      managedByHouseholdLocked
+                        ? "Pets are Managed Care VIPs."
+                        : "Managed Care VIP"
                     }
-                    onChange={(event) =>
-                      saveManagedByHousehold(event.target.checked)
-                    }
-                    type="checkbox"
+                  >
+                    <input
+                      checked={managedByHouseholdChecked}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-300"
+                      disabled={
+                        managedByHouseholdLocked || managedByHouseholdPending
+                      }
+                      onChange={(event) =>
+                        saveManagedByHousehold(event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span>Managed Care VIP</span>
+                  </label>
+                  <ManagedCareVipHelp
+                    tooltipId={`profile-managed-care-vip-help-${person.id}`}
                   />
-                  <span>Managed by Household</span>
-                </label>
+                </span>
               ) : null}
             </div>
           </>
