@@ -33,6 +33,9 @@ export type ConnectPersonScopedAccess =
       careCircleId: string;
       createdByUserId: null;
       mainConnectUserPersonId: string;
+      receiverContactDisplayName?: string;
+      receiverContactIsReceiverUser?: boolean;
+      receiverContactUserId?: string;
       receiverDeviceId: string;
       receiverInstallId: string;
       supabase: SupabaseClient;
@@ -112,6 +115,9 @@ export async function readConnectPersonScopedAccess(
         careCircleId,
         createdByUserId: null,
         mainConnectUserPersonId: boundPersonId,
+        receiverContactDisplayName: binding.receiverContactDisplayName,
+        receiverContactIsReceiverUser: binding.receiverContactIsReceiverUser,
+        receiverContactUserId: binding.receiverContactUserId,
         receiverDeviceId: binding.receiverDeviceId,
         receiverInstallId: binding.receiverInstallId,
         supabase: (options.createReceiverClient ?? createSupabaseServiceClient)(),

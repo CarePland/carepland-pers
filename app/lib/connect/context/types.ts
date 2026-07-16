@@ -7,12 +7,18 @@ export type ConnectPersPerson = {
   displayName: string;
   id: string;
   isActive?: boolean;
+  isCurrentUser?: boolean;
   isDefault?: boolean;
   managedByHousehold?: boolean;
   subjectType?: string;
 };
 
 export type ConnectMainUserContext = {
+  currentAccountProfile?: {
+    displayName: string;
+  } | null;
+  currentAccountPerson?: ConnectPersPerson | null;
+  currentAccountPersonId?: string | null;
   mainConnectUserPerson: ConnectPersPerson | null;
   mainConnectUserPersonId: string | null;
   people: ConnectPersPerson[];

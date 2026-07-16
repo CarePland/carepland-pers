@@ -8,9 +8,6 @@ import {
 import { careplandRuntimeTempPath } from "../../../platform/server/runtimeTemp";
 import { connectAvatarAltText } from "../../avatar";
 import {
-  uniqueConnectParticipantPersonIds,
-} from "../connectParticipantFiltering";
-import {
   isConnectPetSubjectType,
   isEligibleMainConnectUserPerson,
 } from "../mainConnectUserEligibility";
@@ -24,6 +21,7 @@ type LocalConnectSettings = {
 };
 
 type CareSubjectRow = {
+  account_user_id?: string | null;
   avatar_alt_text?: string | null;
   avatar_type?: "generated" | "initials" | "uploaded" | null;
   avatar_url?: string | null;
@@ -40,12 +38,15 @@ type CareCircleMembershipRow = {
   care_circle_id: string;
 };
 
-type ConnectSettingsRow = {
-  main_connect_user_person_id: string | null;
+type ProfileRow = {
+  display_name: string | null;
+  email: string | null;
+  family_name: string | null;
+  given_name: string | null;
 };
 
-type ConnectParticipantRow = {
-  person_id: string | null;
+type ConnectSettingsRow = {
+  main_connect_user_person_id: string | null;
 };
 
 type ConnectUserContext = {
@@ -91,9 +92,10 @@ export async function readConnectMainUserContext(
   userContext: ConnectUserContext
 ): Promise<ConnectMainUserContext> {
   const settingsPath = connectSettingsPathForUser(userContext.userId);
-  const [settingsResult, people] = await Promise.all([
+  const [settingsResult, people, currentAccountProfile] = await Promise.all([
     readConnectSettings(userContext, settingsPath),
     listPersPeopleForConnect(userContext),
+    readCurrentAccountProfile(userContext),
   ]);
   const { settings, source } = settingsResult;
   const mainConnectUserPerson =
@@ -102,11 +104,15 @@ export async function readConnectMainUserContext(
         person.id === settings.main_connect_user_person_id &&
         isEligibleMainConnectUserPerson(person)
     ) ?? null;
+  const currentAccountPerson = people.find((person) => person.isCurrentUser) ?? null;
   const primaryCoordinator = await readPrimaryCoordinatorForCareCircle(
     mainConnectUserPerson?.careCircleId ?? people[0]?.careCircleId ?? null
   );
 
   return {
+    currentAccountProfile,
+    currentAccountPerson,
+    currentAccountPersonId: currentAccountPerson?.id ?? null,
     mainConnectUserPerson,
     mainConnectUserPersonId: mainConnectUserPerson?.id ?? null,
     people,
@@ -130,6 +136,9 @@ export async function updateConnectMainUserContextForUser(
     throw new Error("Pets cannot be selected as the Main Connect User.");
   }
 
+  const currentAccountPerson = people.find((item) => item.isCurrentUser) ?? null;
+  const currentAccountProfile = await readCurrentAccountProfile(userContext);
+
   const source = await writeConnectSettings(
     {
       main_connect_user_person_id: person.id,
@@ -141,12 +150,60 @@ export async function updateConnectMainUserContextForUser(
   );
 
   return {
+    currentAccountProfile,
+    currentAccountPerson,
+    currentAccountPersonId: currentAccountPerson?.id ?? null,
     mainConnectUserPerson: person,
     mainConnectUserPersonId: person.id,
     people,
     primaryCoordinator: await readPrimaryCoordinatorForCareCircle(person.careCircleId),
     source,
   } satisfies ConnectMainUserContext;
+}
+
+export async function ensureConnectCurrentAccountPerson(
+  userContext: ConnectUserContext
+): Promise<ConnectMainUserContext> {
+  let context = await readConnectMainUserContext(userContext);
+
+  if (context.currentAccountPerson) {
+    return context;
+  }
+
+  const supabase = createSupabaseUserClient(userContext.accessToken);
+  const setupResult = await supabase.rpc("ensure_personal_account_setup");
+
+  if (setupResult.error && !isMissingRpc(setupResult.error)) {
+    throw setupResult.error;
+  }
+
+  await ensureCareSubjectForCurrentAccount(userContext);
+  context = await readConnectMainUserContext(userContext);
+
+  if (!context.currentAccountPerson) {
+    throw new Error(
+      "CarePland could not create your Receiver User yet. Please save your profile and try again."
+    );
+  }
+
+  return context;
+}
+
+async function readCurrentAccountProfile(userContext: ConnectUserContext) {
+  const supabase = createSupabaseUserClient(userContext.accessToken);
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("display_name,given_name,family_name,email")
+    .eq("id", userContext.userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    displayName: accountPersonDisplayName(data as ProfileRow | null),
+  };
 }
 
 function petSubjectTypeEmoji(subjectType?: string | null) {
@@ -165,6 +222,152 @@ function petSubjectTypeEmoji(subjectType?: string | null) {
   }
 
   return undefined;
+}
+
+async function ensureCareSubjectForCurrentAccount(
+  userContext: ConnectUserContext
+) {
+  const userClient = createSupabaseUserClient(userContext.accessToken);
+  const serviceClient = createSupabaseServiceClient();
+  const { data: profileData, error: profileError } = await userClient
+    .from("profiles")
+    .select("display_name,given_name,family_name,email")
+    .eq("id", userContext.userId)
+    .maybeSingle();
+
+  if (profileError) {
+    throw profileError;
+  }
+
+  const { data: memberships, error: membershipsError } = await userClient
+    .from("care_circle_memberships")
+    .select("care_circle_id")
+    .eq("user_id", userContext.userId)
+    .eq("status", "active")
+    .limit(1);
+
+  if (membershipsError) {
+    throw membershipsError;
+  }
+
+  const careCircleId = ((memberships ?? []) as CareCircleMembershipRow[])[0]
+    ?.care_circle_id;
+
+  if (!careCircleId) {
+    throw new Error("No CarePland household was found for this account.");
+  }
+
+  const { data: existingAccountPerson, error: accountPersonError } = await serviceClient
+    .from("care_subjects")
+    .select("id")
+    .eq("care_circle_id", careCircleId)
+    .eq("is_active", true)
+    .eq("account_user_id", userContext.userId)
+    .maybeSingle();
+
+  if (accountPersonError) {
+    if (isMissingCareSubjectOptionalColumn(accountPersonError)) {
+      throw new Error(
+        "Receiver Setup needs a CarePland update before it can add you as a Receiver User."
+      );
+    }
+
+    throw accountPersonError;
+  }
+
+  if (existingAccountPerson) {
+    return;
+  }
+
+  const { count: activePersonCount, error: countError } = await serviceClient
+    .from("care_subjects")
+    .select("id", { count: "exact", head: true })
+    .eq("care_circle_id", careCircleId)
+    .eq("is_active", true);
+
+  if (countError) {
+    throw countError;
+  }
+
+  const profile = profileData as ProfileRow | null;
+  const displayName = accountPersonDisplayName(profile);
+  const normalizedDisplayName = normalizedPersonName(displayName);
+  const { data: matchingPeople, error: matchingPeopleError } = await serviceClient
+    .from("care_subjects")
+    .select("id,display_name,account_user_id")
+    .eq("care_circle_id", careCircleId)
+    .eq("is_active", true);
+
+  if (matchingPeopleError) {
+    if (isMissingCareSubjectOptionalColumn(matchingPeopleError)) {
+      throw new Error(
+        "Receiver Setup needs a CarePland update before it can add you as a Receiver User."
+      );
+    }
+
+    throw matchingPeopleError;
+  }
+
+  const matchingUnlinkedPerson = ((matchingPeople ?? []) as CareSubjectRow[]).find(
+    (person) =>
+      !person.account_user_id &&
+      normalizedPersonName(person.display_name) === normalizedDisplayName
+  );
+
+  if (matchingUnlinkedPerson) {
+    const { error: linkError } = await serviceClient
+      .from("care_subjects")
+      .update({ account_user_id: userContext.userId })
+      .eq("id", matchingUnlinkedPerson.id);
+
+    if (linkError) {
+      throw linkError;
+    }
+
+    return;
+  }
+
+  const { error: insertError } = await serviceClient.from("care_subjects").insert({
+    account_user_id: userContext.userId,
+    care_circle_id: careCircleId,
+    display_name: displayName,
+    is_active: true,
+    is_default: (activePersonCount ?? 0) === 0,
+    managed_by_household: false,
+    subject_type: "other",
+  });
+
+  if (insertError) {
+    if (isMissingCareSubjectOptionalColumn(insertError)) {
+      throw new Error(
+        "Receiver Setup needs a CarePland update before it can add you as a Receiver User."
+      );
+    }
+
+    throw insertError;
+  }
+}
+
+function accountPersonDisplayName(profile: ProfileRow | null) {
+  const fullName = [profile?.given_name, profile?.family_name]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    profile?.display_name?.trim() ||
+    fullName ||
+    profile?.given_name?.trim() ||
+    profile?.email?.trim() ||
+    "You"
+  );
+}
+
+function normalizedPersonName(value?: string | null) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 export async function createConnectUserContext(accessToken: string) {
@@ -207,8 +410,9 @@ async function findConnectPersonForUser(
 export async function listPersPeopleForConnect(
   userContext: ConnectUserContext
 ): Promise<ConnectPersPerson[]> {
-  const supabase = createSupabaseUserClient(userContext.accessToken);
-  const { data: memberships, error: membershipsError } = await supabase
+  const userClient = createSupabaseUserClient(userContext.accessToken);
+  const serviceClient = createSupabaseServiceClient();
+  const { data: memberships, error: membershipsError } = await userClient
     .from("care_circle_memberships")
     .select("care_circle_id")
     .eq("user_id", userContext.userId);
@@ -229,22 +433,13 @@ export async function listPersPeopleForConnect(
     return [];
   }
 
-  const participantPersonIds = await listConnectParticipantPersonIds(
-    supabase,
-    careCircleIds
-  );
-
-  let careSubjectsQuery = supabase
+  const careSubjectsQuery = serviceClient
     .from("care_subjects")
-    .select("id,care_circle_id,display_name,subject_type,is_default,is_active,managed_by_household,avatar_url,avatar_type,avatar_alt_text")
+    .select("id,care_circle_id,display_name,subject_type,is_default,is_active,managed_by_household,account_user_id,avatar_url,avatar_type,avatar_alt_text")
     .in("care_circle_id", careCircleIds)
     .eq("is_active", true)
     .order("is_default", { ascending: false })
     .order("display_name", { ascending: true });
-
-  if (participantPersonIds.length > 0) {
-    careSubjectsQuery = careSubjectsQuery.in("id", participantPersonIds);
-  }
 
   const careSubjectsResult = await careSubjectsQuery;
   let data = careSubjectsResult.data as CareSubjectRow[] | null;
@@ -255,17 +450,13 @@ export async function listPersPeopleForConnect(
       throw error;
     }
 
-    let fallbackQuery = supabase
+    const fallbackQuery = serviceClient
       .from("care_subjects")
       .select("id,care_circle_id,display_name,subject_type,is_default,is_active")
       .in("care_circle_id", careCircleIds)
       .eq("is_active", true)
       .order("is_default", { ascending: false })
       .order("display_name", { ascending: true });
-
-    if (participantPersonIds.length > 0) {
-      fallbackQuery = fallbackQuery.in("id", participantPersonIds);
-    }
 
     const fallbackResult = await fallbackQuery;
 
@@ -295,13 +486,14 @@ export async function listPersPeopleForConnect(
       displayName: row.display_name?.trim() || "Unnamed Care VIP",
       id: row.id,
       isActive: row.is_active !== false,
+      isCurrentUser: row.account_user_id === userContext.userId,
       isDefault: row.is_default === true,
       managedByHousehold: row.managed_by_household === true,
       subjectType: row.subject_type ?? undefined,
     }));
 
   return Promise.all(
-    people.map(async (person) => ({
+    dedupeCurrentAccountPersonClones(people).map(async (person) => ({
       ...person,
       avatarAltText: person.avatarAltText ?? connectAvatarAltText(person),
       avatarUrl: await signedAvatarUrl(person.avatarUrl),
@@ -312,8 +504,9 @@ export async function listPersPeopleForConnect(
 export async function listPersFocusPeopleForConnect(
   userContext: ConnectUserContext
 ): Promise<ConnectPersPerson[]> {
-  const supabase = createSupabaseUserClient(userContext.accessToken);
-  const { data: memberships, error: membershipsError } = await supabase
+  const userClient = createSupabaseUserClient(userContext.accessToken);
+  const serviceClient = createSupabaseServiceClient();
+  const { data: memberships, error: membershipsError } = await userClient
     .from("care_circle_memberships")
     .select("care_circle_id")
     .eq("user_id", userContext.userId);
@@ -334,9 +527,9 @@ export async function listPersFocusPeopleForConnect(
     return [];
   }
 
-  const careSubjectsQuery = supabase
+  const careSubjectsQuery = serviceClient
     .from("care_subjects")
-    .select("id,care_circle_id,display_name,subject_type,is_default,is_active,managed_by_household,avatar_url,avatar_type,avatar_alt_text")
+    .select("id,care_circle_id,display_name,subject_type,is_default,is_active,managed_by_household,account_user_id,avatar_url,avatar_type,avatar_alt_text")
     .in("care_circle_id", careCircleIds)
     .eq("is_active", true)
     .order("is_default", { ascending: false })
@@ -351,7 +544,7 @@ export async function listPersFocusPeopleForConnect(
       throw error;
     }
 
-    const fallbackResult = await supabase
+    const fallbackResult = await serviceClient
       .from("care_subjects")
       .select("id,care_circle_id,display_name,subject_type,is_default,is_active")
       .in("care_circle_id", careCircleIds)
@@ -383,13 +576,14 @@ export async function listPersFocusPeopleForConnect(
       displayName: row.display_name?.trim() || "Unnamed Care VIP",
       id: row.id,
       isActive: row.is_active !== false,
+      isCurrentUser: row.account_user_id === userContext.userId,
       isDefault: row.is_default === true,
       managedByHousehold: row.managed_by_household === true,
       subjectType: row.subject_type ?? undefined,
     }));
 
   return Promise.all(
-    people.map(async (person) => ({
+    dedupeCurrentAccountPersonClones(people).map(async (person) => ({
       ...person,
       avatarAltText: person.avatarAltText ?? connectAvatarAltText(person),
       avatarUrl: await signedAvatarUrl(person.avatarUrl),
@@ -397,27 +591,28 @@ export async function listPersFocusPeopleForConnect(
   );
 }
 
-async function listConnectParticipantPersonIds(
-  supabase: ReturnType<typeof createSupabaseUserClient>,
-  careCircleIds: string[]
-) {
-  const { data, error } = await supabase
-    .from("connect_participants")
-    .select("person_id")
-    .in("care_circle_id", careCircleIds)
-    .eq("status", "active");
+function dedupeCurrentAccountPersonClones(people: ConnectPersPerson[]) {
+  const currentAccountPeopleByHouseholdAndName = new Set(
+    people
+      .filter((person) => person.isCurrentUser)
+      .map((person) =>
+        `${person.careCircleId}:${normalizedPersonName(person.displayName)}`
+      )
+  );
 
-  if (!error) {
-    return uniqueConnectParticipantPersonIds(
-      (data ?? []) as ConnectParticipantRow[]
+  if (!currentAccountPeopleByHouseholdAndName.size) {
+    return people;
+  }
+
+  return people.filter((person) => {
+    if (person.isCurrentUser) {
+      return true;
+    }
+
+    return !currentAccountPeopleByHouseholdAndName.has(
+      `${person.careCircleId}:${normalizedPersonName(person.displayName)}`
     );
-  }
-
-  if (isMissingConnectParticipantsTable(error)) {
-    return [];
-  }
-
-  throw error;
+  });
 }
 
 async function readConnectSettings(
@@ -523,8 +718,19 @@ function isMissingConnectSettingsTable(error: unknown) {
   return isMissingTable(error, "connect_settings");
 }
 
-function isMissingConnectParticipantsTable(error: unknown) {
-  return isMissingTable(error, "connect_participants");
+function isMissingRpc(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const maybeError = error as { code?: string; message?: string };
+  const message = maybeError.message ?? "";
+
+  return (
+    maybeError.code === "42883" ||
+    maybeError.code === "PGRST202" ||
+    message.includes("ensure_personal_account_setup")
+  );
 }
 
 function isMissingTable(error: unknown, tableName: string) {
@@ -552,6 +758,7 @@ function isMissingCareSubjectOptionalColumn(error: unknown) {
 
   return (
     maybeError.code === "42703" ||
+    message.includes("account_user_id") ||
     message.includes("avatar_") ||
     message.includes("managed_by_household")
   );

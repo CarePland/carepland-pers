@@ -183,6 +183,7 @@ describe("receiver shell claim store", () => {
       const paired = await pairReceiverShellPairingCode(
         {
           careCircleId: "care-circle-1",
+          mainConnectUserDisplayName: "Rob",
           mainConnectUserPersonId: "person-rob",
           pairingCode: session.pairingCode.replace(" ", "-"),
           receiverUrl: "https://receiver.carepland.com/connect/receiver",
@@ -193,6 +194,7 @@ describe("receiver shell claim store", () => {
       assert.equal(paired.receiverDeviceId, "receiver-demo");
       assert.equal(paired.mainConnectUserPersonId, "person-rob");
       assert.equal(paired.careCircleId, "care-circle-1");
+      assert.equal(paired.locationLabel, "Rob's Receiver DEMO");
 
       const ready = await getReceiverShellPairingSession(
         {

@@ -1,28 +1,25 @@
 import type { Metadata } from "next";
 
-import { ReceiverApkSetupPageClient } from "../apk-setup/ReceiverApkSetupPageClient";
+import { ReceiverApkSetupPageClient } from "./ReceiverApkSetupPageClient";
 
 export const metadata: Metadata = {
   title: "Receiver Setup | CarePland Connect",
-  description: "Approve and open a CarePland Connect Receiver install.",
+  description: "Standalone setup path for CarePland Receiver.",
 };
 
-type ReceiverSetupPageProps = {
+type ReceiverApkSetupPageProps = {
   searchParams: Promise<{
-    code?: string;
     new?: string;
     receiverKey?: string;
   }>;
 };
 
-export default async function ReceiverSetupPage({
+export default async function ReceiverApkSetupPage({
   searchParams,
-}: ReceiverSetupPageProps) {
+}: ReceiverApkSetupPageProps) {
   const params = await searchParams;
-
   return (
     <ReceiverApkSetupPageClient
-      initialPairingCode={params.code || ""}
       selectedReceiverKey={params.new === "1" ? "" : params.receiverKey ?? ""}
     />
   );

@@ -5,7 +5,10 @@ import {
   connectUserCanAccessPerson,
   createConnectUserContext,
 } from "@/app/lib/connect/context/server/mainConnectUserContext";
-import { createReceiverShellSetupClaim } from "@/app/lib/connect/receiverShell/claimStore";
+import {
+  createNumericReceiverSetupCode,
+  createReceiverShellSetupClaim,
+} from "@/app/lib/connect/receiverShell/claimStore";
 
 type RouteContext = {
   params: Promise<{ receiverDeviceId: string }>;
@@ -71,9 +74,11 @@ export async function POST(request: Request, context: RouteContext) {
       deviceProfile: stringValue(body.deviceProfile) || "gxv3370",
       expiresInMinutes: numberValue(body.expiresInMinutes) ?? 30,
       hardwareProfile: stringValue(body.hardwareProfile) || "studio_gxv3370_1024x600",
+      locationLabel: stringValue(body.locationLabel),
       mainConnectUserPersonId,
       receiverDeviceId,
       receiverUrl: stringValue(body.receiverUrl),
+      setupCode: createNumericReceiverSetupCode(),
       uiLayout: stringValue(body.uiLayout) || "desk_phone_1024x600",
     });
 

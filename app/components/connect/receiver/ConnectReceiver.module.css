@@ -339,6 +339,9 @@
   right: 14px;
   bottom: 8px;
   z-index: 24;
+  display: grid;
+  gap: 2px;
+  justify-items: end;
   max-width: min(54cqw, 460px);
   overflow: hidden;
   color: rgba(23, 35, 29, 0.56);
@@ -349,6 +352,17 @@
   pointer-events: none;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.receiverIdentityBadge span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.receiverIdentityName {
+  color: rgba(23, 35, 29, 0.72);
+  font-size: 1.08em;
 }
 
 .deskPhoneMode .receiverIdentityBadge {
@@ -3359,6 +3373,10 @@
   grid-column: 2;
 }
 
+.gxvAskTell2HomeMode .focusHomeUtilityStack .askTell2SettingsAction:nth-child(2):last-child {
+  grid-column: 2 / -1;
+}
+
 .gxvAskTell2HomeMode .focusHomeUtilityStack .focusHomeUtilityAction {
   display: grid;
   align-content: center;
@@ -3379,6 +3397,10 @@
 
 .gxvAskTell2HomeMode .focusHomeUtilityStack .focusHomeUtilityAction > span {
   transform: translateY(1px);
+}
+
+.gxvAskTell2HomeMode .focusHomeUtilityStack .askTell2SettingsAction > span {
+  font-size: 1.28rem;
 }
 
 .cleaningFooterRow {
@@ -5355,6 +5377,71 @@
 .screenCleaningConfirmActions .modalButton {
   min-height: clamp(70px, 12dvh, 92px);
   font-size: clamp(1.35rem, 2.6vw, 1.8rem);
+}
+
+.receiverSettingsPanel {
+  display: grid;
+  gap: 22px;
+  justify-self: end;
+  width: min(430px, calc(100% - 48px));
+  margin-right: clamp(8px, 2.2vw, 28px);
+  border-color: #626a63;
+  background: #fbfcfa;
+}
+
+.receiverSettingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.receiverSettingsGridThree {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.receiverSettingsButton {
+  min-width: 0;
+  min-height: clamp(112px, 20dvh, 156px);
+  border: 4px solid #626a63;
+  border-radius: 8px;
+  background: #eef0eb;
+  color: #17231d;
+  font: inherit;
+  font-size: clamp(1.45rem, 2.9vw, 2.25rem);
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1.04;
+  padding: 12px;
+  text-align: center;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.78),
+    0 5px 0 rgba(42, 31, 21, 0.34),
+    0 8px 13px rgba(50, 37, 22, 0.18);
+}
+
+.receiverSettingsButton:active {
+  transform: translateY(4px);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.22),
+    0 1px 0 rgba(42, 31, 21, 0.42),
+    0 3px 7px rgba(50, 37, 22, 0.22);
+}
+
+.receiverSettingsGridThree .receiverSettingsButton {
+  min-height: clamp(118px, 23dvh, 168px);
+  font-size: clamp(1.25rem, 2.45vw, 1.95rem);
+}
+
+.receiverStyleGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.receiverSettingsButtonSelected {
+  border-color: #17440f;
+  background: #26661a;
+  color: #ffffff;
 }
 
 .screenCleaningView {

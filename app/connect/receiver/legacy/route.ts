@@ -13,7 +13,7 @@ export function GET(request: NextRequest) {
   const runtimeContract = createReceiverRuntimeContract(
     classicReceiverRuntimeInput(searchParams)
   );
-  const displayName = searchParams.get("receiverName") || "Rob Robson";
+  const displayName = searchParams.get("receiverName") || "Receiver setup required";
   const locationLabel = searchParams.get("locationLabel") || "Living Rm";
   const appointmentTitle = searchParams.get("appointmentTitle") || "Cardiology Follow-Up";
   const appointmentDay = searchParams.get("appointmentDay") || "Tomorrow";
@@ -292,7 +292,7 @@ function classicWebViewReceiverHtml({
       font-size: 16px;
       font-weight: 900;
       left: 28px;
-      line-height: 1;
+      line-height: 1.05;
       max-width: 460px;
       overflow: hidden;
       padding: 5px 8px;
@@ -301,6 +301,18 @@ function classicWebViewReceiverHtml({
       text-overflow: ellipsis;
       white-space: nowrap;
       z-index: 24;
+    }
+    .classicReceiverIdentityName {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .classicReceiverIdentityId {
+      display: block;
+      font-size: 13px;
+      opacity: 0.78;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .footerLogo,
     .footerGreeting,
@@ -1438,6 +1450,7 @@ function classicWebViewReceiverHtml({
         callPhase: "",
         cleaningSessionId: "",
         cleaningStartedAt: "",
+        locationLabel: text(document.getElementById("receiverLocation") ? document.getElementById("receiverLocation").innerHTML : ""),
         primaryCoordinatorName: ${primaryCoordinatorNameJson},
         receiverDeviceId: "",
         receiverInstallId: "",
@@ -1985,9 +1998,14 @@ function classicWebViewReceiverHtml({
       function updateReceiverIdentityBadge() {
         var full = receiverState.receiverDeviceId || receiverState.receiverInstallId || "classic-webview-receiver";
         var prefix = receiverState.receiverDeviceId ? "Receiver ID" : "Local ID";
-        setText("receiverIdentityBadge", prefix + ": " + compactReceiverIdentifier(full));
         var badge = document.getElementById("receiverIdentityBadge");
-        if (badge) badge.setAttribute("title", prefix + ": " + full);
+        if (!badge) return;
+        var label = compactReceiverIdentifier(full);
+        var receiverName = text(receiverState.locationLabel);
+        badge.innerHTML = receiverName
+          ? "<span class=\\"classicReceiverIdentityName\\">" + escapeHtml(receiverName) + "</span><span class=\\"classicReceiverIdentityId\\">" + escapeHtml(prefix + ": " + label) + "</span>"
+          : escapeHtml(prefix + ": " + label);
+        badge.setAttribute("title", receiverName ? receiverName + " · " + prefix + ": " + full : prefix + ": " + full);
       }
       function mergedReceiverConfig(config) {
         var stored = readStoredBinding();
@@ -2028,6 +2046,7 @@ function classicWebViewReceiverHtml({
         saveNativeBinding(payload);
         receiverState.receiverDeviceId = payload.receiverDeviceId || receiverState.receiverDeviceId;
         receiverState.receiverInstallId = payload.receiverInstallId || receiverState.receiverInstallId;
+        receiverState.locationLabel = payload.locationLabel || receiverState.locationLabel;
         receiverState.personId = payload.mainConnectUserPersonId || receiverState.personId;
         updateReceiverIdentityBadge();
       }
@@ -2061,6 +2080,8 @@ function classicWebViewReceiverHtml({
             if (status >= 200 && status < 300 && payload && payload.ok !== false) {
               receiverState.online = true;
               receiverState.personId = payload.mainConnectUserPersonId || receiverState.personId;
+              receiverState.locationLabel = payload.locationLabel || receiverState.locationLabel;
+              saveReceiverBindingPayload(payload);
               setText("connectionStatus", "Online");
               if (callback) callback(payload);
               return;

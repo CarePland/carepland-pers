@@ -58,6 +58,8 @@ import {
   browserReceiverPairingCodeReady,
   formatBrowserReceiverPairingCode,
 } from "../../../lib/connect/receiverShell/browserPairing";
+import { ReceiverSetupOverlay } from "../receiverSetupOverlay/ReceiverSetupOverlay";
+import type { ReceiverSetupSection } from "../receiverSetupOverlay/types";
 import { AppointmentMessageComposer } from "../../personal/messages/AppointmentMessageComposer";
 import {
   connectCallsDeprecated,
@@ -168,6 +170,9 @@ type DashboardState = {
 type DashboardView = "connect" | "settings";
 type MessageHistoryView = "timeline" | "appointment";
 type SetupView = "people" | "receivers";
+type ReceiverSetupLaunchOptions = {
+  newReceiver?: boolean;
+};
 type ConnectPageViewState = {
   activeView?: DashboardView;
   scrollY?: number;
@@ -205,9 +210,15 @@ type PendingMessageRecording = {
 };
 
 type ReceiverSetupLink = {
+  createdAt?: string;
   expiresAt?: string;
   setupCode?: string;
   setupUrl: string;
+};
+
+type CachedReceiverSetupLink = ReceiverSetupLink & {
+  createdAt: string;
+  receiverDeviceId: string;
 };
 
 type ReceiverGuideRect = {
@@ -236,6 +247,8 @@ const receiverGuideTargetStorageKey = "carepland-connect-guide-target";
 const receiverGuideRectStorageKey = "carepland-connect-guide-rect";
 const receiverLastPressStorageKey = "carepland-connect-last-press";
 const selectedReceiverStorageKeyPrefix = "carepland-connect-selected-receiver";
+const receiverSetupLinkCacheKeyPrefix = "carepland-connect-receiver-setup-link";
+const receiverSetupLinkReuseMs = 10 * 60 * 1000;
 const receiverGuideEndpoint = "/api/connect/receiver-guide";
 const connectMessagesEndpoint = "/api/connect/messages";
 const connectAvatarsEndpoint = "/api/connect/avatars";
@@ -394,7 +407,8 @@ function receiverKey(device: ConnectReceiverDevice) {
 }
 
 function receiverDisplayName(device?: ConnectReceiverDevice | null) {
-  return device?.locationLabel || device?.name || device?.receiverId || "Receiver";
+  const explicitName = device?.locationLabel || device?.name;
+  return explicitName || defaultReceiverDisplayName(device);
 }
 
 function receiverShortDisplayId(device?: ConnectReceiverDevice | null) {
@@ -404,8 +418,68 @@ function receiverShortDisplayId(device?: ConnectReceiverDevice | null) {
   return compact.length > 10 ? compact.slice(-10) : compact;
 }
 
+function defaultReceiverDisplayName(device?: ConnectReceiverDevice | null) {
+  const shortId = receiverShortDisplayId(device);
+  return shortId ? `Receiver ${shortId}` : "Receiver";
+}
+
 function selectedReceiverStorageKey(personId: string) {
   return `${selectedReceiverStorageKeyPrefix}:${personId || "default"}`;
+}
+
+function receiverSetupLinkCacheKey(receiverDeviceId: string) {
+  return `${receiverSetupLinkCacheKeyPrefix}:${receiverDeviceId}`;
+}
+
+function readCachedReceiverSetupLink(receiverDeviceId: string) {
+  if (typeof window === "undefined" || !receiverDeviceId) return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(receiverSetupLinkCacheKey(receiverDeviceId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CachedReceiverSetupLink>;
+    if (
+      parsed.receiverDeviceId !== receiverDeviceId ||
+      !parsed.createdAt ||
+      !parsed.setupUrl
+    ) {
+      return null;
+    }
+
+    const createdAtMs = Date.parse(parsed.createdAt);
+    if (!Number.isFinite(createdAtMs) || Date.now() - createdAtMs > receiverSetupLinkReuseMs) {
+      window.sessionStorage.removeItem(receiverSetupLinkCacheKey(receiverDeviceId));
+      return null;
+    }
+
+    return {
+      createdAt: parsed.createdAt,
+      expiresAt: parsed.expiresAt,
+      setupCode: parsed.setupCode,
+      setupUrl: parsed.setupUrl,
+    } satisfies ReceiverSetupLink;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedReceiverSetupLink(receiverDeviceId: string, setupLink: ReceiverSetupLink) {
+  if (typeof window === "undefined" || !receiverDeviceId || !setupLink.setupUrl) return;
+
+  const cached = {
+    ...setupLink,
+    createdAt: setupLink.createdAt || new Date().toISOString(),
+    receiverDeviceId,
+  } satisfies CachedReceiverSetupLink;
+
+  try {
+    window.sessionStorage.setItem(
+      receiverSetupLinkCacheKey(receiverDeviceId),
+      JSON.stringify(cached)
+    );
+  } catch {
+    // Cache failure should never block setup link creation.
+  }
 }
 
 function readStickySelectedReceiverKey(personId: string) {
@@ -420,6 +494,21 @@ function writeStickySelectedReceiverKey(personId: string, receiverKeyValue: stri
 
 function personName(person?: ConnectReceiverPerson) {
   return person?.displayName || "Main Receiver User";
+}
+
+function profileDisplayName(profile?: {
+  display_name?: string | null;
+  email?: string | null;
+  family_name?: string | null;
+  given_name?: string | null;
+} | null) {
+  const displayName = profile?.display_name?.trim();
+  const fullName = [profile?.given_name, profile?.family_name]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+  return displayName || fullName || profile?.email?.trim() || "";
 }
 
 function firstNameLabel(value?: string | null) {
@@ -806,6 +895,30 @@ function AppointmentCommunicationSummary({
   );
 }
 
+function readInitialReceiverSetupSection(): ReceiverSetupSection | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const value = new URLSearchParams(window.location.search).get("receiverSetup")?.trim();
+  if (
+    value === "start" ||
+    value === "receiverUser" ||
+    value === "install" ||
+    value === "pair" ||
+    value === "finish" ||
+    value === "advancedAndroid" ||
+    value === "settings"
+  ) {
+    return value;
+  }
+  if (value === "test") return "finish";
+  if (value === "receiverContact") return "receiverUser";
+  if (value === "advanced") return "advancedAndroid";
+  if (value === "home") return "start";
+  return value ? "start" : null;
+}
+
 export function ConnectDashboard() {
   const [initialConnectPageViewState] = useState<ConnectPageViewState | null>(() => {
     const restoredState = restorePageViewState<ConnectPageViewState>("connect");
@@ -850,8 +963,18 @@ export function ConnectDashboard() {
   });
   const [connectTargetPersonId, setConnectTargetPersonId] = useState(messageContextPersonId);
   const [accountEmail, setAccountEmail] = useState("");
+  const [authenticatedSenderName, setAuthenticatedSenderName] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedReceiverKey, setSelectedReceiverKey] = useState(connectPrototypeReceiverId);
+  const [initialReceiverSetupSection] = useState<ReceiverSetupSection | null>(
+    readInitialReceiverSetupSection
+  );
+  const [receiverSetupOpen, setReceiverSetupOpen] = useState(Boolean(initialReceiverSetupSection));
+  const [receiverSetupSection, setReceiverSetupSection] = useState<ReceiverSetupSection>(
+    initialReceiverSetupSection ?? "start"
+  );
+  const [receiverSetupSelectedReceiverKey, setReceiverSetupSelectedReceiverKey] =
+    useState(selectedReceiverKey);
   const [receiverRenameOpen, setReceiverRenameOpen] = useState(false);
   const [receiverLabelDraft, setReceiverLabelDraft] = useState("");
   const [receiverLabelPending, setReceiverLabelPending] = useState(false);
@@ -1271,12 +1394,13 @@ export function ConnectDashboard() {
       setAccountEmail(user.email ?? "");
       const { data: profile } = await supabase
         .from("profiles")
-        .select("is_admin")
+        .select("display_name,email,family_name,given_name,is_admin")
         .eq("id", user.id)
         .maybeSingle();
 
       if (!cancelled) {
         setIsAdmin(profile?.is_admin === true);
+        setAuthenticatedSenderName(profileDisplayName(profile) || user.email || "");
       }
     });
 
@@ -1448,6 +1572,8 @@ export function ConnectDashboard() {
         : "Receiver";
   const selectedReceiverId =
     selectedReceiver?.id || selectedReceiver?.receiverId || connectPrototypeReceiverId;
+  const selectedReceiverContactName =
+    selectedReceiver?.receiverContactDisplayName?.trim() || "Receiver contact";
   const selectedReceiverUsesClassicCallBridge =
     receiverUsesClassicCallBridge(selectedReceiver);
   const selectedReceiverGuideId = selectedReceiverMatch
@@ -1550,6 +1676,15 @@ export function ConnectDashboard() {
     window.location.assign("/?personal=1&profile=1");
   }
 
+  function openReceiverSetup(
+    section: ReceiverSetupSection = "start",
+    options?: ReceiverSetupLaunchOptions
+  ) {
+    setReceiverSetupSelectedReceiverKey(options?.newReceiver ? "" : selectedReceiverKey);
+    setReceiverSetupSection(section);
+    setReceiverSetupOpen(true);
+  }
+
   async function handleSignOut() {
     await supabase.auth.signOut();
     clearAllPageViewState();
@@ -1570,7 +1705,7 @@ export function ConnectDashboard() {
         "label" in parsed && typeof parsed.label === "string"
           ? parsed.label
           : parsed.target === "primary"
-            ? "Contact Andrew"
+            ? `Contact ${selectedReceiverContactName}`
             : parsed.target === "ask"
               ? "Ask a question"
               : parsed.target === "contact"
@@ -1581,7 +1716,7 @@ export function ConnectDashboard() {
 
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
-  }, [selectedPersonName]);
+  }, [selectedPersonName, selectedReceiverContactName]);
 
   function logDashboardCallEvent(
     callId: string,
@@ -1759,7 +1894,7 @@ export function ConnectDashboard() {
         ok?: boolean;
       }>(connectCallsEndpoint, {
         body: JSON.stringify({
-          callerName: "Andrew",
+          callerName: authenticatedSenderName || "CarePland coordinator",
           mainConnectUserPersonId: selectedMainConnectUserPersonId,
           receiverId: selectedReceiverId,
           recipientPersonId: selectedMainConnectUserPersonId,
@@ -1774,7 +1909,7 @@ export function ConnectDashboard() {
       if (callResponse.call?.callId) {
         const optimisticCall = {
           callId: callResponse.call.callId,
-          callerName: "Andrew",
+          callerName: authenticatedSenderName || "CarePland coordinator",
           recipientName: selectedPersonName,
           receiverId: selectedReceiverId,
           state: "ringing",
@@ -1961,13 +2096,13 @@ export function ConnectDashboard() {
                 artifactKind: "coordinator_message",
                 audioDirection: "coordinator_to_receiver",
                 clientAudioCaptureId: pendingRecording.clientAudioCaptureId,
-                role: "Andrew",
+                role: authenticatedSenderName || "CarePland coordinator",
                 surface: "coordinator_message_composer",
               }
             ),
             clientAudioCaptureId: pendingRecording.clientAudioCaptureId,
             clientMessageId,
-            from: "Andrew",
+            from: authenticatedSenderName || "CarePland coordinator",
             mainConnectUserPersonId: selectedMainConnectUserPersonId,
             messageType: "audio",
             receiverId: selectedReceiverId,
@@ -1980,7 +2115,7 @@ export function ConnectDashboard() {
             appointmentId: messageAppointmentId,
             body,
             clientMessageId,
-            from: "Andrew",
+            from: authenticatedSenderName || "CarePland coordinator",
             mainConnectUserPersonId: selectedMainConnectUserPersonId,
             messageType: "text",
             receiverId: selectedReceiverId,
@@ -2128,7 +2263,7 @@ export function ConnectDashboard() {
             artifactKind: "coordinator_message",
             audioDirection: "coordinator_to_receiver",
             clientAudioCaptureId,
-            role: "Andrew",
+            role: authenticatedSenderName || "CarePland coordinator",
             surface: "coordinator_message_composer",
           }),
           clientAudioCaptureId,
@@ -2445,6 +2580,7 @@ export function ConnectDashboard() {
                     }}
                     personId={selectedMainConnectUserPersonId}
                     recipientName={selectedPersonName}
+                    senderName={authenticatedSenderName || "CarePland coordinator"}
                   />
                 </div>
               ) : null}
@@ -2494,6 +2630,7 @@ export function ConnectDashboard() {
           activeMainConnectUserPersonId={selectedMainConnectUserPersonId}
           canShowAdminItems={canShowAdminItems}
           households={households}
+          onOpenReceiverSetup={openReceiverSetup}
           onRefresh={refresh}
           selectedReceiverKey={selectedReceiverKey}
           setSelectedReceiverKey={setSelectedReceiverKey}
@@ -2514,6 +2651,15 @@ export function ConnectDashboard() {
         open={connectAskOpen}
         sending={connectAskSending}
       />
+      <ReceiverSetupOverlay
+        activeDevices={activeDevices}
+        connectContext={state.connectContext}
+        initialSection={receiverSetupSection}
+        onClose={() => setReceiverSetupOpen(false)}
+        onRefresh={refresh}
+        open={receiverSetupOpen}
+        selectedReceiverKey={receiverSetupSelectedReceiverKey}
+      />
       <UserFacingFooter
         onWhyCarePland={() => {
           window.location.assign("/?personal=1");
@@ -2533,6 +2679,11 @@ export function ConnectProfileSettingsPanel({
   const [state, setState] = useState<DashboardState>(emptyDashboardState);
   const [status, setStatus] = useState("Loading receiver settings...");
   const [selectedReceiverKey, setSelectedReceiverKey] = useState(connectPrototypeReceiverId);
+  const [receiverSetupOpen, setReceiverSetupOpen] = useState(false);
+  const [receiverSetupSection, setReceiverSetupSection] =
+    useState<ReceiverSetupSection>("start");
+  const [receiverSetupSelectedReceiverKey, setReceiverSetupSelectedReceiverKey] =
+    useState(selectedReceiverKey);
 
   const refresh = useCallback(async () => {
     setStatus("Refreshing receiver settings...");
@@ -2634,19 +2785,35 @@ export function ConnectProfileSettingsPanel({
   }, [activeDevices, activeMainConnectUserPersonId, selectedReceiverKey]);
 
   return (
-    <ConnectSettingsView
-      activeDevices={activeDevices}
-      activeMainConnectUserPersonId={activeMainConnectUserPersonId}
-      canShowAdminItems={canShowAdminItems}
-      households={households}
-      onRefresh={refresh}
-      selectedReceiverKey={selectedReceiverKey}
-      setSelectedReceiverKey={setSelectedReceiverKey}
-      setupView={setupView}
-      setSetupView={() => undefined}
-      state={state}
-      status={status}
-    />
+    <>
+      <ConnectSettingsView
+        activeDevices={activeDevices}
+        activeMainConnectUserPersonId={activeMainConnectUserPersonId}
+        canShowAdminItems={canShowAdminItems}
+        households={households}
+        onOpenReceiverSetup={(section = "start", options?: ReceiverSetupLaunchOptions) => {
+          setReceiverSetupSelectedReceiverKey(options?.newReceiver ? "" : selectedReceiverKey);
+          setReceiverSetupSection(section);
+          setReceiverSetupOpen(true);
+        }}
+        onRefresh={refresh}
+        selectedReceiverKey={selectedReceiverKey}
+        setSelectedReceiverKey={setSelectedReceiverKey}
+        setupView={setupView}
+        setSetupView={() => undefined}
+        state={state}
+        status={status}
+      />
+      <ReceiverSetupOverlay
+        activeDevices={activeDevices}
+        connectContext={state.connectContext}
+        initialSection={receiverSetupSection}
+        onClose={() => setReceiverSetupOpen(false)}
+        onRefresh={refresh}
+        open={receiverSetupOpen}
+        selectedReceiverKey={receiverSetupSelectedReceiverKey}
+      />
+    </>
   );
 }
 
@@ -2949,6 +3116,7 @@ function ConnectSettingsView({
   activeMainConnectUserPersonId,
   canShowAdminItems,
   households,
+  onOpenReceiverSetup,
   onRefresh,
   selectedReceiverKey,
   setSelectedReceiverKey,
@@ -2961,6 +3129,10 @@ function ConnectSettingsView({
   activeMainConnectUserPersonId: string;
   canShowAdminItems: boolean;
   households: ConnectReceiverHousehold[];
+  onOpenReceiverSetup: (
+    section?: ReceiverSetupSection,
+    options?: ReceiverSetupLaunchOptions
+  ) => void;
   onRefresh: () => Promise<void>;
   selectedReceiverKey: string;
   setSelectedReceiverKey: (value: string) => void;
@@ -2970,16 +3142,45 @@ function ConnectSettingsView({
   status: string;
 }) {
   const [primaryReceiverStatus, setPrimaryReceiverStatus] = useState("Ready.");
-  const receiverLabel =
-    activeDevices[0]?.name || activeDevices[0]?.receiverId || "No receiver selected";
+  const selectedSetupReceiver =
+    activeDevices.find((device) => receiverKey(device) === selectedReceiverKey) ??
+    activeDevices[0] ??
+    null;
+  const receiverLabel = selectedSetupReceiver
+    ? receiverDisplayName(selectedSetupReceiver)
+    : "Receiver";
+  const apkSetupHref = selectedSetupReceiver
+    ? `/connect/receiver/apk-setup?receiverKey=${encodeURIComponent(receiverKey(selectedSetupReceiver))}`
+    : "/connect/receiver/apk-setup?new=1";
 
   return (
-    <section className="min-h-[calc(100vh-86px)] border-t border-[#d6e3f2] bg-[#f4f8fc]">
+    <section className="min-h-[calc(100vh-86px)] bg-[#f4f8fc]">
       <main className="px-2 py-5 sm:px-4 lg:px-6">
-        <p className="mb-4 px-1 text-sm font-bold leading-snug text-[#5f6e84]">
-          Trust boundary: No hidden listening. No recording by default. Every request is named,
-          authorized, and logged.
-        </p>
+        <section className="mb-4 max-w-[1040px] rounded-lg border border-[#d6e3f2] bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black text-[#172f49]">Receiver Setup</h2>
+              <p className="mt-1 text-sm font-semibold text-[#5f6e84]">
+                Install, pair, and configure a Receiver with the guided setup assistant.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="min-h-11 rounded-lg bg-[#2f6f9f] px-5 text-sm font-black text-white hover:bg-[#285f89] focus:outline-none focus:ring-2 focus:ring-[#4e84b2]"
+                onClick={() => onOpenReceiverSetup("receiverUser")}
+                type="button"
+              >
+                Setup {receiverLabel}
+              </button>
+              <a
+                className="grid min-h-11 place-items-center rounded-lg border border-[#cbd9e7] bg-white px-5 text-sm font-black text-[#173150] hover:bg-[#edf5fc] focus:outline-none focus:ring-2 focus:ring-[#4e84b2]"
+                href={apkSetupHref}
+              >
+                Setup page
+              </a>
+            </div>
+          </div>
+        </section>
         {setupView === "people" ? (
           <section className="max-w-[940px] rounded-lg border border-[#d6e3f2] bg-white p-6 shadow-sm">
             <PrimaryReceiverUserPanel
@@ -2992,20 +3193,12 @@ function ConnectSettingsView({
           </section>
         ) : (
           <section className="max-w-[1040px] space-y-4">
-            <div className="rounded-lg border border-[#d6e3f2] bg-white p-6 shadow-sm">
-              <PrimaryReceiverUserPanel
-                currentPersonId={state.connectContext?.mainConnectUserPersonId ?? ""}
-                onRefresh={onRefresh}
-                people={state.connectContext?.people ?? []}
-                setStatus={setPrimaryReceiverStatus}
-                status={primaryReceiverStatus}
-              />
-            </div>
             <SetupPanel
               activeDevices={activeDevices}
               activeMainConnectUserPersonId={activeMainConnectUserPersonId}
               canShowAdminItems={canShowAdminItems}
               households={households}
+              onOpenReceiverSetup={onOpenReceiverSetup}
               onRefresh={onRefresh}
               selectedReceiverKey={selectedReceiverKey}
               setSelectedReceiverKey={setSelectedReceiverKey}
@@ -3016,6 +3209,10 @@ function ConnectSettingsView({
             />
           </section>
         )}
+        <p className="mt-6 max-w-[1040px] px-1 text-sm font-bold leading-snug text-[#5f6e84]">
+          Trust boundary: No hidden listening. No recording by default. Every request is named,
+          authorized, and logged.
+        </p>
       </main>
     </section>
   );
@@ -3080,7 +3277,7 @@ function PrimaryReceiverUserPanel({
   return (
     <section>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-black text-[#172f49]">Main Receiver User</h3>
+        <h3 className="text-2xl font-black text-[#172f49]">Main Receiver User</h3>
         {!status.startsWith("Ready") ? (
           <span className="text-xs font-black text-[#5f6e84]">{status}</span>
         ) : null}
@@ -3582,6 +3779,7 @@ function SetupPanel({
   activeMainConnectUserPersonId,
   canShowAdminItems,
   households,
+  onOpenReceiverSetup,
   onRefresh,
   selectedReceiverKey,
   setSelectedReceiverKey,
@@ -3594,6 +3792,10 @@ function SetupPanel({
   activeMainConnectUserPersonId: string;
   canShowAdminItems: boolean;
   households: ConnectReceiverHousehold[];
+  onOpenReceiverSetup: (
+    section?: ReceiverSetupSection,
+    options?: ReceiverSetupLaunchOptions
+  ) => void;
   onRefresh: () => Promise<void>;
   selectedReceiverKey: string;
   setSelectedReceiverKey: (value: string) => void;
@@ -3604,17 +3806,18 @@ function SetupPanel({
 }) {
   const [setupActionPending, setSetupActionPending] = useState<"pair" | "recover" | null>(null);
   const [setupLink, setSetupLink] = useState<ReceiverSetupLink | null>(null);
-  const [setupStatus, setSetupStatus] = useState("Setup links expire after 30 minutes.");
+  const [setupStatus, setSetupStatus] = useState("Ready.");
   const [receiverActionPending, setReceiverActionPending] = useState<string | null>(null);
-  const [receiverSetupModalOpen, setReceiverSetupModalOpen] = useState(false);
   const [receiverPairingCode, setReceiverPairingCode] = useState("");
   const [receiverPairingPending, setReceiverPairingPending] = useState(false);
-  const [receiverDetailsOpen, setReceiverDetailsOpen] = useState(false);
+  const [savingReceiverUserId, setSavingReceiverUserId] = useState("");
+  const [currentReceiverAction, setCurrentReceiverAction] = useState<
+    "rename" | "pair" | "setup" | null
+  >(null);
+  const [currentReceiverAdvancedOpen, setCurrentReceiverAdvancedOpen] = useState(false);
   const setupPerson = state.connectContext?.people.find(
     (person) => person.id === activeMainConnectUserPersonId
   );
-  const [showRevokedDevices, setShowRevokedDevices] = useState(false);
-  const [expandedReceiverDeviceId, setExpandedReceiverDeviceId] = useState("");
   const [receiverLabelDrafts, setReceiverLabelDrafts] = useState<Record<string, string>>({});
   const selectedDevice =
     activeDevices.find((device) => receiverKey(device) === selectedReceiverKey) ??
@@ -3622,42 +3825,62 @@ function SetupPanel({
     null;
   const allDevices = state.provisioning?.receiverDevices ?? activeDevices;
   const setupTokens = state.provisioning?.setupTokens ?? [];
-  const revokedDeviceCount = allDevices.filter((device) => device.status === "revoked").length;
-  const visibleDevices = showRevokedDevices
-    ? allDevices
-    : allDevices.filter((device) => device.status !== "revoked");
+  const activeReceiverListDevices = allDevices.filter((device) => device.status !== "revoked");
   const householdOrder = households.map((household) => household.id);
-  const sortedVisibleDevices = [...visibleDevices].sort((first, second) => {
-    const firstHouseholdRank = householdOrder.indexOf(first.receiverHouseholdId);
-    const secondHouseholdRank = householdOrder.indexOf(second.receiverHouseholdId);
-    const firstRank = firstHouseholdRank === -1 ? Number.MAX_SAFE_INTEGER : firstHouseholdRank;
-    const secondRank =
-      secondHouseholdRank === -1 ? Number.MAX_SAFE_INTEGER : secondHouseholdRank;
-    if (firstRank !== secondRank) return firstRank - secondRank;
-    return (
-      new Date(second.lastSeenAt || second.pairedAt || 0).getTime() -
-      new Date(first.lastSeenAt || first.pairedAt || 0).getTime()
-    );
-  });
-  const setupPendingDevice =
-    allDevices.find((device) => device.status === "setup_pending") ?? selectedDevice;
+  const sortReceiverListDevices = (devices: ConnectReceiverDevice[]) =>
+    [...devices].sort((first, second) => {
+      const firstHouseholdRank = householdOrder.indexOf(first.receiverHouseholdId);
+      const secondHouseholdRank = householdOrder.indexOf(second.receiverHouseholdId);
+      const firstRank = firstHouseholdRank === -1 ? Number.MAX_SAFE_INTEGER : firstHouseholdRank;
+      const secondRank =
+        secondHouseholdRank === -1 ? Number.MAX_SAFE_INTEGER : secondHouseholdRank;
+      if (firstRank !== secondRank) return firstRank - secondRank;
+      return (
+        new Date(second.lastSeenAt || second.pairedAt || 0).getTime() -
+        new Date(first.lastSeenAt || first.pairedAt || 0).getTime()
+      );
+    });
+  const sortedActiveReceiverListDevices = sortReceiverListDevices(activeReceiverListDevices);
   const receiverLabel =
     selectedDevice ? receiverDisplayName(selectedDevice) : "No receiver selected";
   const receiverPairingCodeReady = browserReceiverPairingCodeReady(receiverPairingCode);
   const publicReceiverUrl = "https://receiver.carepland.com";
-
-  useEffect(() => {
-    if (setupLink) {
-      setReceiverDetailsOpen(true);
-    }
-  }, [setupLink]);
+  const receiverEligiblePeople = (state.connectContext?.people ?? [])
+    .filter((person) => person.isActive !== false)
+    .filter((person) => !isConnectPetSubjectType(person.subjectType));
+  const selectedPresenceState = selectedDevice?.presence?.state || "offline";
+  const selectedPresenceLabel =
+    selectedDevice?.presence?.label || statusLabel(selectedPresenceState);
+  const selectedReceiverPaired = Boolean(selectedDevice?.pairedAt);
+  const selectedPairingLabel = selectedReceiverPaired ? "Paired" : "Not Paired";
 
   function receiverDisplayName(device: ConnectReceiverDevice) {
-    return device.locationLabel || device.name || device.receiverId || "Receiver";
+    return device.locationLabel || device.name || defaultReceiverDisplayName(device);
   }
 
   function receiverDraftLabel(device: ConnectReceiverDevice) {
     return receiverLabelDrafts[receiverKey(device)] ?? receiverDisplayName(device);
+  }
+
+  async function selectInlineReceiverUser(personId: string) {
+    if (!personId || personId === activeMainConnectUserPersonId || savingReceiverUserId) {
+      return;
+    }
+
+    const person = receiverEligiblePeople.find((item) => item.id === personId);
+    if (!person) return;
+
+    setSavingReceiverUserId(personId);
+    try {
+      await updateConnectMainUserContext({ mainConnectUserPersonId: personId });
+      await onRefresh();
+    } catch (error) {
+      setSetupStatus(
+        error instanceof Error ? error.message : "Main Receiver User could not be saved."
+      );
+    } finally {
+      setSavingReceiverUserId("");
+    }
   }
 
   function openReceiverSetupModal() {
@@ -3665,12 +3888,12 @@ function SetupPanel({
       setSetupStatus("Choose a Main Receiver User before adding a Receiver.");
       return;
     }
-    setReceiverSetupModalOpen(true);
-    setSetupStatus("Pair Receiver opened. Enter the code shown on the Receiver.");
+    setSetupLink(null);
+    setCurrentReceiverAction("pair");
   }
 
   function closeReceiverSetupModal() {
-    setReceiverSetupModalOpen(false);
+    setCurrentReceiverAction(null);
     setReceiverPairingCode("");
     void onRefresh();
   }
@@ -3720,7 +3943,7 @@ function SetupPanel({
           ? `Receiver ready for ${payload.receiverName}.`
           : "Receiver ready."
       );
-      setReceiverSetupModalOpen(false);
+      setCurrentReceiverAction(null);
       setReceiverPairingCode("");
       await onRefresh();
     } catch (error) {
@@ -3739,11 +3962,9 @@ function SetupPanel({
   }
 
   function receiverConnectionLine(device: ConnectReceiverDevice) {
-    const pairedLabel = device.pairedAt
-      ? `Paired ${formatDateTime(device.pairedAt)}`
-      : device.status === "setup_pending"
-        ? "Waiting for pairing"
-        : "Not paired";
+    if (!device.pairedAt) return "Not Paired";
+
+    const pairedLabel = `Paired ${formatDateTime(device.pairedAt)}`;
     const lastSeen = device.lastSeenAt
       ? `Last seen ${formatDateTime(device.lastSeenAt)}`
       : "No heartbeat yet";
@@ -3756,10 +3977,6 @@ function SetupPanel({
     if (!id) return "No ID";
     const compact = id.replace(/^receiver-/, "");
     return compact.length > 10 ? compact.slice(-10) : compact;
-  }
-
-  function receiverFullId(device: ConnectReceiverDevice) {
-    return device.receiverId || device.id || "Not reported";
   }
 
   function receiverHeartbeatState(device: ConnectReceiverDevice) {
@@ -3804,12 +4021,6 @@ function SetupPanel({
     return "";
   }
 
-  function receiverDeviceModelLine(device: ConnectReceiverDevice) {
-    const model = [device.nativeManufacturer, device.nativeModel].filter(Boolean).join(" ");
-    const api = device.nativeSdk ? `Android API ${device.nativeSdk}` : "";
-    return [model, api].filter(Boolean).join(" · ") || "Not reported";
-  }
-
   function receiverAppVersionLine(device: ConnectReceiverDevice) {
     const version = device.nativeVersionName
       ? `${device.nativeVersionName}${device.nativeVersionCode ? ` (${device.nativeVersionCode})` : ""}`
@@ -3835,29 +4046,6 @@ function SetupPanel({
     return "Not reported";
   }
 
-  function receiverRecoveryLine(device: ConnectReceiverDevice) {
-    if (!device.lastRecoveryAction) return "No restart recovery reported yet";
-    const actionLabel =
-      device.lastRecoveryAction === "android.intent.action.BOOT_COMPLETED"
-        ? "Started after reboot"
-        : device.lastRecoveryAction === "android.intent.action.MY_PACKAGE_REPLACED"
-          ? "Restarted after app update"
-          : device.lastRecoveryAction === "dedicated_soft_reopen"
-            ? "Reopened after leaving app"
-            : device.lastRecoveryAction === "receiver_load_timeout"
-              ? "Receiver page timed out"
-              : device.lastRecoveryAction === "receiver_network_error"
-                ? "Receiver page connection failed"
-                : device.lastRecoveryAction === "receiver_ssl_error"
-                  ? "Receiver page security check failed"
-                  : device.lastRecoveryAction.startsWith("receiver_http_error")
-                    ? "Receiver page returned an error"
-                    : statusLabel(device.lastRecoveryAction);
-    return device.lastRecoveryAt
-      ? `${actionLabel} · ${formatDateTime(device.lastRecoveryAt)}`
-      : actionLabel;
-  }
-
   function receiverApplianceLine(device: ConnectReceiverDevice) {
     const mode = receiverModeLabel(device.receiverMode) || "Mode not reported";
     const bootStart = capabilityStatusLabel(device.capabilityStatuses?.bootStart);
@@ -3871,19 +4059,6 @@ function SetupPanel({
     if (status === "unavailable") return "Not available";
     if (status === "unknown") return "Unknown";
     return "Not reported";
-  }
-
-  function receiverAuditEvents(receiverDeviceId?: string, receiverHouseholdId?: string) {
-    const events = state.provisioning?.auditEvents ?? [];
-    return events.filter((event) => {
-      if (receiverDeviceId && event.receiverDeviceId === receiverDeviceId) return true;
-      if (receiverHouseholdId && event.receiverHouseholdId === receiverHouseholdId) return true;
-      return !receiverDeviceId && !receiverHouseholdId;
-    });
-  }
-
-  function receiverSetupTokens(receiverDeviceId?: string) {
-    return setupTokens.filter((token) => token.receiverDeviceId === receiverDeviceId);
   }
 
   function auditEventLabel(type?: string) {
@@ -3915,6 +4090,15 @@ function SetupPanel({
     }
 
     setSelectedReceiverKey(receiverKey(targetDevice));
+    if (mode === "pair") {
+      const cachedSetupLink = readCachedReceiverSetupLink(targetDevice.id);
+      if (cachedSetupLink) {
+        setSetupLink(cachedSetupLink);
+        setSetupStatus("Receiver setup link is ready.");
+        return;
+      }
+    }
+
     setSetupActionPending(mode);
     setSetupStatus(mode === "recover" ? "Creating recovery link..." : "Creating setup link...");
 
@@ -3958,11 +4142,16 @@ function SetupPanel({
             typeof window === "undefined" ? "https://app.carepland.com" : window.location.origin
           ).toString()
         : "";
-      setSetupLink({
+      const nextSetupLink = {
+        createdAt: new Date().toISOString(),
         expiresAt: payload.setupToken?.expiresAt,
         setupCode: payload.setupToken?.setupCode,
         setupUrl,
-      });
+      };
+      setSetupLink(nextSetupLink);
+      if (mode === "pair") {
+        writeCachedReceiverSetupLink(targetDevice.id, nextSetupLink);
+      }
       setSetupStatus(
         mode === "recover"
           ? "Recovery setup link is ready."
@@ -4018,7 +4207,10 @@ function SetupPanel({
             confirmedPrototypeWrite: true,
             operationReason: `Admin revoked receiver ${label}.`,
           }),
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            ...(await connectAuthHeaders()),
+            "Content-Type": "application/json",
+          },
           method: "POST",
         }
       );
@@ -4030,7 +4222,11 @@ function SetupPanel({
         throw new Error(payload.error || `Revoke returned ${response.status}`);
       }
 
-      setSetupStatus("Receiver revoked. The Android app remains installed and will need setup again.");
+      const nextDevice = activeReceiverListDevices.find((item) => item.id !== device.id);
+      setSelectedReceiverKey(nextDevice ? receiverKey(nextDevice) : "");
+      setCurrentReceiverAction(null);
+      setCurrentReceiverAdvancedOpen(false);
+      setSetupStatus("Receiver revoked. Pair or set up the physical Receiver again to use it.");
       await onRefresh();
     } catch (error) {
       setSetupStatus(error instanceof Error ? error.message : "Receiver could not be revoked.");
@@ -4092,7 +4288,7 @@ function SetupPanel({
   }
 
   return (
-    <section className="rounded-lg border border-[#d6e3f2] bg-white p-4 shadow-sm">
+    <section className={showTabs ? "rounded-lg border border-[#d6e3f2] bg-white p-4 shadow-sm" : ""}>
       {showTabs ? (
         <>
           <div className="flex items-center justify-between gap-3">
@@ -4117,10 +4313,6 @@ function SetupPanel({
           </div>
         </>
       ) : null}
-
-      <p className="mt-3 rounded-md border border-[#d6e3f2] bg-[#f8fafc] px-3 py-2 text-sm font-black text-[#5f6e84]">
-        {setupStatus}
-      </p>
 
       {setupView === "people" ? (
         <div className="mt-4 space-y-3">
@@ -4206,280 +4398,412 @@ function SetupPanel({
       ) : null}
 
       {setupView === "receivers" ? (
-        <div className="mt-4 space-y-4">
-          <fieldset className="rounded-xl border border-[#d6e3f2] bg-white p-5">
-            <legend className="px-2 text-lg font-black text-[#5f6e84]">
-              Receiver Management
-            </legend>
-
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#b9d5ee] bg-[#f8fbff] p-4">
-              <div className="min-w-0">
-                <p className="text-sm font-black uppercase text-[#5f6e84]">Receiver link</p>
-                <a
-                  className="mt-1 block truncate text-xl font-black text-[#173150] hover:text-[#2f6f9f]"
-                  href={publicReceiverUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {publicReceiverUrl}
-                </a>
-              </div>
-              <button
-                aria-label="Copy Receiver link"
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-[#cbd9e7] bg-white text-[#173150] shadow-sm hover:bg-[#edf5fc]"
-                onClick={() => void copyPublicReceiverLink()}
-                title="Copy Receiver link"
-                type="button"
-              >
-                <svg
-                  aria-hidden="true"
-                  className="h-5 w-5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  viewBox="0 0 24 24"
-                >
-                  <rect height="14" rx="2" width="14" x="8" y="8" />
-                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-[minmax(220px,2fr)_minmax(180px,1fr)_auto_auto_auto]">
-              <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
-                Receiver to call
-                <select
-                  className="min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-black text-[#0f172a]"
-                  onChange={(event) => setSelectedReceiverKey(event.target.value)}
-                  value={selectedDevice ? receiverKey(selectedDevice) : ""}
-                >
-                  {activeDevices.map((device) => {
-                    const key = receiverKey(device);
-                    return (
-                      <option key={key} value={key}>
-                        {receiverDisplayName(device)} · ID {receiverShortId(device)}
-                      </option>
-                    );
-                  })}
-                  {!activeDevices.length ? <option>No active Receiver</option> : null}
-                </select>
-              </label>
-              <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
-                Current target
-                <input
-                  className="min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-black text-[#0f172a]"
-                  readOnly
-                  value={selectedDevice ? receiverDisplayName(selectedDevice) : "No active Receiver"}
-                />
-              </label>
-              <button
-                className="self-end min-h-12 rounded-lg border border-[#1c5686] bg-[#2f6f9f] px-5 text-base font-black text-white shadow-sm hover:bg-[#285f89]"
-                onClick={openReceiverSetupModal}
-                type="button"
-              >
-                Pair Receiver
-              </button>
-              <button
-                className="self-end min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc] disabled:opacity-55"
-                disabled={!selectedDevice || setupActionPending !== null}
-                onClick={() => void createSetupLink("pair")}
-                type="button"
-              >
-                {setupActionPending === "pair" ? "Creating" : "Create setup link"}
-              </button>
-              <button
-                className="self-end min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc]"
-                onClick={() => void onRefresh()}
-                type="button"
-              >
-                Refresh devices
-              </button>
-            </div>
-
-            {receiverSetupModalOpen ? (
-              <div
-                aria-modal="true"
-                className="fixed inset-0 z-[80] grid place-items-center bg-[#0f172a]/45 p-3"
-                role="dialog"
-              >
-                <section className="flex h-[min(860px,calc(100vh-2rem))] w-[min(980px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-[#cbd9e7] bg-white shadow-2xl">
-                  <div className="flex items-start justify-between gap-3 border-b border-[#d6e3f2] bg-[#f8fbff] px-5 py-4">
-                    <div>
-                      <h3 className="text-xl font-black text-[#172f49]">Pair Receiver</h3>
-                      <p className="mt-1 text-sm font-semibold text-[#5f6e84]">
-                        Open the Receiver in a browser, then enter the 6-digit code shown there.
-                      </p>
-                    </div>
-                    <button
-                      className="min-h-10 rounded-lg border border-[#cbd9e7] bg-white px-5 text-sm font-black text-[#0f172a] hover:bg-[#edf5fc]"
-                      onClick={closeReceiverSetupModal}
-                      type="button"
+        <div className="-mt-3 space-y-4">
+          <section>
+            <div className="mb-5 grid gap-x-5 gap-y-3 lg:grid-cols-[minmax(0,0.82fr)_minmax(260px,0.55fr)_minmax(260px,auto)] lg:items-center">
+                <p className="text-lg font-black text-[#5f6e84]">
+                  Current Receiver
+                </p>
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <p className="text-lg font-black text-[#5f6e84]">
+                    Receiver ID
+                  </p>
+                  <p className="text-sm font-black text-[#5f6e84]">
+                    {selectedDevice ? receiverShortId(selectedDevice) : ""}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-lg font-black text-[#5f6e84]">Receiver User</span>
+                  {receiverEligiblePeople.length ? (
+                    receiverEligiblePeople.map((person) => {
+                      const selected = person.id === activeMainConnectUserPersonId;
+                      const pending = person.id === savingReceiverUserId;
+                      return (
+                        <button
+                          aria-pressed={selected}
+                          className={`inline-flex min-h-9 items-center gap-2 rounded-full border px-3 text-sm font-black ${
+                            selected
+                              ? "border-[#9fc6e8] bg-[#edf5fc] text-[#172f49]"
+                              : "border-[#d6e3f2] bg-white text-[#345d83] hover:bg-[#f4f8fc]"
+                          }`}
+                          disabled={Boolean(savingReceiverUserId)}
+                          key={person.id}
+                          onClick={() => void selectInlineReceiverUser(person.id)}
+                          type="button"
+                        >
+                          {firstNameLabel(person.displayName) || person.displayName}
+                          {pending ? <span className="text-xs text-[#5f6e84]">Saving</span> : null}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <span className="text-sm font-semibold text-[#5f6e84]">
+                      Add a Care VIP to choose a person.
+                    </span>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-xl font-black text-[#172f49]">
+                    {selectedDevice ? receiverDisplayName(selectedDevice) : "No active Receiver"}
+                  </p>
+                  {!selectedDevice ? (
+                    <p className="mt-1 truncate text-sm font-black text-[#5f6e84]">
+                      Select a Receiver from the list below.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedDevice ? (
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      {selectedReceiverPaired ? (
+                        <>
+                          <span
+                            className={`h-3 w-3 rounded-full ${
+                              selectedPresenceState === "online"
+                                ? "bg-[#2e9a67]"
+                                : selectedPresenceState === "stale"
+                                  ? "bg-[#d6a629]"
+                                  : selectedPresenceState === "revoked"
+                                    ? "bg-[#b43a32]"
+                                    : "bg-[#5f6e84]"
+                            }`}
+                            aria-hidden="true"
+                          />
+                          <span
+                            className={`inline-flex min-h-9 items-center rounded-full px-3 text-sm font-black ${
+                              selectedPresenceState === "online"
+                                ? "bg-[#e5f7ee] text-[#176342]"
+                                : selectedPresenceState === "stale"
+                                  ? "bg-[#fff8df] text-[#6f4d00]"
+                                  : "bg-[#edf1f4] text-[#5f6e84]"
+                            }`}
+                          >
+                            {selectedPresenceLabel}
+                          </span>
+                        </>
+                      ) : null}
+                      <span className="inline-flex min-h-9 items-center rounded-full bg-[#edf1f4] px-3 text-sm font-black text-[#5f6e84]">
+                        {selectedPairingLabel}
+                      </span>
+                    </span>
+                  ) : null}
+                  <button
+                    className="text-sm font-black text-[#a52b25] hover:text-[#7f1d1d] disabled:opacity-55"
+                    disabled={
+                      !selectedDevice?.id ||
+                      selectedDevice.status === "revoked" ||
+                      receiverActionPending === selectedDevice.id
+                    }
+                    onClick={() => selectedDevice && void revokeReceiverDevice(selectedDevice)}
+                    title={
+                      selectedDevice?.status === "revoked"
+                        ? "Receiver already revoked."
+                        : "Revoke server approval for this receiver."
+                    }
+                    type="button"
+                  >
+                    {selectedDevice && receiverActionPending === selectedDevice.id ? "Revoking" : "Revoke"}
+                  </button>
+                </div>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="text-sm font-black text-[#5f6e84]">
+                    Receiver URL
+                  </span>
+                  <a
+                    className="min-w-0 truncate text-sm font-black text-[#173150] hover:text-[#2f6f9f]"
+                    href={publicReceiverUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {publicReceiverUrl}
+                  </a>
+                  <button
+                    aria-label="Copy Receiver link"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[#cbd9e7] bg-white text-[#173150] hover:bg-[#edf5fc]"
+                    onClick={() => void copyPublicReceiverLink()}
+                    title="Copy Receiver link"
+                    type="button"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
                     >
-                      Close
-                    </button>
-                  </div>
-                  <div className="grid flex-1 content-start gap-4 overflow-auto p-5">
-                    <div className="rounded-xl border border-[#d6e3f2] bg-[#f8fbff] p-4">
-                      <p className="text-sm font-black uppercase text-[#5f6e84]">
-                        Receiver Active Person
-                      </p>
-                      <p className="mt-1 text-2xl font-black text-[#172f49]">
-                        {setupPerson?.displayName || "No Main Receiver User selected"}
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-[#5f6e84]">
-                        This Receiver will pair to the selected Connect person.
-                      </p>
-                    </div>
-                    <label className="grid gap-2 text-sm font-black text-[#5f6e84]">
-                      6-digit Receiver code
+                      <rect height="14" rx="2" width="14" x="8" y="8" />
+                      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                    </svg>
+                  </button>
+                </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-start gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className={`min-h-11 rounded-lg border px-5 text-base font-black ${
+                      currentReceiverAction === "rename"
+                        ? "border-[#1c5686] bg-[#2f6f9f] text-white"
+                        : "border-[#cbd9e7] bg-white text-[#0f172a] hover:bg-[#edf5fc]"
+                    } disabled:opacity-55`}
+                    disabled={!selectedDevice}
+                    onClick={() => {
+                      if (!selectedDevice) return;
+                      setReceiverLabelDrafts((current) => ({
+                        ...current,
+                        [receiverKey(selectedDevice)]: receiverDisplayName(selectedDevice),
+                      }));
+                      setSetupLink(null);
+                      setCurrentReceiverAction("rename");
+                    }}
+                    type="button"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    className={`min-h-11 rounded-lg border px-5 text-base font-black ${
+                      currentReceiverAction === "setup"
+                        ? "border-[#1c5686] bg-[#2f6f9f] text-white"
+                        : "border-[#cbd9e7] bg-white text-[#0f172a] hover:bg-[#edf5fc]"
+                    } disabled:opacity-55`}
+                    disabled={!selectedDevice || setupActionPending !== null}
+                    onClick={() => {
+                      setSetupLink(null);
+                      setCurrentReceiverAction("setup");
+                      void createSetupLink("pair");
+                    }}
+                    type="button"
+                  >
+                    {setupActionPending === "pair" ? "Creating" : "Setup Link"}
+                  </button>
+                </div>
+
+                <div className="min-w-0">
+                  {selectedDevice && currentReceiverAction === "rename" ? (
+                    <div className="grid gap-2 md:grid-cols-[minmax(180px,260px)_auto_auto]">
                       <input
-                        autoComplete="one-time-code"
-                        className="min-h-20 rounded-xl border border-[#172f49] bg-white px-4 text-center text-4xl font-black tracking-normal text-[#0f172a]"
-                        inputMode="numeric"
+                        className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-black text-[#0f172a]"
+                        maxLength={80}
                         onChange={(event) =>
-                          setReceiverPairingCode(
-                            formatBrowserReceiverPairingCode(event.target.value)
-                          )
+                          setReceiverLabelDrafts((current) => ({
+                            ...current,
+                            [receiverKey(selectedDevice)]: event.target.value,
+                          }))
                         }
-                        placeholder="123 456"
-                        value={receiverPairingCode}
+                        value={receiverDraftLabel(selectedDevice)}
                       />
-                    </label>
+                      <button
+                        className="min-h-11 w-24 rounded-lg border border-[#1c5686] bg-[#2f6f9f] px-4 text-base font-black text-white hover:bg-[#285f89] disabled:opacity-55"
+                        disabled={
+                          receiverActionPending === selectedDevice.id ||
+                          receiverDraftLabel(selectedDevice).trim() === receiverDisplayName(selectedDevice)
+                        }
+                        onClick={async () => {
+                          await saveReceiverLabel(selectedDevice);
+                          setCurrentReceiverAction(null);
+                        }}
+                        type="button"
+                      >
+                        {receiverActionPending === selectedDevice.id ? "Saving" : "Save"}
+                      </button>
+                      <button
+                        className="min-h-11 w-24 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-black text-[#0f172a] hover:bg-[#edf5fc]"
+                        onClick={() => {
+                          setCurrentReceiverAction(null);
+                          setReceiverLabelDrafts((current) => {
+                            const next = { ...current };
+                            delete next[receiverKey(selectedDevice)];
+                            return next;
+                          });
+                        }}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {currentReceiverAction === "setup" && setupLink ? (
+                    <div className="grid gap-1.5 md:grid-cols-[minmax(220px,340px)_auto_auto_auto]">
+                      <input
+                        className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-sm font-black text-[#173150]"
+                        readOnly
+                        value={setupLink.setupUrl || setupLink.setupCode || ""}
+                      />
+                      <button
+                        className="min-h-11 w-28 rounded-lg border border-[#cbd9e7] bg-white px-3 text-base font-black text-[#0f172a] hover:bg-[#edf5fc]"
+                        onClick={() => void copySetupLink()}
+                        type="button"
+                      >
+                        Copy Link
+                      </button>
+                      {setupLink.setupUrl ? (
+                        <a
+                          className="grid min-h-11 w-28 place-items-center rounded-lg bg-[#345d83] px-3 text-base font-black text-white hover:bg-[#254a6d]"
+                          href={setupLink.setupUrl}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Open
+                        </a>
+                      ) : null}
+                      <button
+                        className="min-h-11 w-28 rounded-lg border border-[#cbd9e7] bg-white px-3 text-base font-black text-[#0f172a] hover:bg-[#edf5fc]"
+                        onClick={() => {
+                          setSetupLink(null);
+                          setCurrentReceiverAction(null);
+                        }}
+                        type="button"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              {canShowAdminItems && setupStatus !== "Ready." ? (
+                <p className="mt-3 rounded-lg bg-[#edf1f4] px-4 py-3 text-sm font-black text-[#5f6e84]">
+                  {setupStatus}
+                </p>
+              ) : null}
+
+              {selectedDevice ? (
+                <details
+                  className="mt-3"
+                  onToggle={(event) => setCurrentReceiverAdvancedOpen(event.currentTarget.open)}
+                  open={currentReceiverAdvancedOpen}
+                >
+                  <summary className="cursor-pointer text-sm font-black text-[#173150]">
+                    Advanced
+                  </summary>
+                  <div className="mt-3 grid gap-3">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <MiniStatus
+                        label={receiverSetupStatus(selectedDevice)}
+                        value={receiverHeartbeatState(selectedDevice).label}
+                      />
+                      <MiniStatus
+                        label="Receiver ID"
+                        value={receiverShortId(selectedDevice)}
+                      />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <MiniStatus
+                        label="APK"
+                        value={receiverAppVersionLine(selectedDevice)}
+                      />
+                      <MiniStatus
+                        label="Update"
+                        value={receiverUpdateLine(selectedDevice)}
+                      />
+                      <MiniStatus
+                        label="Appliance Mode"
+                        value={receiverApplianceLine(selectedDevice)}
+                      />
+                    </div>
+                    {receiverHeartbeatState(selectedDevice).isStale ? (
+                      <p className="rounded-lg border border-[#d9a441] bg-[#fff8df] px-4 py-3 text-sm font-black text-[#6f4d00]">
+                        {receiverHeartbeatState(selectedDevice).label}. Open the app on the device or refresh after it is online.
+                      </p>
+                    ) : null}
+                  </div>
+                </details>
+              ) : null}
+
+              <div className="mt-5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-lg font-black text-[#5f6e84]">Receivers</p>
                     <button
-                      className="min-h-14 rounded-lg border border-[#1c5686] bg-[#2f6f9f] px-5 text-lg font-black text-white shadow-sm hover:bg-[#285f89] disabled:opacity-55"
-                      disabled={!receiverPairingCodeReady || receiverPairingPending}
-                      onClick={() => void pairReceiverFromBrowser()}
+                      className={`ml-5 min-h-10 rounded-lg px-2 text-sm font-black ${
+                        currentReceiverAction === "pair"
+                          ? "text-[#1c5686]"
+                          : "text-[#173150] hover:text-[#1c5686]"
+                      }`}
+                      onClick={openReceiverSetupModal}
                       type="button"
                     >
-                      {receiverPairingPending ? "Pairing Receiver" : "Pair Receiver"}
+                      Pair Receiver
                     </button>
-                    <p className="rounded-lg border border-[#d6e3f2] bg-white p-3 text-sm font-semibold text-[#5f6e84]">
-                      To get a code, open <strong>CarePland Connect Receiver</strong> in a browser
-                      on the device you want to use as the Receiver.
-                    </p>
-                  </div>
-                </section>
-              </div>
-            ) : null}
-
-            {selectedDevice ? (
-              <div className="mt-4 rounded-xl border border-[#b9d5ee] bg-[#f8fbff] p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-black uppercase text-[#5f6e84]">
-                      Selected Receiver
-                    </p>
-                    <h3 className="mt-1 text-2xl font-black text-[#172f49]">
-                      {receiverDisplayName(selectedDevice)}
-                    </h3>
-                    <p className="mt-1 text-sm font-semibold text-[#5f6e84]">
-                      {receiverConnectionLine(selectedDevice)}
-                    </p>
+                    <button
+                      className="min-h-10 rounded-lg px-2 text-sm font-black text-[#173150] hover:text-[#1c5686] focus:outline-none focus:ring-2 focus:ring-[#4e84b2]"
+                      onClick={() => onOpenReceiverSetup("start", { newReceiver: true })}
+                      type="button"
+                    >
+                      + Add Receiver
+                    </button>
+                    {currentReceiverAction === "pair" ? (
+                      <span className="grid min-w-0 gap-1.5 sm:grid-cols-[104px_auto_auto]">
+                        <input
+                          autoComplete="one-time-code"
+                          className="min-h-10 rounded-lg border border-[#cbd9e7] bg-white px-3 text-sm font-black tracking-normal text-[#0f172a]"
+                          inputMode="numeric"
+                          onChange={(event) =>
+                            setReceiverPairingCode(formatBrowserReceiverPairingCode(event.target.value))
+                          }
+                          placeholder="6 digit code"
+                          value={receiverPairingCode}
+                        />
+                        <button
+                          className="min-h-10 rounded-lg border border-[#1c5686] bg-[#2f6f9f] px-4 text-sm font-black text-white hover:bg-[#285f89] disabled:opacity-55"
+                          disabled={!receiverPairingCodeReady || receiverPairingPending}
+                          onClick={() => void pairReceiverFromBrowser()}
+                          type="button"
+                        >
+                          {receiverPairingPending ? "Confirming" : "Confirm"}
+                        </button>
+                        <button
+                          className="min-h-10 rounded-lg border border-[#cbd9e7] bg-white px-4 text-sm font-black text-[#0f172a] hover:bg-[#edf5fc]"
+                          onClick={closeReceiverSetupModal}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                      </span>
+                    ) : null}
                   </div>
                   <button
-                    className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc]"
+                    className="text-sm font-black text-[#173150] hover:text-[#2f6f9f]"
                     onClick={() => void onRefresh()}
                     type="button"
                   >
-                    Check status
+                    Refresh devices
                   </button>
                 </div>
-                {receiverHeartbeatState(selectedDevice).isStale ? (
-                  <p className="mt-4 rounded-lg border border-[#d9a441] bg-[#fff8df] px-4 py-3 text-sm font-black text-[#6f4d00]">
-                    {receiverHeartbeatState(selectedDevice).label}. Open the app on the device or tap
-                    Check status after it is online.
-                  </p>
-                ) : null}
-                <div className="mt-4 grid gap-3 md:grid-cols-5">
-                  <MiniStatus
-                    label="Heartbeat"
-                    value={receiverHeartbeatState(selectedDevice).label}
-                  />
-                  <MiniStatus
-                    label="Receiver ID"
-                    value={receiverShortId(selectedDevice)}
-                  />
-                  <MiniStatus
-                    label="APK"
-                    value={receiverAppVersionLine(selectedDevice)}
-                  />
-                  <MiniStatus
-                    label="Update"
-                    value={receiverUpdateLine(selectedDevice)}
-                  />
-                  <MiniStatus
-                    label="Appliance"
-                    value={receiverApplianceLine(selectedDevice)}
-                  />
-                  <MiniStatus
-                    label="Restart recovery"
-                    value={receiverRecoveryLine(selectedDevice)}
-                  />
-                </div>
-              </div>
-            ) : null}
-
-            {revokedDeviceCount ? (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#d6e3f2] bg-white p-3">
-                <span className="text-sm font-black text-[#5f6e84]">
-                  {showRevokedDevices
-                    ? "Revoked devices shown"
-                    : `${revokedDeviceCount} revoked device${revokedDeviceCount === 1 ? "" : "s"} hidden`}
-                </span>
-                <button
-                  className="min-h-10 rounded-lg border border-[#cbd9e7] bg-white px-5 text-sm font-black text-[#0f172a] hover:bg-[#edf5fc]"
-                  onClick={() => setShowRevokedDevices((value) => !value)}
-                  type="button"
-                >
-                  {showRevokedDevices ? "Hide revoked" : "Show revoked"}
-                </button>
-              </div>
-            ) : null}
-
-            <div className="mt-4 space-y-3">
-              {!sortedVisibleDevices.length ? (
-                <p className="rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-4 text-sm font-semibold text-[#5f6e84]">
-                  No receiver devices created yet.
-                </p>
-              ) : null}
-              {sortedVisibleDevices.map((device, index) => {
-                const deviceKey = receiverKey(device);
-                const isExpanded = expandedReceiverDeviceId === device.id;
-                const presenceState = device.presence?.state || "offline";
-                const deviceTokens = receiverSetupTokens(device.id);
-                const deviceEvents = receiverAuditEvents(device.id, device.receiverHouseholdId);
-
-                return (
-                  <div className="space-y-2" key={deviceKey}>
-                    <article
-                      className={`rounded-xl border p-4 ${
-                        deviceKey === selectedReceiverKey
-                          ? "border-[#9bc5ef] bg-[#f8fbff]"
-                          : "border-[#d6e3f2] bg-white"
-                      }`}
-                    >
-                      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-                        <button
-                          className="min-w-0 text-left"
-                          onClick={() => setSelectedReceiverKey(deviceKey)}
-                          type="button"
-                        >
-                          <strong className="block text-lg font-black text-[#0f172a]">
+                <div className="grid gap-2">
+                  {sortedActiveReceiverListDevices.map((device) => {
+                    const key = receiverKey(device);
+                    const isSelected = selectedDevice ? key === receiverKey(selectedDevice) : false;
+                    const presenceState = device.presence?.state || "offline";
+                    return (
+                      <button
+                        aria-pressed={isSelected}
+                        className={`grid min-h-16 gap-3 rounded-lg border px-4 py-3 text-left sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
+                          isSelected
+                            ? "border-[#9fc6e8] bg-[#edf5fc]"
+                            : "border-[#d6e3f2] bg-white hover:bg-[#f8fbff]"
+                        }`}
+                        key={key}
+                        onClick={() => {
+                          setSelectedReceiverKey(key);
+                          setCurrentReceiverAction(null);
+                          setCurrentReceiverAdvancedOpen(false);
+                        }}
+                        type="button"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-base font-black text-[#172f49]">
                             {receiverDisplayName(device)}
-                          </strong>
-                          <span className="block text-sm font-semibold text-[#5f6e84]">
-                            {device.locationLabel ? "Named" : "Unnamed"} ·{" "}
-                            ID {receiverShortId(device)} ·{" "}
-                            {receiverSetupStatus(device)} ·{" "}
-                            {device.presence?.label || statusLabel(presenceState)}
                           </span>
-                          <span className="block text-sm font-semibold text-[#5f6e84]">
+                          <span className="mt-1 block truncate text-sm font-semibold text-[#5f6e84]">
                             {receiverConnectionLine(device)}
                           </span>
-                        </button>
-                        <div className="flex flex-wrap items-center gap-2">
+                        </span>
+                        <span className="flex flex-wrap items-center gap-2 sm:justify-end">
                           <span
                             className={`h-3 w-3 rounded-full ${
                               presenceState === "online"
@@ -4490,292 +4814,23 @@ function SetupPanel({
                                     ? "bg-[#b43a32]"
                                     : "bg-[#5f6e84]"
                             }`}
-                            aria-label={statusLabel(presenceState)}
+                            aria-hidden="true"
                           />
-                          <button
-                            className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc]"
-                            onClick={() =>
-                              setExpandedReceiverDeviceId(isExpanded || !device.id ? "" : device.id)
-                            }
-                            type="button"
-                          >
-                            {isExpanded ? "Hide details" : "Details"}
-                          </button>
-                          <button
-                            className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc] disabled:opacity-55"
-                            disabled={setupActionPending !== null}
-                            onClick={() => void createSetupLink("pair", device)}
-                            type="button"
-                          >
-                            {device.status === "revoked" ? "Re-pair" : "New link"}
-                          </button>
-                          <button
-                            className="min-h-11 rounded-lg border border-[#e4b9b5] bg-white px-5 text-base font-black text-[#a52b25] hover:bg-[#fff5f3] disabled:opacity-55"
-                            disabled={
-                              !device.id ||
-                              device.status === "revoked" ||
-                              receiverActionPending === device.id
-                            }
-                            onClick={() => void revokeReceiverDevice(device)}
-                            title={
-                              device.status === "revoked"
-                                ? "Receiver already revoked."
-                                : "Revoke server approval for this receiver."
-                            }
-                            type="button"
-                          >
-                            {receiverActionPending === device.id ? "Revoking" : "Revoke"}
-                          </button>
-                        </div>
-                      </div>
-                      {isExpanded ? (
-                        <div className="mt-4 rounded-lg border border-[#d6e3f2] bg-white p-4">
-                          <div className="grid gap-3 sm:grid-cols-3">
-                            <MiniStatus label="Setup tokens" value={String(deviceTokens.length)} />
-                            <MiniStatus label="Audit events" value={String(deviceEvents.length)} />
-                            <MiniStatus label="Receiver ID" value={receiverShortId(device)} />
-                          </div>
-                          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                            <MiniStatus
-                              label="Paired"
-                              value={device.pairedAt ? formatDateTime(device.pairedAt) : "Not paired"}
-                            />
-                            <MiniStatus
-                              label="Receiver mode"
-                              value={receiverModeLabel(device.receiverMode) || "Not reported"}
-                            />
-                            <MiniStatus
-                              label="Provisioned"
-                              value={
-                                device.provisioningCompletedAt
-                                  ? formatDateTime(device.provisioningCompletedAt)
-                                  : "Not reported"
-                              }
-                            />
-                            <MiniStatus
-                              label="Android device"
-                              value={receiverDeviceModelLine(device)}
-                            />
-                            <MiniStatus
-                              label="App version"
-                              value={receiverAppVersionLine(device)}
-                            />
-                            <MiniStatus label="Update" value={receiverUpdateLine(device)} />
-                            <MiniStatus label="Kiosk" value={receiverKioskLine(device)} />
-                            <MiniStatus
-                              label="Hardware profile"
-                              value={device.hardwareProfile || "Not reported"}
-                            />
-                            <MiniStatus
-                              label="Full receiver ID"
-                              value={receiverFullId(device)}
-                            />
-                            <MiniStatus
-                              label="Recovery"
-                              value={
-                                device.lastRecoveryAction
-                                  ? `${device.lastRecoveryAction}${
-                                      device.lastRecoveryAt
-                                        ? ` · ${formatDateTime(device.lastRecoveryAt)}`
-                                        : ""
-                                    }`
-                                  : "None reported"
-                              }
-                            />
-                          </div>
-                          <div className="mt-4 rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-3">
-                            <p className="text-sm font-black uppercase text-[#5f6e84]">
-                              Receiver setup checks
-                            </p>
-                            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                              <MiniStatus
-                                label="Full screen"
-                                value={capabilityStatusLabel(device.capabilityStatuses?.fullscreen)}
-                              />
-                              <MiniStatus
-                                label="Keep awake"
-                                value={capabilityStatusLabel(device.capabilityStatuses?.keepAwake)}
-                              />
-                              <MiniStatus
-                                label="Microphone"
-                                value={capabilityStatusLabel(device.capabilityStatuses?.microphone)}
-                              />
-                              <MiniStatus
-                                label="Kiosk"
-                                value={capabilityStatusLabel(device.capabilityStatuses?.kiosk)}
-                              />
-                              <MiniStatus
-                                label="Battery"
-                                value={capabilityStatusLabel(
-                                  device.capabilityStatuses?.batteryOptimization
-                                )}
-                              />
-                              <MiniStatus
-                                label="Auto-start"
-                                value={capabilityStatusLabel(device.capabilityStatuses?.bootStart)}
-                              />
-                              <MiniStatus
-                                label="Update checks"
-                                value={capabilityStatusLabel(
-                                  device.capabilityStatuses?.updateChecks
-                                )}
-                              />
-                            </div>
-                          </div>
-                          <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-                            <label className="grid gap-2 text-sm font-black uppercase text-[#5f6e84]">
-                              Receiver name
-                              <input
-                                className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-base font-black normal-case text-[#0f172a]"
-                                maxLength={80}
-                                onChange={(event) =>
-                                  setReceiverLabelDrafts((current) => ({
-                                    ...current,
-                                    [deviceKey]: event.target.value,
-                                  }))
-                                }
-                                placeholder="Living Rm"
-                                value={receiverDraftLabel(device)}
-                              />
-                            </label>
-                            <button
-                              className="self-end min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#0f172a] hover:bg-[#edf5fc] disabled:opacity-55"
-                              disabled={
-                                !device.id ||
-                                receiverActionPending === device.id ||
-                                receiverDraftLabel(device).trim() === receiverDisplayName(device)
-                              }
-                              onClick={() => void saveReceiverLabel(device)}
-                              type="button"
-                            >
-                              {receiverActionPending === device.id ? "Saving" : "Save name"}
-                            </button>
-                          </div>
-                          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                            <div>
-                              <p className="text-sm font-black text-[#0f172a]">Setup history</p>
-                              <ul className="mt-2 space-y-1 text-sm font-semibold text-[#5f6e84]">
-                                {deviceTokens.slice(0, 4).map((token) => (
-                                  <li key={token.token || token.setupCode || token.createdAt}>
-                                    {statusLabel(token.status)} · {token.setupCode || "setup link"} ·{" "}
-                                    {formatDateTime(token.createdAt)}
-                                  </li>
-                                ))}
-                                {!deviceTokens.length ? <li>No setup token history loaded.</li> : null}
-                              </ul>
-                            </div>
-                            <div>
-                              <p className="text-sm font-black text-[#0f172a]">Recent events</p>
-                              <ul className="mt-2 space-y-1 text-sm font-semibold text-[#5f6e84]">
-                                {deviceEvents.slice(0, 6).map((event) => (
-                                  <li key={event.id || `${event.type}-${event.createdAt}`}>
-                                    {shortAuditEvent(event)} · {formatDateTime(event.createdAt)}
-                                  </li>
-                                ))}
-                                {!deviceEvents.length ? <li>No recent events loaded.</li> : null}
-                              </ul>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </article>
-                  </div>
-                );
-              })}
-            </div>
-
-            <details
-              className="mt-4 rounded-lg border border-[#d6e3f2] bg-[#f8fafc] p-3"
-              onToggle={(event) => setReceiverDetailsOpen(event.currentTarget.open)}
-              open={receiverDetailsOpen}
-            >
-              <summary className="cursor-pointer text-lg font-black text-[#173150]">
-                Receiver Details
-              </summary>
-              <div className="mt-3 rounded-xl border border-[#d6e3f2] bg-white p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <strong className="text-lg font-black text-[#172f49]">
-                    {setupPendingDevice
-                      ? receiverDisplayName(setupPendingDevice)
-                      : selectedDevice
-                        ? receiverDisplayName(selectedDevice)
-                        : "Receiver"}
-                  </strong>
-                  <span className="text-sm font-black text-[#5f6e84]">
-                    {setupPendingDevice?.status === "setup_pending" ? "Setup Pending" : "Setup progress"}
-                  </span>
-                </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <MiniStatus
-                    label="Receiver device record"
-                    value={setupPendingDevice ? receiverDisplayName(setupPendingDevice) : "Not created"}
-                  />
-                  <MiniStatus
-                    label="Single-use setup link"
-                    value={setupLink?.setupCode ? setupLink.setupCode : "Not created"}
-                  />
-                  <MiniStatus
-                    label="Device token paired"
-                    value={setupPendingDevice?.pairedAt ? "Paired" : "Waiting for receiver"}
-                  />
-                  <MiniStatus
-                    label="Receiver heartbeat"
-                    value={setupPendingDevice?.lastSeenAt ? formatDateTime(setupPendingDevice.lastSeenAt) : "Not paired"}
-                  />
-                </div>
-              </div>
-
-              {setupLink ? (
-                <div className="mt-4 rounded-md border border-[#d6e3f2] bg-white p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-normal text-[#5f6e84]">
-                        Receiver setup code
-                      </p>
-                      <strong className="mt-1 block text-2xl text-[#172f49]">
-                        {setupLink.setupCode || "---"}
-                      </strong>
-                    </div>
-                    <span className="rounded-full bg-[#f8fafc] px-3 py-2 text-xs font-black text-[#5f6e84]">
-                      {setupLink.expiresAt ? `Expires ${formatDateTime(setupLink.expiresAt)}` : "Expires soon"}
-                    </span>
-                  </div>
-                  {setupLink.setupUrl ? (
-                    <div className="mt-3 grid gap-2">
-                      <a
-                        className="truncate rounded-md border border-[#cbd9e7] bg-white px-3 py-2 text-xs font-semibold text-[#345d83] hover:bg-[#edf5fc]"
-                        href={setupLink.setupUrl}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        {setupLink.setupUrl}
-                      </a>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <button
-                          className="min-h-9 rounded-md border border-[#cbd9e7] bg-white px-3 text-xs font-black text-[#345d83] hover:bg-[#edf5fc]"
-                          onClick={() => void copySetupLink()}
-                          type="button"
-                        >
-                          Copy link
-                        </button>
-                        <a
-                          className="grid min-h-9 place-items-center rounded-md bg-[#345d83] px-3 text-xs font-black text-white hover:bg-[#254a6d]"
-                          href={setupLink.setupUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          Open
-                        </a>
-                      </div>
-                    </div>
+                          <span className="text-sm font-black text-[#5f6e84]">
+                            ID {receiverShortId(device)}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {!sortedActiveReceiverListDevices.length ? (
+                    <p className="rounded-lg border border-[#d6e3f2] bg-white px-4 py-3 text-sm font-semibold text-[#5f6e84]">
+                      No active Receiver devices found.
+                    </p>
                   ) : null}
                 </div>
-              ) : null}
-            </details>
-            <p className="mt-3 text-sm font-black text-[#5f6e84]">
-              Setup links are single-use and expire after 30 minutes.
-            </p>
-          </fieldset>
+              </div>
+          </section>
 
           {canShowAdminItems ? (
             <fieldset className="rounded-xl border border-[#bfd3e8] bg-[#f8fbff] p-5">
@@ -5465,7 +5520,7 @@ function RecipientCallPanel({
     : isRinging
       ? isClassicReceiverCall
         ? "Tap Answer on the Receiver."
-        : "Andrew would like to talk now."
+        : "Your contact would like to talk now."
       : "A live conversation starts only if the recipient accepts.";
   const audioLabel =
     isClassicReceiverCall
@@ -5577,7 +5632,7 @@ function RecipientCallPanel({
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-2xl font-black text-[#173150]">
-                {isClassicReceiverRinging ? "Call sent to Receiver" : "Andrew is calling"}
+                {isClassicReceiverRinging ? "Call sent to Receiver" : "Your contact is calling"}
               </h3>
               <p className="mt-1 text-lg font-semibold text-[#5f6e84]">
                 {isClassicReceiverRinging ? "Answer on the Receiver." : "Press Answer to talk."}

@@ -481,7 +481,7 @@ export function ReceiverSetupClient({
               Receiver ready{claimStorageSource ? ` · ${claimStorageSource}` : ""}
             </strong>
           ) : setupCode.trim() === "12345" ? (
-            <strong>Rob Robson test code</strong>
+            <strong>Local test setup code</strong>
           ) : (
             <strong>Enter the code shown on the Receiver</strong>
           )}

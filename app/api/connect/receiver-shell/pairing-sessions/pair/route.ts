@@ -62,6 +62,7 @@ export async function POST(request: Request) {
       createdByUserId: userContext.userId,
       deviceProfile: stringValue(body.deviceProfile) || "android_receiver",
       hardwareProfile: stringValue(body.hardwareProfile) || "generic_landscape_android",
+      mainConnectUserDisplayName: personResolution.person.displayName,
       mainConnectUserPersonId: personResolution.personId,
       pairingCode: stringValue(body.pairingCode),
       receiverUrl: stringValue(body.receiverUrl),

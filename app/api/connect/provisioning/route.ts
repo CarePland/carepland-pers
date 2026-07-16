@@ -132,7 +132,11 @@ function overlayReceiverShellProfiles(
         nativeSdk: profile.nativeSdk,
         nativeVersionCode: profile.nativeVersionCode,
         nativeVersionName: profile.nativeVersionName,
+        mainConnectUserPersonId: profile.mainConnectUserPersonId,
         provisioningCompletedAt: profile.provisioningCompletedAt,
+        receiverContactDisplayName: profile.receiverContactDisplayName,
+        receiverContactIsReceiverUser: profile.receiverContactIsReceiverUser,
+        receiverContactUserId: profile.receiverContactUserId,
         receiverMode: profile.receiverMode,
         shellVersion: profile.shellVersion,
         updateAction: updatePolicy.updateAction,
@@ -150,6 +154,7 @@ function shellProfileToReceiverDevice(profile: ReceiverShellDeviceProfile): Conn
   const status = profile.status || (profile.receiverInstallId ? "bound" : "setup_pending");
   const displayName = profile.mainConnectUserDisplayName?.trim() || "";
   const locationLabel = profile.locationLabel?.trim() || "";
+  const defaultLabel = defaultReceiverLocationLabel(profile.receiverDeviceId, displayName);
   const presence = receiverPresence(profile.lastSeenAt, status);
 
   return {
@@ -164,16 +169,20 @@ function shellProfileToReceiverDevice(profile: ReceiverShellDeviceProfile): Conn
     lastSeenAt: profile.lastSeenAt,
     lockTaskActive: profile.lockTaskActive,
     lockTaskPermitted: profile.lockTaskPermitted,
-    locationLabel: locationLabel || (displayName ? `${displayName}'s Receiver` : "Receiver"),
-    name: locationLabel || (displayName ? `${displayName}'s Receiver` : "Receiver"),
+    locationLabel: locationLabel || defaultLabel,
+    name: locationLabel || defaultLabel,
     nativeManufacturer: profile.nativeManufacturer,
     nativeModel: profile.nativeModel,
     nativeSdk: profile.nativeSdk,
     nativeVersionCode: profile.nativeVersionCode,
     nativeVersionName: profile.nativeVersionName,
+    mainConnectUserPersonId: profile.mainConnectUserPersonId,
     pairedAt: profile.pairedAt || profile.provisioningCompletedAt,
     presence,
     provisioningCompletedAt: profile.provisioningCompletedAt,
+    receiverContactDisplayName: profile.receiverContactDisplayName,
+    receiverContactIsReceiverUser: profile.receiverContactIsReceiverUser,
+    receiverContactUserId: profile.receiverContactUserId,
     receiverId: profile.receiverDeviceId,
     receiverMode: profile.receiverMode,
     shellVersion: profile.shellVersion,
@@ -182,6 +191,18 @@ function shellProfileToReceiverDevice(profile: ReceiverShellDeviceProfile): Conn
     updateAvailable: updatePolicy.updateAvailable,
     updateRequired: updatePolicy.updateRequired,
   };
+}
+
+function defaultReceiverLocationLabel(receiverDeviceId: string, displayName?: string) {
+  const suffix = receiverShortNameSuffix(receiverDeviceId);
+  const base = displayName?.trim() ? `${displayName.trim()}'s Receiver` : "Receiver";
+  return suffix ? `${base} ${suffix}` : base;
+}
+
+function receiverShortNameSuffix(receiverDeviceId: string) {
+  const normalized = receiverDeviceId.trim().replace(/^receiver-/, "");
+  if (!normalized) return "";
+  return normalized.length > 6 ? normalized.slice(-6).toUpperCase() : normalized.toUpperCase();
 }
 
 function receiverUpdatePolicy(profile: ReceiverShellDeviceProfile) {

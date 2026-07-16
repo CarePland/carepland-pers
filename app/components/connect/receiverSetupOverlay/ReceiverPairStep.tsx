@@ -1,0 +1,206 @@
+"use client";
+
+import { connectAuthHeaders } from "@/app/lib/connect/context/client";
+import {
+  browserReceiverPairingCodeReady,
+  formatBrowserReceiverPairingCode,
+} from "@/app/lib/connect/receiverShell/browserPairing";
+
+import { ReceiverSetupStatus } from "./ReceiverSetupStatus";
+import type { ReceiverSetupStepProps } from "./types";
+
+export function ReceiverPairStep({
+  draft,
+  isReturningReceiverSetup,
+  onCancelPairingChange,
+  receiverUrl,
+  selectedDevice,
+  selectedUser,
+  setDraft,
+}: Pick<
+  ReceiverSetupStepProps,
+  | "draft"
+  | "isReturningReceiverSetup"
+  | "onCancelPairingChange"
+  | "selectedDevice"
+  | "selectedUser"
+  | "setDraft"
+> & {
+  receiverUrl: string;
+}) {
+  const codeReady = browserReceiverPairingCodeReady(draft.pairingCode);
+  const existingPairingReady = Boolean(
+    isReturningReceiverSetup && selectedDevice?.pairedAt && draft.pairingStatus === "paired"
+  );
+  const receiverUserMissing = !selectedUser;
+
+  async function checkCode() {
+    if (!draft.pairingCode.trim()) return;
+    setDraft((current) => ({ ...current, pairingStatus: "checking" }));
+    try {
+      const response = await fetch(
+        `/api/connect/receiver-shell/pairing-sessions?code=${encodeURIComponent(
+          draft.pairingCode
+        )}`,
+        { cache: "no-store" }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        status?: string;
+      };
+      setDraft((current) => ({
+        ...current,
+        pairingStatus:
+          response.ok && payload.status === "paired"
+            ? "paired"
+            : response.ok
+              ? "pending"
+              : "error",
+      }));
+    } catch {
+      setDraft((current) => ({ ...current, pairingStatus: "error" }));
+    }
+  }
+
+  async function pairReceiver() {
+    if (!selectedUser?.id || !codeReady) return;
+    setDraft((current) => ({ ...current, pairingStatus: "pending" }));
+    try {
+      const response = await fetch("/api/connect/receiver-shell/pairing-sessions/pair", {
+        body: JSON.stringify({
+          deviceProfile: "web_receiver",
+          hardwareProfile: "web",
+          mainConnectUserPersonId: selectedUser.id,
+          pairingCode: draft.pairingCode,
+          receiverUrl,
+          uiLayout: "default_receiver",
+        }),
+        cache: "no-store",
+        headers: {
+          ...(await connectAuthHeaders()),
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        claim?: string;
+        error?: string;
+        ok?: boolean;
+        receiverDeviceId?: string;
+      };
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || "Unable to pair Receiver.");
+      }
+      setDraft((current) => ({
+        ...current,
+        lastCompletedSection: "pair",
+        nativeClaim: payload.claim || current.nativeClaim,
+        pairingStatus: "paired",
+        selectedReceiverDeviceId: payload.receiverDeviceId || current.selectedReceiverDeviceId,
+      }));
+    } catch {
+      setDraft((current) => ({ ...current, pairingStatus: "error" }));
+    }
+  }
+
+  return (
+    <section className="mx-auto grid w-full max-w-2xl gap-6 py-6 text-center">
+      <div>
+        <h2 className="text-3xl font-black text-[#172f49]">Pair Receiver</h2>
+        {!receiverUserMissing ? (
+          <p className="mt-3 text-lg font-semibold leading-relaxed text-[#5f6e84]">
+            Enter the six-digit code shown on the Receiver screen.
+          </p>
+        ) : null}
+      </div>
+
+      {receiverUserMissing ? (
+        <button
+          className="mx-auto max-w-xl px-2 py-3 text-center text-xl font-black leading-snug text-[#6f4d00] hover:underline focus:outline-none focus:ring-2 focus:ring-[#d9a441]"
+          onClick={() => setDraft((current) => ({ ...current, section: "receiverUser" }))}
+          type="button"
+        >
+          Choose who this Receiver is for before pairing.
+        </button>
+      ) : null}
+
+      {existingPairingReady ? (
+        <div className="grid justify-items-center gap-4">
+          <ReceiverSetupStatus tone="good">This Receiver is already paired.</ReceiverSetupStatus>
+          <button
+            className="min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#173150] hover:bg-[#edf5fc] focus:outline-none focus:ring-2 focus:ring-[#4e84b2]"
+            onClick={() =>
+              setDraft((current) => ({
+                ...current,
+                pairingCode: "",
+                pairingStatus: "idle",
+              }))
+            }
+            type="button"
+          >
+            Re-pair Receiver
+          </button>
+        </div>
+      ) : !receiverUserMissing ? (
+        <>
+          <label className="mx-auto grid w-fit gap-3">
+            <span className="sr-only">Enter the six-digit code shown on the Receiver screen.</span>
+            <input
+              autoComplete="one-time-code"
+              className="h-16 w-[9ch] rounded-lg border border-[#cbd9e7] bg-white px-3 text-center text-3xl font-black tracking-normal text-[#172f49] outline-none focus:border-[#4e84b2] focus:ring-2 focus:ring-[#9fc6e8]"
+              inputMode="numeric"
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  pairingCode: formatBrowserReceiverPairingCode(event.target.value),
+                  pairingStatus: "idle",
+                }))
+              }
+              placeholder="123 456"
+              value={draft.pairingCode}
+            />
+          </label>
+
+          <div className="flex flex-wrap justify-center gap-3">
+            <button
+              className="min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#173150] hover:bg-[#edf5fc] focus:outline-none focus:ring-2 focus:ring-[#4e84b2] disabled:opacity-55"
+              disabled={!codeReady || draft.pairingStatus === "checking"}
+              onClick={() => void checkCode()}
+              type="button"
+            >
+              {draft.pairingStatus === "checking" ? "Checking" : "Check Code"}
+            </button>
+            <button
+              className="min-h-12 rounded-lg bg-[#2f6f9f] px-6 text-base font-black text-white hover:bg-[#285f89] focus:outline-none focus:ring-2 focus:ring-[#4e84b2] disabled:opacity-55"
+              disabled={!selectedUser || !codeReady || draft.pairingStatus === "pending"}
+              onClick={() => void pairReceiver()}
+              type="button"
+            >
+              {draft.pairingStatus === "pending" ? "Pairing" : "Pair Receiver"}
+            </button>
+            {isReturningReceiverSetup ? (
+              <button
+                className="min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#173150] hover:bg-[#edf5fc] focus:outline-none focus:ring-2 focus:ring-[#4e84b2]"
+                onClick={onCancelPairingChange}
+                type="button"
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+
+      {!existingPairingReady && draft.pairingStatus === "paired" ? (
+        <ReceiverSetupStatus tone="good">Receiver paired successfully.</ReceiverSetupStatus>
+      ) : draft.pairingStatus === "pending" ? (
+        <ReceiverSetupStatus>Pairing Receiver. This may take a moment.</ReceiverSetupStatus>
+      ) : draft.pairingStatus === "error" ? (
+        <ReceiverSetupStatus tone="error">
+          Pairing code is invalid, expired, or unavailable. Check the Receiver screen and try again.
+        </ReceiverSetupStatus>
+      ) : null}
+
+    </section>
+  );
+}

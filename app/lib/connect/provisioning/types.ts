@@ -86,6 +86,8 @@ export type ConnectReceiverDevice = {
   nativeVersionCode?: number;
   nativeVersionName?: string;
   pairedAt?: string;
+  mainConnectUserDisplayName?: string;
+  mainConnectUserPersonId?: string;
   presence?: {
     label?: string;
     lastSeenAgeMs?: number;
@@ -97,6 +99,9 @@ export type ConnectReceiverDevice = {
   receiverHouseholdId?: string;
   receiverId?: string;
   receiverMode?: "dedicated" | "personal" | string;
+  receiverContactDisplayName?: string;
+  receiverContactIsReceiverUser?: boolean;
+  receiverContactUserId?: string;
   revokedAt?: string;
   shellVersion?: string;
   status?: ConnectProvisioningLifecycleStatus | string;

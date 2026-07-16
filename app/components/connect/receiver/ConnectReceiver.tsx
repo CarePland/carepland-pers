@@ -2,7 +2,6 @@
 
 import {
   type CSSProperties,
-  type FormEvent,
   type MouseEvent,
   type ReactNode,
   useCallback,
@@ -99,6 +98,8 @@ type Contact = {
   availability: "free" | "busy" | "away";
   availabilityLabel: string;
   canCall: boolean;
+  disabledReason?: string;
+  userId?: string;
 };
 
 type ReceiverUser = {
@@ -524,6 +525,7 @@ type StoredReceiverBinding = {
   lastRecoveryAt?: string;
   lockTaskActive?: boolean;
   lockTaskPermitted?: boolean;
+  locationLabel?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -532,6 +534,9 @@ type StoredReceiverBinding = {
   mainConnectUserDisplayName?: string;
   mainConnectUserPersonId?: string;
   primaryCoordinatorDisplayName?: string;
+  receiverContactDisplayName?: string;
+  receiverContactIsReceiverUser?: boolean;
+  receiverContactUserId?: string;
   provisioningCompletedAt?: string;
   receiverDeviceId?: string;
   receiverInstallId?: string;
@@ -566,6 +571,7 @@ type ModalState =
   | { type: "contact"; contactId: string }
   | { type: "offlineNotice" }
   | { type: "ask"; confirmExit?: boolean; surface?: "ask_tell" }
+  | { type: "receiverSettings"; view?: "home" | "style" }
   | { type: "screenCleaningConfirm" }
   | { type: "askRecordReview"; surface?: "ask_tell"; transcript: string }
   | { type: "askAnswer"; answer: AskAnswer; page?: number }
@@ -645,16 +651,12 @@ const askRecoveryPrompts = [
 
 const receiverUsers: ReceiverUser[] = [];
 const testReceiverRegistrationCode = "12345";
-const testReceiverUser: ReceiverUser = {
-  id: "local-test-rob-robson",
-  displayName: "Rob Robson",
-  statusLabel: "Registered test receiver",
-};
 const noMainConnectUser: ReceiverUser = {
   id: "",
-  displayName: "Choose Main Connect User",
-  statusLabel: "not selected",
+  displayName: "Receiver setup required",
+  statusLabel: "configuration required",
 };
+const selfContactMessage = "You can't send a message to yourself.";
 
 const initialMessages: Message[] = [];
 
@@ -1107,7 +1109,7 @@ function readInitialSelectedContactId() {
 
 function readInitialSelectedReceiverUserId() {
   if (readInitialReceiverRegistration()) {
-    return readStoredReceiverBinding().mainConnectUserPersonId || testReceiverUser.id;
+    return readStoredReceiverBinding().mainConnectUserPersonId || "";
   }
   // Receiver identity comes from /api/connect/context after real registration.
   return "";
@@ -1116,13 +1118,15 @@ function readInitialSelectedReceiverUserId() {
 function readInitialReceiverUsers() {
   if (!readInitialReceiverRegistration()) return receiverUsers;
   const mainConnectUserPersonId = readStoredReceiverBinding().mainConnectUserPersonId;
-  if (!mainConnectUserPersonId) return [testReceiverUser];
+  if (!mainConnectUserPersonId) return [noMainConnectUser];
   return [
     {
       displayName:
-        readStoredReceiverBinding().mainConnectUserDisplayName || "Receiver Active Person",
+        readStoredReceiverBinding().mainConnectUserDisplayName || "Receiver setup required",
       id: mainConnectUserPersonId,
-      statusLabel: "Receiver ready",
+      statusLabel: readStoredReceiverBinding().mainConnectUserDisplayName
+        ? "Receiver ready"
+        : "configuration required",
     },
   ];
 }
@@ -1232,13 +1236,15 @@ function compactReceiverIdentifier(value: string) {
   return `${normalized.slice(0, 8)}...${normalized.slice(-8)}`;
 }
 
-function readReceiverIdentityDisplay() {
+function readReceiverIdentityDisplay(nameOverride = "") {
+  const storedBinding = readStoredReceiverBinding();
   const receiverDeviceId = readReceiverDeviceId();
   const receiverInstallId = readReceiverInstallId();
   const identifier = receiverDeviceId || receiverInstallId || connectPrototypeReceiverId;
   return {
     full: identifier,
     label: compactReceiverIdentifier(identifier),
+    name: nameOverride.trim() || storedBinding.locationLabel?.trim() || "",
     type: receiverDeviceId ? "Receiver ID" : "Local ID",
   };
 }
@@ -1348,6 +1354,7 @@ function saveReceiverBinding(binding: StoredReceiverBinding) {
     lastRecoveryAt: binding.lastRecoveryAt?.trim() || "",
     lockTaskActive: binding.lockTaskActive,
     lockTaskPermitted: binding.lockTaskPermitted,
+    locationLabel: binding.locationLabel?.trim() || "",
     nativeManufacturer: binding.nativeManufacturer?.trim() || "",
     nativeModel: binding.nativeModel?.trim() || "",
     nativeSdk: binding.nativeSdk,
@@ -1356,6 +1363,9 @@ function saveReceiverBinding(binding: StoredReceiverBinding) {
     mainConnectUserDisplayName: binding.mainConnectUserDisplayName?.trim() || "",
     mainConnectUserPersonId: binding.mainConnectUserPersonId?.trim() || "",
     primaryCoordinatorDisplayName: binding.primaryCoordinatorDisplayName?.trim() || "",
+    receiverContactDisplayName: binding.receiverContactDisplayName?.trim() || "",
+    receiverContactIsReceiverUser: binding.receiverContactIsReceiverUser === true,
+    receiverContactUserId: binding.receiverContactUserId?.trim() || "",
     provisioningCompletedAt: binding.provisioningCompletedAt?.trim() || "",
     receiverDeviceId,
     receiverInstallId,
@@ -1366,7 +1376,7 @@ function saveReceiverBinding(binding: StoredReceiverBinding) {
     uiLayout: binding.uiLayout?.trim() || "",
   };
   window.localStorage.setItem(receiverBindingStorageKey, JSON.stringify(storedBinding));
-  window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
+  window.localStorage.setItem(receiverRegistrationStorageKey, storedBinding.mainConnectUserPersonId || "bound");
   window.CarePlandReceiver?.saveBinding?.(
     storedBinding.receiverDeviceId || "",
     storedBinding.bindingStatus || "bound",
@@ -2298,12 +2308,23 @@ export function ConnectReceiver() {
       readStoredReceiverBinding().primaryCoordinatorDisplayName?.trim() ||
       fallbackPrimaryCoordinatorDisplayName
   );
+  const [receiverContactDisplayName, setReceiverContactDisplayName] = useState(
+    () => readStoredReceiverBinding().receiverContactDisplayName?.trim() || ""
+  );
+  const [receiverContactUserId, setReceiverContactUserId] = useState(
+    () => readStoredReceiverBinding().receiverContactUserId?.trim() || ""
+  );
+  const [receiverContactIsReceiverUser, setReceiverContactIsReceiverUser] = useState(
+    () => readStoredReceiverBinding().receiverContactIsReceiverUser === true
+  );
+  const [receiverLocationLabel, setReceiverLocationLabel] = useState(
+    () => readStoredReceiverBinding().locationLabel?.trim() || ""
+  );
   const [activeReceiverUsers, setActiveReceiverUsers] =
     useState<ReceiverUser[]>(readInitialReceiverUsers);
   const [selectedReceiverUserId, setSelectedReceiverUserId] = useState(readInitialSelectedReceiverUserId);
   const [receiverRegistered, setReceiverRegistered] = useState(readInitialReceiverRegistration);
-  const [registrationCode, setRegistrationCode] = useState(testReceiverRegistrationCode);
-  const [registrationError, setRegistrationError] = useState("");
+  const [receiverSetupError, setReceiverSetupError] = useState("");
   const [browserPairingCode, setBrowserPairingCode] = useState("");
   const [browserPairingExpiresAt, setBrowserPairingExpiresAt] = useState("");
   const [browserPairingStatus, setBrowserPairingStatus] = useState("Preparing Receiver setup...");
@@ -3341,10 +3362,10 @@ export function ConnectReceiver() {
   useEffect(() => {
     if (readLocalTestReceiverProvisioning()) {
       clearReceiverBinding();
-      window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
+      window.localStorage.setItem(receiverRegistrationStorageKey, "configuration-required");
       setReceiverRegistered(true);
-      setActiveReceiverUsers([testReceiverUser]);
-      setSelectedReceiverUserId(testReceiverUser.id);
+      setActiveReceiverUsers([noMainConnectUser]);
+      setSelectedReceiverUserId("");
     }
   }, []);
 
@@ -3363,16 +3384,20 @@ export function ConnectReceiver() {
         if (cancelled) return;
 
         saveReceiverBinding(payload);
+        setReceiverLocationLabel((current) => payload.locationLabel?.trim() || current);
         hasConfirmedBinding = true;
         setReceiverRegistered(true);
         setPrimaryCoordinatorDisplayName(
           payload.primaryCoordinatorDisplayName?.trim() || fallbackPrimaryCoordinatorDisplayName
         );
+        setReceiverContactDisplayName(payload.receiverContactDisplayName?.trim() || "");
+        setReceiverContactUserId(payload.receiverContactUserId?.trim() || "");
+        setReceiverContactIsReceiverUser(payload.receiverContactIsReceiverUser === true);
         applyBoundReceiverActivePerson(
           payload.mainConnectUserPersonId,
           payload.mainConnectUserDisplayName
         );
-        setRegistrationError("");
+        setReceiverSetupError("");
       } catch (error) {
         if (cancelled) return;
         const message =
@@ -3382,7 +3407,7 @@ export function ConnectReceiver() {
           setReceiverRegistered(false);
           setActiveReceiverUsers(receiverUsers);
           setSelectedReceiverUserId("");
-          setRegistrationError(message);
+          setReceiverSetupError(message);
           return;
         }
         if (!hasConfirmedBinding) {
@@ -3431,9 +3456,13 @@ export function ConnectReceiver() {
           deviceProfile?: string;
           error?: string;
           hardwareProfile?: string;
+          locationLabel?: string;
           mainConnectUserPersonId?: string;
           mainConnectUserDisplayName?: string;
           primaryCoordinatorDisplayName?: string;
+          receiverContactDisplayName?: string;
+          receiverContactIsReceiverUser?: boolean;
+          receiverContactUserId?: string;
           receiverDeviceId?: string;
           receiverInstallId?: string;
           receiverUrl?: string;
@@ -3449,26 +3478,36 @@ export function ConnectReceiver() {
           bindingStatus: payload.bindingStatus || "bound",
           deviceProfile: payload.deviceProfile,
           hardwareProfile: payload.hardwareProfile,
+          locationLabel: payload.locationLabel,
           mainConnectUserDisplayName: payload.mainConnectUserDisplayName,
           mainConnectUserPersonId: payload.mainConnectUserPersonId,
           primaryCoordinatorDisplayName: payload.primaryCoordinatorDisplayName,
+          receiverContactDisplayName: payload.receiverContactDisplayName,
+          receiverContactIsReceiverUser: payload.receiverContactIsReceiverUser,
+          receiverContactUserId: payload.receiverContactUserId,
           receiverDeviceId: payload.receiverDeviceId,
           receiverInstallId: payload.receiverInstallId || readReceiverInstallId(),
           receiverUrl: payload.receiverUrl,
           storageSource: payload.storageSource,
           uiLayout: payload.uiLayout,
         });
-        window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
+        setReceiverLocationLabel((current) => payload.locationLabel?.trim() || current);
+        window.localStorage.setItem(
+          receiverRegistrationStorageKey,
+          payload.mainConnectUserPersonId || "bound"
+        );
         setReceiverRegistered(true);
         setPrimaryCoordinatorDisplayName(
           payload.primaryCoordinatorDisplayName?.trim() || fallbackPrimaryCoordinatorDisplayName
         );
+        setReceiverContactDisplayName(payload.receiverContactDisplayName?.trim() || "");
+        setReceiverContactUserId(payload.receiverContactUserId?.trim() || "");
+        setReceiverContactIsReceiverUser(payload.receiverContactIsReceiverUser === true);
         applyBoundReceiverActivePerson(
           payload.mainConnectUserPersonId,
           payload.mainConnectUserDisplayName
         );
-        setRegistrationCode("");
-        setRegistrationError("");
+        setReceiverSetupError("");
         setStatus(
           payload.receiverDeviceId
             ? `Receiver linked: ${payload.receiverDeviceId}.`
@@ -3482,7 +3521,7 @@ export function ConnectReceiver() {
           clearReceiverBinding();
           setReceiverRegistered(false);
         }
-        setRegistrationError(message);
+        setReceiverSetupError(message);
       }
     }
 
@@ -3519,12 +3558,13 @@ export function ConnectReceiver() {
         throw new Error(payload.error || "Receiver setup could not be completed.");
       }
       saveReceiverBinding(payload);
+      setReceiverLocationLabel((current) => payload.locationLabel?.trim() || current);
       setReceiverRegistered(true);
       applyBoundReceiverActivePerson(
         payload.mainConnectUserPersonId,
         payload.mainConnectUserDisplayName
       );
-      setRegistrationError("");
+      setReceiverSetupError("");
       setBrowserPairingStatus("Receiver ready.");
     }
 
@@ -3645,8 +3685,8 @@ export function ConnectReceiver() {
               storedBinding.mainConnectUserDisplayName
             );
           } else {
-            setActiveReceiverUsers([testReceiverUser]);
-            setSelectedReceiverUserId(testReceiverUser.id);
+            setActiveReceiverUsers([noMainConnectUser]);
+            setSelectedReceiverUserId("");
           }
         }
       }
@@ -3885,14 +3925,28 @@ export function ConnectReceiver() {
   }, [started]);
 
   const contacts = useMemo<Contact[]>(
-    () => [
-      {
-        ...fallbackContacts[0],
-        displayName:
-          primaryCoordinatorDisplayName.trim() || fallbackPrimaryCoordinatorDisplayName,
-      },
-    ],
-    [primaryCoordinatorDisplayName]
+    () => {
+      const missingContact = !receiverContactUserId || !receiverContactDisplayName.trim();
+      const disabledReason = receiverContactIsReceiverUser
+        ? selfContactMessage
+        : missingContact
+          ? "Receiver contact setup is required."
+          : "";
+
+      return [
+        {
+          ...fallbackContacts[0],
+          availability: disabledReason ? "away" : fallbackContacts[0].availability,
+          availabilityLabel: disabledReason ? "Unavailable" : fallbackContacts[0].availabilityLabel,
+          canCall: !disabledReason && fallbackContacts[0].canCall,
+          disabledReason,
+          displayName: receiverContactDisplayName.trim() || "Receiver contact",
+          id: receiverContactUserId || primaryCoordinatorContactId,
+          userId: receiverContactUserId,
+        },
+      ];
+    },
+    [receiverContactDisplayName, receiverContactIsReceiverUser, receiverContactUserId]
   );
   const askTellExamples = useMemo(
     () => receiverAskTellExamples(contacts[0].displayName),
@@ -3906,6 +3960,7 @@ export function ConnectReceiver() {
   const selectedReceiverUser =
     visibleReceiverUsers.find((user) => user.id === selectedReceiverUserId) ??
     noMainConnectUser;
+  const receiverCommunicationDisabledReason = selectedContact.disabledReason || "";
   useEffect(() => {
     if (
       !receiverDiagnosticMode ||
@@ -3970,7 +4025,7 @@ export function ConnectReceiver() {
             primaryCoordinatorName: fallbackPrimaryCoordinatorDisplayName,
           })
       : "";
-  const receiverIdentityDisplay = readReceiverIdentityDisplay();
+  const receiverIdentityDisplay = readReceiverIdentityDisplay(receiverLocationLabel);
   const todayFocusDisplayMode =
     visibleTodayFocusItems.length > 0
       ? "items"
@@ -4200,6 +4255,10 @@ export function ConnectReceiver() {
     clearGuideBecauseReceiverActed();
     if (!receiverOnline) {
       explainOfflineAction();
+      return;
+    }
+    if (receiverCommunicationDisabledReason) {
+      setStatus(receiverCommunicationDisabledReason);
       return;
     }
     if (
@@ -4469,25 +4528,6 @@ export function ConnectReceiver() {
     }
   }
 
-  function registerReceiverWithCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const normalizedCode = registrationCode.trim();
-
-    if (normalizedCode !== testReceiverRegistrationCode) {
-      setRegistrationError("Code not recognized.");
-      return;
-    }
-
-    clearReceiverBinding();
-    window.localStorage.setItem(receiverRegistrationStorageKey, testReceiverUser.id);
-    setReceiverRegistered(true);
-    setActiveReceiverUsers([testReceiverUser]);
-    setSelectedReceiverUserId(testReceiverUser.id);
-    setRegistrationCode("");
-    setRegistrationError("");
-    setStatus(`Receiver registered for ${testReceiverUser.displayName}.`);
-  }
-
   async function chooseReceiverUser(user: ReceiverUser) {
     clearGuideBecauseReceiverActed();
     if (!user.id) return;
@@ -4513,6 +4553,10 @@ export function ConnectReceiver() {
       explainOfflineAction();
       return;
     }
+    if (contact.disabledReason) {
+      setStatus(contact.disabledReason);
+      return;
+    }
     clearGuideBecauseReceiverActed();
     setContactDraft("");
     setPendingContactRecording(null);
@@ -4524,13 +4568,17 @@ export function ConnectReceiver() {
       explainOfflineAction();
       return;
     }
+    if (contact.disabledReason) {
+      setStatus(contact.disabledReason);
+      return;
+    }
     const trimmed = body.trim();
     if (!trimmed && !recording) {
       setStatus("Type or record your message first.");
       return;
     }
     if (!selectedReceiverUser.id) {
-      setStatus("Choose a Main Connect User before sending a message.");
+      setStatus("Receiver User setup is required before sending a message.");
       return;
     }
 
@@ -4582,6 +4630,9 @@ export function ConnectReceiver() {
                 clientMessageId: `contact-audio-${currentEpochMs()}`,
                 from: "receiver_user",
                 mainConnectUserPersonId: selectedReceiverUser.id,
+                metadata: {
+                  receiverContactUserId: contact.userId || "",
+                },
                 messageType: "audio",
                 receiverId: connectPrototypeReceiverId,
                 source: "receiver_contact_message",
@@ -4592,6 +4643,9 @@ export function ConnectReceiver() {
                 clientMessageId: `receiver-text-${currentEpochMs()}`,
                 from: "receiver_user",
                 mainConnectUserPersonId: selectedReceiverUser.id,
+                metadata: {
+                  receiverContactUserId: contact.userId || "",
+                },
                 messageType: "text",
                 receiverId: connectPrototypeReceiverId,
                 source: "receiver_contact_message",
@@ -4631,6 +4685,10 @@ export function ConnectReceiver() {
       explainOfflineAction();
       return;
     }
+    if (receiverCommunicationDisabledReason) {
+      setStatus(receiverCommunicationDisabledReason);
+      return;
+    }
     clearGuideBecauseReceiverActed();
     setAskDraftObservationModality("typed");
     setAskDraft("");
@@ -4641,6 +4699,10 @@ export function ConnectReceiver() {
   function openAskTell() {
     if (!receiverOnline) {
       explainOfflineAction();
+      return;
+    }
+    if (receiverCommunicationDisabledReason) {
+      setStatus(receiverCommunicationDisabledReason);
       return;
     }
     clearGuideBecauseReceiverActed();
@@ -5397,6 +5459,36 @@ export function ConnectReceiver() {
     resetSoundTestState();
     setModal({ type: "soundSettings", view: "settings" });
     setStatus("Optional sounds settings are open.");
+  }
+
+  function openOptionalSoundsFromSettings() {
+    resetSoundTestState();
+    setModal({ type: "soundSettings", view: "settings" });
+    setStatus("Optional sounds settings are open.");
+  }
+
+  function openReceiverSettings() {
+    clearGuideBecauseReceiverActed();
+    setLayoutMenuOpen(false);
+    setModal({ type: "receiverSettings" });
+    setStatus("Receiver settings are open.");
+  }
+
+  function openReceiverStyleSettings() {
+    setModal({ type: "receiverSettings", view: "style" });
+    setLayoutMenuOpen(false);
+    setStatus("Receiver style settings are open.");
+  }
+
+  function chooseGxvHomeLayoutFromSettings(nextLayout: GxvHomeLayout) {
+    chooseGxvHomeLayout(nextLayout);
+    setModal(null);
+    setStatus("Receiver style updated.");
+  }
+
+  function maximizeReceiverFromSettings() {
+    setModal(null);
+    void toggleReceiverFullscreen();
   }
 
   function resetSoundTestState() {
@@ -6901,6 +6993,10 @@ function stopReceiverCue() {
       explainOfflineAction();
       return;
     }
+    if (contact.disabledReason) {
+      setStatus(contact.disabledReason);
+      return;
+    }
     closeModal();
     if (!contactCanCallNow(contact)) {
       playCallFailedAudio();
@@ -7253,6 +7349,11 @@ function stopReceiverCue() {
     setStatus("Screen cleaning confirmation opened.");
   }
 
+  function openScreenCleaningConfirmFromSettings() {
+    setModal({ type: "screenCleaningConfirm" });
+    setStatus("Screen cleaning confirmation opened.");
+  }
+
   function buildScreenCleaningSession(): ScreenCleaningSession {
     const cleaningCount = nextScreenCleaningCount();
     const receiverDeviceId = readReceiverDeviceId();
@@ -7379,33 +7480,10 @@ function stopReceiverCue() {
             <small>Code expires {formatPairingExpiryTime(browserPairingExpiresAt)}.</small>
           ) : null}
           <strong>{browserPairingStatus}</strong>
+          {receiverSetupError ? <strong>{receiverSetupError}</strong> : null}
           <button type="button" onClick={() => window.location.reload()}>
             New Code
           </button>
-          <details className={styles.receiverAdvancedSetup}>
-            <summary>Advanced setup</summary>
-            <form onSubmit={registerReceiverWithCode}>
-              <label>
-                Setup code
-                <input
-                  autoComplete="one-time-code"
-                  inputMode="numeric"
-                  maxLength={12}
-                  value={registrationCode}
-                  onChange={(event) => {
-                    setRegistrationCode(event.target.value);
-                    setRegistrationError("");
-                  }}
-                  onFocus={(event) => {
-                    event.currentTarget.select();
-                  }}
-                  aria-label="Receiver setup code"
-                />
-              </label>
-              {registrationError ? <strong>{registrationError}</strong> : null}
-              <button type="submit">Finish Setup</button>
-            </form>
-          </details>
         </section>
       </main>
     );
@@ -7462,19 +7540,6 @@ function stopReceiverCue() {
                   <strong>{formatTime(now)}</strong>
                   <div className={styles.dateControlRow}>
                     <span>{formatDate(now)}</span>
-                    {deskPhoneMode && !kioskManagedFullscreen && !nativeReceiverShell ? (
-                      <button
-                        className={styles.fullscreenTinyButton}
-                        type="button"
-                        aria-label={fullscreenActive ? "Exit full screen" : "Enter full screen"}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void toggleReceiverFullscreen();
-                        }}
-                      >
-                        {fullscreenActive ? "MIN" : "MAX"}
-                      </button>
-                    ) : null}
                     {!modal && deskPhoneMode && !nativeReceiverShell ? (
                       <div className={styles.receiverLayoutControl}>
                         <button
@@ -7691,10 +7756,13 @@ function stopReceiverCue() {
               </section>
 
               <button
-                className={`${styles.modernAskTellCard} ${onlineRequiredActionClass}`}
+                className={`${styles.modernAskTellCard} ${onlineRequiredActionClass} ${
+                  receiverCommunicationDisabledReason ? styles.inactive : ""
+                }`}
                 type="button"
-                aria-disabled={!receiverOnline}
+                aria-disabled={!receiverOnline || Boolean(receiverCommunicationDisabledReason)}
                 aria-label="Open Ask/Tell"
+                title={receiverCommunicationDisabledReason || undefined}
                 onClick={openAskTell}
               >
                 <div>
@@ -7773,21 +7841,6 @@ function stopReceiverCue() {
                   >
                     {renderTodayFocusHomeContent("Goals")}
                   </section>
-                  {!kioskManagedFullscreen && !nativeReceiverShell ? (
-                    <section className={styles.askTell2MaxPanel} aria-label="Screen size">
-                      <button
-                        className={styles.fullscreenTinyButton}
-                        type="button"
-                        aria-label={fullscreenActive ? "Exit full screen" : "Enter full screen"}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void toggleReceiverFullscreen();
-                        }}
-                      >
-                        {fullscreenActive ? "MIN" : "MAX"}
-                      </button>
-                    </section>
-                  ) : null}
                   <button
                     className={`${styles.appointmentPanel} ${styles.applianceAppointmentPanel} ${styles.focusHomeAppointmentPanel} ${styles.askTellAppointmentPanel}`}
                     type="button"
@@ -7885,66 +7938,24 @@ function stopReceiverCue() {
                         </span>
                       </span>
                     </section>
-                    {!modal && !nativeReceiverShell && screenCleaningSecondsRemaining === null ? (
-                      <div className={`${styles.receiverLayoutControl} ${styles.focusHomeUtilityControl}`}>
-                        <button
-                          className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
-                          type="button"
-                          aria-haspopup="menu"
-                          aria-expanded={layoutMenuOpen}
-                          aria-label="Choose Receiver style"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setLayoutMenuOpen((open) => !open);
-                          }}
-                        >
-                          <span>Style</span>
-                        </button>
-                        {renderReceiverLayoutMenu()}
-                      </div>
+                    {!modal && screenCleaningSecondsRemaining === null ? (
+                      <button
+                        className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction} ${styles.askTell2SettingsAction}`}
+                        type="button"
+                        aria-haspopup="dialog"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openReceiverSettings();
+                        }}
+                      >
+                        <span>Settings</span>
+                      </button>
                     ) : null}
-                    <button
-                      className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openOptionalSounds();
-                      }}
-                    >
-                      <span>Sound</span>
-                    </button>
-                    <button
-                      className={`${styles.footerUtilityAction} ${styles.focusHomeUtilityAction}`}
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openScreenCleaningConfirm();
-                      }}
-                    >
-                      <span>
-                        Clean the
-                        <br />
-                        Screen
-                      </span>
-                    </button>
                   </div>
                 </>
               ) : gxvAskTellHomeEnabled ? (
                 <>
                   <div className={styles.focusHomeLayoutControls} aria-label="Style controls">
-                    {!kioskManagedFullscreen && !nativeReceiverShell ? (
-                      <button
-                        className={styles.fullscreenTinyButton}
-                        type="button"
-                        aria-label={fullscreenActive ? "Exit full screen" : "Enter full screen"}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void toggleReceiverFullscreen();
-                        }}
-                      >
-                        {fullscreenActive ? "MIN" : "MAX"}
-                      </button>
-                    ) : null}
                     {!modal && !nativeReceiverShell && screenCleaningSecondsRemaining === null ? (
                       <div className={styles.receiverLayoutControl}>
                         <button
@@ -8080,19 +8091,6 @@ function stopReceiverCue() {
               ) : gxvFocusHomeEnabled ? (
                 <>
                   <div className={styles.focusHomeLayoutControls} aria-label="Style controls">
-                    {!kioskManagedFullscreen && !nativeReceiverShell ? (
-                      <button
-                        className={styles.fullscreenTinyButton}
-                        type="button"
-                        aria-label={fullscreenActive ? "Exit full screen" : "Enter full screen"}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void toggleReceiverFullscreen();
-                        }}
-                      >
-                        {fullscreenActive ? "MIN" : "MAX"}
-                      </button>
-                    ) : null}
                     {!modal && !nativeReceiverShell && screenCleaningSecondsRemaining === null ? (
                       <div className={styles.receiverLayoutControl}>
                         <button
@@ -8200,9 +8198,12 @@ function stopReceiverCue() {
 	                          : guideTarget
 	                            ? styles.guideDim
 	                            : ""
-	                      } ${onlineRequiredActionClass}`}
+	                      } ${onlineRequiredActionClass} ${
+                        receiverCommunicationDisabledReason ? styles.inactive : ""
+                      }`}
 	                      type="button"
-	                      aria-disabled={!receiverOnline}
+	                      aria-disabled={!receiverOnline || Boolean(receiverCommunicationDisabledReason)}
+                      title={receiverCommunicationDisabledReason || undefined}
                       onClick={(event) => {
                         event.stopPropagation();
                         openAsk();
@@ -8217,9 +8218,12 @@ function stopReceiverCue() {
 	                          : guideTarget
 	                            ? styles.guideDim
 	                            : ""
-	                      } ${onlineRequiredActionClass}`}
+	                      } ${onlineRequiredActionClass} ${
+                        receiverCommunicationDisabledReason ? styles.inactive : ""
+                      }`}
 	                      type="button"
-	                      aria-disabled={!receiverOnline}
+	                      aria-disabled={!receiverOnline || Boolean(receiverCommunicationDisabledReason)}
+                      title={receiverCommunicationDisabledReason || undefined}
                       onClick={(event) => {
                         event.stopPropagation();
                         callContact(selectedContact);
@@ -8274,9 +8278,12 @@ function stopReceiverCue() {
 	                      : guideTarget
 	                        ? styles.guideDim
 	                        : ""
-	                  } ${onlineRequiredActionClass}`}
+	                  } ${onlineRequiredActionClass} ${
+                      receiverCommunicationDisabledReason ? styles.inactive : ""
+                    }`}
 	                  type="button"
-	                  aria-disabled={!receiverOnline}
+	                  aria-disabled={!receiverOnline || Boolean(receiverCommunicationDisabledReason)}
+                  title={receiverCommunicationDisabledReason || undefined}
                   onClick={(event) => {
                     event.stopPropagation();
                     openAsk();
@@ -8291,9 +8298,12 @@ function stopReceiverCue() {
 	                      : guideTarget
 	                        ? styles.guideDim
 	                        : ""
-	                  } ${onlineRequiredActionClass}`}
+	                  } ${onlineRequiredActionClass} ${
+                      receiverCommunicationDisabledReason ? styles.inactive : ""
+                    }`}
 	                  type="button"
-	                  aria-disabled={!receiverOnline}
+	                  aria-disabled={!receiverOnline || Boolean(receiverCommunicationDisabledReason)}
+                  title={receiverCommunicationDisabledReason || undefined}
                   onClick={(event) => {
                     event.stopPropagation();
                     callContact(selectedContact);
@@ -8389,9 +8399,12 @@ function stopReceiverCue() {
 	                      : guideTarget
 	                        ? styles.guideDim
 	                        : ""
-	                  } ${onlineRequiredActionClass}`}
+	                  } ${onlineRequiredActionClass} ${
+                      receiverCommunicationDisabledReason ? styles.inactive : ""
+                    }`}
 	                  type="button"
-	                  aria-disabled={!receiverOnline}
+	                  aria-disabled={!receiverOnline || Boolean(receiverCommunicationDisabledReason)}
+                  title={receiverCommunicationDisabledReason || undefined}
                   onClick={(event) => {
                     event.stopPropagation();
                     openContact();
@@ -8407,9 +8420,12 @@ function stopReceiverCue() {
 	                        : guideTarget
 	                          ? styles.guideDim
 	                          : ""
-	                    } ${onlineRequiredActionClass}`}
+	                    } ${onlineRequiredActionClass} ${
+                      receiverCommunicationDisabledReason ? styles.inactive : ""
+                    }`}
 	                    type="button"
-	                    aria-disabled={!receiverOnline}
+	                    aria-disabled={!receiverOnline || Boolean(receiverCommunicationDisabledReason)}
+                    title={receiverCommunicationDisabledReason || undefined}
                     onClick={(event) => {
                       event.stopPropagation();
                       openAsk();
@@ -8567,6 +8583,7 @@ function stopReceiverCue() {
               messageTextSize={messageTextSize}
               modal={modal}
               messages={messages}
+              gxvHomeLayout={gxvHomeLayout}
               pendingContactRecording={pendingContactRecording}
               playingMessageId={playingMessageId}
               presentationMode={receiverModernEnabled ? "modern" : "classic"}
@@ -8611,6 +8628,14 @@ function stopReceiverCue() {
               onRecordHearingFeedback={recordHearingFeedback}
               onResolveSoundHelp={markSoundHelpResolved}
               onResetSoundTestState={resetSoundTestState}
+              onMaximizeReceiver={maximizeReceiverFromSettings}
+              receiverFullscreenActive={fullscreenActive}
+              onChooseGxvHomeLayout={chooseGxvHomeLayoutFromSettings}
+              onOpenClassicWebReceiverLayout={openClassicWebReceiverLayout}
+              onOpenModernReceiverLayout={openModernReceiverLayout}
+              onOpenOptionalSounds={openOptionalSoundsFromSettings}
+              onOpenReceiverStyleSettings={openReceiverStyleSettings}
+              onOpenScreenCleaningConfirm={openScreenCleaningConfirmFromSettings}
               onSendContact={sendMessage}
               onSendCondensedMessage={sendCondensedSpeechMessage}
               onSaveCallSummaryDraft={saveCallSummaryDraft}
@@ -8620,6 +8645,7 @@ function stopReceiverCue() {
               onTestSound={testOptionalSound}
               onToggleAutoHearPreference={toggleAutoHearPreference}
               onUpdateSoundSetting={updateSoundSetting}
+              showReceiverFullscreenSetting={!kioskManagedFullscreen && !nativeReceiverShell}
             />
           ) : null}
           {interruptedReviewIncomingCall?.callId ? (
@@ -8675,10 +8701,25 @@ function stopReceiverCue() {
           ) : null}
           <div
             className={styles.receiverIdentityBadge}
-            title={`${receiverIdentityDisplay.type}: ${receiverIdentityDisplay.full}`}
-            aria-label={`${receiverIdentityDisplay.type}: ${receiverIdentityDisplay.full}`}
+            title={
+              receiverIdentityDisplay.name
+                ? `${receiverIdentityDisplay.name} · ${receiverIdentityDisplay.type}: ${receiverIdentityDisplay.full}`
+                : `${receiverIdentityDisplay.type}: ${receiverIdentityDisplay.full}`
+            }
+            aria-label={
+              receiverIdentityDisplay.name
+                ? `${receiverIdentityDisplay.name}. ${receiverIdentityDisplay.type}: ${receiverIdentityDisplay.full}`
+                : `${receiverIdentityDisplay.type}: ${receiverIdentityDisplay.full}`
+            }
           >
-            {receiverIdentityDisplay.type}: {receiverIdentityDisplay.label}
+            {receiverIdentityDisplay.name ? (
+              <span className={styles.receiverIdentityName}>
+                {receiverIdentityDisplay.name}
+              </span>
+            ) : null}
+            <span>
+              {receiverIdentityDisplay.type}: {receiverIdentityDisplay.label}
+            </span>
           </div>
         </section>
       </div>
@@ -9414,6 +9455,7 @@ function ReceiverModal({
   contactRecording,
   contactRecordingProcessing,
   contactDraft,
+  gxvHomeLayout,
   messageTextSize,
   messages,
   modal,
@@ -9452,6 +9494,14 @@ function ReceiverModal({
   onReportSoundProblem,
   onResolveSoundHelp,
   onResetSoundTestState,
+  onMaximizeReceiver,
+  receiverFullscreenActive,
+  onChooseGxvHomeLayout,
+  onOpenClassicWebReceiverLayout,
+  onOpenModernReceiverLayout,
+  onOpenOptionalSounds,
+  onOpenReceiverStyleSettings,
+  onOpenScreenCleaningConfirm,
   onRetryAsk,
   onSendContact,
   onSendCondensedMessage,
@@ -9462,6 +9512,7 @@ function ReceiverModal({
   onTestSound,
   onToggleAutoHearPreference,
   onUpdateSoundSetting,
+  showReceiverFullscreenSetting,
 }: {
   applianceMode: boolean;
   askDraft: string;
@@ -9471,6 +9522,7 @@ function ReceiverModal({
   contactRecording: boolean;
   contactRecordingProcessing: boolean;
   contactDraft: string;
+  gxvHomeLayout: GxvHomeLayout;
   messageTextSize: ReaderTextSize;
   messages: Message[];
   modal: NonNullable<ModalState>;
@@ -9516,6 +9568,14 @@ function ReceiverModal({
   onReportSoundProblem: (problem: SoundProblem) => void;
   onResolveSoundHelp: () => void;
   onResetSoundTestState: () => void;
+  onMaximizeReceiver: () => void;
+  receiverFullscreenActive: boolean;
+  onChooseGxvHomeLayout: (nextLayout: GxvHomeLayout) => void;
+  onOpenClassicWebReceiverLayout: () => void;
+  onOpenModernReceiverLayout: () => void;
+  onOpenOptionalSounds: () => void;
+  onOpenReceiverStyleSettings: () => void;
+  onOpenScreenCleaningConfirm: () => void;
   onRetryAsk: (question: string) => void;
   onSendContact: (contact: Contact, body: string, recording?: PendingContactRecording | null) => void;
   onSendCondensedMessage: (
@@ -9533,6 +9593,7 @@ function ReceiverModal({
   onTestSound: () => void;
   onToggleAutoHearPreference: () => void;
   onUpdateSoundSetting: (key: keyof SoundSettings, value: boolean | SoundSettings["comfortVolume"]) => void;
+  showReceiverFullscreenSetting: boolean;
 }) {
   const readerFullText = modal.type === "reader" ? messageText(modal.message) : "";
   const readerPages = useMemo(
@@ -9890,6 +9951,92 @@ function ReceiverModal({
     );
   }
 
+  if (modal.type === "receiverSettings") {
+    const receiverStyleChoices: Array<{ label: string; layout: GxvHomeLayout }> = [
+      { label: "Classic", layout: "classic" },
+      { label: "Focus", layout: "focus_v1" },
+      { label: "Ask/Tell", layout: "ask_tell" },
+      { label: "Ask/Tell 2", layout: "ask_tell_2" },
+    ];
+
+    if (modal.view === "style") {
+      return (
+        <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="receiver-style-title">
+          <section className={`${styles.modalPanel} ${styles.receiverSettingsPanel}`}>
+            <div className={styles.modalTitleRow}>
+              <h2 id="receiver-style-title">Visual Style</h2>
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                type="button"
+                onClick={() => onSetModal({ type: "receiverSettings" })}
+              >
+                Back
+              </button>
+            </div>
+            <div className={styles.receiverStyleGrid}>
+              {receiverStyleChoices.map((choice) => (
+                <button
+                  className={`${styles.receiverSettingsButton} ${
+                    gxvHomeLayout === choice.layout ? styles.receiverSettingsButtonSelected : ""
+                  }`}
+                  key={choice.layout}
+                  type="button"
+                  aria-pressed={gxvHomeLayout === choice.layout}
+                  onClick={() => onChooseGxvHomeLayout(choice.layout)}
+                >
+                  {choice.label}
+                </button>
+              ))}
+              {showReceiverFullscreenSetting ? (
+                <>
+                  <button className={styles.receiverSettingsButton} type="button" onClick={onOpenModernReceiverLayout}>
+                    Modern
+                  </button>
+                  <button className={styles.receiverSettingsButton} type="button" onClick={onOpenClassicWebReceiverLayout}>
+                    Old Web
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    return (
+      <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="receiver-settings-title">
+        <section className={`${styles.modalPanel} ${styles.receiverSettingsPanel}`}>
+          <div className={styles.modalTitleRow}>
+            <h2 id="receiver-settings-title">Settings</h2>
+            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
+              Go Home
+            </button>
+          </div>
+          <div
+            className={`${styles.receiverSettingsGrid} ${
+              showReceiverFullscreenSetting ? "" : styles.receiverSettingsGridThree
+            }`}
+          >
+            <button className={styles.receiverSettingsButton} type="button" onClick={onOpenReceiverStyleSettings}>
+              Visual Style
+            </button>
+            <button className={styles.receiverSettingsButton} type="button" onClick={onOpenOptionalSounds}>
+              Sound
+            </button>
+            <button className={styles.receiverSettingsButton} type="button" onClick={onOpenScreenCleaningConfirm}>
+              Clean the Screen
+            </button>
+            {showReceiverFullscreenSetting ? (
+              <button className={styles.receiverSettingsButton} type="button" onClick={onMaximizeReceiver}>
+                {receiverFullscreenActive ? "Minimize Receiver Size" : "Maximize Receiver Size"}
+              </button>
+            ) : null}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   if (modal.type === "screenCleaningConfirm") {
     if (modernPresentation) {
       return (
@@ -9936,23 +10083,31 @@ function ReceiverModal({
   if (modal.type === "contact") {
     const contact = contacts.find((item) => item.id === modal.contactId) ?? contacts[0];
     const canCall = contactCanCallNow(contact);
+    const disabledReason = contact.disabledReason || "";
 
     return (
       <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="contact-title">
         <section className={`${styles.modalPanel} ${styles.contactPanel}`}>
           <div className={styles.modalTitleRow}>
             <h2 id="contact-title">
-              {canCall ? `Tell ${contact.displayName} something` : `Send a message to ${contact.displayName}`}
+              {disabledReason
+                ? "Message unavailable"
+                : canCall
+                  ? `Tell ${contact.displayName} something`
+                  : `Send a message to ${contact.displayName}`}
             </h2>
             <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={onClose}>
               Go Home
             </button>
           </div>
-          {!canCall ? (
-            <p className={styles.availabilityNotice}>{contact.displayName} is unavailable right now.</p>
+          {disabledReason || !canCall ? (
+            <p className={styles.availabilityNotice}>
+              {disabledReason || `${contact.displayName} is unavailable right now.`}
+            </p>
           ) : null}
           <textarea
             className={styles.requestInput}
+            disabled={Boolean(disabledReason)}
             maxLength={RECEIVER_TEXT_INPUT_MAX_LENGTH}
             onChange={(event) => onContactDraftChange(limitReceiverTextInput(event.target.value))}
             placeholder={`What would you like to tell ${contact.displayName}?`}
@@ -9960,7 +10115,7 @@ function ReceiverModal({
           />
           <button
             className={`${styles.modalButton} ${contactRecording ? styles.danger : styles.secondary}`}
-            disabled={contactRecordingProcessing}
+            disabled={Boolean(disabledReason) || contactRecordingProcessing}
             type="button"
             onClick={() => {
               void onRecordContact(contact);
@@ -9977,13 +10132,21 @@ function ReceiverModal({
           ) : null}
           <button
             className={`${styles.modalButton} ${contactDraft.trim() || pendingContactRecording ? "" : styles.inactive}`}
+            disabled={Boolean(disabledReason)}
             type="button"
+            title={disabledReason || undefined}
             onClick={() => onSendContact(contact, contactDraft, pendingContactRecording)}
           >
             {contactDraft.trim() || pendingContactRecording ? "Send Message" : "Type or record first"}
           </button>
           {canCall ? (
-            <button className={`${styles.modalButton} ${styles.secondary}`} type="button" onClick={() => onCallContact(contact)}>
+            <button
+              className={`${styles.modalButton} ${styles.secondary}`}
+              disabled={Boolean(disabledReason)}
+              title={disabledReason || undefined}
+              type="button"
+              onClick={() => onCallContact(contact)}
+            >
               Call {contact.displayName}
             </button>
           ) : null}

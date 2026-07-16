@@ -15,6 +15,7 @@ export type ReceiverShellClaimRecord = {
   careCircleId?: string;
   claim: string;
   createdAt: string;
+  createdByUserId?: string;
   deviceOwner?: boolean;
   deviceProfile: string;
   expiresAt: string;
@@ -27,6 +28,9 @@ export type ReceiverShellClaimRecord = {
   mainConnectUserPersonId?: string;
   mainConnectUserDisplayName?: string;
   primaryCoordinatorDisplayName?: string;
+  receiverContactDisplayName?: string;
+  receiverContactIsReceiverUser?: boolean;
+  receiverContactUserId?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -61,6 +65,9 @@ export type ReceiverShellBindingRecord = {
   mainConnectUserPersonId?: string;
   mainConnectUserDisplayName?: string;
   primaryCoordinatorDisplayName?: string;
+  receiverContactDisplayName?: string;
+  receiverContactIsReceiverUser?: boolean;
+  receiverContactUserId?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -101,6 +108,9 @@ export type ReceiverShellDeviceProfile = {
   mainConnectUserPersonId?: string;
   mainConnectUserDisplayName?: string;
   primaryCoordinatorDisplayName?: string;
+  receiverContactDisplayName?: string;
+  receiverContactIsReceiverUser?: boolean;
+  receiverContactUserId?: string;
   nativeManufacturer?: string;
   nativeModel?: string;
   nativeSdk?: number;
@@ -140,6 +150,7 @@ const setupCodeWords = {
 export async function issueReceiverShellClaim(
   input: {
     careCircleId?: string;
+    createdByUserId?: string;
     deviceProfile?: string;
     hardwareProfile?: string;
     mainConnectUserPersonId?: string;
@@ -175,6 +186,7 @@ export async function issueReceiverShellClaim(
     claim: `cpclaim_${randomUUID().replace(/-/g, "")}`,
     careCircleId: input.careCircleId?.trim() || undefined,
     createdAt: now.toISOString(),
+    createdByUserId: input.createdByUserId?.trim() || undefined,
     deviceProfile: input.deviceProfile?.trim() || "gxv3370",
     expiresAt: expiresAt.toISOString(),
     hardwareProfile: input.hardwareProfile?.trim() || "studio_gxv3370_1024x600",
@@ -244,6 +256,7 @@ export async function createReceiverShellSetupClaim(
     deviceProfile?: string;
     expiresInMinutes?: number;
     hardwareProfile?: string;
+    locationLabel?: string;
     mainConnectUserPersonId?: string;
     receiverDeviceId?: string;
     receiverUrl?: string;
@@ -266,6 +279,8 @@ export async function createReceiverShellSetupClaim(
 
   const receiverDeviceId =
     input.receiverDeviceId?.trim() || `receiver-${randomUUID().replace(/-/g, "")}`;
+  const locationLabel =
+    input.locationLabel?.trim() || defaultReceiverLocationLabel(receiverDeviceId);
   const indexPath = options.indexPath ?? defaultIndexPath;
   const index = await readReceiverShellClaimIndex(indexPath);
   const expiresAt = new Date(now.getTime() + ttlMs);
@@ -273,9 +288,11 @@ export async function createReceiverShellSetupClaim(
     careCircleId: input.careCircleId?.trim() || undefined,
     claim: `cpclaim_${randomUUID().replace(/-/g, "")}`,
     createdAt: now.toISOString(),
+    createdByUserId: input.createdByUserId?.trim() || undefined,
     deviceProfile: input.deviceProfile?.trim() || "gxv3370",
     expiresAt: expiresAt.toISOString(),
     hardwareProfile: input.hardwareProfile?.trim() || "studio_gxv3370_1024x600",
+    locationLabel,
     mainConnectUserPersonId: input.mainConnectUserPersonId?.trim() || undefined,
     receiverDeviceId,
     receiverUrl: input.receiverUrl?.trim() || "",
@@ -365,6 +382,8 @@ export async function pairReceiverShellPairingCode(
     createdByUserId?: string;
     deviceProfile?: string;
     hardwareProfile?: string;
+    locationLabel?: string;
+    mainConnectUserDisplayName?: string;
     mainConnectUserPersonId?: string;
     pairingCode?: string;
     receiverUrl?: string;
@@ -403,10 +422,20 @@ export async function pairReceiverShellPairingCode(
   const paired: ReceiverShellClaimRecord = {
     ...current,
     careCircleId: input.careCircleId?.trim() || current.careCircleId,
+    createdByUserId: input.createdByUserId?.trim() || current.createdByUserId,
     deviceProfile: input.deviceProfile?.trim() || current.deviceProfile,
     hardwareProfile: input.hardwareProfile?.trim() || current.hardwareProfile,
+    locationLabel:
+      input.locationLabel?.trim() ||
+      receiverLocationLabelForPairing(
+        current.receiverDeviceId,
+        current.locationLabel,
+        input.mainConnectUserDisplayName
+      ),
     mainConnectUserPersonId:
       input.mainConnectUserPersonId?.trim() || current.mainConnectUserPersonId,
+    mainConnectUserDisplayName:
+      input.mainConnectUserDisplayName?.trim() || current.mainConnectUserDisplayName,
     receiverUrl: input.receiverUrl?.trim() || current.receiverUrl,
     uiLayout: input.uiLayout?.trim() || current.uiLayout,
   };
@@ -487,7 +516,7 @@ export async function verifyReceiverShellBinding(
     shellVersion?: string;
   },
   options: { indexPath?: string; now?: Date } = {}
-) {
+): Promise<ReceiverShellBindingRecord> {
   const receiverDeviceId = input.receiverDeviceId?.trim() || "";
   const receiverInstallId = input.receiverInstallId?.trim() || "";
   if (!receiverDeviceId || !receiverInstallId) {
@@ -536,6 +565,9 @@ export async function verifyReceiverShellBinding(
     mainConnectUserPersonId: claim.mainConnectUserPersonId,
     mainConnectUserDisplayName: claim.mainConnectUserDisplayName,
     primaryCoordinatorDisplayName: claim.primaryCoordinatorDisplayName,
+    receiverContactDisplayName: claim.receiverContactDisplayName,
+    receiverContactIsReceiverUser: claim.receiverContactIsReceiverUser,
+    receiverContactUserId: claim.receiverContactUserId || claim.createdByUserId,
     nativeManufacturer: claim.nativeManufacturer,
     nativeModel: claim.nativeModel,
     nativeSdk: claim.nativeSdk,
@@ -723,6 +755,34 @@ function receiverPairingStatusFromClaim(
   return "pending";
 }
 
+function defaultReceiverLocationLabel(receiverDeviceId: string, displayName?: string) {
+  const suffix = receiverShortNameSuffix(receiverDeviceId);
+  const base = displayName?.trim() ? `${displayName.trim()}'s Receiver` : "Receiver";
+  return trimReceiverLocationLabel(suffix ? `${base} ${suffix}` : base);
+}
+
+function receiverLocationLabelForPairing(
+  receiverDeviceId: string,
+  currentLocationLabel?: string,
+  displayName?: string
+) {
+  const current = currentLocationLabel?.trim() || "";
+  const genericDefault = defaultReceiverLocationLabel(receiverDeviceId);
+  if (current && current !== genericDefault) return current;
+  return defaultReceiverLocationLabel(receiverDeviceId, displayName);
+}
+
+function receiverShortNameSuffix(receiverDeviceId: string) {
+  const normalized = receiverDeviceId.trim().replace(/^receiver-/, "");
+  if (!normalized) return "";
+  return normalized.length > 6 ? normalized.slice(-6).toUpperCase() : normalized.toUpperCase();
+}
+
+function trimReceiverLocationLabel(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 80 ? trimmed.slice(0, 80).trim() : trimmed;
+}
+
 async function readReceiverShellClaimIndex(indexPath: string) {
   try {
     const parsed = JSON.parse(await readFile(indexPath, "utf8")) as Partial<
@@ -852,6 +912,7 @@ async function tryCreateSupabaseReceiverShellSetupClaim(
     createdByUserId?: string;
     deviceProfile?: string;
     hardwareProfile?: string;
+    locationLabel?: string;
     mainConnectUserPersonId?: string;
     receiverDeviceId?: string;
     receiverUrl?: string;
@@ -867,14 +928,39 @@ async function tryCreateSupabaseReceiverShellSetupClaim(
     const receiverDeviceId =
       input.receiverDeviceId?.trim() || `receiver-${randomUUID().replace(/-/g, "")}`;
     const claim = `cpclaim_${randomUUID().replace(/-/g, "")}`;
-    const deviceProfile = input.deviceProfile?.trim() || "gxv3370";
-    const hardwareProfile = input.hardwareProfile?.trim() || "studio_gxv3370_1024x600";
-    const receiverUrl = input.receiverUrl?.trim() || "";
+    const { data: existingDevice, error: existingDeviceError } = await supabase
+      .from("connect_receiver_devices")
+      .select(
+        "care_circle_id, device_profile, hardware_profile, location_label, main_connect_user_person_id, receiver_url, status, ui_layout"
+      )
+      .eq("id", receiverDeviceId)
+      .maybeSingle();
+    if (existingDeviceError) throw existingDeviceError;
+
+    const deviceProfile =
+      input.deviceProfile?.trim() || stringFromRow(existingDevice?.device_profile) || "gxv3370";
+    const hardwareProfile =
+      input.hardwareProfile?.trim() ||
+      stringFromRow(existingDevice?.hardware_profile) ||
+      "studio_gxv3370_1024x600";
+    const receiverUrl = input.receiverUrl?.trim() || stringFromRow(existingDevice?.receiver_url);
     const setupCode = normalizeSetupCode(input.setupCode || createTypeableSetupCode());
-    const uiLayout = input.uiLayout?.trim() || "desk_phone_1024x600";
-    const careCircleId = input.careCircleId?.trim() || undefined;
-    const mainConnectUserPersonId = input.mainConnectUserPersonId?.trim() || undefined;
+    const uiLayout =
+      input.uiLayout?.trim() || stringFromRow(existingDevice?.ui_layout) || "desk_phone_1024x600";
+    const careCircleId =
+      input.careCircleId?.trim() || stringFromRow(existingDevice?.care_circle_id) || undefined;
+    const mainConnectUserPersonId =
+      input.mainConnectUserPersonId?.trim() ||
+      stringFromRow(existingDevice?.main_connect_user_person_id) ||
+      undefined;
     const createdByUserId = uuidOrUndefined(input.createdByUserId);
+    const locationLabel =
+      input.locationLabel?.trim() ||
+      stringFromRow(existingDevice?.location_label) ||
+      defaultReceiverLocationLabel(receiverDeviceId);
+    const existingStatus = stringFromRow(existingDevice?.status);
+    const receiverStatus =
+      existingStatus && existingStatus !== "revoked" ? existingStatus : "setup_pending";
 
     const { error: deviceError } = await supabase
       .from("connect_receiver_devices")
@@ -884,9 +970,10 @@ async function tryCreateSupabaseReceiverShellSetupClaim(
           device_profile: deviceProfile,
           hardware_profile: hardwareProfile,
           id: receiverDeviceId,
+          location_label: locationLabel,
           main_connect_user_person_id: mainConnectUserPersonId,
           receiver_url: receiverUrl,
-          status: "setup_pending",
+          status: receiverStatus,
           ui_layout: uiLayout,
           updated_at: now.toISOString(),
         }),
@@ -980,6 +1067,8 @@ async function tryPairSupabaseReceiverShellPairingCode(
     createdByUserId?: string;
     deviceProfile?: string;
     hardwareProfile?: string;
+    locationLabel?: string;
+    mainConnectUserDisplayName?: string;
     mainConnectUserPersonId?: string;
     pairingCode?: string;
     receiverUrl?: string;
@@ -1013,6 +1102,13 @@ async function tryPairSupabaseReceiverShellPairingCode(
     const careCircleId = input.careCircleId?.trim() || current.careCircleId;
     const mainConnectUserPersonId =
       input.mainConnectUserPersonId?.trim() || current.mainConnectUserPersonId;
+    const locationLabel =
+      input.locationLabel?.trim() ||
+      receiverLocationLabelForPairing(
+        current.receiverDeviceId,
+        current.locationLabel,
+        input.mainConnectUserDisplayName
+      );
 
     const { error: deviceError } = await supabase
       .from("connect_receiver_devices")
@@ -1021,6 +1117,7 @@ async function tryPairSupabaseReceiverShellPairingCode(
           care_circle_id: careCircleId,
           device_profile: deviceProfile,
           hardware_profile: hardwareProfile,
+          location_label: locationLabel,
           main_connect_user_person_id: mainConnectUserPersonId,
           receiver_url: receiverUrl,
           status: "claim_pending",
@@ -1126,6 +1223,18 @@ async function tryRedeemSupabaseReceiverShellClaim(
     const displayNames = await tryGetSupabaseCareSubjectDisplayNames([
       current.mainConnectUserPersonId,
     ]);
+    const receiverContactUserId = current.createdByUserId || stringFromRow(updated.created_by_user_id);
+    const receiverContactDisplayNames = await tryGetSupabaseProfileDisplayNames([
+      receiverContactUserId,
+    ]);
+    const receiverContactSelfFlags = await tryGetSupabaseReceiverContactSelfFlags([
+      {
+        careCircleId: current.careCircleId,
+        receiverContactUserId,
+        receiverDeviceId: current.receiverDeviceId,
+        receiverUserPersonId: current.mainConnectUserPersonId,
+      },
+    ]);
     const primaryCoordinator = await readPrimaryCoordinatorForCareCircle(
       current.careCircleId
     );
@@ -1136,6 +1245,10 @@ async function tryRedeemSupabaseReceiverShellClaim(
       mainConnectUserDisplayName: displayNames.get(current.mainConnectUserPersonId || ""),
       mainConnectUserPersonId: current.mainConnectUserPersonId,
       primaryCoordinatorDisplayName: primaryCoordinator.displayName,
+      receiverContactDisplayName: receiverContactDisplayNames.get(receiverContactUserId),
+      receiverContactIsReceiverUser:
+        receiverContactSelfFlags.get(current.receiverDeviceId) ?? false,
+      receiverContactUserId,
     };
   } catch (error) {
     if (error instanceof ReceiverShellClaimError) throw error;
@@ -1166,7 +1279,7 @@ async function tryVerifySupabaseReceiverShellBinding(
     shellVersion?: string;
   },
   options: { now?: Date }
-) {
+): Promise<ReceiverShellBindingRecord | null> {
   try {
     const supabase = createSupabaseServiceClient();
     const now = options.now ?? new Date();
@@ -1226,6 +1339,29 @@ async function tryVerifySupabaseReceiverShellBinding(
       mainConnectUserPersonId,
     ]);
     const careCircleId = stringFromRow(data.care_circle_id);
+    const { data: contactClaimRows, error: contactClaimError } = await supabase
+      .from("connect_receiver_claims")
+      .select("created_by_user_id")
+      .eq("receiver_device_id", receiverDeviceId)
+      .in("status", ["used", "available"])
+      .order("redeemed_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (contactClaimError) throw contactClaimError;
+    const receiverContactUserId = stringFromRow(
+      Array.isArray(contactClaimRows) ? contactClaimRows[0]?.created_by_user_id : ""
+    );
+    const receiverContactDisplayNames = await tryGetSupabaseProfileDisplayNames([
+      receiverContactUserId,
+    ]);
+    const receiverContactSelfFlags = await tryGetSupabaseReceiverContactSelfFlags([
+      {
+        careCircleId,
+        receiverContactUserId,
+        receiverDeviceId,
+        receiverUserPersonId: mainConnectUserPersonId,
+      },
+    ]);
     const primaryCoordinator = await readPrimaryCoordinatorForCareCircle(careCircleId);
 
     return {
@@ -1248,6 +1384,9 @@ async function tryVerifySupabaseReceiverShellBinding(
       mainConnectUserPersonId,
       mainConnectUserDisplayName: displayNames.get(mainConnectUserPersonId),
       primaryCoordinatorDisplayName: primaryCoordinator.displayName,
+      receiverContactDisplayName: receiverContactDisplayNames.get(receiverContactUserId),
+      receiverContactIsReceiverUser: receiverContactSelfFlags.get(receiverDeviceId) ?? false,
+      receiverContactUserId,
       nativeManufacturer:
         input.nativeManufacturer?.trim() || stringFromRow(data.native_manufacturer),
       nativeModel: input.nativeModel?.trim() || stringFromRow(data.native_model),
@@ -1347,6 +1486,24 @@ async function receiverShellDeviceProfilesFromRows(
       stringFromRow((rawRow as unknown as Record<string, unknown>).main_connect_user_person_id)
     )
   );
+  const receiverContactUserIdsByDevice = await tryGetSupabaseReceiverContactUserIds(
+    rows.map((rawRow) => stringFromRow((rawRow as unknown as Record<string, unknown>).id))
+  );
+  const receiverContactDisplayNames = await tryGetSupabaseProfileDisplayNames([
+    ...receiverContactUserIdsByDevice.values(),
+  ]);
+  const receiverContactSelfFlags = await tryGetSupabaseReceiverContactSelfFlags(
+    rows.map((rawRow) => {
+      const row = rawRow as unknown as Record<string, unknown>;
+      const receiverDeviceId = stringFromRow(row.id);
+      return {
+        careCircleId: stringFromRow(row.care_circle_id),
+        receiverContactUserId: receiverContactUserIdsByDevice.get(receiverDeviceId),
+        receiverDeviceId,
+        receiverUserPersonId: stringFromRow(row.main_connect_user_person_id),
+      };
+    })
+  );
   const coordinatorNames = new Map<string, string>();
   await Promise.all(
     rows.map(async (rawRow) => {
@@ -1377,6 +1534,11 @@ async function receiverShellDeviceProfilesFromRows(
       mainConnectUserPersonId,
       mainConnectUserDisplayName: displayNames.get(mainConnectUserPersonId),
       primaryCoordinatorDisplayName: coordinatorNames.get(careCircleId),
+      receiverContactDisplayName: receiverContactDisplayNames.get(
+        receiverContactUserIdsByDevice.get(stringFromRow(row.id)) || ""
+      ),
+      receiverContactIsReceiverUser: receiverContactSelfFlags.get(stringFromRow(row.id)) ?? false,
+      receiverContactUserId: receiverContactUserIdsByDevice.get(stringFromRow(row.id)),
       nativeManufacturer: stringFromRow(row.native_manufacturer),
       nativeModel: stringFromRow(row.native_model),
       nativeSdk: finiteNumberOrUndefined(row.native_sdk),
@@ -1457,6 +1619,9 @@ async function listLocalReceiverShellDeviceProfiles() {
       mainConnectUserPersonId: claim.mainConnectUserPersonId,
       mainConnectUserDisplayName: claim.mainConnectUserDisplayName,
       primaryCoordinatorDisplayName: claim.primaryCoordinatorDisplayName,
+      receiverContactDisplayName: claim.receiverContactDisplayName,
+      receiverContactIsReceiverUser: claim.receiverContactIsReceiverUser,
+      receiverContactUserId: claim.receiverContactUserId || claim.createdByUserId,
       nativeManufacturer: claim.nativeManufacturer,
       nativeModel: claim.nativeModel,
       nativeSdk: claim.nativeSdk,
@@ -1534,6 +1699,7 @@ function supabaseClaimRecord(row: Record<string, unknown>): ReceiverShellClaimRe
     careCircleId: stringFromRow(row.care_circle_id) || undefined,
     claim: stringFromRow(row.claim),
     createdAt: stringFromRow(row.created_at),
+    createdByUserId: stringFromRow(row.created_by_user_id) || undefined,
     deviceProfile: stringFromRow(row.device_profile),
     expiresAt: stringFromRow(row.expires_at),
     hardwareProfile: stringFromRow(row.hardware_profile),
@@ -1597,6 +1763,156 @@ async function tryGetSupabaseCareSubjectDisplayNames(personIds: Array<string | u
   return names;
 }
 
+async function tryGetSupabaseProfileDisplayNames(userIds: Array<string | undefined>) {
+  const ids = [...new Set(userIds.map((id) => id?.trim()).filter(Boolean) as string[])];
+  const names = new Map<string, string>();
+  if (!ids.length) return names;
+
+  try {
+    const supabase = createSupabaseServiceClient();
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, email, display_name, given_name, family_name")
+      .in("id", ids);
+    if (error) throw error;
+
+    for (const row of Array.isArray(data) ? data : []) {
+      const record = row as Record<string, unknown>;
+      const id = stringFromRow(record.id);
+      const displayName = profileDisplayNameFromRow(record);
+      if (id && displayName) names.set(id, displayName);
+    }
+  } catch (error) {
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return names;
+    }
+    throw error;
+  }
+
+  return names;
+}
+
+async function tryGetSupabaseReceiverContactUserIds(receiverDeviceIds: string[]) {
+  const ids = [...new Set(receiverDeviceIds.map((id) => id.trim()).filter(Boolean))];
+  const contactsByDevice = new Map<string, string>();
+  if (!ids.length) return contactsByDevice;
+
+  try {
+    const supabase = createSupabaseServiceClient();
+    const { data, error } = await supabase
+      .from("connect_receiver_claims")
+      .select("receiver_device_id, created_by_user_id, redeemed_at, created_at")
+      .in("receiver_device_id", ids)
+      .not("created_by_user_id", "is", null)
+      .order("redeemed_at", { ascending: false })
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+
+    for (const row of Array.isArray(data) ? data : []) {
+      const record = row as Record<string, unknown>;
+      const receiverDeviceId = stringFromRow(record.receiver_device_id);
+      const userId = stringFromRow(record.created_by_user_id);
+      if (receiverDeviceId && userId && !contactsByDevice.has(receiverDeviceId)) {
+        contactsByDevice.set(receiverDeviceId, userId);
+      }
+    }
+  } catch (error) {
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return contactsByDevice;
+    }
+    throw error;
+  }
+
+  return contactsByDevice;
+}
+
+async function tryGetSupabaseReceiverContactSelfFlags(
+  inputs: Array<{
+    careCircleId?: string;
+    receiverContactUserId?: string;
+    receiverDeviceId?: string;
+    receiverUserPersonId?: string;
+  }>
+) {
+  const flagsByDevice = new Map<string, boolean>();
+  const completeInputs = inputs
+    .map((input) => ({
+      careCircleId: input.careCircleId?.trim() || "",
+      receiverContactUserId: input.receiverContactUserId?.trim() || "",
+      receiverDeviceId: input.receiverDeviceId?.trim() || "",
+      receiverUserPersonId: input.receiverUserPersonId?.trim() || "",
+    }))
+    .filter(
+      (input) =>
+        input.careCircleId &&
+        input.receiverContactUserId &&
+        input.receiverDeviceId &&
+        input.receiverUserPersonId
+    );
+  if (!completeInputs.length) return flagsByDevice;
+
+  try {
+    const supabase = createSupabaseServiceClient();
+    const receiverUserPersonIds = [
+      ...new Set(completeInputs.map((input) => input.receiverUserPersonId)),
+    ];
+    const contactUserIds = [
+      ...new Set(completeInputs.map((input) => input.receiverContactUserId)),
+    ];
+    const { data: subjects, error: subjectError } = await supabase
+      .from("care_subjects")
+      .select("id, care_circle_id, is_default")
+      .in("id", receiverUserPersonIds);
+    if (subjectError) throw subjectError;
+
+    const { data: memberships, error: membershipError } = await supabase
+      .from("care_circle_memberships")
+      .select("care_circle_id, user_id, status")
+      .in("user_id", contactUserIds)
+      .eq("status", "active");
+    if (membershipError) throw membershipError;
+
+    const defaultSubjectKeys = new Set(
+      (Array.isArray(subjects) ? subjects : [])
+        .map((row) => row as Record<string, unknown>)
+        .filter((row) => row.is_default === true)
+        .map((row) => `${stringFromRow(row.care_circle_id)}:${stringFromRow(row.id)}`)
+    );
+    const membershipKeys = new Set(
+      (Array.isArray(memberships) ? memberships : [])
+        .map((row) => row as Record<string, unknown>)
+        .map((row) => `${stringFromRow(row.care_circle_id)}:${stringFromRow(row.user_id)}`)
+    );
+
+    for (const input of completeInputs) {
+      flagsByDevice.set(
+        input.receiverDeviceId,
+        defaultSubjectKeys.has(`${input.careCircleId}:${input.receiverUserPersonId}`) &&
+          membershipKeys.has(`${input.careCircleId}:${input.receiverContactUserId}`)
+      );
+    }
+  } catch (error) {
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return flagsByDevice;
+    }
+    throw error;
+  }
+
+  return flagsByDevice;
+}
+
+function profileDisplayNameFromRow(row: Record<string, unknown>) {
+  const displayName = stringFromRow(row.display_name);
+  if (displayName) return displayName;
+
+  const fullName = [stringFromRow(row.given_name), stringFromRow(row.family_name)]
+    .filter(Boolean)
+    .join(" ");
+  if (fullName) return fullName;
+
+  return stringFromRow(row.email);
+}
+
 function supabaseRecordNotFound(error: unknown) {
   if (!error || typeof error !== "object") return false;
   const maybeError = error as { code?: string };
@@ -1626,6 +1942,10 @@ function createTypeableSetupCode() {
 
 function createNumericPairingCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+export function createNumericReceiverSetupCode() {
+  return createNumericPairingCode();
 }
 
 export function normalizeReceiverPairingCode(value: string) {

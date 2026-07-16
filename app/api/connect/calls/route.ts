@@ -104,6 +104,18 @@ export async function POST(request: Request) {
     }
 
     const access = await readConnectCallPersonAccessForRequest(request, personId, payload);
+    if (access.accessType === "receiver_device" && access.receiverContactIsReceiverUser) {
+      return NextResponse.json(
+        { error: "You can't send a message to yourself.", ok: false },
+        { status: 409 }
+      );
+    }
+    if (access.accessType === "receiver_device" && !access.receiverContactUserId) {
+      return NextResponse.json(
+        { error: "Receiver contact setup is required.", ok: false },
+        { status: 409 }
+      );
+    }
 
     await Promise.all([
       markStaleLocalConnectCallsMissed({

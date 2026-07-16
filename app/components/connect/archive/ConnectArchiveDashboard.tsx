@@ -1289,7 +1289,7 @@ export function ConnectArchiveDashboard() {
         "label" in parsed && typeof parsed.label === "string"
           ? parsed.label
           : parsed.target === "primary"
-            ? "Contact Andrew"
+            ? "Contact caregiver"
             : parsed.target === "ask"
               ? "Ask a question"
               : parsed.target === "contact"
@@ -1478,7 +1478,7 @@ export function ConnectArchiveDashboard() {
         ok?: boolean;
       }>(connectCallsEndpoint, {
         body: JSON.stringify({
-          callerName: "Andrew",
+          callerName: "CarePland coordinator",
           mainConnectUserPersonId: selectedMainConnectUserPersonId,
           receiverId: selectedReceiverId,
           recipientPersonId: selectedMainConnectUserPersonId,
@@ -1493,7 +1493,7 @@ export function ConnectArchiveDashboard() {
       if (callResponse.call?.callId) {
         const optimisticCall = {
           callId: callResponse.call.callId,
-          callerName: "Andrew",
+          callerName: "CarePland coordinator",
           recipientName: selectedPersonName,
           receiverId: selectedReceiverId,
           state: "ringing",
@@ -1679,13 +1679,13 @@ export function ConnectArchiveDashboard() {
                 artifactKind: "coordinator_message",
                 audioDirection: "coordinator_to_receiver",
                 clientAudioCaptureId: pendingRecording.clientAudioCaptureId,
-                role: "Andrew",
+                role: "CarePland coordinator",
                 surface: "coordinator_message_composer",
               }
             ),
             clientAudioCaptureId: pendingRecording.clientAudioCaptureId,
             clientMessageId,
-            from: "Andrew",
+            from: "CarePland coordinator",
             mainConnectUserPersonId: selectedMainConnectUserPersonId,
             messageType: "audio",
             receiverId: selectedReceiverId,
@@ -1697,7 +1697,7 @@ export function ConnectArchiveDashboard() {
             allowsCallbackRequest: messageAllowsCallbackRequest,
             body,
             clientMessageId,
-            from: "Andrew",
+            from: "CarePland coordinator",
             mainConnectUserPersonId: selectedMainConnectUserPersonId,
             messageType: "text",
             receiverId: selectedReceiverId,
@@ -1846,7 +1846,7 @@ export function ConnectArchiveDashboard() {
             artifactKind: "coordinator_message",
             audioDirection: "coordinator_to_receiver",
             clientAudioCaptureId,
-            role: "Andrew",
+            role: "CarePland coordinator",
             surface: "coordinator_message_composer",
           }),
           clientAudioCaptureId,
@@ -5311,7 +5311,7 @@ function SetupPanel({
                 }}
               >
                 <p className="text-lg font-black uppercase text-[#5f6e84]">Receiver</p>
-                <h3 className="text-3xl font-black">Call Andrew</h3>
+                <h3 className="text-3xl font-black">Contact caregiver</h3>
                 <button
                   className="mt-4 min-h-16 w-full rounded-xl border-4 text-2xl font-black shadow-sm"
                   style={{
@@ -5963,7 +5963,7 @@ function RecipientCallPanel({
     : isRinging
       ? isClassicReceiverCall
         ? "Tap Answer on the Receiver."
-        : "Andrew would like to talk now."
+        : "Your contact would like to talk now."
       : "A live conversation starts only if the recipient accepts.";
   const audioLabel =
     isClassicReceiverCall
@@ -6075,7 +6075,7 @@ function RecipientCallPanel({
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-2xl font-black text-[#173150]">
-                {isClassicReceiverRinging ? "Call sent to Receiver" : "Andrew is calling"}
+                {isClassicReceiverRinging ? "Call sent to Receiver" : "Your contact is calling"}
               </h3>
               <p className="mt-1 text-lg font-semibold text-[#5f6e84]">
                 {isClassicReceiverRinging ? "Answer on the Receiver." : "Press Answer to talk."}

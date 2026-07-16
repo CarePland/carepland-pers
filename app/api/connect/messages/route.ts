@@ -167,6 +167,18 @@ export async function POST(request: Request) {
       payload.mainConnectUserPersonId,
       payload as unknown as Record<string, unknown>
     );
+    if (access.accessType === "receiver_device" && access.receiverContactIsReceiverUser) {
+      return NextResponse.json(
+        { error: "You can't send a message to yourself.", ok: false },
+        { status: 409 }
+      );
+    }
+    if (access.accessType === "receiver_device" && !access.receiverContactUserId) {
+      return NextResponse.json(
+        { error: "Receiver contact setup is required.", ok: false },
+        { status: 409 }
+      );
+    }
 
     const messagePayload = await ensureAudioMessageOriginalPreserved(payload);
     const message = messagePayload.appointmentId

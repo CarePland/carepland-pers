@@ -40,6 +40,17 @@ export async function updateConnectMainUserContext(
   });
 }
 
+export async function ensureConnectCurrentAccountPerson(): Promise<ConnectMainUserContext> {
+  return fetchJson<ConnectMainUserContext>("/api/connect/context", {
+    body: JSON.stringify({ action: "ensureCurrentAccountPerson" }),
+    headers: {
+      ...(await connectAuthHeaders()),
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+}
+
 export async function connectAuthHeaders(): Promise<Record<string, string>> {
   const {
     data: { session },
