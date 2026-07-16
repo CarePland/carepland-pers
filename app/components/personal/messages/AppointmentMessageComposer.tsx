@@ -41,6 +41,7 @@ type AppointmentMessageComposerProps = {
   onSent?: () => void | Promise<void>;
   personId: string;
   recipientName?: string;
+  senderName?: string;
 };
 
 const connectMessagesEndpoint = "/api/connect/messages";
@@ -53,6 +54,7 @@ export function AppointmentMessageComposer({
   onSent,
   personId,
   recipientName = "Receiver",
+  senderName = "CarePland coordinator",
 }: AppointmentMessageComposerProps) {
   const [messageText, setMessageText] = useState(initialDraft?.text ?? "");
   const [sending, setSending] = useState(false);
@@ -135,13 +137,13 @@ export function AppointmentMessageComposer({
                 artifactKind: "coordinator_message",
                 audioDirection: "coordinator_to_receiver",
                 clientAudioCaptureId: pendingRecording.clientAudioCaptureId,
-                role: "Andrew",
+                role: senderName,
                 surface: composerSurface,
               }
             ),
             clientAudioCaptureId: pendingRecording.clientAudioCaptureId,
             clientMessageId,
-            from: "Andrew",
+            from: senderName,
             mainConnectUserPersonId: personId,
             messageType: "audio",
             requiresAcknowledgement: false,
@@ -153,7 +155,7 @@ export function AppointmentMessageComposer({
             appointmentId,
             body,
             clientMessageId,
-            from: "Andrew",
+            from: senderName,
             mainConnectUserPersonId: personId,
             messageType: "text",
             requiresAcknowledgement: false,
@@ -280,7 +282,7 @@ export function AppointmentMessageComposer({
             artifactKind: "coordinator_message",
             audioDirection: "coordinator_to_receiver",
             clientAudioCaptureId,
-            role: "Andrew",
+            role: senderName,
             surface: composerSurface,
           }),
           clientAudioCaptureId,

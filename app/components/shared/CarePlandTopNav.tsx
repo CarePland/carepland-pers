@@ -102,7 +102,7 @@ function metricClass(tone: SupportMetric["tone"] = "neutral") {
   return "bg-slate-50 text-slate-500";
 }
 
-function AskSpeechBubbleIcon() {
+export function AskSpeechBubbleIcon() {
   return (
     <svg
       aria-hidden="true"

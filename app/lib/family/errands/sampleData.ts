@@ -2,8 +2,8 @@ import type { Errand, ErrandEvent, FamilyMember } from "../types";
 
 export const sampleFamilyMembers: FamilyMember[] = [
   {
-    id: "member-andrew",
-    displayName: "Andrew",
+    id: "member-casey",
+    displayName: "Casey",
     relationshipLabel: "Care Coordinator",
     phoneNumber: "+15550101001",
     lastActiveLabel: "Today",
@@ -31,7 +31,7 @@ export const sampleErrands: Errand[] = [
     title: "Pick up prescriptions",
     description: "Confirm pharmacy pickup and mark complete after delivery.",
     status: "assigned",
-    assignedMemberName: "Andrew",
+    assignedMemberName: "Casey",
     dueLabel: "Today",
   },
   {
@@ -58,7 +58,7 @@ export const sampleErrandEvents: ErrandEvent[] = [
     id: "event-1",
     errandId: "errand-1",
     type: "created",
-    actorName: "Andrew",
+    actorName: "Casey",
     detail: "Created errand: Pick up prescriptions",
     createdLabel: "Today, 8:15 AM",
   },
@@ -66,16 +66,16 @@ export const sampleErrandEvents: ErrandEvent[] = [
     id: "event-2",
     errandId: "errand-1",
     type: "assigned",
-    actorName: "Andrew",
-    detail: "Assigned to Andrew",
+    actorName: "Casey",
+    detail: "Assigned to Casey",
     createdLabel: "Today, 8:16 AM",
   },
   {
     id: "event-3",
     errandId: "errand-1",
     type: "assigned",
-    actorName: "Andrew",
-    detail: "Ownership accepted by Andrew",
+    actorName: "Casey",
+    detail: "Ownership accepted by Casey",
     createdLabel: "Today, 8:19 AM",
   },
   {

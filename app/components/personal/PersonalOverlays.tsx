@@ -52,6 +52,7 @@ type PersonalOverlaysProps = {
   runtimeEnvironmentLabel: string;
   sendingAskMessage: boolean;
   showPendingMainTabConfirm: boolean;
+  showPersonalSetupSignOutCopy: boolean;
   showVersionInfo: boolean;
   signOutConfirmOpen: boolean;
   unsavedSignOutChanges: UnsavedChange[];
@@ -89,10 +90,14 @@ export function PersonalOverlays({
   runtimeEnvironmentLabel,
   sendingAskMessage,
   showPendingMainTabConfirm,
+  showPersonalSetupSignOutCopy,
   showVersionInfo,
   signOutConfirmOpen,
   unsavedSignOutChanges,
 }: PersonalOverlaysProps) {
+  const showUnsavedSignOutChanges =
+    unsavedSignOutChanges.length > 0 && !showPersonalSetupSignOutCopy;
+
   return (
     <>
       {canUseAskPanel && askPanelOpen ? (
@@ -253,17 +258,21 @@ export function PersonalOverlays({
           <section className="relative w-full max-w-lg rounded-xl border border-blue-200 bg-[#f4faff] p-5 text-blue-950 shadow-lg">
             <div>
               <h2 className="text-xl font-semibold text-slate-950">
-                {unsavedSignOutChanges.length > 0
+                {showPersonalSetupSignOutCopy
+                  ? "Exit setup?"
+                  : unsavedSignOutChanges.length > 0
                   ? "You have unsaved changes"
                   : "Sign out of CarePland?"}
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-700">
-                {unsavedSignOutChanges.length > 0
+                {showPersonalSetupSignOutCopy
+                  ? "Exiting will log you out and lose your setup changes."
+                  : unsavedSignOutChanges.length > 0
                   ? "Signing out will discard this work."
                   : "You can sign back in whenever you are ready."}
               </p>
             </div>
-            {unsavedSignOutChanges.length > 0 ? (
+            {showUnsavedSignOutChanges ? (
               <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
                 {unsavedSignOutChanges.map((change) => (
                   <li
@@ -295,7 +304,9 @@ export function PersonalOverlays({
                 onClick={onConfirmSignOut}
                 type="button"
               >
-                {unsavedSignOutChanges.length > 0
+                {showPersonalSetupSignOutCopy
+                  ? "Exit and log out"
+                  : unsavedSignOutChanges.length > 0
                   ? "Discard and sign out"
                   : "Sign out"}
               </button>

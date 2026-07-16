@@ -14,9 +14,9 @@ import {
 } from "./profileDraft";
 
 const baseProfileDraft = {
-  addressLine1: "",
+  addressLine1: "123 Main St",
   addressLine2: "",
-  city: "",
+  city: "Los Angeles",
   country: "US",
   displayName: "",
   email: "user@example.com",
@@ -24,7 +24,7 @@ const baseProfileDraft = {
   givenName: "Pat",
   phone: "(310) 555-1212",
   postalCode: "90292",
-  region: "",
+  region: "CA",
   timezone: "America/Los_Angeles",
 };
 

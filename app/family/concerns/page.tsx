@@ -10,7 +10,7 @@ const concerns = [
   {
     category: "Household concern",
     summary: "Kitchen trash needs to be taken out after dinner.",
-    byline: "Submitted by Andrew yesterday",
+    byline: "Submitted by Casey yesterday",
   },
 ];
 

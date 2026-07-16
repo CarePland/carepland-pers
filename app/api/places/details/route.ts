@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import {
   googlePlacesErrorKey,
+  PlaceAddressResult,
   placesUnavailableMessage,
   PlaceDetailsResult,
 } from "../../../lib/platform/integrations/places";
@@ -39,6 +40,71 @@ async function recordPlacesError(
     p_error_message: message,
     p_integration_key: "google_places",
   });
+}
+
+type GoogleAddressComponent = {
+  longText?: string;
+  shortText?: string;
+  types?: string[];
+};
+
+function addressComponentText(
+  components: GoogleAddressComponent[],
+  type: string,
+  text: "longText" | "shortText" = "longText"
+) {
+  return (
+    components.find((component) => component.types?.includes(type))?.[text] ??
+    ""
+  );
+}
+
+function placeAddressFromComponents(
+  components: GoogleAddressComponent[] = [],
+  formattedAddress = ""
+): PlaceAddressResult | undefined {
+  const country = addressComponentText(components, "country", "shortText");
+
+  if (country && country !== "US") {
+    return undefined;
+  }
+
+  const streetNumber = addressComponentText(components, "street_number");
+  const route = addressComponentText(components, "route");
+  const subpremise = addressComponentText(components, "subpremise");
+  const city =
+    addressComponentText(components, "locality") ||
+    addressComponentText(components, "postal_town") ||
+    addressComponentText(components, "sublocality_level_1") ||
+    addressComponentText(components, "administrative_area_level_2");
+  const region = addressComponentText(
+    components,
+    "administrative_area_level_1",
+    "shortText"
+  );
+  const postalCode = addressComponentText(components, "postal_code");
+  const postalCodeSuffix = addressComponentText(
+    components,
+    "postal_code_suffix"
+  );
+  const formattedPostalCode =
+    formattedAddress.match(/\b\d{5}(?:-\d{4})?\b/)?.[0] ?? "";
+  const addressLine1 = [streetNumber, route].filter(Boolean).join(" ").trim();
+
+  if (!addressLine1 && !city && !region && !postalCode) {
+    return undefined;
+  }
+
+  return {
+    addressLine1,
+    addressLine2: subpremise ? `#${subpremise}` : "",
+    city,
+    country: "US",
+    postalCode: postalCodeSuffix
+      ? `${postalCode}-${postalCodeSuffix}`
+      : postalCode || formattedPostalCode,
+    region,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -102,7 +168,7 @@ export async function POST(request: NextRequest) {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": googleMapsApiKey,
         "X-Goog-FieldMask":
-          "id,displayName,formattedAddress,nationalPhoneNumber,googleMapsUri",
+          "addressComponents,id,displayName,formattedAddress,nationalPhoneNumber,googleMapsUri",
       },
       method: "GET",
     });
@@ -125,6 +191,7 @@ export async function POST(request: NextRequest) {
 
     const googleJson = responseText
       ? (JSON.parse(responseText) as {
+          addressComponents?: GoogleAddressComponent[];
           displayName?: { text?: string };
           formattedAddress?: string;
           googleMapsUri?: string;
@@ -139,6 +206,10 @@ export async function POST(request: NextRequest) {
       placeId: googleJson.id ?? placeId,
       placeName: googleJson.displayName?.text ?? "",
     };
+    place.address = placeAddressFromComponents(
+      googleJson.addressComponents,
+      place.formattedAddress
+    );
 
     return NextResponse.json({ place });
   } catch (error) {

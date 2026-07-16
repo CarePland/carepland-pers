@@ -369,7 +369,7 @@ export function AdminProductManagementPanel({
                 className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                 disabled={!selectedProductMgmtArea || savingProductMgmtItem}
                 onChange={(event) => setNewProductMgmtBody(event.target.value)}
-                placeholder="What should future Andrew remember about this?"
+                placeholder="What should future reviewers remember about this?"
                 value={newProductMgmtBody}
               />
             </label>

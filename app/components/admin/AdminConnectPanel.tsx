@@ -5030,7 +5030,7 @@ function ConnectAppearancePanel() {
           }}
         >
           <span className="text-xs font-bold uppercase opacity-75">Receiver</span>
-          <strong>Call Andrew</strong>
+          <strong>Contact caregiver</strong>
           <button
             className="rounded-md border px-3 py-2 text-sm font-bold text-white"
             style={{
@@ -5302,7 +5302,7 @@ function ConnectTraceArea() {
       .split(/\r?\n/)
       .map((line, index) => ({ lineNumber: index + 1, question: line.trim() }))
       .filter((item) => item.question);
-    const fallbackContact = { displayName: "Andrew", id: "contact-andrew" };
+    const fallbackContact = { displayName: "Caregiver", id: "contact-caregiver" };
     const contacts = [fallbackContact];
     const results = lines.map(({ lineNumber, question }) => {
       const interpretation = interpretReceiverAskObservation({
@@ -5377,7 +5377,7 @@ function ConnectTraceArea() {
         <textarea
           className="min-h-36 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900"
           onChange={(event) => setBulkQuestionInput(event.target.value)}
-          placeholder={"When is my next appointment?\nWhere are my glasses?\nShould I call Andrew?"}
+          placeholder={"When is my next appointment?\nWhere are my glasses?\nShould I message my caregiver?"}
           value={bulkQuestionInput}
         />
         <div className="flex flex-wrap items-center gap-2">

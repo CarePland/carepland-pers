@@ -1054,7 +1054,7 @@ function ConnectAppearancePanel({
           }}
         >
           <span className="text-xs font-bold uppercase opacity-75">Receiver</span>
-          <strong>Call Andrew</strong>
+          <strong>Contact caregiver</strong>
           <button
             className="rounded-md border px-3 py-2 text-sm font-bold text-white"
             style={{

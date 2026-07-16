@@ -7,11 +7,21 @@ export type PlaceAutocompleteSuggestion = {
 };
 
 export type PlaceDetailsResult = {
+  address?: PlaceAddressResult;
   googleMapsUri: string;
   placeId: string;
   placeName: string;
   formattedAddress: string;
   nationalPhoneNumber: string;
+};
+
+export type PlaceAddressResult = {
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  country: "US";
+  postalCode: string;
+  region: string;
 };
 
 export type FavoriteLocation = {

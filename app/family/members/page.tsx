@@ -2,7 +2,7 @@ import { FamilyShell } from "../../components/family/shell/FamilyShell";
 import { panelClass } from "../../components/shared/uiStyles";
 
 const members = [
-  { name: "Andrew", relationship: "Care Coordinator", lastActive: "Today" },
+  { name: "Casey", relationship: "Care Coordinator", lastActive: "Today" },
   { name: "Jamie", relationship: "Family member", lastActive: "Yesterday" },
   { name: "Taylor", relationship: "Neighbor", lastActive: "Last week" },
 ];

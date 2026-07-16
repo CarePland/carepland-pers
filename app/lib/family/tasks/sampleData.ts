@@ -7,7 +7,7 @@ export const sampleFamilyTasks: FamilyTask[] = [
     title: "Pick up prescriptions",
     description: "Confirm pharmacy pickup and mark complete after delivery.",
     status: "assigned",
-    assignedMemberName: "Andrew",
+    assignedMemberName: "Casey",
     dueLabel: "Today",
   },
   {

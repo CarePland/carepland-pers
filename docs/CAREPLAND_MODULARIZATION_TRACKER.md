@@ -241,7 +241,7 @@ Defer or move carefully:
 
 - `HomeContextPanel` has type imports from `app/lib/ask`; moving it requires
   updating those imports.
-- `OnboardingGate` imports profile draft types and profile form components.
+- `OnboardingGate` owns the Personal Setup wizard UI and imports only profile draft types.
 - `PersonalOverlays` imports `InlineConfirmation`.
 - `AIReviewBadge` is cross-surface; decide whether it is shared UI or
   Admin/review domain before moving.

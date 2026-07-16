@@ -101,6 +101,20 @@ export function phoneDigits(value: string): string {
   return digits.slice(0, 10);
 }
 
+export function zipDigits(value: string): string {
+  return value.replace(/\D/g, "").slice(0, 9);
+}
+
+export function formatUsZipFromDigits(digits: string): string {
+  const compactDigits = zipDigits(digits);
+
+  if (compactDigits.length <= 5) {
+    return compactDigits;
+  }
+
+  return `${compactDigits.slice(0, 5)}-${compactDigits.slice(5)}`;
+}
+
 export function normalizeUsPhone(value: string):
   | { display: string; e164: string }
   | null {
@@ -118,6 +132,15 @@ export function normalizeUsPhone(value: string):
 
 export function isValidUsZip(value: string): boolean {
   return /^\d{5}(-\d{4})?$/.test(value.trim());
+}
+
+export function isProfileAddressComplete(profile: ProfileDraft): boolean {
+  return Boolean(
+    profile.addressLine1.trim() &&
+      profile.city.trim() &&
+      profile.region.trim() &&
+      isValidUsZip(formatUsZipFromDigits(zipDigits(profile.postalCode)))
+  );
 }
 
 export function trimProfileDraft(profile: ProfileDraft): ProfileDraft {
@@ -184,11 +207,26 @@ export function validateProfileDraft({
     throw new Error("Phone number is required.");
   }
 
+  if (profileDetailsRequired && !profileDraft.addressLine1.trim()) {
+    throw new Error("Address line 1 is required.");
+  }
+
+  if (profileDetailsRequired && !profileDraft.city.trim()) {
+    throw new Error("City is required.");
+  }
+
+  if (profileDetailsRequired && !profileDraft.region.trim()) {
+    throw new Error("State is required.");
+  }
+
   if (profileDetailsRequired && !profileDraft.postalCode.trim()) {
     throw new Error("ZIP code is required.");
   }
 
-  if (profileDraft.postalCode.trim() && !isValidUsZip(profileDraft.postalCode)) {
+  if (
+    profileDraft.postalCode.trim() &&
+    !isValidUsZip(formatUsZipFromDigits(zipDigits(profileDraft.postalCode)))
+  ) {
     throw new Error("Enter a valid ZIP code, like 12345 or 12345-6789.");
   }
 

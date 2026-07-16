@@ -214,6 +214,7 @@ import {
 import {
   favoriteLocationLabel,
   FavoriteLocation,
+  PlaceAddressResult,
   PlaceAutocompleteSuggestion,
   PlaceDetailsResult,
   placesUnavailableMessage,
@@ -256,7 +257,9 @@ import { createCareVipActions } from "./lib/personal/profile/careVipActions";
 import {
   emptyProfileDraft,
   formatUsPhoneFromDigits,
+  formatUsZipFromDigits,
   phoneDigits,
+  zipDigits,
   profileDisplayName,
   profileDraftFromRow,
   profileDraftKey,
@@ -394,6 +397,12 @@ type CareCircleEntitlement = {
   max_active_subjects: number;
   plan_id: string;
   plan_name: string;
+};
+
+type CareCircleMembership = {
+  care_circle_id: string;
+  created_at?: string | null;
+  role?: string | null;
 };
 
 type AppointmentNote = {
@@ -839,6 +848,25 @@ const defaultEntitlement: CareCircleEntitlement = {
   plan_id: "personal",
   plan_name: "Free",
 };
+
+function primaryCareCircleIdFromMemberships(
+  memberships: CareCircleMembership[] | null | undefined
+) {
+  return [...(memberships ?? [])]
+    .filter((membership) => Boolean(membership.care_circle_id))
+    .sort((left, right) => {
+      const leftRoleRank = left.role === "owner" ? 0 : 1;
+      const rightRoleRank = right.role === "owner" ? 0 : 1;
+
+      if (leftRoleRank !== rightRoleRank) {
+        return leftRoleRank - rightRoleRank;
+      }
+
+      return String(left.created_at ?? "").localeCompare(
+        String(right.created_at ?? "")
+      );
+    })[0]?.care_circle_id ?? null;
+}
 
 function careSubjectAvatarPerson(
   subject?: CareSubject | null
@@ -3735,6 +3763,8 @@ export function CarePlandPers({
   const [onboardingCompletedAt, setOnboardingCompletedAt] = useState<
     string | null
   >(null);
+  const [showOnboardingReady, setShowOnboardingReady] = useState(false);
+  const [hasConfiguredReceiver, setHasConfiguredReceiver] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [sessionProfileLoaded, setSessionProfileLoaded] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -4505,6 +4535,53 @@ export function CarePlandPers({
     !needsOnboarding &&
     mainTab === "home" &&
     !welcomeGuideDismissed;
+
+  useEffect(() => {
+    if (!signedInEmail || needsBetaAgreement) {
+      setHasConfiguredReceiver(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadReceiverStatus() {
+      try {
+        const response = await fetch("/api/connect/provisioning/summary", {
+          cache: "no-store",
+        });
+        const payload: unknown = await response.json().catch(() => null);
+
+        if (cancelled || !response.ok) {
+          return;
+        }
+
+        const payloadRecord = payload as {
+          provisioning?: { receiverDevices?: unknown };
+          receiverDevices?: unknown;
+        } | null;
+        const receiverDeviceValue =
+          payloadRecord?.receiverDevices ??
+          payloadRecord?.provisioning?.receiverDevices;
+        const receiverDevices = Array.isArray(receiverDeviceValue)
+          ? (receiverDeviceValue as Array<{ status?: unknown }>)
+          : [];
+
+        setHasConfiguredReceiver(
+          receiverDevices.some((device) => device.status === "bound")
+        );
+      } catch {
+        if (!cancelled) {
+          setHasConfiguredReceiver(false);
+        }
+      }
+    }
+
+    void loadReceiverStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [needsBetaAgreement, signedInEmail]);
 
   function discardUnsavedWorkState() {
     setProfileDraft(savedProfileDraft);
@@ -5389,14 +5466,17 @@ export function CarePlandPers({
 
     const { data: memberships, error: membershipsError } = await supabase
       .from("care_circle_memberships")
-      .select("care_circle_id")
-      .limit(1);
+      .select("care_circle_id,role,created_at")
+      .eq("user_id", userId)
+      .eq("status", "active");
 
     if (membershipsError) {
       throw membershipsError;
     }
 
-    const careCircleId = memberships?.[0]?.care_circle_id;
+    const careCircleId = primaryCareCircleIdFromMemberships(
+      memberships as CareCircleMembership[] | null
+    );
 
     if (!careCircleId) {
       throw new Error("No care circle membership found for this user.");
@@ -5507,6 +5587,18 @@ export function CarePlandPers({
     setProfileDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
+    }));
+  }
+
+  function applyProfileAddress(address: PlaceAddressResult) {
+    setProfileDraft((currentDraft) => ({
+      ...currentDraft,
+      addressLine1: address.addressLine1,
+      addressLine2: address.addressLine2,
+      city: address.city,
+      country: "US",
+      postalCode: formatUsZipFromDigits(zipDigits(address.postalCode)),
+      region: address.region,
     }));
   }
 
@@ -6388,6 +6480,10 @@ export function CarePlandPers({
     window.location.assign(`/connect/dashboard?${params}`);
   }
 
+  function openReceiverSetup() {
+    window.location.assign("/connect/dashboard?receiverSetup=home");
+  }
+
   async function handleHomeContextQuestion(
     question: string,
     askContext: HomeContextAskContext = { level: "global" }
@@ -7212,7 +7308,7 @@ export function CarePlandPers({
       setGuidance([]);
       setCarePrepHistory([]);
       setHistoryAppointmentId("");
-      setMessage("Review the Early Access notice to continue.");
+      setMessage("Review the Early Access Agreement to continue.");
       return;
     }
 
@@ -7239,13 +7335,18 @@ export function CarePlandPers({
 
     const { data: memberships, error: membershipsError } = await supabase
       .from("care_circle_memberships")
-      .select("care_circle_id");
+      .select("care_circle_id,role,created_at")
+      .eq("user_id", user.id)
+      .eq("status", "active");
 
     if (membershipsError) {
       throw membershipsError;
     }
 
-    const circleIds = memberships?.map((row) => row.care_circle_id) ?? [];
+    const primaryCareCircleId = primaryCareCircleIdFromMemberships(
+      memberships as CareCircleMembership[] | null
+    );
+    const circleIds = primaryCareCircleId ? [primaryCareCircleId] : [];
 
     if (circleIds.length === 0) {
       setAppointments([]);
@@ -7779,7 +7880,7 @@ export function CarePlandPers({
       setPassword("");
       setConfirmPassword("");
       setMessage(
-        "Account created. Check your email, including your junk folder, to confirm the account. Then sign in."
+        "If this email can be used to create an account, CarePland will send a confirmation link. If you already have an account, sign in or reset your password."
       );
     } catch (error) {
       logAuthError("signUp", error);
@@ -11701,6 +11802,8 @@ export function CarePlandPers({
     setAuthProvider("email");
     setRequiresEmailUpdate(false);
     setOnboardingCompletedAt(null);
+    setShowOnboardingReady(false);
+    setHasConfiguredReceiver(false);
     setProfileDraft(emptyProfileDraft);
     setSavedProfileDraft(emptyProfileDraft);
     setSavedProfileLabel("");
@@ -11849,6 +11952,7 @@ export function CarePlandPers({
         ...trimmedProfileDraft,
         email: profileEmail,
         phone: normalizedPhone?.display ?? "",
+        postalCode: formatUsZipFromDigits(zipDigits(trimmedProfileDraft.postalCode)),
       };
       const { error } = await supabase.from("profiles").upsert({
         address_line1: trimmedProfileDraft.addressLine1 || null,
@@ -11863,7 +11967,7 @@ export function CarePlandPers({
         onboarding_completed_at: completedAt,
         phone: normalizedPhone?.display ?? null,
         phone_e164: normalizedPhone?.e164 ?? null,
-        postal_code: trimmedProfileDraft.postalCode || null,
+        postal_code: savedDraft.postalCode || null,
         region: trimmedProfileDraft.region || null,
         timezone: trimmedProfileDraft.timezone,
       });
@@ -11900,7 +12004,8 @@ export function CarePlandPers({
       setSavedProfileDraft(savedDraft);
       setSavedProfileLabel(visibleDisplayName);
       await loadAppointments();
-      setMessage("Profile saved.");
+      setShowOnboardingReady(true);
+      setMessage("");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -16205,6 +16310,26 @@ export function CarePlandPers({
               </div>
             ) : null}
 
+            <section className="rounded-lg border border-blue-100 bg-white px-4 py-3 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-black text-slate-900">
+                    Receiver Setup
+                  </h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">
+                    Install, pair, and configure a CarePland Receiver.
+                  </p>
+                </div>
+                <button
+                  className="min-h-10 rounded-full border border-blue-100 bg-blue-50 px-4 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100"
+                  onClick={openReceiverSetup}
+                  type="button"
+                >
+                  Set Up Receiver
+                </button>
+              </div>
+            </section>
+
             {isEveryoneFocus ? (
               everyoneNextAppointmentRows.length > 0 ? (
                 <div className="space-y-2">
@@ -16965,13 +17090,19 @@ export function CarePlandPers({
     authMode !== "updatePassword" &&
     !needsBetaAgreement &&
     !needsOnboarding;
+  const showingPersonalSetup =
+    Boolean(signedInEmail) &&
+    sessionProfileLoaded &&
+    authMode !== "updatePassword" &&
+    (needsBetaAgreement || needsOnboarding || showOnboardingReady);
   const canUseAskPanel =
     isSignedInAppShell ||
     (Boolean(signedInEmail) &&
       authMode !== "updatePassword" &&
       !needsBetaAgreement &&
       needsOnboarding);
-  const canShowAskEntry = canUseAskPanel && !showWelcomeGuide && !needsOnboarding;
+  const canShowAskEntry =
+    canUseAskPanel && !showWelcomeGuide && !needsOnboarding;
   const isEveryoneFocus = selectedSubjectId === ALL_SUBJECTS;
   const importAnythingOwnerPerson =
     importAnythingOwnerPersonId && importAnythingOwnerPersonId !== ALL_SUBJECTS
@@ -17335,7 +17466,11 @@ export function CarePlandPers({
               ) : null}
             </div>
           )}
-          {signedInEmail && mainTab === "appointments" && !showWelcomeGuide ? (
+          {signedInEmail &&
+          mainTab === "appointments" &&
+          !showWelcomeGuide &&
+          !needsBetaAgreement &&
+          !needsOnboarding ? (
             <AppointmentViewToolbar
               allSubjectsValue={ALL_SUBJECTS}
               canFilterCareVips={canFilterCareVips}
@@ -17394,19 +17529,21 @@ export function CarePlandPers({
             password={password}
             passwordsMismatch={passwordsMismatch}
           />
-        ) : needsBetaAgreement || needsOnboarding ? (
+        ) : needsBetaAgreement || needsOnboarding || showOnboardingReady ? (
           <OnboardingGate
             acceptBetaDisclaimer={acceptBetaDisclaimer}
             acceptBetaPrivacy={acceptBetaPrivacy}
             acceptBetaTerms={acceptBetaTerms}
             appContentText={appContentText}
-            gentleSmallSecondaryButtonClass={gentleSmallSecondaryButtonClass}
-            hasUnsavedProfileChanges={hasUnsavedProfileChanges}
             loading={loading}
             message={message}
             needsBetaAgreement={needsBetaAgreement}
             needsOnboarding={needsOnboarding}
             onAcceptBetaAgreement={handleAcceptBetaAgreement}
+            onImportAnything={() => {
+              setShowOnboardingReady(false);
+              startAppointmentPanel("quickAdd");
+            }}
             onChangeProfileField={updateProfileDraft}
             onChangeProfilePhone={(value) =>
               updateProfileDraft(
@@ -17414,21 +17551,39 @@ export function CarePlandPers({
                 formatUsPhoneFromDigits(phoneDigits(value))
               )
             }
-            onNeedHelp={() => {
-              setAskPanelOpen(true);
-              setAskCloseConfirmOpen(false);
-            }}
+            onChangeProfileZip={(value) =>
+              updateProfileDraft(
+                "postalCode",
+                formatUsZipFromDigits(zipDigits(value))
+              )
+            }
+            getPlacesAuthHeaders={placesAuthHeader}
+            onApplyProfileAddress={applyProfileAddress}
             onSaveProfile={handleSaveProfile}
             onSetAcceptBetaDisclaimer={setAcceptBetaDisclaimer}
             onSetAcceptBetaPrivacy={setAcceptBetaPrivacy}
             onSetAcceptBetaTerms={setAcceptBetaTerms}
+            onOpenCarePland={() => {
+              setShowOnboardingReady(false);
+              setMainTab("home");
+            }}
+            onOpenReceiver={() => {
+              window.open(
+                "/connect/receiver/setup?new=1",
+                "_blank",
+                "noopener,noreferrer"
+              );
+            }}
+            onReviewStep={() => {
+              setShowOnboardingReady(false);
+            }}
             onSignOut={() => void handleSignOut()}
-            primaryButtonClassName="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
             profileDetailsRequired={profileDetailsRequired}
             profileDraft={profileDraft}
+            receiverConfigured={hasConfiguredReceiver}
             requiresEmailUpdate={requiresEmailUpdate}
             savingProfile={savingProfile}
-            secondaryButtonClassName="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-400"
+            showReady={showOnboardingReady}
             timezoneDetectionMessage={timezoneDetectionMessage}
             timeZoneOptions={timeZoneOptions}
             verifiedAccountEmail={verifiedAccountEmail}
@@ -17491,12 +17646,19 @@ export function CarePlandPers({
             canShowAdminItems={canShowAdminItems}
             contactDetailsProps={{
               accountPersonId: ACCOUNT_PROFILE_PERSON_ID,
+              getPlacesAuthHeaders: placesAuthHeader,
+              onApplyProfileAddress: applyProfileAddress,
               hasUnsavedProfileChanges,
               onChangeField: updateProfileDraft,
               onChangePhone: (value) =>
                 updateProfileDraft(
                   "phone",
                   formatUsPhoneFromDigits(phoneDigits(value))
+                ),
+              onChangeZip: (value) =>
+                updateProfileDraft(
+                  "postalCode",
+                  formatUsZipFromDigits(zipDigits(value))
                 ),
               onChangeSelectedPersonId: setProfileContactPersonId,
               onRenamePerson: handleRenameProfilePerson,
@@ -20966,6 +21128,7 @@ export function CarePlandPers({
                             }}
                             personId={appointment.care_subject_id}
                             recipientName={appointmentSubject || "Receiver"}
+                            senderName={savedProfileLabel || signedInEmail || "CarePland coordinator"}
                           />
                         ) : (
                           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium text-amber-800">
@@ -22064,6 +22227,7 @@ export function CarePlandPers({
         showPendingMainTabConfirm={Boolean(
           pendingMainTab || pendingImportLeaveAction
         )}
+        showPersonalSetupSignOutCopy={showingPersonalSetup}
         showVersionInfo={showVersionInfo}
         signOutConfirmOpen={signOutConfirmOpen}
         unsavedSignOutChanges={unsavedSignOutChanges}

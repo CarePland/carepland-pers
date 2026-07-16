@@ -1,11 +1,13 @@
 import { FormEvent, useRef, useState } from "react";
 import { type ProfileDraft } from "../../../lib/personal/profile/profileDraft";
+import { type PlaceAddressResult } from "../../../lib/platform/integrations/places";
 import {
   ManagedByHouseholdHeart,
   PersonAvatar,
 } from "../../shared/PersonAvatar";
 import { ManagedCareVipHelp } from "../../shared/ManagedCareVipHelp";
 import { gentleSmallSecondaryButtonClass } from "../../shared/uiStyles";
+import { AddressAutocompleteField } from "./AddressAutocompleteField";
 
 type TimeZoneOption = {
   label: string;
@@ -30,8 +32,11 @@ type ProfileContactDetailsFormProps = {
   accountPersonId?: string;
   disableWhenUnchanged?: boolean;
   hasUnsavedProfileChanges: boolean;
+  getPlacesAuthHeaders: () => Promise<Record<string, string>>;
+  onApplyProfileAddress: (address: PlaceAddressResult) => void;
   onChangeField: (field: keyof ProfileDraft, value: string) => void;
   onChangePhone: (value: string) => void;
+  onChangeZip: (value: string) => void;
   onChangeSelectedPersonId?: (personId: string) => void;
   onRenamePerson?: (subjectId: string, displayName: string) => Promise<void>;
   onRemoveAvatar?: (subjectId: string) => Promise<void>;
@@ -50,6 +55,8 @@ type ProfileContactDetailsFormProps = {
   selectedPersonId?: string;
   savingProfile: boolean;
   secondaryButtonClassName: string;
+  formId?: string;
+  showSubmitButton?: boolean;
   submitLabel?: string;
   timezoneDetectionMessage?: string;
   timeZoneOptions: TimeZoneOption[];
@@ -61,8 +68,11 @@ export function ProfileContactDetailsForm({
   accountPersonId = "account",
   disableWhenUnchanged = true,
   hasUnsavedProfileChanges,
+  getPlacesAuthHeaders,
+  onApplyProfileAddress,
   onChangeField,
   onChangePhone,
+  onChangeZip,
   onChangeSelectedPersonId,
   onRenamePerson,
   onRemoveAvatar,
@@ -78,6 +88,8 @@ export function ProfileContactDetailsForm({
   selectedPersonId = accountPersonId,
   savingProfile,
   secondaryButtonClassName,
+  formId,
+  showSubmitButton = true,
   submitLabel = "Save profile",
   timezoneDetectionMessage,
   timeZoneOptions,
@@ -207,7 +219,7 @@ export function ProfileContactDetailsForm({
   }
 
   return (
-    <form className={formClassName} onSubmit={onSubmit}>
+    <form className={formClassName} id={formId} onSubmit={onSubmit}>
       {header}
       <div className={fieldsClassName}>
         <label className="block text-sm font-medium text-slate-700">
@@ -341,18 +353,14 @@ export function ProfileContactDetailsForm({
             </p>
           ) : null}
         </label>
-        <label className="block text-sm font-medium text-slate-700 md:col-span-2">
-          Address line 1
-          <input
-            autoComplete="address-line1"
-            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-            onChange={(event) =>
-              onChangeField("addressLine1", event.target.value)
-            }
-            placeholder="Optional"
-            value={profileDraft.addressLine1}
-          />
-        </label>
+        <AddressAutocompleteField
+          className="md:col-span-2"
+          getAuthHeaders={getPlacesAuthHeaders}
+          onApplyAddress={onApplyProfileAddress}
+          onChange={(value) => onChangeField("addressLine1", value)}
+          placeholder="Start typing your address"
+          value={profileDraft.addressLine1}
+        />
         <label className="block text-sm font-medium text-slate-700 md:col-span-2">
           Address line 2
           <input
@@ -394,11 +402,10 @@ export function ProfileContactDetailsForm({
             autoComplete="postal-code"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             inputMode="numeric"
-            onChange={(event) =>
-              onChangeField("postalCode", event.target.value)
-            }
-            placeholder="12345 or 12345-6789"
-            required={profileDetailsRequired}
+            maxLength={10}
+            onChange={(event) => onChangeZip(event.target.value)}
+            placeholder="12345"
+            title="Use 12345 or 12345-6789."
             value={profileDraft.postalCode}
           />
         </label>
@@ -406,24 +413,26 @@ export function ProfileContactDetailsForm({
           Country
           <input
             autoComplete="country"
-            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
-            onChange={(event) => onChangeField("country", event.target.value)}
-            value={profileDraft.country}
+            className="mt-2 w-full rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-base text-slate-500"
+            disabled
+            value="United States"
           />
         </label>
-        <div className="md:col-span-2">
-          <button
-            className={
-              hasUnsavedProfileChanges
-                ? primaryButtonClassName
-                : secondaryButtonClassName
-            }
-            disabled={buttonDisabled}
-            type="submit"
-          >
-            {savingProfile ? "Saving..." : submitLabel}
-          </button>
-        </div>
+        {showSubmitButton ? (
+          <div className="md:col-span-2">
+            <button
+              className={
+                hasUnsavedProfileChanges
+                  ? primaryButtonClassName
+                  : secondaryButtonClassName
+              }
+              disabled={buttonDisabled}
+              type="submit"
+            >
+              {savingProfile ? "Saving..." : submitLabel}
+            </button>
+          </div>
+        ) : null}
       </div>
       {avatarControls}
     </form>
