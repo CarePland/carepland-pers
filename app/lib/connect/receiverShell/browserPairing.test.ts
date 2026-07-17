@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { ConnectMainUserContext, ConnectPersPerson } from "../context";
 import {
   browserReceiverPairingCodeReady,
+  browserReceiverShouldRequestPairing,
   formatBrowserReceiverPairingCode,
   normalizeBrowserReceiverPairingCode,
   resolveBrowserReceiverPairingPerson,
@@ -56,5 +57,49 @@ describe("browser Receiver pairing helpers", () => {
       ok: false,
       status: 400,
     });
+  });
+
+  it("does not request a pairing code while a stored Receiver identity is being checked", () => {
+    assert.equal(
+      browserReceiverShouldRequestPairing({
+        hasReceiverIdentity: true,
+        receiverRegistered: false,
+        receiverSessionRestored: true,
+        selectedReceiverUserId: "",
+        started: true,
+      }),
+      false
+    );
+    assert.equal(
+      browserReceiverShouldRequestPairing({
+        bindingCheckPending: true,
+        receiverRegistered: false,
+        receiverSessionRestored: true,
+        selectedReceiverUserId: "",
+        started: true,
+      }),
+      false
+    );
+  });
+
+  it("requests pairing only for an active unpaired Receiver session", () => {
+    assert.equal(
+      browserReceiverShouldRequestPairing({
+        receiverRegistered: false,
+        receiverSessionRestored: true,
+        selectedReceiverUserId: "",
+        started: true,
+      }),
+      true
+    );
+    assert.equal(
+      browserReceiverShouldRequestPairing({
+        receiverRegistered: true,
+        receiverSessionRestored: true,
+        selectedReceiverUserId: "",
+        started: true,
+      }),
+      false
+    );
   });
 });

@@ -3,6 +3,7 @@ import {
   proxyConnectProvisioningJson,
 } from "@/app/lib/connect/provisioning/server/prototypeProvisioningProxy";
 import {
+  deleteUnpairedReceiverShellDevice,
   ReceiverShellBindingError,
   updateReceiverShellDeviceLabel,
 } from "@/app/lib/connect/receiverShell/claimStore";
@@ -58,6 +59,30 @@ export async function PATCH(request: Request, context: RouteContext) {
     return Response.json(
       {
         error: error instanceof Error ? error.message : "Unable to update Receiver.",
+        ok: false,
+      },
+      { status }
+    );
+  }
+}
+
+export async function DELETE(_request: Request, context: RouteContext) {
+  const { receiverDeviceId } = await context.params;
+
+  try {
+    const deleted = await deleteUnpairedReceiverShellDevice({ receiverDeviceId });
+
+    return Response.json({
+      deletedAt: deleted.deletedAt,
+      ok: true,
+      receiverDeviceId: deleted.receiverDeviceId,
+      storageSource: deleted.storageSource,
+    });
+  } catch (error) {
+    const status = error instanceof ReceiverShellBindingError ? error.status : 500;
+    return Response.json(
+      {
+        error: error instanceof Error ? error.message : "Unable to delete Receiver.",
         ok: false,
       },
       { status }

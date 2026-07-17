@@ -26,6 +26,28 @@ export function browserReceiverPairingCodeReady(value: string) {
   return normalizeBrowserReceiverPairingCode(value).length === 6;
 }
 
+export function browserReceiverShouldRequestPairing(input: {
+  bindingCheckPending?: boolean;
+  hasReceiverIdentity?: boolean;
+  hasSetupClaim?: boolean;
+  localTestProvisioning?: boolean;
+  receiverRegistered?: boolean;
+  receiverSessionRestored?: boolean;
+  selectedReceiverUserId?: string;
+  started?: boolean;
+}) {
+  return (
+    input.receiverSessionRestored === true &&
+    input.started === true &&
+    input.receiverRegistered !== true &&
+    !input.selectedReceiverUserId?.trim() &&
+    input.localTestProvisioning !== true &&
+    input.hasSetupClaim !== true &&
+    input.hasReceiverIdentity !== true &&
+    input.bindingCheckPending !== true
+  );
+}
+
 export function resolveBrowserReceiverPairingPerson(
   connectContext: ConnectMainUserContext,
   requestedPersonId?: string

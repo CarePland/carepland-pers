@@ -5381,18 +5381,34 @@
 
 .receiverSettingsPanel {
   display: grid;
-  gap: 22px;
-  justify-self: end;
-  width: min(430px, calc(100% - 48px));
-  margin-right: clamp(8px, 2.2vw, 28px);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: clamp(18px, 2.2dvh, 30px);
+  align-self: stretch;
+  justify-self: stretch;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  margin: 0;
   border-color: #626a63;
   background: #fbfcfa;
+  padding: clamp(18px, 2.6dvh, 34px);
+}
+
+.receiverSettingsPanel .modalTitleRow {
+  align-items: start;
+}
+
+.receiverSettingsPanel .modalTitleRow h2 {
+  overflow-wrap: normal;
 }
 
 .receiverSettingsGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  grid-auto-rows: auto;
+  align-content: start;
+  gap: clamp(16px, 2.1dvh, 28px);
+  min-height: 0;
 }
 
 .receiverSettingsGridThree {
@@ -5401,7 +5417,7 @@
 
 .receiverSettingsButton {
   min-width: 0;
-  min-height: clamp(112px, 20dvh, 156px);
+  min-height: clamp(88px, 13dvh, 124px);
   border: 4px solid #626a63;
   border-radius: 8px;
   background: #eef0eb;
@@ -5428,14 +5444,17 @@
 }
 
 .receiverSettingsGridThree .receiverSettingsButton {
-  min-height: clamp(118px, 23dvh, 168px);
+  min-height: clamp(92px, 14dvh, 132px);
   font-size: clamp(1.25rem, 2.45vw, 1.95rem);
 }
 
 .receiverStyleGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  grid-auto-rows: auto;
+  align-content: start;
+  gap: clamp(16px, 2.1dvh, 28px);
+  min-height: 0;
 }
 
 .receiverSettingsButtonSelected {
@@ -5448,6 +5467,7 @@
   position: absolute;
   inset: 0;
   z-index: 50;
+  box-sizing: border-box;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   align-items: center;
@@ -5458,6 +5478,10 @@
   text-align: center;
   touch-action: none;
   user-select: none;
+}
+
+.screenCleaningViewMicrowave {
+  padding: clamp(6px, 1.2dvh, 18px) clamp(6px, 1.2vw, 18px);
 }
 
 .screenCleaningCenter {
@@ -5492,6 +5516,227 @@
   line-height: 0.92;
   letter-spacing: 0;
   text-align: center;
+}
+
+.microwaveCleaningCenter {
+  width: min(100%, 1800px, calc((100dvh - clamp(12px, 2.4dvh, 36px)) * 1.5));
+  max-height: 100%;
+  display: grid;
+  grid-template-rows: auto;
+  justify-items: center;
+  align-items: center;
+}
+
+.microwaveScene {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1536 / 1024;
+  --clean-duration: 120s;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+}
+
+.microwaveScene img {
+  pointer-events: none;
+  user-select: none;
+}
+
+.microwaveMaskedLayer,
+.microwaveBack,
+.microwaveFront {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.microwaveMaskedLayer {
+  z-index: 1;
+  clip-path: inset(7% 0.3% 5.5% 0.3% round 4.2% / 6.6%);
+}
+
+.microwaveBack,
+.microwaveFront {
+  object-fit: contain;
+}
+
+.microwaveBack {
+  z-index: 1;
+}
+
+.cavityClip {
+  position: absolute;
+  left: 11%;
+  top: 12%;
+  width: 68%;
+  height: 76%;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.turntableStage {
+  position: absolute;
+  left: 38%;
+  top: 68%;
+  width: 30%;
+  transform: translate(-50%, -50%) perspective(900px) rotateX(66deg);
+  transform-origin: 50% 50%;
+  transform-style: preserve-3d;
+}
+
+.rotation {
+  width: 100%;
+  transform-origin: center;
+  transform-style: preserve-3d;
+}
+
+.growth {
+  transform-origin: center;
+  transform-style: preserve-3d;
+  animation: microwaveGrow var(--clean-duration) linear forwards;
+}
+
+.heatPulse {
+  transform-origin: center;
+  animation: microwaveHeatPulse 7s ease-in-out 30s infinite;
+}
+
+.growth,
+.heatPulse,
+.microwaveWordmark {
+  transform-origin: center;
+}
+
+.microwaveWordmark {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter:
+    drop-shadow(0 14px 7px rgba(0, 0, 0, 0.34))
+    drop-shadow(0 3px 12px rgba(255, 255, 255, 0.42));
+}
+
+.wordmarkPlain {
+  display: none;
+}
+
+.microwaveFront {
+  z-index: 3;
+}
+
+.microwaveCountdownDisplay {
+  position: absolute;
+  right: 3.1%;
+  top: 20.3%;
+  z-index: 4;
+  width: 11.2%;
+  height: 6.8%;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(141, 255, 178, 0.26);
+  border-radius: 3px;
+  background:
+    linear-gradient(180deg, rgba(14, 38, 26, 0.96), rgba(2, 12, 9, 0.98)),
+    #06110c;
+  color: #8dffb2;
+  font-family: "SFMono-Regular", "Roboto Mono", "Liberation Mono", "Courier New", monospace;
+  font-size: clamp(0.78rem, 2.45vw, 2.25rem);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-shadow:
+    0 0 5px rgba(141, 255, 178, 0.78),
+    0 0 14px rgba(58, 255, 120, 0.5),
+    0 0 26px rgba(58, 255, 120, 0.26);
+  box-shadow:
+    inset 0 0 10px rgba(141, 255, 178, 0.11),
+    0 0 11px rgba(0, 0, 0, 0.55);
+}
+
+.screenCleaningStatusText {
+  max-width: min(1180px, 92vw);
+  font-size: clamp(1.2rem, 2.4vw, 2.5rem) !important;
+  line-height: 1.08 !important;
+}
+
+.microwaveCleaningCenter strong {
+  font-size: clamp(3.6rem, 9vw, 6.8rem);
+}
+
+@keyframes turntableSpin {
+  from {
+    transform: rotateZ(0deg);
+  }
+
+  to {
+    transform: rotateZ(360deg);
+  }
+}
+
+@keyframes microwaveGrow {
+  0%,
+  25% {
+    transform: scaleX(1) scaleY(1);
+  }
+
+  28% {
+    transform: scaleX(1.18) scaleY(1.34);
+  }
+
+  35% {
+    transform: scaleX(1.34) scaleY(1.7);
+  }
+
+  53% {
+    transform: scaleX(1.68) scaleY(2.12);
+  }
+
+  70% {
+    transform: scaleX(2.22) scaleY(2.82);
+  }
+
+  100% {
+    transform: scaleX(3.15) scaleY(3.72);
+  }
+}
+
+@keyframes microwaveHeatPulse {
+  0%,
+  100% {
+    transform: scaleX(1) scaleY(1);
+  }
+
+  45% {
+    transform: scaleX(1.16) scaleY(1.42);
+  }
+
+  62% {
+    transform: scaleX(1.08) scaleY(1.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotation,
+  .growth,
+  .heatPulse {
+    animation: none;
+  }
+
+  .growth {
+    transform: scale(1.2);
+  }
+
+  .wordmarkBulging {
+    display: none;
+  }
+
+  .wordmarkPlain {
+    display: block;
+  }
 }
 
 .applianceListPanel {

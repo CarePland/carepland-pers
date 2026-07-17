@@ -7,6 +7,8 @@ import { describe, it } from "node:test";
 import {
   createReceiverShellPairingSession,
   createReceiverShellSetupClaim,
+  deleteExpiredUnpairedReceiverShellDevices,
+  deleteUnpairedReceiverShellDevice,
   formatReceiverPairingCode,
   getReceiverShellPairingSession,
   issueReceiverShellClaim,
@@ -362,6 +364,95 @@ describe("receiver shell claim store", () => {
           error.status === 404 &&
           error.message === "Receiver binding not found."
       );
+    });
+  });
+
+  it("deletes only unpaired receiver setup placeholders", async () => {
+    await withClaimIndex(async (indexPath) => {
+      const placeholder = await createReceiverShellSetupClaim(
+        { receiverDeviceId: "receiver-placeholder" },
+        { indexPath, now: new Date("2026-06-27T12:00:00.000Z") }
+      );
+
+      const deleted = await deleteUnpairedReceiverShellDevice(
+        { receiverDeviceId: placeholder.receiverDeviceId },
+        { indexPath, now: new Date("2026-06-27T12:01:00.000Z") }
+      );
+      assert.equal(deleted.receiverDeviceId, "receiver-placeholder");
+      assert.equal(deleted.storageSource, "local_file");
+
+      await assert.rejects(
+        () =>
+          deleteUnpairedReceiverShellDevice(
+            { receiverDeviceId: placeholder.receiverDeviceId },
+            { indexPath, now: new Date("2026-06-27T12:02:00.000Z") }
+          ),
+        (error) =>
+          error instanceof ReceiverShellBindingError &&
+          error.status === 404 &&
+          error.message === "Receiver device not found."
+      );
+
+      const paired = await createReceiverShellSetupClaim(
+        { receiverDeviceId: "receiver-paired" },
+        { indexPath, now: new Date("2026-06-27T12:03:00.000Z") }
+      );
+      await pairReceiverShellPairingCode(
+        {
+          careCircleId: "care-circle-1",
+          mainConnectUserPersonId: "person-1",
+          pairingCode: paired.setupCode,
+        },
+        { indexPath, now: new Date("2026-06-27T12:04:00.000Z") }
+      );
+
+      await assert.rejects(
+        () =>
+          deleteUnpairedReceiverShellDevice(
+            { receiverDeviceId: paired.receiverDeviceId },
+            { indexPath, now: new Date("2026-06-27T12:05:00.000Z") }
+          ),
+        (error) =>
+          error instanceof ReceiverShellBindingError &&
+          error.status === 409 &&
+          error.message === "Only unpaired setup Receivers can be deleted."
+      );
+    });
+  });
+
+  it("expires unpaired receiver setup placeholders after thirty minutes", async () => {
+    await withClaimIndex(async (indexPath) => {
+      const expired = await createReceiverShellSetupClaim(
+        { receiverDeviceId: "receiver-expired-placeholder" },
+        { indexPath, now: new Date("2026-06-27T12:00:00.000Z") }
+      );
+      const fresh = await createReceiverShellSetupClaim(
+        { receiverDeviceId: "receiver-fresh-placeholder" },
+        { indexPath, now: new Date("2026-06-27T12:20:00.000Z") }
+      );
+
+      await deleteExpiredUnpairedReceiverShellDevices({
+        indexPath,
+        now: new Date("2026-06-27T12:31:00.000Z"),
+      });
+
+      await assert.rejects(
+        () =>
+          deleteUnpairedReceiverShellDevice(
+            { receiverDeviceId: expired.receiverDeviceId },
+            { indexPath, now: new Date("2026-06-27T12:32:00.000Z") }
+          ),
+        (error) =>
+          error instanceof ReceiverShellBindingError &&
+          error.status === 404 &&
+          error.message === "Receiver device not found."
+      );
+
+      const deletedFresh = await deleteUnpairedReceiverShellDevice(
+        { receiverDeviceId: fresh.receiverDeviceId },
+        { indexPath, now: new Date("2026-06-27T12:33:00.000Z") }
+      );
+      assert.equal(deletedFresh.receiverDeviceId, "receiver-fresh-placeholder");
     });
   });
 

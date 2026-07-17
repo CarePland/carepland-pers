@@ -58,6 +58,7 @@ export type ReceiverSetupStepProps = {
   currentReceiverUser: ConnectPersPerson | null;
   onCancelPairingChange: () => void;
   onCancelReceiverUserChange: () => void;
+  onPairingComplete: () => Promise<void>;
   receiverUserPreparationStatus: string;
   selectedContact: ReceiverContactOption | null;
   selectedDevice: ConnectReceiverDevice | null;

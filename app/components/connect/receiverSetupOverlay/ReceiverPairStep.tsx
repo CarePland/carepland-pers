@@ -13,6 +13,7 @@ export function ReceiverPairStep({
   draft,
   isReturningReceiverSetup,
   onCancelPairingChange,
+  onPairingComplete,
   receiverUrl,
   selectedDevice,
   selectedUser,
@@ -22,6 +23,7 @@ export function ReceiverPairStep({
   | "draft"
   | "isReturningReceiverSetup"
   | "onCancelPairingChange"
+  | "onPairingComplete"
   | "selectedDevice"
   | "selectedUser"
   | "setDraft"
@@ -29,9 +31,10 @@ export function ReceiverPairStep({
   receiverUrl: string;
 }) {
   const codeReady = browserReceiverPairingCodeReady(draft.pairingCode);
-  const existingPairingReady = Boolean(
-    isReturningReceiverSetup && selectedDevice?.pairedAt && draft.pairingStatus === "paired"
-  );
+  const pairingReady = draft.pairingStatus === "paired" || Boolean(selectedDevice?.pairedAt);
+  const readyMessage = isReturningReceiverSetup
+    ? "This Receiver is already paired."
+    : "Receiver paired successfully.";
   const receiverUserMissing = !selectedUser;
 
   async function checkCode() {
@@ -98,6 +101,9 @@ export function ReceiverPairStep({
         pairingStatus: "paired",
         selectedReceiverDeviceId: payload.receiverDeviceId || current.selectedReceiverDeviceId,
       }));
+      void onPairingComplete().catch((error) => {
+        console.warn("Receiver Setup could not refresh after pairing.", error);
+      });
     } catch {
       setDraft((current) => ({ ...current, pairingStatus: "error" }));
     }
@@ -124,9 +130,9 @@ export function ReceiverPairStep({
         </button>
       ) : null}
 
-      {existingPairingReady ? (
+      {pairingReady ? (
         <div className="grid justify-items-center gap-4">
-          <ReceiverSetupStatus tone="good">This Receiver is already paired.</ReceiverSetupStatus>
+          <ReceiverSetupStatus tone="good">{readyMessage}</ReceiverSetupStatus>
           <button
             className="min-h-12 rounded-lg border border-[#cbd9e7] bg-white px-5 text-base font-black text-[#173150] hover:bg-[#edf5fc] focus:outline-none focus:ring-2 focus:ring-[#4e84b2]"
             onClick={() =>
@@ -191,9 +197,7 @@ export function ReceiverPairStep({
         </>
       ) : null}
 
-      {!existingPairingReady && draft.pairingStatus === "paired" ? (
-        <ReceiverSetupStatus tone="good">Receiver paired successfully.</ReceiverSetupStatus>
-      ) : draft.pairingStatus === "pending" ? (
+      {draft.pairingStatus === "pending" ? (
         <ReceiverSetupStatus>Pairing Receiver. This may take a moment.</ReceiverSetupStatus>
       ) : draft.pairingStatus === "error" ? (
         <ReceiverSetupStatus tone="error">

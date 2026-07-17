@@ -1,10 +1,10 @@
-# Receiver Modern Experiment
+# Receiver Modern
 
-Receiver Modern is an experimental tablet-first presentation layer for the hosted React Receiver. It exists alongside Receiver Classic and does not replace appliance-oriented Receiver layouts.
+Receiver Modern is an alternate tablet-first presentation layer for the hosted React Receiver. It exists alongside Receiver Appliance, which is the default appliance-oriented layout.
 
 ## Purpose
 
-Receiver Classic remains optimized for seniors, cognitive accessibility, dedicated appliances, assisted living, and large-touch appliance use. Receiver Modern explores the same Receiver workflows for adult children, family caregivers, tech-comfortable adults, self-use, browsers, tablets, and larger phones.
+Receiver Appliance remains optimized for seniors, cognitive accessibility, dedicated appliances, assisted living, and large-touch appliance use. Receiver Modern presents the same Receiver workflows for adult children, family caregivers, tech-comfortable adults, self-use, browsers, tablets, and larger phones.
 
 ## Design Philosophy
 
@@ -16,7 +16,7 @@ Receiver Modern must not become a chat application, admin dashboard, settings sc
 
 ## Switching
 
-Use `receiverLayout=modern` on the Receiver URL to open Receiver Modern. The Modern header includes a `Classic` button that removes the modern layout selection. The existing Receiver Classic layout remains the default.
+Use `receiverLayout=modern` on the Receiver URL to open Receiver Modern. The normal Receiver style choices are Appliance and Modern. Classic, Focus, original Ask/Tell, and Old Web are hidden trial layouts that should appear only when the Admin display toggle is enabled.
 
 ## Boundaries
 

@@ -132,10 +132,9 @@ export function ReceiverSetupOverlay({
     [activeDevices, connectContext]
   );
   const selectedDevice = useMemo(() => {
-    if (!selectedReceiverKey) return null;
-    const keyedDevice =
-      activeDevices.find((device) => receiverDeviceKey(device) === selectedReceiverKey) ?? null;
-    if (keyedDevice) return keyedDevice;
+    const keyedDevice = selectedReceiverKey
+      ? activeDevices.find((device) => receiverDeviceKey(device) === selectedReceiverKey) ?? null
+      : null;
     const draftDevice = draft.selectedReceiverDeviceId
       ? activeDevices.find(
           (device) =>
@@ -143,8 +142,7 @@ export function ReceiverSetupOverlay({
             device.receiverId === draft.selectedReceiverDeviceId
         )
       : null;
-    if (draftDevice) return draftDevice;
-    return null;
+    return keyedDevice ?? draftDevice ?? null;
   }, [activeDevices, draft.selectedReceiverDeviceId, selectedReceiverKey]);
   const savedReceiverUserPersonId = selectedDevice?.mainConnectUserPersonId?.trim() || "";
   const savedReceiverContactUserId = selectedDevice?.receiverContactUserId?.trim() || "";
@@ -534,6 +532,7 @@ export function ReceiverSetupOverlay({
     isSelfContact,
     onCancelPairingChange: cancelPairingChange,
     onCancelReceiverUserChange: cancelReceiverUserChange,
+    onPairingComplete: onRefresh,
     receiverUserPreparationStatus,
     selectedContact,
     selectedDevice,

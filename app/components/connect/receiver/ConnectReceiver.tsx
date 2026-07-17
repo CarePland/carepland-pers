@@ -74,7 +74,14 @@ import {
   serializeReceiverTalkResult,
 } from "../../../lib/platform/ai/receiverTalkInterpreter";
 import { condenseReceiverSpeechMessage } from "../../../lib/platform/ai/messageCondensation";
-import { formatBrowserReceiverPairingCode } from "../../../lib/connect/receiverShell/browserPairing";
+import {
+  browserReceiverShouldRequestPairing,
+  formatBrowserReceiverPairingCode,
+} from "../../../lib/connect/receiverShell/browserPairing";
+import {
+  adminItemsVisibilityChangedEvent,
+  adminItemsVisibilityStorageKey,
+} from "../../../lib/platform/adminItemsVisibility";
 import {
   formatReceiverCacheTimestamp,
   readReceiverAppointmentCache,
@@ -571,7 +578,7 @@ type ModalState =
   | { type: "contact"; contactId: string }
   | { type: "offlineNotice" }
   | { type: "ask"; confirmExit?: boolean; surface?: "ask_tell" }
-  | { type: "receiverSettings"; view?: "home" | "style" }
+  | { type: "receiverSettings"; view?: "home" | "style" | "cleanScreenTheme" }
   | { type: "screenCleaningConfirm" }
   | { type: "askRecordReview"; surface?: "ask_tell"; transcript: string }
   | { type: "askAnswer"; answer: AskAnswer; page?: number }
@@ -798,6 +805,8 @@ const defaultSoundSettings: SoundSettings = {
   retroSounds: true,
 };
 
+type ScreenCleaningTheme = "classic" | "microwave";
+
 type StoredReceiverModal =
   | { type: "contact"; contactId: string }
   | { type: "ask" }
@@ -814,6 +823,7 @@ type StoredReceiverSession = {
   selectedContactId?: string;
   /** Legacy local key. Do not restore this as active identity. */
   selectedReceiverUserId?: string;
+  screenCleaningTheme?: ScreenCleaningTheme;
   soundSettings?: Partial<SoundSettings>;
   started?: boolean;
 };
@@ -830,66 +840,6 @@ type FullscreenDocument = Document & {
 function readInitialPreviewMode() {
   if (typeof window === "undefined") return false;
   return new URLSearchParams(window.location.search).get("preview") === "1";
-}
-
-function redirectGxvLikeBrowserToClassicReceiver() {
-  if (typeof window === "undefined") return false;
-  if (window.location.pathname.includes("/connect/receiver/legacy")) return false;
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("receiver_runtime") === "classic_webview") return false;
-  if (params.get("receiver_runtime") === "modern_web") return false;
-  if (params.get("preview") === "1") return false;
-
-  const screenWidth = Number(window.screen?.width || 0);
-  const screenHeight = Number(window.screen?.height || 0);
-  const viewportWidth = Number(window.innerWidth || 0);
-  const viewportHeight = Number(window.innerHeight || 0);
-  const shortSide = Math.min(nonZeroDisplaySide(screenWidth), nonZeroDisplaySide(screenHeight));
-  const longSide = Math.max(nonZeroDisplaySide(screenWidth), nonZeroDisplaySide(screenHeight));
-  const viewportShortSide = Math.min(
-    nonZeroDisplaySide(viewportWidth),
-    nonZeroDisplaySide(viewportHeight)
-  );
-  const viewportLongSide = Math.max(
-    nonZeroDisplaySide(viewportWidth),
-    nonZeroDisplaySide(viewportHeight)
-  );
-  const userAgent = window.navigator.userAgent.toLowerCase();
-  const gxvUserAgent = userAgent.includes("gxv3370") || userAgent.includes("grandstream");
-  const androidGxvSized =
-    userAgent.includes("android") &&
-    (nearDisplaySize(shortSide, longSide, 600, 1024) ||
-      nearDisplaySize(viewportShortSide, viewportLongSide, 600, 1024));
-
-  if (!gxvUserAgent && !androidGxvSized) return false;
-
-  params.set("device", params.get("device") || "gxv3370");
-  params.set("hardwareProfile", params.get("hardwareProfile") || "grandstream_gxv3370");
-  params.set("uiLayout", params.get("uiLayout") || "desk_phone_1024x600");
-  params.set("receiver_runtime", "classic_webview");
-  if (screenWidth) params.set("displayWidthPx", String(screenWidth));
-  if (screenHeight) params.set("displayHeightPx", String(screenHeight));
-  if (window.devicePixelRatio) params.set("displayDensity", String(window.devicePixelRatio));
-  window.location.replace(`/connect/receiver/legacy?${params.toString()}`);
-  return true;
-}
-
-function nearDisplaySize(
-  shortSide: number,
-  longSide: number,
-  expectedShort: number,
-  expectedLong: number
-) {
-  return (
-    Number.isFinite(shortSide) &&
-    Number.isFinite(longSide) &&
-    Math.abs(shortSide - expectedShort) <= 90 &&
-    Math.abs(longSide - expectedLong) <= 140
-  );
-}
-
-function nonZeroDisplaySide(value: number) {
-  return value > 0 ? value : Number.POSITIVE_INFINITY;
 }
 
 function readNativeReceiverProvisioningConfig(): NativeReceiverProvisioningConfig {
@@ -931,11 +881,14 @@ function readReceiverProfileSelection() {
   if (typeof window === "undefined") {
     return {
       hardwareProfile: "",
-      uiLayout: "default_receiver",
+      uiLayout: "desk_phone_1024x600",
     };
   }
   const params = new URLSearchParams(window.location.search);
   const nativeConfig = readNativeReceiverProvisioningConfig();
+  const presentationLayout = normalizedProfileValue(
+    params.get("receiverLayout") || params.get("receiver_layout") || params.get("ui")
+  );
   const explicitUiLayout = normalizedProfileValue(params.get("uiLayout") || params.get("layout") || nativeConfig.uiLayout);
   const legacyDevice = normalizedProfileValue(params.get("device") || nativeConfig.deviceProfile);
   const hardwareProfile = normalizedProfileValue(
@@ -972,6 +925,7 @@ function readReceiverProfileSelection() {
   }
 
   if (
+    presentationLayout === "modern" ||
     explicitUiLayout === "default_receiver" ||
     ["default", "web", "tablet", "android_receiver"].includes(legacyDevice) ||
     ["generic_android_phone", "generic_android_tablet", "generic_landscape_android", "web"].includes(hardwareProfile)
@@ -985,8 +939,8 @@ function readReceiverProfileSelection() {
 
   const storedDeskPhone = window.localStorage.getItem(receiverDeviceProfileStorageKey) === "gxv3370";
   return {
-    hardwareProfile: storedDeskPhone ? "stored_gxv3370" : hardwareProfile,
-    uiLayout: storedDeskPhone ? "desk_phone_1024x600" : "default_receiver",
+    hardwareProfile: storedDeskPhone ? "stored_gxv3370" : hardwareProfile || "desk_phone_1024x600",
+    uiLayout: "desk_phone_1024x600",
   };
 }
 
@@ -995,7 +949,7 @@ function readInitialDeskPhoneMode() {
 }
 
 function readInitialGxvHomeLayout(): GxvHomeLayout {
-  if (typeof window === "undefined") return "classic";
+  if (typeof window === "undefined") return "ask_tell_2";
   const params = new URLSearchParams(window.location.search);
   const value = normalizedProfileValue(
     params.get("homeLayout") ||
@@ -1003,18 +957,19 @@ function readInitialGxvHomeLayout(): GxvHomeLayout {
       params.get("gxvHome") ||
       params.get("gxv_home")
   );
+  const canUseTrialLayouts = readReceiverAdminLayoutAccess();
 
   if (["ask_tell_2", "asktell2", "ask-tell-2", "ask_tell_v2", "asktellv2"].includes(value)) {
     return "ask_tell_2";
   }
 
-  if (["ask_tell", "asktell", "ask-tell"].includes(value)) {
+  if (canUseTrialLayouts && ["ask_tell", "asktell", "ask-tell"].includes(value)) {
     return "ask_tell";
   }
 
-  return ["focus", "focus_v1", "today_focus", "v1"].includes(value)
+  return canUseTrialLayouts && ["focus", "focus_v1", "today_focus", "v1"].includes(value)
     ? "focus_v1"
-    : "classic";
+    : "ask_tell_2";
 }
 
 type GxvHomeLayout = "ask_tell" | "ask_tell_2" | "classic" | "focus_v1";
@@ -1031,6 +986,11 @@ function readInitialReceiverPresentationLayout(): ReceiverPresentationLayout {
   );
 
   return ["modern", "receiver_modern"].includes(value) ? "modern" : "classic";
+}
+
+function readReceiverAdminLayoutAccess() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(adminItemsVisibilityStorageKey) === "true";
 }
 
 function statusLooksEnabled(value?: string | null) {
@@ -1134,6 +1094,12 @@ function readInitialReceiverUsers() {
 function readInitialReceiverRegistration() {
   if (typeof window === "undefined") return false;
   return Boolean(readStoredReceiverBinding().receiverDeviceId) || readLocalTestReceiverProvisioning();
+}
+
+function readInitialReceiverBindingCheckPending() {
+  if (typeof window === "undefined") return false;
+  if (readInitialReceiverRegistration() || readLocalTestReceiverProvisioning()) return false;
+  return Boolean(readReceiverDeviceId() && readReceiverInstallId());
 }
 
 function readLocalTestReceiverProvisioning() {
@@ -1498,6 +1464,10 @@ function readInitialSoundSettings(): SoundSettings {
         ? storedSettings.retroSounds
         : defaultSoundSettings.retroSounds,
   };
+}
+
+function readInitialScreenCleaningTheme(): ScreenCleaningTheme {
+  return readStoredReceiverSession().screenCleaningTheme === "microwave" ? "microwave" : "classic";
 }
 
 function readInitialMessageTextSize(): ReaderTextSize {
@@ -2288,9 +2258,9 @@ function resolveReceiverAttentionItem(input: {
 export function ConnectReceiver() {
   const initialDevicePixelRatioRef = useRef(initialReceiverDevicePixelRatio());
   const [deskPhoneMode] = useState(readInitialDeskPhoneMode);
-  const [receiverPresentationLayout, setReceiverPresentationLayout] =
-    useState<ReceiverPresentationLayout>(readInitialReceiverPresentationLayout);
+  const [receiverPresentationLayout] = useState<ReceiverPresentationLayout>(readInitialReceiverPresentationLayout);
   const [gxvHomeLayout, setGxvHomeLayout] = useState<GxvHomeLayout>(readInitialGxvHomeLayout);
+  const [adminLayoutAccess, setAdminLayoutAccess] = useState(readReceiverAdminLayoutAccess);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [nativeReceiverShell] = useState(readInitialNativeReceiverShell);
   const [kioskManagedFullscreen] = useState(readInitialKioskManagedFullscreen);
@@ -2324,6 +2294,9 @@ export function ConnectReceiver() {
     useState<ReceiverUser[]>(readInitialReceiverUsers);
   const [selectedReceiverUserId, setSelectedReceiverUserId] = useState(readInitialSelectedReceiverUserId);
   const [receiverRegistered, setReceiverRegistered] = useState(readInitialReceiverRegistration);
+  const [receiverBindingCheckPending, setReceiverBindingCheckPending] = useState(
+    readInitialReceiverBindingCheckPending
+  );
   const [receiverSetupError, setReceiverSetupError] = useState("");
   const [browserPairingCode, setBrowserPairingCode] = useState("");
   const [browserPairingExpiresAt, setBrowserPairingExpiresAt] = useState("");
@@ -2397,6 +2370,8 @@ export function ConnectReceiver() {
     useState<number | null>(null);
   const [screenCleaningSession, setScreenCleaningSession] =
     useState<ScreenCleaningSession | null>(null);
+  const [screenCleaningTheme, setScreenCleaningTheme] =
+    useState<ScreenCleaningTheme>(readInitialScreenCleaningTheme);
   const [contactDraft, setContactDraft] = useState(() =>
     limitReceiverTextInput(readStoredReceiverSession().contactDraft || "")
   );
@@ -2487,7 +2462,17 @@ export function ConnectReceiver() {
   const attemptTraceStory = buildReceiverAttemptTraceStory(attemptDiagnosticEntries);
 
   useEffect(() => {
-    redirectGxvLikeBrowserToClassicReceiver();
+    function syncAdminLayoutAccess() {
+      setAdminLayoutAccess(readReceiverAdminLayoutAccess());
+    }
+
+    syncAdminLayoutAccess();
+    window.addEventListener(adminItemsVisibilityChangedEvent, syncAdminLayoutAccess);
+    window.addEventListener("storage", syncAdminLayoutAccess);
+    return () => {
+      window.removeEventListener(adminItemsVisibilityChangedEvent, syncAdminLayoutAccess);
+      window.removeEventListener("storage", syncAdminLayoutAccess);
+    };
   }, []);
 
   useEffect(() => {
@@ -2748,7 +2733,7 @@ export function ConnectReceiver() {
       }
 
       resetTodayFocusList([]);
-      setTodayFocusStatus("No Today’s Focus items are ready for this person.");
+      setTodayFocusStatus("You have no Focus items today.");
     } catch {
       markReceiverOffline();
       // Today's Focus should improve the home screen when available, never block it.
@@ -3341,6 +3326,7 @@ export function ConnectReceiver() {
       mainConnectUserPersonId: selectedReceiverUserId || undefined,
       messageTextSize,
       modal: storableReceiverModal(modal),
+      screenCleaningTheme,
       selectedContactId,
       soundSettings,
       started,
@@ -3353,6 +3339,7 @@ export function ConnectReceiver() {
     messageTextSize,
     modal,
     receiverSessionRestored,
+    screenCleaningTheme,
     selectedContactId,
     selectedReceiverUserId,
     soundSettings,
@@ -3373,9 +3360,13 @@ export function ConnectReceiver() {
     if (readLocalTestReceiverProvisioning()) return;
     const receiverDeviceId = readReceiverDeviceId();
     const receiverInstallId = readReceiverInstallId();
-    if (!receiverDeviceId || !receiverInstallId) return;
+    if (!receiverDeviceId || !receiverInstallId) {
+      setReceiverBindingCheckPending(false);
+      return;
+    }
     let cancelled = false;
     let hasConfirmedBinding = false;
+    setReceiverBindingCheckPending(true);
 
     async function verifyBinding() {
       try {
@@ -3393,6 +3384,7 @@ export function ConnectReceiver() {
         setReceiverContactDisplayName(payload.receiverContactDisplayName?.trim() || "");
         setReceiverContactUserId(payload.receiverContactUserId?.trim() || "");
         setReceiverContactIsReceiverUser(payload.receiverContactIsReceiverUser === true);
+        setReceiverBindingCheckPending(false);
         applyBoundReceiverActivePerson(
           payload.mainConnectUserPersonId,
           payload.mainConnectUserDisplayName
@@ -3408,11 +3400,13 @@ export function ConnectReceiver() {
           setActiveReceiverUsers(receiverUsers);
           setSelectedReceiverUserId("");
           setReceiverSetupError(message);
+          setReceiverBindingCheckPending(false);
           return;
         }
         if (!hasConfirmedBinding) {
           setStatus("Receiver setup check is pending.");
         }
+        setReceiverBindingCheckPending(false);
       }
     }
 
@@ -3503,6 +3497,7 @@ export function ConnectReceiver() {
         setReceiverContactDisplayName(payload.receiverContactDisplayName?.trim() || "");
         setReceiverContactUserId(payload.receiverContactUserId?.trim() || "");
         setReceiverContactIsReceiverUser(payload.receiverContactIsReceiverUser === true);
+        setReceiverBindingCheckPending(false);
         applyBoundReceiverActivePerson(
           payload.mainConnectUserPersonId,
           payload.mainConnectUserDisplayName
@@ -3520,6 +3515,7 @@ export function ConnectReceiver() {
         if (isReceiverSetupRequiredMessage(message)) {
           clearReceiverBinding();
           setReceiverRegistered(false);
+          setReceiverBindingCheckPending(false);
         }
         setReceiverSetupError(message);
       }
@@ -3533,10 +3529,21 @@ export function ConnectReceiver() {
   }, [receiverRegistered]);
 
   useEffect(() => {
-    if (!receiverSessionRestored || !started || receiverRegistered || selectedReceiverUserId) {
+    if (
+      !browserReceiverShouldRequestPairing({
+        bindingCheckPending: receiverBindingCheckPending,
+        hasReceiverIdentity:
+          !receiverSetupError && Boolean(readReceiverDeviceId() && readReceiverInstallId()),
+        hasSetupClaim: Boolean(readReceiverShellClaim()),
+        localTestProvisioning: readLocalTestReceiverProvisioning(),
+        receiverRegistered,
+        receiverSessionRestored,
+        selectedReceiverUserId,
+        started,
+      })
+    ) {
       return undefined;
     }
-    if (readLocalTestReceiverProvisioning() || readReceiverShellClaim()) return undefined;
 
     let cancelled = false;
     let pollTimer: number | undefined;
@@ -3560,6 +3567,7 @@ export function ConnectReceiver() {
       saveReceiverBinding(payload);
       setReceiverLocationLabel((current) => payload.locationLabel?.trim() || current);
       setReceiverRegistered(true);
+      setReceiverBindingCheckPending(false);
       applyBoundReceiverActivePerson(
         payload.mainConnectUserPersonId,
         payload.mainConnectUserDisplayName
@@ -3650,7 +3658,14 @@ export function ConnectReceiver() {
       cancelled = true;
       if (pollTimer) window.clearTimeout(pollTimer);
     };
-  }, [receiverRegistered, receiverSessionRestored, selectedReceiverUserId, started]);
+  }, [
+    receiverBindingCheckPending,
+    receiverRegistered,
+    receiverSetupError,
+    receiverSessionRestored,
+    selectedReceiverUserId,
+    started,
+  ]);
 
   useEffect(() => {
     let ignore = false;
@@ -4089,25 +4104,6 @@ export function ConnectReceiver() {
     }
   }
 
-  function chooseReceiverPresentationLayout(nextLayout: ReceiverPresentationLayout) {
-    setReceiverPresentationLayout(nextLayout);
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      if (nextLayout === "modern") {
-        url.searchParams.set("receiverLayout", "modern");
-      } else {
-        url.searchParams.delete("receiverLayout");
-        if (normalizedProfileValue(url.searchParams.get("homeLayout")) === "modern") {
-          url.searchParams.delete("homeLayout");
-        }
-        if (normalizedProfileValue(url.searchParams.get("ui")) === "modern") {
-          url.searchParams.delete("ui");
-        }
-      }
-      window.history.replaceState(null, "", url.toString());
-    }
-  }
-
   function openClassicWebReceiverLayout() {
     setLayoutMenuOpen(false);
     if (nativeReceiverShell) return;
@@ -4141,50 +4137,18 @@ export function ConnectReceiver() {
         <button
           type="button"
           role="menuitemradio"
-          aria-checked={gxvHomeLayout === "classic"}
-          onClick={(event) => {
-            event.stopPropagation();
-            chooseGxvHomeLayout("classic");
-          }}
-        >
-          Classic
-        </button>
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={gxvHomeLayout === "focus_v1"}
-          onClick={(event) => {
-            event.stopPropagation();
-            chooseGxvHomeLayout("focus_v1");
-          }}
-        >
-          Focus
-        </button>
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={gxvHomeLayout === "ask_tell"}
-          onClick={(event) => {
-            event.stopPropagation();
-            chooseGxvHomeLayout("ask_tell");
-          }}
-        >
-          Ask/Tell
-        </button>
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={gxvHomeLayout === "ask_tell_2"}
+          aria-checked={deskPhoneMode && gxvHomeLayout === "ask_tell_2"}
           onClick={(event) => {
             event.stopPropagation();
             chooseGxvHomeLayout("ask_tell_2");
           }}
         >
-          Ask/Tell 2
+          Appliance
         </button>
         <button
           type="button"
-          role="menuitem"
+          role="menuitemradio"
+          aria-checked={receiverModernEnabled}
           onClick={(event) => {
             event.stopPropagation();
             openModernReceiverLayout();
@@ -4192,16 +4156,53 @@ export function ConnectReceiver() {
         >
           Modern
         </button>
-        <button
-          type="button"
-          role="menuitem"
-          onClick={(event) => {
-            event.stopPropagation();
-            openClassicWebReceiverLayout();
-          }}
-        >
-          Old Web
-        </button>
+        {adminLayoutAccess ? (
+          <>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={gxvHomeLayout === "classic"}
+              onClick={(event) => {
+                event.stopPropagation();
+                chooseGxvHomeLayout("classic");
+              }}
+            >
+              Classic
+            </button>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={gxvHomeLayout === "focus_v1"}
+              onClick={(event) => {
+                event.stopPropagation();
+                chooseGxvHomeLayout("focus_v1");
+              }}
+            >
+              Focus
+            </button>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={gxvHomeLayout === "ask_tell"}
+              onClick={(event) => {
+                event.stopPropagation();
+                chooseGxvHomeLayout("ask_tell");
+              }}
+            >
+              Ask/Tell
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(event) => {
+                event.stopPropagation();
+                openClassicWebReceiverLayout();
+              }}
+            >
+              Old Web
+            </button>
+          </>
+        ) : null}
       </div>
     );
   }
@@ -5480,10 +5481,22 @@ export function ConnectReceiver() {
     setStatus("Receiver style settings are open.");
   }
 
+  function openCleanScreenThemeSettings() {
+    setModal({ type: "receiverSettings", view: "cleanScreenTheme" });
+    setLayoutMenuOpen(false);
+    setStatus("Clean Screen theme settings are open.");
+  }
+
   function chooseGxvHomeLayoutFromSettings(nextLayout: GxvHomeLayout) {
     chooseGxvHomeLayout(nextLayout);
     setModal(null);
     setStatus("Receiver style updated.");
+  }
+
+  function chooseScreenCleaningThemeFromSettings(nextTheme: ScreenCleaningTheme) {
+    setScreenCleaningTheme(nextTheme);
+    setModal({ type: "receiverSettings" });
+    setStatus("Clean Screen theme updated.");
   }
 
   function maximizeReceiverFromSettings() {
@@ -7459,6 +7472,20 @@ function stopReceiverCue() {
   }
 
   if (!selectedReceiverUser.id) {
+    if (receiverBindingCheckPending) {
+      return (
+        <main className={styles.registrationScreen}>
+          <section className={styles.registrationPanel} aria-live="polite">
+            <p>CarePland Connect</p>
+            <h1>Receiver</h1>
+            <span>Checking Receiver setup</span>
+            <strong>Confirming this Receiver is paired.</strong>
+            <small>CarePland will continue automatically when setup is confirmed.</small>
+          </section>
+        </main>
+      );
+    }
+
     return (
       <main className={styles.registrationScreen}>
         <section className={styles.registrationPanel} aria-live="polite">
@@ -8632,6 +8659,8 @@ function stopReceiverCue() {
               receiverFullscreenActive={fullscreenActive}
               onChooseGxvHomeLayout={chooseGxvHomeLayoutFromSettings}
               onOpenClassicWebReceiverLayout={openClassicWebReceiverLayout}
+              onChooseScreenCleaningTheme={chooseScreenCleaningThemeFromSettings}
+              onOpenCleanScreenThemeSettings={openCleanScreenThemeSettings}
               onOpenModernReceiverLayout={openModernReceiverLayout}
               onOpenOptionalSounds={openOptionalSoundsFromSettings}
               onOpenReceiverStyleSettings={openReceiverStyleSettings}
@@ -8645,6 +8674,8 @@ function stopReceiverCue() {
               onTestSound={testOptionalSound}
               onToggleAutoHearPreference={toggleAutoHearPreference}
               onUpdateSoundSetting={updateSoundSetting}
+              screenCleaningTheme={screenCleaningTheme}
+              showExperimentalReceiverLayouts={adminLayoutAccess}
               showReceiverFullscreenSetting={!kioskManagedFullscreen && !nativeReceiverShell}
             />
           ) : null}
@@ -8685,6 +8716,7 @@ function stopReceiverCue() {
             <ScreenCleaningView
               message={screenCleaningSession?.message || screenCleaningMessages[0]}
               secondsRemaining={screenCleaningSecondsRemaining}
+              theme={screenCleaningTheme}
             />
           ) : null}
           {receiverDiagnosticMode ? (
@@ -9047,13 +9079,17 @@ function stopReceiverCue() {
 function ScreenCleaningView({
   message,
   secondsRemaining,
+  theme,
 }: {
   message: string;
   secondsRemaining: number;
+  theme: ScreenCleaningTheme;
 }) {
   return (
     <div
-      className={styles.screenCleaningView}
+      className={`${styles.screenCleaningView} ${
+        theme === "microwave" ? styles.screenCleaningViewMicrowave : ""
+      }`}
       role="status"
       aria-live="polite"
       onClickCapture={(event) => {
@@ -9077,10 +9113,102 @@ function ScreenCleaningView({
         event.stopPropagation();
       }}
     >
-      <div className={styles.screenCleaningCenter}>
-        <p>{message}</p>
-        <strong>{formatCountdownSeconds(secondsRemaining)}</strong>
-      </div>
+      {theme === "microwave" ? (
+        <div className={styles.microwaveCleaningCenter}>
+          <div className={styles.microwaveScene} aria-hidden="true">
+            <div className={styles.microwaveMaskedLayer}>
+              <img
+                className={styles.microwaveBack}
+                src="/connect/receiver/microwave-back.png"
+                alt=""
+              />
+              <div className={styles.cavityClip}>
+                <div className={styles.turntableStage}>
+                  <div className={styles.rotation}>
+                    <div className={styles.growth}>
+                      <div className={styles.heatPulse}>
+                        <svg
+                          className={styles.microwaveWordmark}
+                          viewBox="0 0 1638 960"
+                          aria-hidden="true"
+                          focusable="false"
+                        >
+                          <defs>
+                            <filter
+                              id="microwave-wordmark-bulge"
+                              x="-45%"
+                              y="-45%"
+                              width="190%"
+                              height="190%"
+                              colorInterpolationFilters="sRGB"
+                            >
+                              <feImage
+                                href="/connect/receiver/wordmark-bulge-map.png"
+                                result="bulgeMap"
+                                preserveAspectRatio="none"
+                                x="0"
+                                y="0"
+                                width="1638"
+                                height="960"
+                              />
+                              <feDisplacementMap
+                                in="SourceGraphic"
+                                in2="bulgeMap"
+                                xChannelSelector="R"
+                                yChannelSelector="G"
+                                scale="0"
+                              >
+                                <animate
+                                  attributeName="scale"
+                                  dur="120s"
+                                  fill="freeze"
+                                  keyTimes="0;0.25;0.28;0.35;0.53;0.7;0.88;1"
+                                  values="0;0;115;175;235;300;360;430"
+                                />
+                              </feDisplacementMap>
+                            </filter>
+                          </defs>
+                          <image
+                            className={styles.wordmarkBulging}
+                            href="/connect/receiver/carepland-wordmark.svg"
+                            width="1638"
+                            height="960"
+                            preserveAspectRatio="xMidYMid meet"
+                            filter="url(#microwave-wordmark-bulge)"
+                          />
+                          <image
+                            className={styles.wordmarkPlain}
+                            href="/connect/receiver/carepland-wordmark.svg"
+                            width="1638"
+                            height="960"
+                            preserveAspectRatio="xMidYMid meet"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <img
+              className={styles.microwaveFront}
+              src="/connect/receiver/microwave-front.png"
+              alt=""
+            />
+            <div className={styles.microwaveCountdownDisplay}>
+              {formatCountdownSeconds(secondsRemaining)}
+            </div>
+          </div>
+          <span className={styles.srOnly}>
+            Screen cleaning. {formatCountdownSeconds(secondsRemaining)} remaining.
+          </span>
+        </div>
+      ) : (
+        <div className={styles.screenCleaningCenter}>
+          <p>{message}</p>
+          <strong>{formatCountdownSeconds(secondsRemaining)}</strong>
+        </div>
+      )}
     </div>
   );
 }
@@ -9483,6 +9611,7 @@ function ReceiverModal({
   onConfirmAskTellExit,
   onCompleteTodayFocusItem,
   onContactDraftChange,
+  onChooseScreenCleaningTheme,
   onEscalateAskRecovery,
   onMessageTextSizeChange,
   onOpenMessageFromAllMessages,
@@ -9495,6 +9624,7 @@ function ReceiverModal({
   onResolveSoundHelp,
   onResetSoundTestState,
   onMaximizeReceiver,
+  onOpenCleanScreenThemeSettings,
   receiverFullscreenActive,
   onChooseGxvHomeLayout,
   onOpenClassicWebReceiverLayout,
@@ -9512,6 +9642,8 @@ function ReceiverModal({
   onTestSound,
   onToggleAutoHearPreference,
   onUpdateSoundSetting,
+  screenCleaningTheme,
+  showExperimentalReceiverLayouts,
   showReceiverFullscreenSetting,
 }: {
   applianceMode: boolean;
@@ -9551,6 +9683,7 @@ function ReceiverModal({
   onCallContact: (contact: Contact) => void;
   onCancelCondensedMessage: (condensation: ReceiverMessageCondensationModal) => void;
   onClose: () => void;
+  onChooseScreenCleaningTheme: (nextTheme: ScreenCleaningTheme) => void;
   onConfirmAskTellExit: () => void;
   onCompleteTodayFocusItem: (
     item: ReceiverTodayFocusHomeItem,
@@ -9572,6 +9705,7 @@ function ReceiverModal({
   receiverFullscreenActive: boolean;
   onChooseGxvHomeLayout: (nextLayout: GxvHomeLayout) => void;
   onOpenClassicWebReceiverLayout: () => void;
+  onOpenCleanScreenThemeSettings: () => void;
   onOpenModernReceiverLayout: () => void;
   onOpenOptionalSounds: () => void;
   onOpenReceiverStyleSettings: () => void;
@@ -9593,6 +9727,8 @@ function ReceiverModal({
   onTestSound: () => void;
   onToggleAutoHearPreference: () => void;
   onUpdateSoundSetting: (key: keyof SoundSettings, value: boolean | SoundSettings["comfortVolume"]) => void;
+  screenCleaningTheme: ScreenCleaningTheme;
+  showExperimentalReceiverLayouts: boolean;
   showReceiverFullscreenSetting: boolean;
 }) {
   const readerFullText = modal.type === "reader" ? messageText(modal.message) : "";
@@ -9953,10 +10089,18 @@ function ReceiverModal({
 
   if (modal.type === "receiverSettings") {
     const receiverStyleChoices: Array<{ label: string; layout: GxvHomeLayout }> = [
-      { label: "Classic", layout: "classic" },
-      { label: "Focus", layout: "focus_v1" },
-      { label: "Ask/Tell", layout: "ask_tell" },
-      { label: "Ask/Tell 2", layout: "ask_tell_2" },
+      { label: "Appliance", layout: "ask_tell_2" },
+      ...(showExperimentalReceiverLayouts
+        ? [
+            { label: "Classic", layout: "classic" as const },
+            { label: "Focus", layout: "focus_v1" as const },
+            { label: "Ask/Tell", layout: "ask_tell" as const },
+          ]
+        : []),
+    ];
+    const cleanScreenThemeChoices: Array<{ label: string; theme: ScreenCleaningTheme }> = [
+      { label: "Classic", theme: "classic" },
+      { label: "Microwave", theme: "microwave" },
     ];
 
     if (modal.view === "style") {
@@ -9987,16 +10131,59 @@ function ReceiverModal({
                   {choice.label}
                 </button>
               ))}
-              {showReceiverFullscreenSetting ? (
-                <>
-                  <button className={styles.receiverSettingsButton} type="button" onClick={onOpenModernReceiverLayout}>
-                    Modern
-                  </button>
-                  <button className={styles.receiverSettingsButton} type="button" onClick={onOpenClassicWebReceiverLayout}>
+              <button
+                className={`${styles.receiverSettingsButton} ${
+                  presentationMode === "modern" ? styles.receiverSettingsButtonSelected : ""
+                }`}
+                type="button"
+                aria-pressed={presentationMode === "modern"}
+                onClick={onOpenModernReceiverLayout}
+              >
+                Modern
+              </button>
+              {showExperimentalReceiverLayouts && showReceiverFullscreenSetting ? (
+                  <button
+                    className={styles.receiverSettingsButton}
+                    type="button"
+                    onClick={onOpenClassicWebReceiverLayout}
+                  >
                     Old Web
                   </button>
-                </>
               ) : null}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    if (modal.view === "cleanScreenTheme") {
+      return (
+        <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="clean-screen-theme-title">
+          <section className={`${styles.modalPanel} ${styles.receiverSettingsPanel}`}>
+            <div className={styles.modalTitleRow}>
+              <h2 id="clean-screen-theme-title">Clean Screen Theme</h2>
+              <button
+                className={`${styles.modalButton} ${styles.secondary}`}
+                type="button"
+                onClick={() => onSetModal({ type: "receiverSettings" })}
+              >
+                Back
+              </button>
+            </div>
+            <div className={styles.receiverStyleGrid}>
+              {cleanScreenThemeChoices.map((choice) => (
+                <button
+                  className={`${styles.receiverSettingsButton} ${
+                    screenCleaningTheme === choice.theme ? styles.receiverSettingsButtonSelected : ""
+                  }`}
+                  key={choice.theme}
+                  type="button"
+                  aria-pressed={screenCleaningTheme === choice.theme}
+                  onClick={() => onChooseScreenCleaningTheme(choice.theme)}
+                >
+                  {choice.label}
+                </button>
+              ))}
             </div>
           </section>
         </div>
@@ -10022,6 +10209,9 @@ function ReceiverModal({
             </button>
             <button className={styles.receiverSettingsButton} type="button" onClick={onOpenOptionalSounds}>
               Sound
+            </button>
+            <button className={styles.receiverSettingsButton} type="button" onClick={onOpenCleanScreenThemeSettings}>
+              Clean Screen Theme
             </button>
             <button className={styles.receiverSettingsButton} type="button" onClick={onOpenScreenCleaningConfirm}>
               Clean the Screen

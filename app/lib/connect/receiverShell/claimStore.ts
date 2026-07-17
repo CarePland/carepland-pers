@@ -96,6 +96,7 @@ export type ReceiverShellCapabilityStatuses = {
 export type ReceiverShellDeviceProfile = {
   capabilityStatuses?: ReceiverShellCapabilityStatuses;
   careCircleId?: string;
+  createdAt?: string;
   deviceProfile?: string;
   deviceOwner?: boolean;
   hardwareProfile?: string;
@@ -138,6 +139,7 @@ const defaultIndexPath = careplandRuntimeTempPath(
   "claims.json"
 );
 const defaultClaimTtlMs = 15 * 60 * 1000;
+const unpairedReceiverPlaceholderTtlMs = 30 * 60 * 1000;
 const prototypeSetupCode = "12345";
 const prototypeReceiverDeviceId = "local-dev-rob-gxv3370";
 
@@ -585,8 +587,68 @@ export async function verifyReceiverShellBinding(
 }
 
 export async function listReceiverShellDeviceProfiles() {
+  await deleteExpiredUnpairedReceiverShellDevices();
   const supabaseProfiles = await tryListSupabaseReceiverShellDeviceProfiles();
   return supabaseProfiles ?? listLocalReceiverShellDeviceProfiles();
+}
+
+export async function deleteUnpairedReceiverShellDevice(
+  input: {
+    receiverDeviceId?: string;
+  },
+  options: { indexPath?: string; now?: Date } = {}
+) {
+  const receiverDeviceId = input.receiverDeviceId?.trim() || "";
+  if (!receiverDeviceId) {
+    throw new ReceiverShellBindingError("Missing receiver device.", 400);
+  }
+
+  if (!options.indexPath) {
+    const supabaseDelete = await tryDeleteSupabaseUnpairedReceiverShellDevice(input);
+    if (supabaseDelete) return supabaseDelete;
+  }
+
+  const indexPath = options.indexPath ?? defaultIndexPath;
+  const index = await readReceiverShellClaimIndex(indexPath);
+  const matchingClaims = index.claims.filter((record) => record.receiverDeviceId === receiverDeviceId);
+  if (!matchingClaims.length) {
+    throw new ReceiverShellBindingError("Receiver device not found.", 404);
+  }
+  if (matchingClaims.some((record) => !receiverShellClaimIsUnpairedPlaceholder(record))) {
+    throw new ReceiverShellBindingError("Only unpaired setup Receivers can be deleted.", 409);
+  }
+
+  index.claims = index.claims.filter((record) => record.receiverDeviceId !== receiverDeviceId);
+  await writeReceiverShellClaimIndex(index, indexPath);
+  return {
+    deletedAt: (options.now ?? new Date()).toISOString(),
+    ok: true,
+    receiverDeviceId,
+    storageSource: "local_file" as const,
+  };
+}
+
+export async function deleteExpiredUnpairedReceiverShellDevices(
+  options: { indexPath?: string; now?: Date } = {}
+) {
+  const now = options.now ?? new Date();
+  const cutoffMs = now.getTime() - unpairedReceiverPlaceholderTtlMs;
+
+  if (!options.indexPath) {
+    await tryDeleteExpiredSupabaseUnpairedReceiverShellDevices({ cutoffMs });
+  }
+
+  const indexPath = options.indexPath ?? defaultIndexPath;
+  const index = await readReceiverShellClaimIndex(indexPath);
+  const nextClaims = index.claims.filter((record) => {
+    if (!receiverShellClaimIsUnpairedPlaceholder(record)) return true;
+    const createdMs = Date.parse(record.createdAt);
+    return !Number.isFinite(createdMs) || createdMs > cutoffMs;
+  });
+  if (nextClaims.length !== index.claims.length) {
+    index.claims = nextClaims;
+    await writeReceiverShellClaimIndex(index, indexPath);
+  }
 }
 
 export async function updateReceiverShellDeviceLabel(
@@ -781,6 +843,17 @@ function receiverShortNameSuffix(receiverDeviceId: string) {
 function trimReceiverLocationLabel(value: string) {
   const trimmed = value.trim();
   return trimmed.length > 80 ? trimmed.slice(0, 80).trim() : trimmed;
+}
+
+function receiverShellClaimIsUnpairedPlaceholder(record: ReceiverShellClaimRecord) {
+  return (
+    ["available", "expired"].includes(record.status) &&
+    !record.careCircleId?.trim() &&
+    !record.mainConnectUserPersonId?.trim() &&
+    !record.receiverInstallId?.trim() &&
+    !record.redeemedAt?.trim() &&
+    !record.provisioningCompletedAt?.trim()
+  );
 }
 
 async function readReceiverShellClaimIndex(indexPath: string) {
@@ -1446,6 +1519,7 @@ async function tryListSupabaseReceiverShellDeviceProfiles() {
 
 const receiverShellCoreProfileColumns = [
   "id",
+  "created_at",
   "care_circle_id",
   "device_profile",
   "main_connect_user_person_id",
@@ -1522,6 +1596,7 @@ async function receiverShellDeviceProfilesFromRows(
     return {
       capabilityStatuses: capabilityStatusesFromRow(row.capability_statuses),
       careCircleId,
+      createdAt: stringFromRow(row.created_at),
       deviceProfile: stringFromRow(row.device_profile),
       deviceOwner: booleanOrUndefined(row.device_owner),
       hardwareProfile: stringFromRow(row.hardware_profile),
@@ -1608,6 +1683,7 @@ async function listLocalReceiverShellDeviceProfiles() {
     profiles.set(claim.receiverDeviceId, {
       capabilityStatuses: claim.capabilityStatuses,
       careCircleId: claim.careCircleId,
+      createdAt: claim.createdAt,
       deviceProfile: claim.deviceProfile,
       deviceOwner: claim.deviceOwner,
       hardwareProfile: claim.hardwareProfile,
@@ -1639,6 +1715,117 @@ async function listLocalReceiverShellDeviceProfiles() {
     });
   }
   return [...profiles.values()];
+}
+
+async function tryDeleteSupabaseUnpairedReceiverShellDevice(input: {
+  receiverDeviceId?: string;
+}) {
+  try {
+    const supabase = createSupabaseServiceClient();
+    const receiverDeviceId = input.receiverDeviceId?.trim() || "";
+    const { data, error } = await supabase
+      .from("connect_receiver_devices")
+      .select(
+        "id, bound_at, care_circle_id, last_seen_at, main_connect_user_person_id, provisioning_completed_at, receiver_install_id, status"
+      )
+      .eq("id", receiverDeviceId)
+      .single();
+    if (error) {
+      if (supabaseRecordNotFound(error)) {
+        throw new ReceiverShellBindingError("Receiver device not found.", 404);
+      }
+      throw error;
+    }
+
+    if (!supabaseReceiverDeviceIsUnpairedPlaceholder(data)) {
+      throw new ReceiverShellBindingError("Only unpaired setup Receivers can be deleted.", 409);
+    }
+
+    const { error: claimsError } = await supabase
+      .from("connect_receiver_claims")
+      .delete()
+      .eq("receiver_device_id", receiverDeviceId);
+    if (claimsError) throw claimsError;
+
+    const { error: deleteError } = await supabase
+      .from("connect_receiver_devices")
+      .delete()
+      .eq("id", receiverDeviceId);
+    if (deleteError) throw deleteError;
+
+    return {
+      deletedAt: new Date().toISOString(),
+      ok: true,
+      receiverDeviceId: stringFromRow(data.id),
+      storageSource: "supabase" as const,
+    };
+  } catch (error) {
+    if (error instanceof ReceiverShellBindingError) throw error;
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function tryDeleteExpiredSupabaseUnpairedReceiverShellDevices(input: { cutoffMs: number }) {
+  try {
+    const supabase = createSupabaseServiceClient();
+    const cutoff = new Date(input.cutoffMs).toISOString();
+    const { data, error } = await supabase
+      .from("connect_receiver_devices")
+      .select(
+        "id, bound_at, care_circle_id, created_at, last_seen_at, main_connect_user_person_id, provisioning_completed_at, receiver_install_id, status"
+      )
+      .in("status", ["setup_pending"])
+      .is("bound_at", null)
+      .is("care_circle_id", null)
+      .is("last_seen_at", null)
+      .is("main_connect_user_person_id", null)
+      .is("provisioning_completed_at", null)
+      .is("receiver_install_id", null)
+      .lte("created_at", cutoff);
+    if (error) throw error;
+
+    const receiverDeviceIds = (Array.isArray(data) ? data : [])
+      .filter((row) => supabaseReceiverDeviceIsUnpairedPlaceholder(row))
+      .map((row) => stringFromRow(row.id))
+      .filter(Boolean);
+    if (!receiverDeviceIds.length) return { deleted: 0, storageSource: "supabase" as const };
+
+    const { error: claimsError } = await supabase
+      .from("connect_receiver_claims")
+      .delete()
+      .in("receiver_device_id", receiverDeviceIds);
+    if (claimsError) throw claimsError;
+
+    const { error: deleteError } = await supabase
+      .from("connect_receiver_devices")
+      .delete()
+      .in("id", receiverDeviceIds);
+    if (deleteError) throw deleteError;
+
+    return { deleted: receiverDeviceIds.length, storageSource: "supabase" as const };
+  } catch (error) {
+    if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function supabaseReceiverDeviceIsUnpairedPlaceholder(row: unknown) {
+  const record = row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+  const status = stringFromRow(record.status);
+  return (
+    ["setup_pending"].includes(status) &&
+    !stringFromRow(record.bound_at) &&
+    !stringFromRow(record.care_circle_id) &&
+    !stringFromRow(record.last_seen_at) &&
+    !stringFromRow(record.main_connect_user_person_id) &&
+    !stringFromRow(record.provisioning_completed_at) &&
+    !stringFromRow(record.receiver_install_id)
+  );
 }
 
 async function tryRevokeSupabaseReceiverShellDevice(
