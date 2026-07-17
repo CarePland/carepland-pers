@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, type FormEvent } from "react";
+
 type AdminUserActivityCareSubject = {
   display_name: string;
   id: string;
@@ -38,6 +40,7 @@ export type AdminUserActivityFilter =
   | "test";
 
 export type AdminUserActivitySortKey =
+  | "admin"
   | "appointments"
   | "careprep"
   | "created"
@@ -70,6 +73,11 @@ type AdminUserActivityPanelProps = {
   loadingReadonlyUserId: string | null;
   onChangeFilter: (filter: AdminUserActivityFilter) => void;
   onOpenReadonlyUserView: (userId: string) => void;
+  onSetUserAdmin: (input: {
+    isAdmin: boolean;
+    password: string;
+    userId: string;
+  }) => Promise<void>;
   onToggleCareVips: (userId: string) => void;
   onToggleSort: (key: AdminUserActivitySortKey) => void;
   rows: AdminUserActivityRow[];
@@ -96,12 +104,65 @@ export function AdminUserActivityPanel({
   loadingReadonlyUserId,
   onChangeFilter,
   onOpenReadonlyUserView,
+  onSetUserAdmin,
   onToggleCareVips,
   onToggleSort,
   rows,
   sort,
   stats,
 }: AdminUserActivityPanelProps) {
+  const [adminChangeTarget, setAdminChangeTarget] =
+    useState<AdminUserActivityRow | null>(null);
+  const [adminChangeConfirmed, setAdminChangeConfirmed] = useState(false);
+  const [adminChangePassword, setAdminChangePassword] = useState("");
+  const [adminChangeError, setAdminChangeError] = useState("");
+  const [savingAdminChange, setSavingAdminChange] = useState(false);
+
+  const closeAdminChangeDialog = () => {
+    if (savingAdminChange) {
+      return;
+    }
+
+    setAdminChangeTarget(null);
+    setAdminChangeConfirmed(false);
+    setAdminChangePassword("");
+    setAdminChangeError("");
+  };
+
+  const pendingAdminValue = adminChangeTarget
+    ? !adminChangeTarget.is_admin
+    : false;
+  const knownAdminCount = rows.filter((row) => row.is_admin).length;
+
+  async function submitAdminChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!adminChangeTarget) {
+      return;
+    }
+
+    setSavingAdminChange(true);
+    setAdminChangeError("");
+
+    try {
+      await onSetUserAdmin({
+        isAdmin: pendingAdminValue,
+        password: adminChangePassword,
+        userId: adminChangeTarget.user_id,
+      });
+      setAdminChangeTarget(null);
+      setAdminChangeConfirmed(false);
+      setAdminChangePassword("");
+      setAdminChangeError("");
+    } catch (error) {
+      setAdminChangeError(
+        error instanceof Error ? error.message : "Unable to update admin access."
+      );
+    } finally {
+      setSavingAdminChange(false);
+    }
+  }
+
   const sortIndicator = (key: AdminUserActivitySortKey) => {
     if (sort.key !== key) {
       return "";
@@ -170,6 +231,7 @@ export function AdminUserActivityPanel({
                   ["group", "User Group"],
                   ["last_seen", "Last seen"],
                   ["created", "Created"],
+                  ["admin", "Admin"],
                   ["appointments", "Appts"],
                   ["notes", "Notes"],
                   ["careprep", "CarePrep"],
@@ -179,6 +241,7 @@ export function AdminUserActivityPanel({
                 ].map(([key, label]) => {
                   const alignRight = [
                     "appointments",
+                    "admin",
                     "notes",
                     "careprep",
                     "tickets",
@@ -216,6 +279,7 @@ export function AdminUserActivityPanel({
                 const rowCareSubjects = row.care_subjects ?? [];
                 const areCareVipsExpanded =
                   expandedCareVipRows[row.user_id] ?? false;
+                const isLastKnownAdmin = row.is_admin && knownAdminCount <= 1;
 
                 return (
                   <tr
@@ -264,6 +328,38 @@ export function AdminUserActivityPanel({
                     <td className="border-b border-slate-100 px-3 py-3 align-top text-slate-700">
                       {formatAdminDate(row.account_created_at)}
                     </td>
+                    <td className="border-b border-slate-100 px-3 py-3 text-center align-top">
+                      <label className="inline-flex min-h-8 items-center justify-center">
+                        <span className="sr-only">
+                          {row.is_admin
+                            ? "Remove admin access"
+                            : "Grant admin access"}{" "}
+                          for {row.display_name || row.email || row.user_id}
+                        </span>
+                        <input
+                          checked={row.is_admin}
+                          className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600"
+                          disabled={isLastKnownAdmin}
+                          onChange={() => {
+                            setAdminChangeTarget(row);
+                            setAdminChangeConfirmed(false);
+                            setAdminChangePassword("");
+                            setAdminChangeError("");
+                          }}
+                          title={
+                            isLastKnownAdmin
+                              ? "CarePland must keep at least one Admin."
+                              : undefined
+                          }
+                          type="checkbox"
+                        />
+                      </label>
+                      {isLastKnownAdmin ? (
+                        <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                          Last Admin
+                        </p>
+                      ) : null}
+                    </td>
                     <td className="border-b border-slate-100 px-3 py-3 text-right align-top">
                       <span className="font-semibold text-slate-900">
                         {row.appointment_count}
@@ -292,11 +388,6 @@ export function AdminUserActivityPanel({
                     </td>
                     <td className="border-b border-slate-100 px-3 py-3 align-top">
                       <div className="flex flex-wrap gap-1">
-                        {row.is_admin ? (
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
-                            Admin
-                          </span>
-                        ) : null}
                         {row.is_test_user ? (
                           <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
                             Test
@@ -341,6 +432,105 @@ export function AdminUserActivityPanel({
           </table>
         </div>
       )}
+
+      {adminChangeTarget ? (
+        <div
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+          role="dialog"
+        >
+          <form
+            className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl"
+            onSubmit={submitAdminChange}
+          >
+            <h3 className="text-lg font-semibold text-slate-900">
+              {pendingAdminValue ? "Grant admin access?" : "Remove admin access?"}
+            </h3>
+            {pendingAdminValue ? (
+              <>
+                <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-sm font-semibold text-slate-900">
+                    You&apos;re going to give Admin access to:
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {adminChangeTarget.display_name || "Unknown name"}
+                  </p>
+                  <p className="break-all text-sm text-slate-600">
+                    {adminChangeTarget.email || adminChangeTarget.user_id}
+                  </p>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-700">
+                  Admin access gives universal access to much user data. Do not
+                  provide this without being absolutely sure you want to!
+                </p>
+              </>
+            ) : (
+              <p className="mt-3 text-sm leading-6 text-slate-700">
+                This will remove Admin access for{" "}
+                {adminChangeTarget.display_name ||
+                  adminChangeTarget.email ||
+                  "this user"}
+                .
+              </p>
+            )}
+            <p className="mt-4 font-semibold text-slate-900">Are you sure?</p>
+
+            {adminChangeConfirmed && pendingAdminValue ? (
+              <label className="mt-4 block text-sm font-medium text-slate-700">
+                Your password
+                <input
+                  autoComplete="current-password"
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+                  disabled={savingAdminChange}
+                  onChange={(event) =>
+                    setAdminChangePassword(event.target.value)
+                  }
+                  required={pendingAdminValue}
+                  type="password"
+                  value={adminChangePassword}
+                />
+              </label>
+            ) : null}
+
+            {adminChangeError ? (
+              <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+                {adminChangeError}
+              </p>
+            ) : null}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
+                disabled={savingAdminChange}
+                onClick={closeAdminChangeDialog}
+                type="button"
+              >
+                No
+              </button>
+              {adminChangeConfirmed ? (
+                <button
+                  className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-300"
+                  disabled={
+                    savingAdminChange ||
+                    (pendingAdminValue && !adminChangePassword)
+                  }
+                  type="submit"
+                >
+                  {savingAdminChange ? "Saving..." : "Confirm"}
+                </button>
+              ) : (
+                <button
+                  className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white"
+                  onClick={() => setAdminChangeConfirmed(true)}
+                  type="button"
+                >
+                  Yes
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      ) : null}
     </>
   );
 }

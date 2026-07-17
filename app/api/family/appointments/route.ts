@@ -1,6 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-import { createSupabaseServiceClient } from "../../../lib/platform/server/supabase";
+import {
+  createSupabaseServiceClient,
+  createSupabaseUserClient,
+} from "../../../lib/platform/server/supabase";
 
 type AppointmentRow = {
   id: string;
@@ -18,8 +21,19 @@ type CareSubjectRow = {
   display_name: string;
 };
 
-export async function GET(request: Request) {
+class FamilyAccessError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export async function GET(request: NextRequest) {
   try {
+    await requireFamilyAdmin(request);
+
     const requestUrl = new URL(request.url);
     const searchText = requestUrl.searchParams.get("q")?.trim() ?? "";
     const supabase = createSupabaseServiceClient();
@@ -97,8 +111,45 @@ export async function GET(request: Request) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to load appointments.";
+    const status = error instanceof FamilyAccessError ? error.status : 500;
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+async function requireFamilyAdmin(request: NextRequest) {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+
+  if (!accessToken) {
+    throw new FamilyAccessError("Please sign in before using Family.", 401);
+  }
+
+  const userClient = createSupabaseUserClient(accessToken);
+  const { data: userData, error: userError } = await userClient.auth.getUser();
+
+  if (userError) {
+    throw userError;
+  }
+
+  const userId = userData.user?.id;
+
+  if (!userId) {
+    throw new FamilyAccessError("Please sign in before using Family.", 401);
+  }
+
+  const { data: profile, error: profileError } = await userClient
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", userId)
+    .single();
+
+  if (profileError) {
+    throw profileError;
+  }
+
+  if (profile?.is_admin !== true) {
+    throw new FamilyAccessError("Admin access is required to use Family.", 403);
   }
 }
 

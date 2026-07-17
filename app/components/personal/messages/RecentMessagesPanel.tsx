@@ -95,7 +95,7 @@ export function RecentMessagesPanel({
         <div className="flex flex-wrap items-center justify-between gap-3">
           {title ? (
             <div>
-              <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
+              <h2 className="text-sm font-semibold text-blue-700">{title}</h2>
             </div>
           ) : null}
           {action}

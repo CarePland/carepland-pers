@@ -3,6 +3,7 @@
 import { ComponentProps } from "react";
 
 import { AdminAiPanel } from "./AdminAiPanel";
+import { AdminCheckpointPanel } from "./AdminCheckpointPanel";
 import { AdminConnectPanel } from "./AdminConnectPanel";
 import { AdminAssistantReviewPanel } from "./AdminAssistantReviewPanel";
 import { AdminAuditTrailPanel } from "./AdminAuditTrailPanel";
@@ -15,10 +16,12 @@ import { AdminRecommendationsReviewPanel } from "./AdminRecommendationsReviewPan
 import { AdminSupportTicketsPanel } from "./AdminSupportTicketsPanel";
 import { AdminToolsPanel } from "./AdminToolsPanel";
 import { AdminUsersPanel } from "./AdminUsersPanel";
+import { AdminWorkflowViewPanel } from "./AdminWorkflowViewPanel";
 import { AdminWorkspaceShell } from "./AdminWorkspaceShell";
 import type { AdminNavItem } from "./AdminAttention";
 
 export type AdminWorkspaceTab =
+  | "checkpoint"
   | "connect"
   | "dashboard"
   | "ai"
@@ -31,16 +34,19 @@ export type AdminWorkspaceTab =
   | "tickets"
   | "tools"
   | "userAudit"
-  | "users";
+  | "users"
+  | "workflows";
 
 export type AdminWorkspaceTopTab =
+  | "checkpoint"
   | "connect"
   | "dashboard"
   | "recommendations"
   | "support"
   | "system"
   | "tools"
-  | "users";
+  | "users"
+  | "workflows";
 
 export type AdminWorkspaceProps = {
   activeSecondaryKey: AdminWorkspaceTab;
@@ -49,6 +55,7 @@ export type AdminWorkspaceProps = {
   assistantReview: ComponentProps<typeof AdminAssistantReviewPanel>;
   audit: ComponentProps<typeof AdminAuditTrailPanel<AdminWorkspaceTab>>;
   content: ComponentProps<typeof AdminContentPanel>;
+  checkpoint: ComponentProps<typeof AdminCheckpointPanel>;
   dashboard: ComponentProps<typeof AdminDashboardPanel>;
   errors: ComponentProps<typeof AdminIntegrationErrorsPanel>;
   intake: ComponentProps<typeof AdminEarlyAccessIntakePanel<AdminWorkspaceTab>>;
@@ -71,6 +78,7 @@ export function AdminWorkspace({
   assistantReview,
   audit,
   content,
+  checkpoint,
   dashboard,
   errors,
   intake,
@@ -100,6 +108,14 @@ export function AdminWorkspace({
       ) : null}
 
       {activeSecondaryKey === "tools" ? <AdminToolsPanel {...tools} /> : null}
+
+      {activeSecondaryKey === "checkpoint" ? (
+        <AdminCheckpointPanel {...checkpoint} />
+      ) : null}
+
+      {activeSecondaryKey === "workflows" ? (
+        <AdminWorkflowViewPanel />
+      ) : null}
 
       {activeSecondaryKey === "recommendations" ? (
         <AdminRecommendationsReviewPanel {...recommendations} />

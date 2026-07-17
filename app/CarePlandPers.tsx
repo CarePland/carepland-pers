@@ -605,6 +605,7 @@ type AiAdminTab =
   | "inventory"
   | "proposals";
 type AdminTab =
+  | "checkpoint"
   | "connect"
   | "dashboard"
   | "ai"
@@ -617,7 +618,8 @@ type AdminTab =
   | "tickets"
   | "tools"
   | "userAudit"
-  | "users";
+  | "users"
+  | "workflows";
 type StoredAdminTab = AdminTab | "messages";
 type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
@@ -991,7 +993,6 @@ function buildHomeAtAGlanceSummary({
   careSubjects,
   carePrepHistory,
   hasAnySavedAppointments,
-  healthFocusTopics,
   homeNextAppointment,
   homeNextAppointmentsBySubjectId,
   homeNextGuidance,
@@ -1003,7 +1004,6 @@ function buildHomeAtAGlanceSummary({
   careSubjects: CareSubject[];
   carePrepHistory: CarePrepHistoryRow[];
   hasAnySavedAppointments: boolean;
-  healthFocusTopics: HealthFocusTopicSummary[];
   homeNextAppointment: Appointment | null;
   homeNextAppointmentsBySubjectId: Record<string, Appointment | null>;
   homeNextGuidance: CarePrepGuidance | null;
@@ -1047,7 +1047,7 @@ function buildHomeAtAGlanceSummary({
   ).length;
   const estimatedCoordinationAvoided = Math.max(
     0,
-    Math.min(12, currentCarePrepCount + healthFocusTopics.length + focusItemCount)
+    Math.min(12, currentCarePrepCount + focusItemCount)
   );
   const testOnlyPrefix = (count: number) => (count > 0 ? "" : "(test) ");
   const items: string[] = [];
@@ -1064,14 +1064,6 @@ function buildHomeAtAGlanceSummary({
     items.push("CarePrep identified visit context before the next appointment.");
   }
 
-  if (healthFocusTopics.length > 0) {
-    items.push(
-      `Health Stories made ${healthFocusTopics.length} recurring care ${
-        healthFocusTopics.length === 1 ? "theme" : "themes"
-      } easier to recognize.`
-    );
-  }
-
   if (focusItemCount > 0) {
     items.push(
       `Today's Focus kept ${focusItemCount} care ${
@@ -1086,7 +1078,7 @@ function buildHomeAtAGlanceSummary({
 
   if (items.length === 0) {
     items.push(
-      "Add appointments, notes, Focus items, or Health Stories to give CarePland real outcomes to summarize."
+      "Add appointments, notes, or Focus items to give CarePland real outcomes to summarize."
     );
   }
   const monthItems = [
@@ -1096,9 +1088,6 @@ function buildHomeAtAGlanceSummary({
     `${testOnlyPrefix(currentCarePrepCount)}CarePrep prepared context for ${currentCarePrepCount} appointment${
       currentCarePrepCount === 1 ? "" : "s"
     } without rebuilding the visit history by hand.`,
-    `${testOnlyPrefix(healthFocusTopics.length)}Health Stories helped connect ${healthFocusTopics.length} recurring care ${
-      healthFocusTopics.length === 1 ? "theme" : "themes"
-    } for the current Care VIP.`,
     `${testOnlyPrefix(focusItemCount)}Today's Focus kept ${focusItemCount} care ${
       focusItemCount === 1 ? "prompt" : "prompts"
     } surfaced for the current Home view.`,
@@ -3883,6 +3872,9 @@ export function CarePlandPers({
   const healthFocusBackfillAttemptedRef = useRef(new Set<string>());
   const appointmentMessagePrepBackfillAttemptedRef = useRef(new Set<string>());
   const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
+  const [currentCareCircleId, setCurrentCareCircleId] = useState<string | null>(
+    null
+  );
   const [entitlement, setEntitlement] =
     useState<CareCircleEntitlement>(defaultEntitlement);
   const [notes, setNotes] = useState<AppointmentNote[]>([]);
@@ -4651,9 +4643,8 @@ export function CarePlandPers({
     }
 
     return [
-      { items: asTextList(homeNextGuidance.key_questions), label: "Ask" },
-      { items: asTextList(homeNextGuidance.bring_list), label: "Bring" },
-      { items: asTextList(homeNextGuidance.watchouts), label: "Watch" },
+      { items: asTextList(homeNextGuidance.bring_list), label: "Before" },
+      { items: asTextList(homeNextGuidance.key_questions), label: "During" },
     ]
       .map((section) => ({
         ...section,
@@ -6052,23 +6043,6 @@ export function CarePlandPers({
     }
   }
 
-  useEffect(() => {
-    if (!signedInEmail || mainTab !== "home") {
-      return;
-    }
-
-    if (!activeHealthStorySubjectId) {
-      setHealthFocusTopics([]);
-      setSelectedHealthFocusTopic(null);
-      setHealthFocusTopicDetail(null);
-      return;
-    }
-
-    void loadHealthFocusSummary(activeHealthStorySubjectId);
-    // loadHealthFocusSummary intentionally uses current auth/session state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeHealthStorySubjectId, mainTab, signedInEmail]);
-
   async function loadHomeTodayFocus() {
     const { data: sessionData, error: sessionError } =
       await supabase.auth.getSession();
@@ -6481,7 +6455,11 @@ export function CarePlandPers({
   }
 
   function openReceiverSetup() {
-    window.location.assign("/connect/dashboard?receiverSetup=home");
+    window.open(
+      "/connect/receiver/setup?new=1",
+      "_blank",
+      "noopener,noreferrer"
+    );
   }
 
   async function handleHomeContextQuestion(
@@ -7303,6 +7281,7 @@ export function CarePlandPers({
       setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
       setCareSubjects([]);
+      setCurrentCareCircleId(null);
       setEntitlement(defaultEntitlement);
       setNotes([]);
       setGuidance([]);
@@ -7320,6 +7299,7 @@ export function CarePlandPers({
       setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
       setCareSubjects([]);
+      setCurrentCareCircleId(null);
       setEntitlement(defaultEntitlement);
       setNotes([]);
       setGuidance([]);
@@ -7347,6 +7327,7 @@ export function CarePlandPers({
       memberships as CareCircleMembership[] | null
     );
     const circleIds = primaryCareCircleId ? [primaryCareCircleId] : [];
+    setCurrentCareCircleId(primaryCareCircleId ?? null);
 
     if (circleIds.length === 0) {
       setAppointments([]);
@@ -7356,6 +7337,7 @@ export function CarePlandPers({
       setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
       setCareSubjects([]);
+      setCurrentCareCircleId(null);
       setEntitlement(defaultEntitlement);
       setNotes([]);
       setGuidance([]);
@@ -9224,6 +9206,51 @@ export function CarePlandPers({
     } finally {
       setLoadingAdminUserActivity(false);
     }
+  }
+
+  async function handleSetUserAdmin({
+    isAdmin: nextIsAdmin,
+    password,
+    userId,
+  }: {
+    isAdmin: boolean;
+    password: string;
+    userId: string;
+  }) {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      throw new Error("Please sign in before updating admin access.");
+    }
+
+    const response = await fetch("/api/admin/user-admin-access", {
+      body: JSON.stringify({ isAdmin: nextIsAdmin, password, userId }),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error ?? "Admin access update failed.");
+    }
+
+    setAdminUserActivity((currentRows) =>
+      currentRows.map((row) =>
+        row.user_id === userId ? { ...row, is_admin: nextIsAdmin } : row
+      )
+    );
+    setMessage(result.message ?? "Admin access updated.");
+    showToast(result.message ?? "Admin access updated.", { type: "success" });
   }
 
   function toggleAdminUserActivitySort(key: AdminUserActivitySortKey) {
@@ -11816,6 +11843,7 @@ export function CarePlandPers({
     setHasAnySavedAppointments(false);
     setNotesReminderAppointment(null);
     setCareSubjects([]);
+    setCurrentCareCircleId(null);
     setEntitlement(defaultEntitlement);
     setNotes([]);
     setGuidance([]);
@@ -11885,7 +11913,15 @@ export function CarePlandPers({
       setAcceptBetaDisclaimer(false);
       setAcceptBetaPrivacy(false);
       setAcceptBetaTerms(false);
-      await loadAppointments();
+      setProfileDraft((currentDraft) => ({
+        ...currentDraft,
+        email: profileEmail,
+      }));
+      setSavedProfileDraft((currentDraft) => ({
+        ...currentDraft,
+        email: profileEmail,
+      }));
+      setMessage("");
       showToast("Early Access acknowledgement saved.", {
         durationMs: 5000,
         type: "success",
@@ -11913,6 +11949,10 @@ export function CarePlandPers({
 
       if (!user) {
         throw new Error("Please sign in before saving your profile.");
+      }
+
+      if (!hasAcceptedBetaAgreement) {
+        throw new Error("Review the Early Access Agreement before continuing.");
       }
 
       const profileEmail = user.email ?? profileDraft.email.trim();
@@ -11957,6 +11997,11 @@ export function CarePlandPers({
       const { error } = await supabase.from("profiles").upsert({
         address_line1: trimmedProfileDraft.addressLine1 || null,
         address_line2: trimmedProfileDraft.addressLine2 || null,
+        beta_agreement_version: betaAgreementVersion,
+        beta_disclaimer_acknowledged_at:
+          betaDisclaimerAcknowledgedAt || completedAt,
+        beta_privacy_acknowledged_at: betaPrivacyAcknowledgedAt || completedAt,
+        beta_terms_acknowledged_at: betaTermsAcknowledgedAt || completedAt,
         city: trimmedProfileDraft.city || null,
         country: trimmedProfileDraft.country || null,
         display_name: storedDisplayName,
@@ -14017,10 +14062,6 @@ export function CarePlandPers({
       carePrep: {
         bring_list: asTextList(prep?.bring_list),
         key_questions: asTextList(prep?.key_questions),
-        med_review: asTextList(prep?.med_review),
-        next_steps: asTextList(prep?.next_steps),
-        since_last_visit: asTextList(prep?.since_last_visit),
-        watchouts: asTextList(prep?.watchouts),
       },
       communicationItems: communicationItemsByAppointment.get(appointmentId) ?? [],
     });
@@ -14580,7 +14621,7 @@ export function CarePlandPers({
     setFavoriteLocationNickname("");
   }
 
-  async function placesAuthHeader() {
+  async function getSignedInAuthHeaders() {
     const { data: sessionData, error: sessionError } =
       await supabase.auth.getSession();
 
@@ -14591,10 +14632,22 @@ export function CarePlandPers({
     const accessToken = sessionData.session?.access_token;
 
     if (!accessToken) {
-      throw new Error("Please sign in before searching locations.");
+      throw new Error("Please sign in before continuing.");
     }
 
     return { Authorization: `Bearer ${accessToken}` };
+  }
+
+  async function placesAuthHeader() {
+    try {
+      return await getSignedInAuthHeaders();
+    } catch (error) {
+      if (error instanceof Error && error.message === "Please sign in before continuing.") {
+        throw new Error("Please sign in before searching locations.");
+      }
+
+      throw error;
+    }
   }
 
   async function loadFavoriteLocations() {
@@ -15104,6 +15157,8 @@ export function CarePlandPers({
       generationMode?: CarePrepGenerationMode;
       guidanceId?: string;
       message?: string;
+      reason?: string;
+      status?: "generated" | "not_useful";
     };
   }
 
@@ -15290,10 +15345,14 @@ export function CarePlandPers({
         return nextErrors;
       });
 
-      await requestCarePrepGeneration(
+      const carePrepResult = await requestCarePrepGeneration(
         nextAppointment.id,
         "auto_after_notes"
       );
+
+      if (carePrepResult.status === "not_useful") {
+        return;
+      }
 
       const { data: generatedGuidanceRows, error: generatedGuidanceError } =
         await supabase
@@ -15352,6 +15411,11 @@ export function CarePlandPers({
       }
 
       const result = await requestCarePrepGeneration(appointment.id, "manual");
+
+      if (result.status === "not_useful") {
+        setMessage(result.message ?? "No useful CarePrep was found for this appointment.");
+        return;
+      }
 
       await loadAppointments();
       setCarePrepExpandedForAppointment(appointment.id, true);
@@ -15417,7 +15481,10 @@ export function CarePlandPers({
 
       if (canRefreshCarePrepForAppointment(appointment)) {
         try {
-          await requestCarePrepGeneration(appointment.id, "manual");
+          const carePrepResult = await requestCarePrepGeneration(appointment.id, "manual");
+          if (carePrepResult.status === "not_useful") {
+            refreshError = carePrepResult.message ?? "";
+          }
         } catch (error) {
           refreshError = getErrorMessage(error);
         }
@@ -15745,13 +15812,9 @@ export function CarePlandPers({
           appointmentId,
           currentGuidanceId: prep.id,
           editedGuidance: {
-            bring_list: linesToList(draftValues.bringList),
-            key_questions: linesToList(draftValues.keyQuestions),
-            med_review: linesToList(draftValues.medReview),
-            next_steps: linesToList(draftValues.nextSteps),
-            since_last_visit: linesToList(draftValues.sinceLastVisit),
-            summary: draftValues.summary.trim(),
-            watchouts: linesToList(draftValues.watchouts),
+            beforeVisit: linesToList(draftValues.beforeVisit),
+            duringVisit: linesToList(draftValues.duringVisit),
+            intro: draftValues.intro.trim(),
           },
         }),
         headers: {
@@ -15811,13 +15874,9 @@ export function CarePlandPers({
           editedGuidance:
             action === "save_edit"
               ? {
-                  bring_list: linesToList(draftValues.bringList),
-                  key_questions: linesToList(draftValues.keyQuestions),
-                  med_review: linesToList(draftValues.medReview),
-                  next_steps: linesToList(draftValues.nextSteps),
-                  since_last_visit: linesToList(draftValues.sinceLastVisit),
-                  summary: draftValues.summary.trim(),
-                  watchouts: linesToList(draftValues.watchouts),
+                  beforeVisit: linesToList(draftValues.beforeVisit),
+                  duringVisit: linesToList(draftValues.duringVisit),
+                  intro: draftValues.intro.trim(),
                 }
               : null,
         }),
@@ -16184,11 +16243,6 @@ export function CarePlandPers({
           textIntakeTargetAppointmentId === notesEntryAppointment.id ||
           pendingModifierSwitch?.appointmentId === notesEntryAppointment.id)
     );
-    const healthFocusAskContext = buildHealthFocusAskContext({
-      allSubjectsValue: ALL_SUBJECTS,
-      selectedTopic: selectedHealthFocusTopic,
-      topicDetail: healthFocusTopicDetail,
-    });
     const hasExistingWelcomeAppointments =
       hasAnySavedAppointments ||
       Boolean(homeNextAppointment) ||
@@ -16213,7 +16267,6 @@ export function CarePlandPers({
       careSubjects,
       carePrepHistory,
       hasAnySavedAppointments,
-      healthFocusTopics,
       homeNextAppointment,
       homeNextAppointmentsBySubjectId,
       homeNextGuidance,
@@ -16242,6 +16295,10 @@ export function CarePlandPers({
       activeHomeMessageSummaryResult?.individualSummaries[0]?.summary ?? "";
     const activeHomeMessageIndividualSummary =
       activeHomeMessageSummaryResult?.individualSummaries[0] ?? null;
+    const shouldShowHomeMessages =
+      homeMessagesLoading ||
+      activeHomeMessages.length > 0 ||
+      Boolean(activeHomeMessageSummary);
 
     return (
       <div className="mt-1 space-y-2">
@@ -16310,13 +16367,13 @@ export function CarePlandPers({
               </div>
             ) : null}
 
-            <section className="rounded-lg border border-blue-100 bg-white px-4 py-3 shadow-sm">
+            <section className="px-1 py-2">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-black text-slate-900">
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <h2 className="text-sm font-semibold text-blue-700">
                     Receiver Setup
                   </h2>
-                  <p className="mt-1 text-sm font-semibold text-slate-600">
+                  <p className="text-xs font-medium text-slate-600">
                     Install, pair, and configure a CarePland Receiver.
                   </p>
                 </div>
@@ -16573,55 +16630,65 @@ export function CarePlandPers({
               </HomeNextAppointmentPanel>
             )}
 
-            <RecentMessagesPanel
-              action={
-                selectedSubjectId === ALL_SUBJECTS ? null : (
-                  <button
-                    className="rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 transition hover:border-blue-200 hover:bg-blue-100"
-                    onClick={() => openMessagesPage()}
-                    type="button"
-                  >
-                    View all messages
-                  </button>
-                )
-              }
-              emptyLabel={
-                selectedSubjectId === ALL_SUBJECTS
-                  ? "Choose a Care VIP to see recent messages."
-                  : "No recent messages for this Care VIP yet."
-              }
-              formatDate={formatDate}
-              loading={homeMessagesLoading}
-              messages={activeHomeMessages}
-              onOpenAppointmentMessage={openMessageAppointment}
-              onOpenMessage={() => openMessagesPage()}
-              onSummaryFeedback={
-                selectedSubjectId !== ALL_SUBJECTS &&
-                activeHomeMessageSummaryResult &&
-                activeHomeMessageIndividualSummary
-                  ? ({ userComment }) =>
-                      submitHomeMessageSummaryFeedback({
-                        decisionTrace:
-                          activeHomeMessageSummaryResult.decisionTrace,
-                        keyPoints: activeHomeMessageIndividualSummary.keyPoints,
-                        personId: selectedSubjectId,
-                        sourceMessageIds:
-                          activeHomeMessageIndividualSummary.sourceMessageIds,
-                        summary: activeHomeMessageIndividualSummary.summary,
-                        userComment,
-                      })
-                  : undefined
-              }
-              summary={activeHomeMessageSummary}
-              title="Messages"
-            />
+            {shouldShowHomeMessages ? (
+              <RecentMessagesPanel
+                action={
+                  selectedSubjectId === ALL_SUBJECTS ? null : (
+                    <button
+                      className="rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800 transition hover:border-blue-200 hover:bg-blue-100"
+                      onClick={() => openMessagesPage()}
+                      type="button"
+                    >
+                      View all messages
+                    </button>
+                  )
+                }
+                emptyLabel={
+                  selectedSubjectId === ALL_SUBJECTS
+                    ? "Choose a Care VIP to see recent messages."
+                    : "No recent messages for this Care VIP yet."
+                }
+                formatDate={formatDate}
+                loading={homeMessagesLoading}
+                messages={activeHomeMessages}
+                onOpenAppointmentMessage={openMessageAppointment}
+                onOpenMessage={() => openMessagesPage()}
+                onSummaryFeedback={
+                  selectedSubjectId !== ALL_SUBJECTS &&
+                  activeHomeMessageSummaryResult &&
+                  activeHomeMessageIndividualSummary
+                    ? ({ userComment }) =>
+                        submitHomeMessageSummaryFeedback({
+                          decisionTrace:
+                            activeHomeMessageSummaryResult.decisionTrace,
+                          keyPoints: activeHomeMessageIndividualSummary.keyPoints,
+                          personId: selectedSubjectId,
+                          sourceMessageIds:
+                            activeHomeMessageIndividualSummary.sourceMessageIds,
+                          summary: activeHomeMessageIndividualSummary.summary,
+                          userComment,
+                        })
+                    : undefined
+                }
+                summary={activeHomeMessageSummary}
+                title="Messages"
+              />
+            ) : null}
 
             {canShowAdminItems && showHomeAtAGlanceTest ? (
               <section className="space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-blue-700">
-                      {homeAtAGlanceSummary.title}
+                    <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-blue-700">
+                      <Image
+                        alt=""
+                        aria-hidden="true"
+                        className="h-5 w-5 shrink-0 brightness-0"
+                        height={460}
+                        src="/carepland-loop-mark.png"
+                        width={460}
+                      />
+                      <span>{homeAtAGlanceSummary.title}</span>
                     </h2>
                     <p className="mt-1 text-sm text-slate-600">
                       {homeAtAGlanceSummary.subtitle}
@@ -16751,109 +16818,6 @@ export function CarePlandPers({
                 </div>
               </section>
             ) : null}
-
-            <HealthFocusCard
-              changeControl={
-                healthFocusTopics.length > 0 && healthStoryFocusOptions.length > 1 ? (
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <button
-                      className="text-xs font-semibold text-blue-700 underline-offset-2 hover:text-blue-900 hover:underline"
-                      onClick={() =>
-                        setHealthStorySubjectChooserOpen(
-                          (currentValue) => !currentValue
-                        )
-                      }
-                      type="button"
-                    >
-                      Change
-                    </button>
-                    {healthStorySubjectChooserOpen ? (
-                      <div className="flex min-w-0 gap-1.5 overflow-x-auto pb-1">
-                        {healthStoryFocusOptions.map((option) => {
-                          const selected =
-                            option.id === activeHealthStorySubjectId;
-
-                          return (
-                            <button
-                              aria-pressed={selected}
-                              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold transition ${
-                                selected
-                                  ? "border-blue-300 bg-blue-50 text-blue-900"
-                                  : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800"
-                              }`}
-                              key={option.id}
-                              onClick={() =>
-                                handleChangeHealthStorySubject(option.id)
-                              }
-                              type="button"
-                            >
-                              <PersonAvatar person={option.avatar} size="xs" />
-                              <span>
-                                {option.label}
-                                {option.avatar?.managedByHousehold ? (
-                                  <ManagedByHouseholdHeart className="ml-1" />
-                                ) : null}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null
-              }
-              contextLabelOverrides={healthFocusContextLabelOverrides}
-              isLoading={healthFocusLoading}
-              onExpandTopics={(hiddenTopics) => {
-                void prefetchHealthFocusTopicDetails(hiddenTopics);
-              }}
-              onCloseTopic={() => {
-                setSelectedHealthFocusTopic(null);
-                setHealthFocusTopicDetail(null);
-                setHealthStoryContextAnswer("");
-                setHealthStoryContextError(null);
-              }}
-              onSelectTopic={(topic) => {
-                void loadHealthFocusTopicDetail(topic);
-              }}
-              selectedTopicKey={
-                selectedHealthFocusTopic
-                  ? `${selectedHealthFocusTopic.careSubjectId}:${selectedHealthFocusTopic.topicSlug}`
-                  : null
-              }
-              selectedTopicStory={
-                <HealthFocusTopicDetail
-                  contextLabelOverrides={healthFocusContextLabelOverrides}
-                  detail={healthFocusTopicDetail}
-                  isLoading={healthFocusDetailLoading}
-                  onClose={() => {
-                    setSelectedHealthFocusTopic(null);
-                    setHealthFocusTopicDetail(null);
-                    setHealthStoryContextAnswer("");
-                    setHealthStoryContextError(null);
-                  }}
-                  onSubmitFeedback={handleHealthStoryFeedback}
-                  onUndoFeedback={handleUndoHealthStoryFeedback}
-                  contextPanel={
-                    selectedHealthFocusTopic ? (
-                      <HomeContextPanel
-                        answer={healthStoryContextAnswer}
-                        askContext={
-                          healthFocusAskContext ?? { level: "health_focus" }
-                        }
-                        error={healthStoryContextError}
-                        isLoading={healthStoryContextLoading}
-                        onAsk={handleHomeContextQuestion}
-                        variant="compact"
-                      />
-                    ) : null
-                  }
-                  variant="inline"
-                />
-              }
-              title={healthFocusTopics.length > 0 ? healthStoryTitle : "Your Health Stories"}
-              topics={healthFocusTopics}
-            />
 
             {showNotesReminderTrigger && notesReminderAppointment ? (
               <section className="mb-24">
@@ -17244,6 +17208,7 @@ export function CarePlandPers({
     handleResolveProductMgmtItem, handleRetireProductMgmtArea, handleRevertAppContent, handleRevertInstructionVersion,
     handleReviewAgentKnowledgeProposalItem, handleRunAskModuleLab, handleSaveAgentKnowledge, handleSaveAgentKnowledgeAutomationSettings,
     handleSaveAiInstructions, handleSaveAppContent, handleSaveAppSessionSettings, handleSeedAdminSampleData,
+    handleSetUserAdmin,
     handleUpdateAdminTicketStatus, handleUpdateAskReview, handleUpdateAskRoutingSettings, handleUpdateAssistantAnalysisRun,
     handleUpdateEarlyAccessIntake, handleUpdateProductMgmtItem, historyAppointmentId, instructionChangeNote,
     instructionModel, instructionOutputSchema, instructionSystemPrompt, instructionUserPrompt,
@@ -17297,27 +17262,32 @@ export function CarePlandPers({
 
   return (
     <main
-      className={`min-h-screen overflow-x-clip bg-slate-50 px-3 text-slate-900 sm:px-4 lg:px-6 lg:py-8 ${
-        isSignedInAppShell
+      className={`min-h-screen overflow-x-clip bg-slate-50 text-slate-900 ${
+        showingPersonalSetup
+          ? "p-0"
+          : isSignedInAppShell
           ? showUserFacingFooter
-            ? "pb-20 pt-2 sm:pt-4"
-            : "pb-6 pt-2 sm:pt-4"
-          : "py-6"
+            ? "px-3 pb-20 pt-2 sm:px-4 sm:pt-4 lg:px-6 lg:py-8"
+            : "px-3 pb-6 pt-2 sm:px-4 sm:pt-4 lg:px-6 lg:py-8"
+          : "px-3 py-6 sm:px-4 lg:px-6"
       }`}
     >
       <section
         className={`mx-auto w-full ${
-          isSignedInAppShell
+          showingPersonalSetup
+            ? "max-w-none"
+            : isSignedInAppShell
             ? isAdmin
               ? "max-w-5xl 2xl:max-w-6xl"
               : "max-w-[900px]"
             : "max-w-3xl"
         }`}
       >
-        <header
-          className="sticky top-0 z-50 grid gap-2 bg-slate-50 py-1.5 sm:gap-3 sm:py-3"
-          ref={mainHeaderRef}
-        >
+        {!showingPersonalSetup ? (
+          <header
+            className="sticky top-0 z-50 grid gap-2 bg-slate-50 py-1.5 sm:gap-3 sm:py-3"
+            ref={mainHeaderRef}
+          >
           {isSignedInAppShell && !showWelcomeGuide ? (
             <CarePlandTopNav
               activeModule={
@@ -17507,7 +17477,8 @@ export function CarePlandPers({
 	              </button>
 	            </div>
 	          ) : null}
-	        </header>
+          </header>
+        ) : null}
 
         {authMode === "updatePassword" ? (
           <PasswordUpdatePanel
@@ -17710,6 +17681,10 @@ export function CarePlandPers({
               timezoneDetectionMessage,
               timeZoneOptions,
               verifiedAccountEmail,
+            }}
+            offlineAccessProps={{
+              accountId: currentCareCircleId,
+              getAuthHeaders: getSignedInAuthHeaders,
             }}
             message={message}
           />
@@ -20548,10 +20523,6 @@ export function CarePlandPers({
                   carePrep: {
                     bring_list: asTextList(prep?.bring_list),
                     key_questions: asTextList(prep?.key_questions),
-                    med_review: asTextList(prep?.med_review),
-                    next_steps: asTextList(prep?.next_steps),
-                    since_last_visit: asTextList(prep?.since_last_visit),
-                    watchouts: asTextList(prep?.watchouts),
                   },
                   communicationItems: appointmentCommunicationItems,
                 });
@@ -20574,20 +20545,12 @@ export function CarePlandPers({
                   Boolean(carePrepDraft);
                 const takeaways = asTextList(note?.takeaways);
                 const followups = asTextList(note?.followups);
-                const bringList = whatToKnow.categories.bring_list;
-                const questions = whatToKnow.categories.key_questions;
-                const watchouts = whatToKnow.categories.watchouts;
-                const medReview = whatToKnow.categories.med_review;
-                const sinceLastVisit = whatToKnow.categories.since_last_visit;
-                const nextSteps = whatToKnow.categories.next_steps;
+                const beforeVisit = whatToKnow.categories.bring_list;
+                const duringVisit = whatToKnow.categories.key_questions;
                 const whatToKnowTopSections = [
-                  { icon: "👜", items: bringList, label: "Bring" },
-                  { icon: "❓", items: questions, label: "Ask" },
+                  { items: beforeVisit, label: "Before the Visit" },
+                  { items: duringVisit, label: "During the Visit" },
                 ].filter((section) => section.items.length > 0);
-                const whatToKnowWatchForSection =
-                  watchouts.length > 0
-                    ? { icon: "👁", items: watchouts, label: "Watch for" }
-                    : null;
                 const whatToKnowTopGridClassName =
                   whatToKnowTopSections.length === 1
                     ? "flex flex-col gap-4"
@@ -21624,110 +21587,51 @@ export function CarePlandPers({
 
                         <div className="mt-4 grid gap-4">
                           <label className="block text-sm font-medium text-slate-700">
-                            Summary
+                            Opening line
                             <textarea
                               className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                              maxLength={180}
                               onChange={(event) =>
                                 updateCarePrepDraft(
                                   appointment.id,
-                                  "summary",
+                                  "intro",
                                   event.target.value,
                                   draftValues
                                 )
                               }
-                              value={draftValues.summary}
+                              value={draftValues.intro}
                             />
                           </label>
 
                           <div className="grid gap-4 md:grid-cols-2">
                             <label className="block text-sm font-medium text-slate-700">
-                              Bring
+                              Before the Visit
                               <textarea
                                 className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                                 onChange={(event) =>
                                   updateCarePrepDraft(
                                     appointment.id,
-                                    "bringList",
+                                    "beforeVisit",
                                     event.target.value,
                                     draftValues
                                   )
                                 }
-                                value={draftValues.bringList}
+                                value={draftValues.beforeVisit}
                               />
                             </label>
                             <label className="block text-sm font-medium text-slate-700">
-                              Ask
+                              During the Visit
                               <textarea
                                 className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                                 onChange={(event) =>
                                   updateCarePrepDraft(
                                     appointment.id,
-                                    "keyQuestions",
+                                    "duringVisit",
                                     event.target.value,
                                     draftValues
                                   )
                                 }
-                                value={draftValues.keyQuestions}
-                              />
-                            </label>
-                            <label className="block text-sm font-medium text-slate-700">
-                              Watch for
-                              <textarea
-                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                                onChange={(event) =>
-                                  updateCarePrepDraft(
-                                    appointment.id,
-                                    "watchouts",
-                                    event.target.value,
-                                    draftValues
-                                  )
-                                }
-                                value={draftValues.watchouts}
-                              />
-                            </label>
-                            <label className="block text-sm font-medium text-slate-700">
-                              Medication review
-                              <textarea
-                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                                onChange={(event) =>
-                                  updateCarePrepDraft(
-                                    appointment.id,
-                                    "medReview",
-                                    event.target.value,
-                                    draftValues
-                                  )
-                                }
-                                value={draftValues.medReview}
-                              />
-                            </label>
-                            <label className="block text-sm font-medium text-slate-700">
-                              Since last visit
-                              <textarea
-                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                                onChange={(event) =>
-                                  updateCarePrepDraft(
-                                    appointment.id,
-                                    "sinceLastVisit",
-                                    event.target.value,
-                                    draftValues
-                                  )
-                                }
-                                value={draftValues.sinceLastVisit}
-                              />
-                            </label>
-                            <label className="block text-sm font-medium text-slate-700">
-                              Next steps
-                              <textarea
-                                className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                                onChange={(event) =>
-                                  updateCarePrepDraft(
-                                    appointment.id,
-                                    "nextSteps",
-                                    event.target.value,
-                                    draftValues
-                                  )
-                                }
-                                value={draftValues.nextSteps}
+                                value={draftValues.duringVisit}
                               />
                             </label>
                           </div>
@@ -21919,110 +21823,51 @@ export function CarePlandPers({
                               />
                             ) : null}
                             <label className="block text-sm font-medium text-slate-700">
-                              Summary
+                              Opening line
                               <textarea
                                 className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+                                maxLength={180}
                                 onChange={(event) =>
                                   updateCarePrepDraft(
                                     appointment.id,
-                                    "summary",
+                                    "intro",
                                     event.target.value,
                                     prepEditValues
                                   )
                                 }
-                                value={prepEditValues.summary}
+                                value={prepEditValues.intro}
                               />
                             </label>
 
                             <div className="grid gap-4 md:grid-cols-2">
                               <label className="block text-sm font-medium text-slate-700">
-                                Bring
+                                Before the Visit
                                 <textarea
                                   className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                                   onChange={(event) =>
                                     updateCarePrepDraft(
                                       appointment.id,
-                                      "bringList",
+                                      "beforeVisit",
                                       event.target.value,
                                       prepEditValues
                                     )
                                   }
-                                  value={prepEditValues.bringList}
+                                  value={prepEditValues.beforeVisit}
                                 />
                               </label>
                               <label className="block text-sm font-medium text-slate-700">
-                                Ask
+                                During the Visit
                                 <textarea
                                   className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                                   onChange={(event) =>
                                     updateCarePrepDraft(
                                       appointment.id,
-                                      "keyQuestions",
+                                      "duringVisit",
                                       event.target.value,
                                       prepEditValues
                                     )
                                   }
-                                  value={prepEditValues.keyQuestions}
-                                />
-                              </label>
-                              <label className="block text-sm font-medium text-slate-700">
-                                Watch for
-                                <textarea
-                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                                  onChange={(event) =>
-                                    updateCarePrepDraft(
-                                      appointment.id,
-                                      "watchouts",
-                                      event.target.value,
-                                      prepEditValues
-                                    )
-                                  }
-                                  value={prepEditValues.watchouts}
-                                />
-                              </label>
-                              <label className="block text-sm font-medium text-slate-700">
-                                Medication review
-                                <textarea
-                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                                  onChange={(event) =>
-                                    updateCarePrepDraft(
-                                      appointment.id,
-                                      "medReview",
-                                      event.target.value,
-                                      prepEditValues
-                                    )
-                                  }
-                                  value={prepEditValues.medReview}
-                                />
-                              </label>
-                              <label className="block text-sm font-medium text-slate-700">
-                                Since last visit
-                                <textarea
-                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                                  onChange={(event) =>
-                                    updateCarePrepDraft(
-                                      appointment.id,
-                                      "sinceLastVisit",
-                                      event.target.value,
-                                      prepEditValues
-                                    )
-                                  }
-                                  value={prepEditValues.sinceLastVisit}
-                                />
-                              </label>
-                              <label className="block text-sm font-medium text-slate-700">
-                                Next steps
-                                <textarea
-                                  className="mt-2 min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                                  onChange={(event) =>
-                                    updateCarePrepDraft(
-                                      appointment.id,
-                                      "nextSteps",
-                                      event.target.value,
-                                      prepEditValues
-                                    )
-                                  }
-                                  value={prepEditValues.nextSteps}
+                                  value={prepEditValues.duringVisit}
                                 />
                               </label>
                             </div>
@@ -22075,9 +21920,6 @@ export function CarePlandPers({
                                       key={section.label}
                                     >
                                       <h4 className="font-semibold text-slate-900">
-                                        <span aria-hidden="true">
-                                          {section.icon}
-                                        </span>{" "}
                                         {section.label}
                                       </h4>
                                       <DetailList
@@ -22089,64 +21931,6 @@ export function CarePlandPers({
                                   ))}
                                 </div>
                               ) : null}
-                              {whatToKnowWatchForSection ? (
-                                <section className="min-w-0 px-2 py-1 sm:px-3">
-                                  <h4 className="font-semibold text-slate-900">
-                                    <span aria-hidden="true">
-                                      {whatToKnowWatchForSection.icon}
-                                    </span>{" "}
-                                    {whatToKnowWatchForSection.label}
-                                  </h4>
-                                  <DetailList
-                                    emptyLabel=""
-                                    items={whatToKnowWatchForSection.items}
-                                    showBullets={false}
-                                  />
-                                </section>
-                              ) : null}
-
-                            {(medReview.length > 0 ||
-                              sinceLastVisit.length > 0 ||
-                              nextSteps.length > 0) && (
-                              <div className="grid gap-4 md:grid-cols-2">
-                                <section className="px-2 py-1 sm:px-3">
-                                  <h4 className="font-semibold text-slate-900">
-                                    <span aria-hidden="true">💊</span>{" "}
-                                    Medications
-                                  </h4>
-                                  <DetailList
-                                    emptyLabel="No medication review items saved yet."
-                                    items={medReview}
-                                    showBullets={false}
-                                  />
-                                </section>
-
-                                <section className="px-2 py-1 sm:px-3">
-                                  <h4 className="font-semibold text-slate-900">
-                                    <span aria-hidden="true">💡</span>{" "}
-                                    Last visit highlights
-                                  </h4>
-                                  <DetailList
-                                    emptyLabel="No prior-visit context saved yet."
-                                    items={sinceLastVisit}
-                                    showBullets={false}
-                                  />
-                                </section>
-                                {nextSteps.length > 0 ? (
-                                  <section className="px-2 py-1 sm:px-3">
-                                    <h4 className="font-semibold text-slate-900">
-                                      <span aria-hidden="true">✓</span>{" "}
-                                      Next steps
-                                    </h4>
-                                    <DetailList
-                                      emptyLabel=""
-                                      items={nextSteps}
-                                      showBullets={false}
-                                    />
-                                  </section>
-                                ) : null}
-                              </div>
-                            )}
                             </div>
                           </div>
                         )}

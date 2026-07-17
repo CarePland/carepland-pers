@@ -54,13 +54,9 @@ export type SavedAppointmentDetails = {
 };
 
 export type CarePrepFormDraft = {
-  bringList: string;
-  keyQuestions: string;
-  medReview: string;
-  nextSteps: string;
-  sinceLastVisit: string;
-  summary: string;
-  watchouts: string;
+  beforeVisit: string;
+  duringVisit: string;
+  intro: string;
 };
 
 export type SavedCarePrepGuidance = {
@@ -92,13 +88,9 @@ export const emptyAppointmentDraft: AppointmentDetailsDraft = {
 };
 
 export const emptyCarePrepDraft: CarePrepFormDraft = {
-  bringList: "",
-  keyQuestions: "",
-  medReview: "",
-  nextSteps: "",
-  sinceLastVisit: "",
-  summary: "",
-  watchouts: "",
+  beforeVisit: "",
+  duringVisit: "",
+  intro: "",
 };
 
 export function asTextList(value: unknown): string[] {
@@ -229,19 +221,11 @@ export function carePrepDraftHasChanges(
   savedCarePrep: CarePrepFormDraft
 ): boolean {
   return (
-    normalizeLineList(draft.bringList) !==
-      normalizeLineList(savedCarePrep.bringList) ||
-    normalizeLineList(draft.keyQuestions) !==
-      normalizeLineList(savedCarePrep.keyQuestions) ||
-    normalizeLineList(draft.medReview) !==
-      normalizeLineList(savedCarePrep.medReview) ||
-    normalizeLineList(draft.nextSteps) !==
-      normalizeLineList(savedCarePrep.nextSteps) ||
-    normalizeLineList(draft.sinceLastVisit) !==
-      normalizeLineList(savedCarePrep.sinceLastVisit) ||
-    normalizeText(draft.summary) !== normalizeText(savedCarePrep.summary) ||
-    normalizeLineList(draft.watchouts) !==
-      normalizeLineList(savedCarePrep.watchouts)
+    normalizeLineList(draft.beforeVisit) !==
+      normalizeLineList(savedCarePrep.beforeVisit) ||
+    normalizeLineList(draft.duringVisit) !==
+      normalizeLineList(savedCarePrep.duringVisit) ||
+    normalizeText(draft.intro) !== normalizeText(savedCarePrep.intro)
   );
 }
 
@@ -250,13 +234,9 @@ export function carePrepGuidanceFormValues(
   draftOverrides: Partial<CarePrepFormDraft> = {}
 ): CarePrepFormDraft {
   return {
-    bringList: asTextList(guidance.bring_list).join("\n"),
-    keyQuestions: asTextList(guidance.key_questions).join("\n"),
-    medReview: asTextList(guidance.med_review).join("\n"),
-    nextSteps: asTextList(guidance.next_steps).join("\n"),
-    sinceLastVisit: asTextList(guidance.since_last_visit).join("\n"),
-    summary: guidance.summary ?? "",
-    watchouts: asTextList(guidance.watchouts).join("\n"),
+    beforeVisit: asTextList(guidance.bring_list).join("\n"),
+    duringVisit: asTextList(guidance.key_questions).join("\n"),
+    intro: guidance.summary ?? "",
     ...draftOverrides,
   };
 }

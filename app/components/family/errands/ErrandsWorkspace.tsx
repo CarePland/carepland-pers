@@ -1,5 +1,6 @@
 "use client";
 
+import { createClient } from "@supabase/supabase-js";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -30,6 +31,10 @@ import {
   panelClass,
 } from "../../shared/uiStyles";
 import { ErrandStatusPill } from "./ErrandStatusPill";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type ErrandDraft = {
   title: string;
@@ -208,7 +213,18 @@ export function ErrandsWorkspace() {
         const query = appointmentSearchText
           ? `?q=${encodeURIComponent(appointmentSearchText)}`
           : "";
-        const response = await fetch(`/api/family/appointments${query}`);
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const accessToken = session?.access_token;
+
+        if (!accessToken) {
+          throw new Error("Please sign in before loading appointments.");
+        }
+
+        const response = await fetch(`/api/family/appointments${query}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
         const body = (await response.json()) as {
           appointments?: FamilyAppointmentOption[];
           error?: string;

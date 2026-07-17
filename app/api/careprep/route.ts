@@ -111,6 +111,18 @@ function asTextList(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function truncateIntro(value: unknown): string {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+
+  return normalized.length > 180
+    ? normalized.slice(0, 180).trimEnd()
+    : normalized;
+}
+
+function limitedList(value: unknown, limit: number): string[] {
+  return asTextList(value).slice(0, limit);
+}
+
 function responseText(response: JsonObject): string {
   if (typeof response.output_text === "string") {
     return response.output_text;
@@ -142,16 +154,24 @@ function responseText(response: JsonObject): string {
 }
 
 function normalizeCarePrepOutput(output: JsonObject) {
+  const beforeVisit =
+    output.beforeVisit ?? output.before_visit ?? output.bring_list;
+  const duringVisit =
+    output.duringVisit ?? output.during_visit ?? output.key_questions;
+
   return {
-    bring_list: asTextList(output.bring_list),
-    key_questions: asTextList(output.key_questions),
-    med_review: asTextList(output.med_review),
-    next_steps: asTextList(output.next_steps ?? output.next_steps_suggested),
-    since_last_visit: asTextList(output.since_last_visit),
-    summary: String(
-      output.summary ?? output.summary_320 ?? output.pre_visit_summary ?? ""
-    ).trim(),
-    watchouts: asTextList(output.watchouts),
+    bring_list: limitedList(beforeVisit, 3),
+    key_questions: limitedList(duringVisit, 4),
+    med_review: [],
+    next_steps: [],
+    since_last_visit: [],
+    summary: truncateIntro(
+      output.intro ??
+        output.summary ??
+        output.summary_320 ??
+        output.pre_visit_summary
+    ),
+    watchouts: [],
   };
 }
 
@@ -167,6 +187,16 @@ function carePrepPayload(output: JsonObject) {
     summary: guidance.summary,
     watchouts: guidance.watchouts,
   };
+}
+
+function hasUsefulCarePrep(
+  guidance: ReturnType<typeof normalizeCarePrepOutput>
+) {
+  return Boolean(
+    guidance.summary ||
+      guidance.bring_list.length > 0 ||
+      guidance.key_questions.length > 0
+  );
 }
 
 function snapshotPastAppointmentCount(snapshot: unknown): number | null {
@@ -350,8 +380,8 @@ export async function POST(request: NextRequest) {
 
       const editedPayload = carePrepPayload(editedGuidance);
 
-      if (!editedPayload.summary) {
-        throw new Error("Edited CarePrep needs a summary.");
+      if (!hasUsefulCarePrep(editedPayload)) {
+        throw new Error("Edited CarePrep needs at least one useful preparation item.");
       }
 
       const { data: editedVersion, error: editedError } = await supabase
@@ -510,8 +540,8 @@ export async function POST(request: NextRequest) {
 
       const editedPayload = carePrepPayload(editedGuidance);
 
-      if (!editedPayload.summary) {
-        throw new Error("Edited CarePrep needs a summary.");
+      if (!hasUsefulCarePrep(editedPayload)) {
+        throw new Error("Edited CarePrep needs at least one useful preparation item.");
       }
 
       const { data: editedVersion, error: editedError } = await supabase
@@ -753,6 +783,7 @@ export async function POST(request: NextRequest) {
         generationMode,
         guidanceId: latestGuidance.id,
         message: "CarePrep already exists for this appointment.",
+        status: "generated",
       });
     }
 
@@ -802,6 +833,7 @@ export async function POST(request: NextRequest) {
         message:
           refreshNotReadyMessage ||
           "CarePrep is already up to date for this appointment. Add or save new Visit Notes, then try again.",
+        status: "generated",
       });
     }
 
@@ -861,11 +893,11 @@ export async function POST(request: NextRequest) {
         : {
             additionalProperties: false,
             properties: {
-              bring_list: { items: { type: "string" }, type: "array" },
-              key_questions: { items: { type: "string" }, type: "array" },
-              summary: { type: "string" },
+              beforeVisit: { items: { type: "string" }, type: "array" },
+              duringVisit: { items: { type: "string" }, type: "array" },
+              intro: { type: "string" },
             },
-            required: ["summary", "key_questions", "bring_list"],
+            required: ["beforeVisit", "duringVisit"],
             type: "object",
           };
     const userPrompt = [
@@ -927,8 +959,24 @@ export async function POST(request: NextRequest) {
     const parsedOutput = JSON.parse(text) as JsonObject;
     const guidance = normalizeCarePrepOutput(parsedOutput);
 
-    if (!guidance.summary) {
-      throw new Error("OpenAI returned CarePrep without a summary.");
+    if (!hasUsefulCarePrep(guidance)) {
+      if (reservedMeteredFeature) {
+        await supabase.rpc("refund_feature_usage", {
+          p_care_circle_id: reservedMeteredFeature.careCircleId,
+          p_feature_key: reservedMeteredFeature.featureKey,
+          p_quantity: reservedMeteredFeature.quantity,
+        });
+        reservedMeteredFeature = null;
+      }
+
+      return NextResponse.json({
+        appointmentId: appointment.id,
+        generationMode,
+        message: "No useful CarePrep was found for this appointment.",
+        reason:
+          "No materially useful appointment preparation was supported by the available CarePland evidence.",
+        status: "not_useful",
+      });
     }
 
     const { data: existingDraftRows, error: existingDraftError } =
@@ -1084,6 +1132,7 @@ export async function POST(request: NextRequest) {
           : generationMode === "auto_home"
             ? "CarePrep was prepared for the next appointment."
           : "AI CarePrep draft generated.",
+      status: "generated",
     });
   } catch (error) {
     if (

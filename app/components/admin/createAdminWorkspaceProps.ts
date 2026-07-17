@@ -153,6 +153,7 @@ export function createAdminWorkspaceProps({
   handleSaveAppContent,
   handleSaveAppSessionSettings,
   handleSeedAdminSampleData,
+  handleSetUserAdmin,
   handleUpdateAdminTicketStatus,
   handleUpdateAskReview,
   handleUpdateAskRoutingSettings,
@@ -564,7 +565,10 @@ export function createAdminWorkspaceProps({
                   rows: adminAccessEvents,
                   shortId,
                   userRows: adminUserActivity,
-                },
+    },
+    checkpoint: {
+      formatDate,
+    },
     content: {
                   appContentBody,
                   appContentCategories,
@@ -785,6 +789,7 @@ export function createAdminWorkspaceProps({
                   navItems: usersAdminNavItems,
                   onRefresh: loadAdminUserActivity,
                   onSelectTab: handleChangeAdminTab,
+                  onSetUserAdmin: handleSetUserAdmin,
                   openAdminReadonlyUserView,
                   revealAdminSensitiveData,
                   revealingAdminSensitiveKey,

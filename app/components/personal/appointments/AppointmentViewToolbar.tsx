@@ -40,6 +40,37 @@ function compactSubjectName(displayName: string) {
   return displayName.trim().split(/\s+/)[0] || displayName;
 }
 
+function normalizeReadableName(displayName: string) {
+  const trimmedName = displayName.trim();
+
+  if (!trimmedName.includes("@")) {
+    return trimmedName;
+  }
+
+  const localPart = trimmedName.split("@")[0] ?? "";
+  return (
+    localPart
+      .replace(/[._-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || trimmedName
+  );
+}
+
+function firstNameKey(displayName: string) {
+  return compactSubjectName(normalizeReadableName(displayName)).toLowerCase();
+}
+
+function appointmentSubjectLabel(displayName: string, duplicateFirstNames: Set<string>) {
+  const readableName = normalizeReadableName(displayName);
+  const firstName = compactSubjectName(readableName);
+
+  if (duplicateFirstNames.has(firstName.toLowerCase())) {
+    return readableName;
+  }
+
+  return firstName;
+}
+
 export function AppointmentViewToolbar({
   allSubjectsValue,
   canFilterCareVips,
@@ -64,6 +95,20 @@ export function AppointmentViewToolbar({
     { display_name: "All appts", id: allSubjectsValue },
     ...careSubjects,
   ];
+  const firstNameCounts = careSubjects.reduce((counts, subject) => {
+    const key = firstNameKey(subject.display_name);
+
+    if (key) {
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+
+    return counts;
+  }, new Map<string, number>());
+  const duplicateFirstNames = new Set(
+    Array.from(firstNameCounts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([name]) => name)
+  );
   const showingOlderAppointments = optimisticView !== "upcoming";
 
   return (
@@ -87,10 +132,18 @@ export function AppointmentViewToolbar({
                   isAllSubjects
                     ? "All"
                     : avatarEmoji || subjectInitials(subject.display_name);
-                const shortName = compactSubjectName(subject.display_name);
+                const subjectLabel = appointmentSubjectLabel(
+                  subject.display_name,
+                  duplicateFirstNames
+                );
 
                 return (
                   <button
+                    aria-label={
+                      isAllSubjects
+                        ? "All appointments"
+                        : `Appointments for ${subjectLabel}`
+                    }
                     aria-pressed={selected}
                     className={`inline-flex shrink-0 items-center gap-2 rounded-full py-1.5 pl-1.5 text-sm font-semibold transition-colors ${
                       selected
@@ -115,19 +168,9 @@ export function AppointmentViewToolbar({
                     >
                       {avatarLabel}
                     </span>
-                    {isAllSubjects ? (
-                      <span className="hidden min-[1280px]:inline">
-                        {subject.display_name}
-                      </span>
-                    ) : (
+                    {isAllSubjects ? null : (
                       <span>
-                        <span>{shortName}</span>
-                        {shortName !== subject.display_name ? (
-                          <span className="hidden min-[1280px]:inline">
-                            {" "}
-                            {subject.display_name.slice(shortName.length).trim()}
-                          </span>
-                        ) : null}
+                        <span>{subjectLabel}</span>
                         {subject.managed_by_household ? (
                           <ManagedByHouseholdHeart className="ml-1" />
                         ) : null}

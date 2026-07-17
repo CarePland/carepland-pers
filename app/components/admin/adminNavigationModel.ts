@@ -173,7 +173,9 @@ export function createAdminNavigationModel({
   );
   const topAdminNavItems: AdminNavItem<AdminWorkspaceTopTab>[] = [
     { key: "dashboard", label: "Dashboard" },
+    { key: "checkpoint", label: "Checkpoint" },
     { key: "connect", label: "Connect" },
+    { key: "workflows", label: "Workflow View" },
     { key: "recommendations", label: "Today's Focus" },
     { key: "tools", label: "Tools" },
     { ...usersAdminAttentionCounts, key: "users", label: "Users" },
@@ -188,6 +190,10 @@ export function createAdminNavigationModel({
       ? "system"
       : supportAdminTabs.includes(adminTab)
         ? "support"
+        : adminTab === "workflows"
+        ? "workflows"
+        : adminTab === "checkpoint"
+          ? "checkpoint"
         : adminTab === "recommendations"
           ? "recommendations"
           : adminTab === "connect"

@@ -604,7 +604,7 @@ export function HealthFocusTopicDetail({
               ) : null}
                 </>
               ) : null}
-              {relationshipTopic ? (
+              {relationshipTopic && canSubmitFeedback ? (
                 <div className="mt-3 rounded-md bg-white/80 p-3">
                   {relationshipAcknowledgement ? (
                     <>

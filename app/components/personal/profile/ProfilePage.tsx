@@ -3,6 +3,7 @@
 import { ComponentProps, useState } from "react";
 
 import { ConnectProfileSettingsPanel } from "../../connect/dashboard/ConnectDashboard";
+import { OfflineAccessPanel } from "./OfflineAccessPanel";
 import { ProfileAccountSummary } from "./ProfileAccountSummary";
 import { ProfileContactDetailsForm } from "./ProfileContactDetailsForm";
 
@@ -10,13 +11,15 @@ type ProfilePageProps = {
   accountSummaryProps: ComponentProps<typeof ProfileAccountSummary>;
   canShowAdminItems: boolean;
   contactDetailsProps: ComponentProps<typeof ProfileContactDetailsForm>;
+  offlineAccessProps: ComponentProps<typeof OfflineAccessPanel>;
   message?: string;
 };
 
-type ProfileSettingsTab = "account" | "receiverSettings";
+type ProfileSettingsTab = "account" | "offlineAccess" | "receiverSettings";
 
 const profileSettingsTabs: Array<{ id: ProfileSettingsTab; label: string }> = [
   { id: "account", label: "Your CarePland Account" },
+  { id: "offlineAccess", label: "Offline Access" },
   { id: "receiverSettings", label: "Receiver Settings" },
 ];
 
@@ -24,6 +27,7 @@ export function ProfilePage({
   accountSummaryProps,
   canShowAdminItems,
   contactDetailsProps,
+  offlineAccessProps,
   message,
 }: ProfilePageProps) {
   const [activeTab, setActiveTab] = useState<ProfileSettingsTab>("account");
@@ -61,6 +65,8 @@ export function ProfilePage({
             </p>
           ) : null}
         </>
+      ) : activeTab === "offlineAccess" ? (
+        <OfflineAccessPanel {...offlineAccessProps} />
       ) : (
         <ConnectProfileSettingsPanel
           canShowAdminItems={canShowAdminItems}

@@ -218,15 +218,10 @@ export function HomeNextAppointmentPanel({
                 {title}
               </p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-950">
-                Nothing scheduled
+                No Upcoming Appointments
               </h2>
             </>
           )}
-          {!appointment ? (
-            <p className="mt-2 text-slate-600">
-              Add an appointment when something is coming up.
-            </p>
-          ) : null}
         </div>
         <div className="text-left md:min-w-64 md:text-right">
           {appointment ? (

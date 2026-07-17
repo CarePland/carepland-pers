@@ -102,6 +102,33 @@ function metricClass(tone: SupportMetric["tone"] = "neutral") {
   return "bg-slate-50 text-slate-500";
 }
 
+function ConnectivityIndicator({ online }: { online: boolean }) {
+  return (
+    <div
+      aria-label={online ? "CarePland is online" : "CarePland is offline"}
+      className="inline-flex shrink-0 items-center gap-1.5"
+      role="status"
+      title={online ? "Online" : "Offline"}
+    >
+      {!online ? (
+        <span className="text-xs font-black uppercase tracking-wide text-slate-500">
+          Offline
+        </span>
+      ) : (
+        <span className="sr-only">Online</span>
+      )}
+      <span
+        aria-hidden="true"
+        className={`h-3 w-3 rounded-full border ${
+          online
+            ? "border-[#3cac42] bg-[#3cac42] shadow-[0_0_8px_rgba(60,172,66,0.8)]"
+            : "border-slate-400 bg-slate-700 shadow-inner"
+        }`}
+      />
+    </div>
+  );
+}
+
 export function AskSpeechBubbleIcon() {
   return (
     <svg
@@ -274,6 +301,7 @@ export function CarePlandTopNav({
   const [showAllPlatformModules, setShowAllPlatformModules] = useState(false);
   const [showAdminItems, setShowAdminItems] = useState(true);
   const [focusMenuOpen, setFocusMenuOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const focusMenuRef = useRef<HTMLDivElement | null>(null);
   const canShowAdminItems = canShowAdmin && showAdminItems;
   const moduleVisibility = useMemo(
@@ -288,6 +316,21 @@ export function CarePlandTopNav({
     activeModule === "appointments" ||
     activeModule === "connect" ||
     activeModule === "connectArchive";
+
+  useEffect(() => {
+    const syncConnectivity = () => {
+      setIsOnline(typeof navigator === "undefined" ? true : navigator.onLine);
+    };
+
+    syncConnectivity();
+    window.addEventListener("online", syncConnectivity);
+    window.addEventListener("offline", syncConnectivity);
+
+    return () => {
+      window.removeEventListener("online", syncConnectivity);
+      window.removeEventListener("offline", syncConnectivity);
+    };
+  }, []);
 
   useEffect(() => {
     function syncShowAdminItems() {
@@ -435,7 +478,7 @@ export function CarePlandTopNav({
             Messages
           </NavLink>
         ) : null}
-        {canShowAdminItems ? (
+        {canShowAdminItems && showAllPlatformModules ? (
           <NavLink
             active={activeModule === "connectArchive"}
             href="/connect-archive/dashboard"
@@ -452,6 +495,7 @@ export function CarePlandTopNav({
       </nav>
 
       <div className="col-span-2 flex min-w-0 items-center justify-end gap-1.5 text-sm text-slate-600 sm:col-span-1 sm:gap-2">
+        <ConnectivityIndicator online={isOnline} />
         {currentFocus ? (
           <div className="relative" ref={focusMenuRef}>
             <button

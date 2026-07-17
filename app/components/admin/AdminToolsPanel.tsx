@@ -3,6 +3,7 @@
 import { ComponentProps, FormEvent } from "react";
 
 import { AppSessionSettings } from "../../lib/platform/sessionSettings";
+import { AdminDataHealthPanel } from "./AdminDataHealthPanel";
 import { AdminRecommendationsReviewPanel } from "./AdminRecommendationsReviewPanel";
 import { AdminSessionSettingsPanel } from "./AdminSessionSettingsPanel";
 
@@ -144,6 +145,8 @@ export function AdminToolsPanel({
         saving={savingAppSessionSettings}
         settings={appSessionSettings}
       />
+
+      <AdminDataHealthPanel />
 
       <AdminRecommendationsReviewPanel {...recommendationsReview} />
 

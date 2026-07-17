@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CarePland is offline</title>
+    <meta name="theme-color" content="#254a6d" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Arial, Helvetica, sans-serif;
+        background: #f7fbff;
+        color: #172f49;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      .fallback {
+        align-items: center;
+        display: flex;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      .fallback-content {
+        margin: 0 auto;
+        max-width: 620px;
+        width: 100%;
+      }
+
+      .fallback img {
+        display: block;
+        height: auto;
+        margin-bottom: 28px;
+        width: 190px;
+      }
+
+      .fallback h1 {
+        font-size: clamp(2rem, 7vw, 3.7rem);
+        line-height: 1;
+        margin: 0 0 18px;
+      }
+
+      .fallback p {
+        color: #345d83;
+        font-size: 1.1rem;
+        line-height: 1.55;
+        margin: 0 0 24px;
+      }
+
+      .offline-snapshot-notice {
+        align-items: center;
+        background: #172f49;
+        color: white;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+        justify-content: center;
+        padding: 10px 16px;
+        position: sticky;
+        text-align: center;
+        top: 0;
+        z-index: 2147483647;
+      }
+
+      .offline-snapshot-notice strong {
+        font-size: 0.84rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .offline-snapshot-notice span {
+        color: #dcecf8;
+        font-size: 0.9rem;
+        font-weight: 700;
+      }
+
+      .offline-snapshot-root {
+        user-select: text;
+      }
+
+      .offline-snapshot-root :is(button, input, textarea, select) {
+        cursor: default !important;
+      }
+
+      button {
+        appearance: none;
+        background: #254a6d;
+        border: 0;
+        border-radius: 8px;
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+        min-height: 48px;
+        padding: 0 22px;
+      }
+
+      button:focus-visible {
+        outline: 3px solid #85a9cc;
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="offline-root">
+      <main class="fallback">
+        <section class="fallback-content">
+          <img src="/carepland-logo.png" alt="CarePland" />
+          <h1>CarePland needs to connect to continue.</h1>
+          <p>
+            CarePland cannot reach the internet right now. Recent frozen views
+            are available only while this device's offline access is current.
+            Older information needs a fresh connection before CarePland can
+            continue.
+          </p>
+          <button type="button" onclick="window.location.reload()">Try again</button>
+        </section>
+      </main>
+    </div>
+    <script>
+      (function () {
+        var snapshotStorageKey = "carepland-offline-visible-snapshot:v1";
+        var root = document.getElementById("offline-root");
+
+        function formatTimestamp(value) {
+          try {
+            return new Intl.DateTimeFormat(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short"
+            }).format(new Date(value));
+          } catch (error) {
+            return new Date(value).toLocaleString();
+          }
+        }
+
+        function renderFallback() {
+          if (root) root.hidden = false;
+        }
+
+        try {
+          var rawSnapshot = window.localStorage.getItem(snapshotStorageKey);
+          if (!rawSnapshot) {
+            renderFallback();
+            return;
+          }
+
+          var snapshot = JSON.parse(rawSnapshot);
+          var now = Date.now();
+          if (
+            !snapshot ||
+            typeof snapshot.html !== "string" ||
+            typeof snapshot.expiresAt !== "number" ||
+            snapshot.expiresAt <= now
+          ) {
+            window.localStorage.removeItem(snapshotStorageKey);
+            renderFallback();
+            return;
+          }
+
+          if (snapshot.title) {
+            document.title = snapshot.title + " (offline)";
+          }
+
+          if (typeof snapshot.headHtml === "string") {
+            document.head.insertAdjacentHTML("beforeend", snapshot.headHtml);
+          }
+
+          document.body.innerHTML =
+            '<aside class="offline-snapshot-notice" role="status" aria-live="polite">' +
+            "<strong>Offline</strong>" +
+            "<span>Frozen view from " +
+            formatTimestamp(snapshot.capturedAt) +
+            ". Actions are paused until CarePland reconnects.</span>" +
+            "</aside>" +
+            '<div class="offline-snapshot-root">' +
+            snapshot.html +
+            "</div>";
+
+          document.addEventListener(
+            "click",
+            function (event) {
+              event.preventDefault();
+              event.stopPropagation();
+            },
+            true
+          );
+        } catch (error) {
+          renderFallback();
+        }
+      })();
+    </script>
+  </body>
+</html>

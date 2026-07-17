@@ -88,6 +88,8 @@ export function filterAdminUserActivity({
     const direction = sort.direction === "asc" ? 1 : -1;
     const valueForSort = (row: AdminUserActivityRow) => {
       switch (sort.key) {
+        case "admin":
+          return row.is_admin ? 1 : 0;
         case "appointments":
           return row.appointment_count;
         case "careprep":

@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import Image from "next/image";
 
 import { AskSpeechBubbleIcon } from "../../shared/CarePlandTopNav";
 import { AddressAutocompleteField } from "../profile/AddressAutocompleteField";
@@ -114,6 +115,9 @@ export function OnboardingGate({
       (!requiresEmailUpdate || profileDraft.email.trim()));
   const profileAddressComplete =
     !profileDetailsRequired || isProfileAddressComplete(profileDraft);
+  const setupRequirementsComplete =
+    betaComplete && Boolean(profileBasicsComplete) && profileAddressComplete;
+  const readyActionsDisabled = loading || savingProfile || !setupRequirementsComplete;
   const firstStep: PersonalOnboardingStep = needsBetaAgreement
     ? "earlyAccess"
     : "profileBasics";
@@ -136,11 +140,11 @@ export function OnboardingGate({
           : undefined;
   const primaryDisabled =
     visibleStep === "ready"
-      ? needsBetaAgreement || needsOnboarding
+      ? readyActionsDisabled
       : visibleStep === "earlyAccess"
       ? loading || !betaComplete
       : visibleStep === "profileAddress"
-      ? savingProfile || !profileAddressComplete
+      ? savingProfile
       : savingProfile || viewingBlockedProfile;
   const primaryLabel =
     visibleStep === "ready"
@@ -200,7 +204,7 @@ export function OnboardingGate({
     return visibleStep === "earlyAccess" ? (
       <PersonalOnboardingShell
         currentStep={visibleStep}
-        message=""
+        message={message}
         onSelectStep={handleSelectStep}
         onSignOut={onSignOut}
         primaryDisabled={primaryDisabled}
@@ -320,7 +324,7 @@ export function OnboardingGate({
           />
         ) : (
           <ReadyPage
-            actionsDisabled={needsBetaAgreement || needsOnboarding}
+            actionsDisabled={readyActionsDisabled}
             onImportAnything={onImportAnything}
             onOpenCarePland={onOpenCarePland}
             onOpenReceiver={onOpenReceiver}
@@ -399,7 +403,7 @@ export function OnboardingGate({
           />
         ) : (
           <ReadyPage
-            actionsDisabled={needsBetaAgreement || needsOnboarding}
+            actionsDisabled={readyActionsDisabled}
             onImportAnything={onImportAnything}
             onOpenCarePland={onOpenCarePland}
             onOpenReceiver={onOpenReceiver}
@@ -491,7 +495,7 @@ function PersonalOnboardingShell({
   ] as const;
 
   return (
-    <section className="mt-8 grid justify-center">
+    <section className="grid min-h-screen place-items-center py-4">
       <div
         style={{
           height: `${scaledCanvasHeight}px`,
@@ -508,25 +512,18 @@ function PersonalOnboardingShell({
           }}
         >
           <header className="bg-[#f8fbff] px-8 pb-0 pt-5 sm:px-12 sm:pt-6 lg:px-14">
-            <div className="flex items-start justify-between gap-4">
-              <div className="pt-4">
-                <p className="text-xs font-black uppercase tracking-normal text-[#5f6e84]">
-                  CarePland Personal Setup
-                </p>
-              </div>
+            <div className="relative border-b border-[#d6e3f2] pb-4">
               <button
                 aria-label="Sign out"
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-transparent text-xl font-black text-[#173150] hover:bg-[#edf5fc] focus:outline-none focus:ring-2 focus:ring-[#4e84b2]"
+                className="absolute right-0 top-0 grid h-11 w-11 place-items-center rounded-lg bg-transparent text-xl font-black text-[#173150] hover:bg-[#edf5fc] focus:outline-none focus:ring-2 focus:ring-[#4e84b2]"
                 onClick={onSignOut}
                 type="button"
               >
                 ×
               </button>
-            </div>
-            <div className="mt-2 border-b border-[#d6e3f2] pb-4">
               <nav aria-label="Personal setup progress">
                 <ol className="grid grid-cols-4 gap-3">
-                  {progressItems.map((item) => {
+                  {progressItems.map((item, index) => {
                     const active = item.id === currentStep;
                     const itemClassName = active
                         ? "bg-[#2f6f9f] text-white"
@@ -535,7 +532,25 @@ function PersonalOnboardingShell({
                         : "bg-[#edf1f4] text-[#5f6e84]";
 
                     return (
-                      <li key={item.id}>
+                      <li className="min-w-0" key={item.id}>
+                        {index === 0 ? (
+                          <div className="mb-3 flex min-h-12 items-center gap-3 pr-2">
+                            <Image
+                              alt=""
+                              aria-hidden="true"
+                              className="h-11 w-11 shrink-0 rounded-full"
+                              height={44}
+                              priority
+                              src="/carepland-loop-mark.png"
+                              width={44}
+                            />
+                            <p className="text-[11px] font-black uppercase leading-tight tracking-normal text-[#5f6e84]">
+                              CarePland Personal Setup
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="mb-3 min-h-12" />
+                        )}
                         <button
                           aria-current={active ? "step" : undefined}
                           className={`block w-full rounded-full px-4 py-3 text-center text-base font-black transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#4e84b2] ${itemClassName}`}

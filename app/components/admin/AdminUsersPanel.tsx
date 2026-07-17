@@ -34,6 +34,7 @@ type AdminUsersPanelProps<TabKey extends string> = {
   navItems: AdminNavItem<TabKey>[];
   onRefresh: () => void;
   onSelectTab: (tab: TabKey) => void;
+  onSetUserAdmin: AdminUserActivityPanelProps["onSetUserAdmin"];
   openAdminReadonlyUserView: (userId: string) => void;
   revealAdminSensitiveData: AdminReadonlyUserPanelProps["onReveal"];
   revealingAdminSensitiveKey: string | null;
@@ -67,6 +68,7 @@ export function AdminUsersPanel<TabKey extends string>({
   navItems,
   onRefresh,
   onSelectTab,
+  onSetUserAdmin,
   openAdminReadonlyUserView,
   revealAdminSensitiveData,
   revealingAdminSensitiveKey,
@@ -124,6 +126,7 @@ export function AdminUsersPanel<TabKey extends string>({
         loadingReadonlyUserId={loadingAdminReadonlyUserId}
         onChangeFilter={setAdminUserActivityFilter}
         onOpenReadonlyUserView={openAdminReadonlyUserView}
+        onSetUserAdmin={onSetUserAdmin}
         onToggleCareVips={(userId) =>
           setExpandedAdminUserCareVipRows((currentRows) => ({
             ...currentRows,

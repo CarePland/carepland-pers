@@ -108,21 +108,17 @@ describe("editorState", () => {
 
   it("normalizes CarePrep line lists before comparing drafts", () => {
     const savedCarePrep = {
-      bringList: "Medication list\nBlood pressure log",
-      keyQuestions: "Is this dose still appropriate?",
-      medReview: "",
-      nextSteps: "",
-      sinceLastVisit: "",
-      summary: "Review dizziness patterns.",
-      watchouts: "Chest pain",
+      beforeVisit: "Medication list\nBlood pressure log",
+      duringVisit: "Is this dose still appropriate?",
+      intro: "Review dizziness patterns.",
     };
 
     assert.equal(
       carePrepDraftHasChanges(
         {
           ...savedCarePrep,
-          bringList: "\nMedication list\nBlood pressure log\n",
-          summary: " Review dizziness patterns. ",
+          beforeVisit: "\nMedication list\nBlood pressure log\n",
+          intro: " Review dizziness patterns. ",
         },
         savedCarePrep
       ),
