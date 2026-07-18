@@ -5,6 +5,7 @@ import {
 } from "@/app/lib/connect/context/server/mainConnectUserContext";
 import {
   ReceiverDeviceAccessError,
+  receiverDeviceCredentialsFromRequest,
   receiverDeviceSetupRequiredBody,
 } from "@/app/lib/connect/context/server/personScopedAccess";
 import { connectPrototypeEndpoints } from "@/app/lib/connect/prototypeClient";
@@ -28,7 +29,9 @@ import {
   recordSupabaseConnectMessage,
   recordSupabaseConnectMessageStrict,
 } from "@/app/lib/connect/messaging/server/supabaseMessages";
+import { personHasAttachedReceiver } from "@/app/lib/connect/messaging/receiverAttachment";
 import type { ConnectMessageRecord } from "@/app/lib/connect/messaging";
+import { listReceiverShellDeviceProfiles } from "@/app/lib/connect/receiverShell/claimStore";
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) {
@@ -57,12 +60,14 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export async function GET(request: Request) {
   try {
-    const personId = new URL(request.url).searchParams.get("personId")?.trim() ?? "";
+    const requestedPersonId =
+      new URL(request.url).searchParams.get("personId")?.trim() ?? "";
+    const receiverCredentials = receiverDeviceCredentialsFromRequest(request);
 
-    if (!personId) {
+    if (!requestedPersonId && !receiverCredentials.hasAnyCredential) {
       return NextResponse.json(
         {
-          error: "Select a Main Connect User before loading Connect messages.",
+          error: "Select a person before loading Connect messages.",
           localMessages: [],
           mainConnectUserPersonId: null,
           messages: [],
@@ -74,7 +79,11 @@ export async function GET(request: Request) {
       );
     }
 
-    const access = await readConnectMessagePersonAccessForRequest(request, personId);
+    const access = await readConnectMessagePersonAccessForRequest(
+      request,
+      requestedPersonId
+    );
+    const personId = access.mainConnectUserPersonId;
 
     const localIndex = await readLocalConnectMessages();
     const supabaseMessages = await readSupabaseConnectMessages(access);
@@ -179,8 +188,31 @@ export async function POST(request: Request) {
         { status: 409 }
       );
     }
+    if (
+      access.accessType === "user" &&
+      !(await personHasReceiverForMessaging(access.mainConnectUserPersonId))
+    ) {
+      return NextResponse.json(
+        {
+          error: "Messaging is available after this person is attached to a Receiver.",
+          ok: false,
+        },
+        { status: 409 }
+      );
+    }
 
-    const messagePayload = await ensureAudioMessageOriginalPreserved(payload);
+    const messagePayload = await ensureAudioMessageOriginalPreserved({
+      ...payload,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        recipientDisplayNameSnapshot:
+          stringValue(payload.metadata?.recipientDisplayNameSnapshot) ||
+          payload.to ||
+          "",
+        recipientPersonId: access.mainConnectUserPersonId,
+      },
+      recipientPersonId: access.mainConnectUserPersonId,
+    });
     const message = messagePayload.appointmentId
       ? await recordSupabaseConnectMessageStrict(messagePayload, access)
       : (await recordSupabaseConnectMessage(messagePayload, access)) ??
@@ -216,6 +248,15 @@ export async function POST(request: Request) {
       { status: 503 }
     );
   }
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+async function personHasReceiverForMessaging(personId: string) {
+  const devices = await listReceiverShellDeviceProfiles();
+  return personHasAttachedReceiver(devices, personId);
 }
 
 async function fetchPrototypeMessages() {

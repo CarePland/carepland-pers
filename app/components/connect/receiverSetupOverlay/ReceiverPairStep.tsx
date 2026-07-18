@@ -5,6 +5,7 @@ import {
   browserReceiverPairingCodeReady,
   formatBrowserReceiverPairingCode,
 } from "@/app/lib/connect/receiverShell/browserPairing";
+import { LongOperationStatus } from "@/app/components/shared/LongOperationStatus";
 
 import { ReceiverSetupStatus } from "./ReceiverSetupStatus";
 import type { ReceiverSetupStepProps } from "./types";
@@ -197,8 +198,42 @@ export function ReceiverPairStep({
         </>
       ) : null}
 
-      {draft.pairingStatus === "pending" ? (
-        <ReceiverSetupStatus>Pairing Receiver. This may take a moment.</ReceiverSetupStatus>
+      {draft.pairingStatus === "checking" ? (
+        <LongOperationStatus
+          allowDiagnostics
+          className="mx-auto max-w-xl border-[#d6e3f2] bg-[#f8fbff] text-[#345d83]"
+          delayMs={3000}
+          escalationMs={45000}
+          messages={[
+            "Checking the Receiver screen code...",
+            "This can take a moment if the Receiver just came online.",
+            "A few careful moments later...",
+            "Still checking. If the code expired, we will say so.",
+          ]}
+          onRetry={() => void checkCode()}
+          operation="receiver_pairing"
+          stage="checking_code"
+          title="Checking code."
+          verySlowMs={30000}
+        />
+      ) : draft.pairingStatus === "pending" ? (
+        <LongOperationStatus
+          allowDiagnostics
+          className="mx-auto max-w-xl border-[#d6e3f2] bg-[#f8fbff] text-[#345d83]"
+          delayMs={3000}
+          escalationMs={45000}
+          messages={[
+            "Connecting this Receiver to the selected person...",
+            "This can take a moment if the Receiver is finishing setup.",
+            "A few careful moments later...",
+            "Still pairing. The Receiver may need another moment.",
+          ]}
+          onRetry={() => void pairReceiver()}
+          operation="receiver_pairing"
+          stage="pairing_receiver"
+          title="Pairing Receiver."
+          verySlowMs={30000}
+        />
       ) : draft.pairingStatus === "error" ? (
         <ReceiverSetupStatus tone="error">
           Pairing code is invalid, expired, or unavailable. Check the Receiver screen and try again.

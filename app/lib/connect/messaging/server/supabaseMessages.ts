@@ -161,6 +161,10 @@ export function connectMessageInsertFromInput(
   access: ConnectMessageAccess
 ) {
   const senderRole = normalizeSenderRole(input.senderRole || input.from, access);
+  const metadata = {
+    ...(input.metadata ?? {}),
+    recipientPersonId: input.recipientPersonId || access.mainConnectUserPersonId,
+  };
 
   return {
     allows_callback_request: Boolean(input.allowsCallbackRequest),
@@ -177,8 +181,9 @@ export function connectMessageInsertFromInput(
     client_message_id: input.clientMessageId || "",
     main_connect_user_person_id: access.mainConnectUserPersonId,
     message_type: input.messageType || (input.audioUrl ? "audio" : "text"),
-    metadata: input.metadata ?? {},
-    receiver_device_id: access.receiverDeviceId || null,
+    metadata,
+    receiver_device_id:
+      access.accessType === "receiver_device" ? access.receiverDeviceId || null : null,
     recipient_display_name: input.to || "",
     requires_acknowledgement: Boolean(input.requiresAcknowledgement),
     sender_display_name:

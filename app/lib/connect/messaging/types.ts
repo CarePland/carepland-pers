@@ -19,6 +19,7 @@ export type ConnectMessageRecord = {
   mainConnectUserPersonId?: string;
   metadata?: Record<string, unknown>;
   messageType?: string;
+  recipientPersonId?: string;
   receiverDeviceId?: string;
   readAt?: string;
   receiverId?: string;

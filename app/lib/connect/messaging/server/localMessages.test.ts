@@ -68,6 +68,35 @@ describe("local Connect messages", () => {
     }
   });
 
+  it("keeps local fallback messages person-owned instead of receiver-owned", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "connect-messages-"));
+    const indexPath = path.join(dir, "messages.json");
+
+    try {
+      const message = await recordLocalConnectMessage(
+        {
+          body: "Dinner is ready.",
+          from: "Andrew",
+          mainConnectUserPersonId: "person-bob",
+          receiverDeviceId: "old-bedroom-receiver",
+          receiverId: "old-bedroom-receiver",
+          to: "Bob",
+        },
+        { indexPath }
+      );
+      const index = await readLocalConnectMessages({ indexPath });
+
+      assert.equal(message.mainConnectUserPersonId, "person-bob");
+      assert.equal(message.receiverDeviceId, "");
+      assert.equal(message.receiverId, "");
+      assert.equal(index.messages[0]?.mainConnectUserPersonId, "person-bob");
+      assert.equal(index.messages[0]?.receiverDeviceId, "");
+      assert.equal(index.messages[0]?.receiverId, "");
+    } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
+  });
+
   it("records acknowledgement and callback request state for local fallback", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "connect-messages-"));
     const indexPath = path.join(dir, "messages.json");

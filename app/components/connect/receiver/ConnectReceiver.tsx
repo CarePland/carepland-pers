@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 import {
@@ -82,6 +83,12 @@ import {
   adminItemsVisibilityChangedEvent,
   adminItemsVisibilityStorageKey,
 } from "../../../lib/platform/adminItemsVisibility";
+import { carePlandSignInPath } from "../../../lib/platform/authRedirect";
+import {
+  reportSessionLossFromResponse,
+  sessionValidityStore,
+  type SessionValiditySnapshot,
+} from "../../../lib/platform/sessionValidity";
 import {
   formatReceiverCacheTimestamp,
   readReceiverAppointmentCache,
@@ -98,6 +105,14 @@ import {
   recordConnectPollingRequest,
 } from "../../../lib/connect/receiver/pollingPolicy";
 import styles from "./ConnectReceiver.module.css";
+
+const receiverSessionValidityServerSnapshot: SessionValiditySnapshot = {
+  duplicateLossCount: 0,
+  reason: "",
+  returnTo: "",
+  state: "authenticated",
+  surface: "shared",
+};
 
 type Contact = {
   id: string;
@@ -1184,6 +1199,13 @@ function receiverDeviceAuthHeaders() {
   return headers;
 }
 
+function reportReceiverSessionLoss(response: Pick<Response, "status">, reason: string) {
+  return reportSessionLossFromResponse(response, {
+    reason,
+    surface: "receiver",
+  });
+}
+
 function readReceiverGuideId() {
   if (typeof window === "undefined") return connectPrototypeReceiverId;
   const params = new URLSearchParams(window.location.search);
@@ -2256,6 +2278,11 @@ function resolveReceiverAttentionItem(input: {
 }
 
 export function ConnectReceiver() {
+  const sessionValidity = useSyncExternalStore(
+    sessionValidityStore.subscribe,
+    sessionValidityStore.getSnapshot,
+    () => receiverSessionValidityServerSnapshot
+  );
   const initialDevicePixelRatioRef = useRef(initialReceiverDevicePixelRatio());
   const [deskPhoneMode] = useState(readInitialDeskPhoneMode);
   const [receiverPresentationLayout] = useState<ReceiverPresentationLayout>(readInitialReceiverPresentationLayout);
@@ -2573,7 +2600,11 @@ export function ConnectReceiver() {
         messages?: Array<Partial<Message> & { id?: string }>;
       };
 
-      if (!response.ok || !Array.isArray(payload.messages)) return;
+      if (!response.ok) {
+        reportReceiverSessionLoss(response, "Receiver messages authentication was rejected.");
+        return;
+      }
+      if (!Array.isArray(payload.messages)) return;
       markReceiverOnline();
 
       const nextMessages = payload.messages
@@ -2693,7 +2724,17 @@ export function ConnectReceiver() {
         };
       };
 
-      if (!response.ok || !Array.isArray(payload.focusItems)) {
+      if (!response.ok) {
+        reportReceiverSessionLoss(response, "Receiver Today’s Focus authentication was rejected.");
+        setTodayFocusLoadState(todayFocusItems.length ? "ready" : "error");
+        if (todayFocusItems.length === 0) {
+          setTodayFocusStatus(
+            "Today’s Focus could not load for this Receiver user."
+          );
+        }
+        return;
+      }
+      if (!Array.isArray(payload.focusItems)) {
         setTodayFocusLoadState(todayFocusItems.length ? "ready" : "error");
         if (todayFocusItems.length === 0) {
           setTodayFocusStatus(
@@ -2765,7 +2806,11 @@ export function ConnectReceiver() {
         calls?: Array<Partial<ReceiverCall>>;
       };
 
-      if (!response.ok || !Array.isArray(payload.calls)) return;
+      if (!response.ok) {
+        reportReceiverSessionLoss(response, "Receiver call authentication was rejected.");
+        return;
+      }
+      if (!Array.isArray(payload.calls)) return;
       markReceiverOnline();
 
       const activeCalls = payload.calls.filter((call) =>
@@ -4330,7 +4375,12 @@ export function ConnectReceiver() {
         };
       };
 
-      if (!response.ok || payload.ok === false) {
+      if (!response.ok) {
+        reportReceiverSessionLoss(response, "Receiver Today’s Focus authentication was rejected.");
+        throw new Error(payload.error || "Today’s Focus could not be saved.");
+      }
+
+      if (payload.ok === false) {
         throw new Error(payload.error || "Today’s Focus could not be saved.");
       }
 
@@ -4431,7 +4481,12 @@ export function ConnectReceiver() {
         ok?: boolean;
       };
 
-      if (!response.ok || payload.ok === false) {
+      if (!response.ok) {
+        reportReceiverSessionLoss(response, "Receiver Today’s Focus authentication was rejected.");
+        throw new Error(payload.error || "Today’s Focus could not be undone.");
+      }
+
+      if (payload.ok === false) {
         throw new Error(payload.error || "Today’s Focus could not be undone.");
       }
 
@@ -4509,7 +4564,12 @@ export function ConnectReceiver() {
         ok?: boolean;
       };
 
-      if (!response.ok || payload.ok === false) {
+      if (!response.ok) {
+        reportReceiverSessionLoss(response, "Receiver Today’s Focus authentication was rejected.");
+        throw new Error(payload.error || "Today’s Focus preference could not be saved.");
+      }
+
+      if (payload.ok === false) {
         throw new Error(payload.error || "Today’s Focus preference could not be saved.");
       }
 
@@ -4663,7 +4723,12 @@ export function ConnectReceiver() {
         message?: Partial<Message> & { id?: string };
       };
 
-      if (response.ok && payload.message) {
+      if (!response.ok) {
+        reportReceiverSessionLoss(response, "Receiver message authentication was rejected.");
+        throw new Error("CarePland needs to reconnect.");
+      }
+
+      if (payload.message) {
         const serverMessage = normalizeServerMessage(payload.message, optimisticMessage);
         setMessages((current) =>
           current.map((message) =>
@@ -4674,7 +4739,11 @@ export function ConnectReceiver() {
       setStatus(`Message sent to ${contact.displayName}.`);
       setPendingContactRecording(null);
     } catch {
-      setStatus(`Message saved here. ${contact.displayName} may see it when Connect is online.`);
+      setStatus(
+        sessionValidityStore.getSnapshot().state === "session_lost"
+          ? "CarePland needs to reconnect."
+          : `Message saved here. ${contact.displayName} may see it when Connect is online.`
+      );
     }
 
     setModal({ type: "sent", recipientName: contact.displayName });
@@ -6819,6 +6888,9 @@ function stopReceiverCue() {
           (state === "answered"
             ? "Receiver could not answer this call."
             : "Receiver could not update this call.");
+        if (!response.ok) {
+          reportReceiverSessionLoss(response, "Receiver call authentication was rejected.");
+        }
         logReceiverCallEvent(callId, "call_receiver_state_update_failed", {
           httpStatus: response.status,
           message,
@@ -7465,6 +7537,27 @@ function stopReceiverCue() {
           <span>Living Room Receiver</span>
           <button type="button" onClick={startReceiverFromAction}>
             Start Receiver
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (sessionValidity.state === "session_lost") {
+    return (
+      <main className={styles.registrationScreen}>
+        <section className={styles.registrationPanel} aria-live="assertive">
+          <p>CarePland Connect</p>
+          <h1>CarePland needs to reconnect</h1>
+          <span>Ask the person who set up this Receiver to sign in again.</span>
+          <small>This Receiver can continue after the session is refreshed.</small>
+          <button
+            type="button"
+            onClick={() => {
+              window.location.assign(carePlandSignInPath("/connect/receiver"));
+            }}
+          >
+            Sign in again
           </button>
         </section>
       </main>

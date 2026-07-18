@@ -41,6 +41,7 @@ import {
   groupMessagesByAppointment,
   type MessageGroup,
 } from "../../../lib/connect/messaging/messageGrouping";
+import { personHasAttachedReceiver } from "../../../lib/connect/messaging/receiverAttachment";
 import {
   createConnectCallAudioController,
   type ConnectCallAudioStatus,
@@ -1596,6 +1597,10 @@ export function ConnectDashboard() {
       : "Connect User";
   const selectedPersonFirstName =
     firstNameLabel(selectedPersonName) || selectedPersonName;
+  const selectedPersonHasReceiver = personHasAttachedReceiver(
+    activeDevices,
+    selectedMainConnectUserPersonId
+  );
   const visibleMessages = state.messages;
   const appointmentMessageGroups = useMemo(
     () => groupMessagesByAppointment(state.messages),
@@ -2509,20 +2514,27 @@ export function ConnectDashboard() {
         <section className="grid w-full gap-5 px-2 pt-2 pb-5 sm:px-4 sm:pt-3 lg:px-6">
             <div>
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <button
-                  aria-expanded={messageHistoryComposerOpen}
+	                <button
+	                  aria-expanded={messageHistoryComposerOpen}
                   className={`min-h-10 rounded-full border px-4 text-sm font-black shadow-sm transition ${
                     messageHistoryComposerOpen
                       ? "border-blue-200 bg-blue-50 text-blue-900"
                       : "border-[#d6e3f2] bg-white text-[#173150] hover:bg-[#f8fafc]"
                   }`}
-                  onClick={() =>
-                    setMessageHistoryComposerOpen((isOpen) => !isOpen)
-                  }
-                  type="button"
-                >
-                  New Message
-                </button>
+	                  disabled={!selectedPersonHasReceiver}
+	                  onClick={() => {
+	                    if (!selectedPersonHasReceiver) return;
+	                    setMessageHistoryComposerOpen((isOpen) => !isOpen);
+	                  }}
+	                  title={
+	                    selectedPersonHasReceiver
+	                      ? "New Message"
+	                      : "Set up Receiver before sending messages"
+	                  }
+	                  type="button"
+	                >
+	                  New Message
+	                </button>
                 <div className="flex flex-wrap items-center justify-end gap-3">
                   <div
                     aria-label="Message history view"
@@ -2570,9 +2582,9 @@ export function ConnectDashboard() {
                   ) : null}
                 </div>
               </div>
-              {messageHistoryComposerOpen ? (
-                <div className="mt-4">
-                  <AppointmentMessageComposer
+	              {messageHistoryComposerOpen && selectedPersonHasReceiver ? (
+	                <div className="mt-4">
+	                  <AppointmentMessageComposer
                     onCancel={() => setMessageHistoryComposerOpen(false)}
                     onSent={async () => {
                       setMessageHistoryComposerOpen(false);
@@ -2582,8 +2594,13 @@ export function ConnectDashboard() {
                     recipientName={selectedPersonName}
                     senderName={authenticatedSenderName || "CarePland coordinator"}
                   />
-                </div>
-              ) : null}
+	                </div>
+	              ) : null}
+	              {!selectedPersonHasReceiver ? (
+	                <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-semibold text-amber-800">
+	                  Set up Receiver for {selectedPersonName} before sending messages.
+	                </p>
+	              ) : null}
               {messageHistoryView === "timeline" && visibleMessages.length ? (
                 <div className="mt-5">
                   {visibleMessages.map((message, index) => (

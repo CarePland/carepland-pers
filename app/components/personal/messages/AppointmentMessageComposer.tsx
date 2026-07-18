@@ -15,6 +15,7 @@ import {
 import { connectAuthHeaders } from "../../../lib/connect/context/client";
 import { connectPrototypeReceiverId } from "../../../lib/connect/prototypeClient";
 import { MicrophoneIcon } from "../../shared/icons";
+import { LongOperationStatus } from "../../shared/LongOperationStatus";
 
 type PendingMessageRecording = {
   artifactId: string;
@@ -145,6 +146,10 @@ export function AppointmentMessageComposer({
             clientMessageId,
             from: senderName,
             mainConnectUserPersonId: personId,
+            metadata: {
+              recipientDisplayNameSnapshot: recipientName,
+              recipientPersonId: personId,
+            },
             messageType: "audio",
             requiresAcknowledgement: false,
             source: `${messageSourcePrefix}_audio_message`,
@@ -157,6 +162,10 @@ export function AppointmentMessageComposer({
             clientMessageId,
             from: senderName,
             mainConnectUserPersonId: personId,
+            metadata: {
+              recipientDisplayNameSnapshot: recipientName,
+              recipientPersonId: personId,
+            },
             messageType: "text",
             requiresAcknowledgement: false,
             source: `${messageSourcePrefix}_text_message`,
@@ -186,7 +195,11 @@ export function AppointmentMessageComposer({
       setMessageText("");
       setPendingRecording(null);
       onDraftChange?.(null);
-      setStatus(pendingRecording ? "Audio message sent." : "Message sent.");
+      setStatus(
+        pendingRecording
+          ? `Audio message sent to ${recipientName}.`
+          : `Message sent to ${recipientName}.`
+      );
       await onSent?.();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to send message.");
@@ -365,6 +378,18 @@ export function AppointmentMessageComposer({
       className="grid gap-3 px-1 py-2"
       onSubmit={sendMessage}
     >
+      <div className="grid gap-2 rounded-md bg-[#f8fafc] px-3 py-3 text-sm text-[#334155]">
+        <div>
+          <p className="text-xs font-black uppercase tracking-normal text-[#5f6e84]">
+            Sending to
+          </p>
+          <h3 className="text-lg font-black text-[#172f49]">Message {recipientName}</h3>
+        </div>
+        <p className="text-sm font-semibold text-[#5f6e84]">
+          This message belongs to {recipientName}&apos;s CarePland inbox. Any Receiver
+          assigned to {recipientName} will show it.
+        </p>
+      </div>
       <textarea
         className="min-h-28 min-w-0 resize-y rounded-lg border border-[#b6cfe8] bg-white px-4 py-4 text-base leading-relaxed shadow-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
         onChange={(event) => setMessageText(event.target.value)}
@@ -405,6 +430,7 @@ export function AppointmentMessageComposer({
           </button>
           <button
             className="min-h-10 rounded-md border border-[#d6e3f2] bg-white px-5 text-sm font-semibold text-[#0f172a] shadow-sm hover:bg-[#f8fafc]"
+            disabled={!hasDraft}
             onClick={clearComposer}
             type="button"
           >
@@ -439,6 +465,41 @@ export function AppointmentMessageComposer({
         <p aria-live="polite" className="text-sm font-semibold text-[#5f6e84]">
           {status}
         </p>
+      ) : null}
+      {sending || processingRecording ? (
+        <LongOperationStatus
+          allowDiagnostics
+          className="border-[#d6e3f2] bg-[#f8fbff] text-[#345d83]"
+          delayMs={3500}
+          escalationMs={45000}
+          messages={
+            sending
+              ? [
+                  "Saving this to the person's inbox...",
+                  "This can take a moment if the Receiver connection is catching up.",
+                  "A few careful moments later...",
+                  "Still sending. We will say if it does not go through.",
+                ]
+              : [
+                  "Listening back and preparing the transcript...",
+                  "Audio can take a beat, especially on a slower connection.",
+                  "A few careful moments later...",
+                  "Audio can take a beat. Still working.",
+                ]
+          }
+          operation={
+            sending ? "connect_message_delivery" : "connect_audio_transcription"
+          }
+          stage={
+            sending
+              ? pendingRecording
+                ? "sending_audio_message"
+                : "sending_text_message"
+              : "processing_recording"
+          }
+          title={sending ? "Message delivery in progress." : "Recording processing."}
+          verySlowMs={30000}
+        />
       ) : null}
     </form>
   );

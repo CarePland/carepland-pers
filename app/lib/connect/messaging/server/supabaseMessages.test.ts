@@ -17,8 +17,6 @@ describe("Supabase Connect messages", () => {
         clientMessageId: "coordinator-text-1",
         from: "Andrew",
         mainConnectUserPersonId: "person-bob",
-        receiverId: "receiver-1",
-        receiverDeviceId: "receiver-2",
         requiresAcknowledgement: true,
         source: "coordinator_text_message",
         to: "Bob",
@@ -28,6 +26,7 @@ describe("Supabase Connect messages", () => {
         careCircleId: "care-circle-1",
         createdByUserId: "user-1",
         mainConnectUserPersonId: "person-bob",
+        receiverDeviceId: "receiver-2",
         supabase: {} as never,
       }
     );
@@ -37,9 +36,38 @@ describe("Supabase Connect messages", () => {
     assert.equal(insert.requires_acknowledgement, true);
     assert.equal(insert.main_connect_user_person_id, "person-bob");
     assert.equal(insert.receiver_device_id, null);
+    assert.deepEqual(insert.metadata, {
+      recipientPersonId: "person-bob",
+    });
     assert.equal(insert.sender_display_name, "Andrew");
     assert.equal(insert.sender_role, "dashboard");
     assert.equal(insert.sender_user_id, "user-1");
+  });
+
+  it("stores recipient snapshots without making a receiver the destination", () => {
+    const insert = connectMessageInsertFromInput(
+      {
+        body: "Dinner is ready.",
+        metadata: {
+          recipientDisplayNameSnapshot: "Bob",
+        },
+        to: "Bob",
+      },
+      {
+        accessType: "user",
+        careCircleId: "care-circle-1",
+        createdByUserId: "user-1",
+        mainConnectUserPersonId: "person-bob",
+        receiverDeviceId: "receiver-bedroom",
+        supabase: {} as never,
+      }
+    );
+
+    assert.equal(insert.receiver_device_id, null);
+    assert.deepEqual(insert.metadata, {
+      recipientDisplayNameSnapshot: "Bob",
+      recipientPersonId: "person-bob",
+    });
   });
 
   it("builds receiver-authored message inserts from receiver device access", () => {
