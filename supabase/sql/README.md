@@ -8,6 +8,9 @@ Supabase SQL editor history.
 - `2026-07-02_carepland_work_events_foundation.sql`
   Migration: adds `carepland_work_events`, the Layer 2 record of what CarePland actually handled, connected, prepared, coordinated, or made reviewable. This bridges raw facts to future `CarePland at a Glance` human-outcome summaries. The vocabulary is intentionally constrained through `work_type`, `outcome_category`, `source_type`, and optional conservative avoided-effort fields.
 
+- `2026-07-17_meaning_sample_data_refresh.sql`
+  Migration/admin utility: layers current meaning/action sample data on top of the existing Health Focus seed, including Recommendations, Today's Focus, Track Events, Connect Messages, Focus cadence preferences, and CarePland Work Events. It also adds removal support for the new sample rows and keeps the normal app-facing Add/Remove demo data controls as the entry point.
+
 - `2026-07-01_care_recommendations_foundation.sql`
   Migration: adds reviewable CarePland Recommendation candidates and supporting evidence rows. Recommendations bridge existing CarePland knowledge to possible Focus Items, but are not automatically shown or converted; initial generation is deterministic and evidence-based, with no AI prompt seeded. The v1 backend uses `dedupe_key` and `evidence_hash` so repeated scans can update open candidates without duplicating evidence.
 

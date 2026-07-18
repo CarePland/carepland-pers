@@ -21,6 +21,12 @@ import {
   readShowAdminItemsPreference,
   writeShowAdminItemsPreference,
 } from "../../lib/platform/adminItemsVisibility";
+import {
+  recordHelpDiagnosticsEvent,
+  submitHelpDiagnostics,
+  type HelpDiagnosticsPacket,
+  type HelpDiagnosticsSubmissionResult,
+} from "../../lib/platform/helpDiagnostics";
 import { ManagedByHouseholdHeart, PersonAvatar } from "./PersonAvatar";
 import type { AvatarPerson } from "../../lib/platform/avatar";
 
@@ -301,6 +307,17 @@ export function CarePlandTopNav({
   const [showAllPlatformModules, setShowAllPlatformModules] = useState(false);
   const [showAdminItems, setShowAdminItems] = useState(true);
   const [focusMenuOpen, setFocusMenuOpen] = useState(false);
+  const [helpStatus, setHelpStatus] = useState<
+    "idle" | "sending" | "sent" | "failed"
+  >("idle");
+  const [helpDialogOpen, setHelpDialogOpen] = useState(false);
+  const [helpTryingToDo, setHelpTryingToDo] = useState("");
+  const [helpHappenedInstead, setHelpHappenedInstead] = useState("");
+  const [helpSubmissionError, setHelpSubmissionError] = useState("");
+  const [helpPendingPacket, setHelpPendingPacket] =
+    useState<HelpDiagnosticsPacket | null>(null);
+  const [helpSubmissionResult, setHelpSubmissionResult] =
+    useState<HelpDiagnosticsSubmissionResult | null>(null);
   const [isOnline, setIsOnline] = useState(true);
   const focusMenuRef = useRef<HTMLDivElement | null>(null);
   const canShowAdminItems = canShowAdmin && showAdminItems;
@@ -402,6 +419,70 @@ export function CarePlandTopNav({
     currentFocus?.type === "person"
       ? currentFocus.avatar ?? { displayName: currentFocus.label }
       : null;
+  const helpButtonLabel =
+    helpStatus === "sending"
+      ? "Sending"
+      : helpStatus === "sent"
+        ? "Sent"
+        : helpStatus === "failed"
+          ? "Try Again"
+          : "Send Help";
+
+  function openHelpDialog() {
+    setHelpSubmissionError("");
+    setHelpSubmissionResult(null);
+    setHelpPendingPacket(
+      typeof window === "undefined"
+        ? null
+        : window.CarePlandHelpDiagnostics?.createPacket() ?? null
+    );
+    setHelpDialogOpen(true);
+    recordHelpDiagnosticsEvent("help_report_opened");
+  }
+
+  async function handleSendHelp() {
+    if (helpStatus === "sending") return;
+
+    setHelpStatus("sending");
+    setHelpSubmissionError("");
+    const packet =
+      helpPendingPacket ??
+      (typeof window === "undefined"
+        ? null
+        : window.CarePlandHelpDiagnostics?.createPacket() ?? null);
+
+    try {
+      const result = await submitHelpDiagnostics(
+        {
+          happenedInstead: helpHappenedInstead,
+          tryingToDo: helpTryingToDo,
+        },
+        packet ?? undefined
+      );
+      setHelpSubmissionResult(result);
+      setHelpStatus("sent");
+    } catch {
+      setHelpSubmissionError("CarePland did not receive this report.");
+      setHelpStatus("failed");
+    }
+  }
+
+  function closeHelpDialog() {
+    setHelpDialogOpen(false);
+    if (helpStatus !== "sending") {
+      setHelpStatus("idle");
+      setHelpSubmissionError("");
+      setHelpSubmissionResult(null);
+      setHelpPendingPacket(null);
+    }
+  }
+
+  function copyHelpReference() {
+    const reference = helpSubmissionResult?.referenceId;
+    if (!reference || typeof navigator === "undefined") return;
+
+    void navigator.clipboard?.writeText(reference).catch(() => undefined);
+  }
 
   const homeControl = (
     <span className="inline-flex items-center gap-2 rounded-md focus-within:outline-none focus-within:ring-2 focus-within:ring-blue-300">
@@ -417,6 +498,7 @@ export function CarePlandTopNav({
   );
 
   return (
+    <>
     <div
       className={`grid w-full grid-cols-[max-content_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[max-content_minmax(0,1fr)_minmax(12rem,14rem)] ${className}`}
     >
@@ -681,6 +763,22 @@ export function CarePlandTopNav({
             </Link>
           )
         ) : null}
+        <button
+          aria-live="polite"
+          className={`inline-flex h-10 shrink-0 items-center justify-center rounded-full border px-3 text-xs font-semibold shadow-sm transition sm:h-11 ${
+            helpStatus === "sent"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : helpStatus === "failed"
+                ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                : "border-slate-200 bg-white/85 text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+          }`}
+          disabled={helpStatus === "sending"}
+          onClick={openHelpDialog}
+          title="Send current app diagnostics to CarePland"
+          type="button"
+        >
+          {helpButtonLabel}
+        </button>
         {canShowAsk ? (
           onAskClick ? (
             <UtilityActionLink
@@ -706,5 +804,165 @@ export function CarePlandTopNav({
         ) : null}
       </div>
     </div>
+    {helpDialogOpen ? (
+      <div
+        className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/30 px-4 py-6"
+        role="presentation"
+      >
+        <section
+          aria-labelledby="send-help-title"
+          aria-modal="true"
+          className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 text-slate-900 shadow-xl"
+          role="dialog"
+        >
+          {helpSubmissionResult ? (
+            <>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-semibold" id="send-help-title">
+                    Help report sent
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Reference:{" "}
+                    <span className="font-mono font-semibold text-slate-900">
+                      {helpSubmissionResult.referenceId}
+                    </span>
+                  </p>
+                </div>
+                <button
+                  className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700"
+                  onClick={closeHelpDialog}
+                  type="button"
+                >
+                  Done
+                </button>
+              </div>
+              <div className="mt-4 rounded-md bg-emerald-50 p-3 text-sm text-emerald-900">
+                CarePland saved recent activity, technical errors, device
+                details, and a sanitized view of this screen.
+              </div>
+              <dl className="mt-4 grid gap-3 text-sm">
+                <div>
+                  <dt className="font-semibold text-slate-700">Submitted</dt>
+                  <dd className="text-slate-600">
+                    {new Date(helpSubmissionResult.submittedAt).toLocaleString()}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-semibold text-slate-700">Included</dt>
+                  <dd className="text-slate-600">
+                    Recent navigation, API activity, technical errors, device
+                    details, and the current sanitized screen.
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-semibold text-slate-700">Excluded</dt>
+                  <dd className="text-slate-600">
+                    Passwords, tokens, secret URL values, and typed form values
+                    are not intentionally included.
+                  </dd>
+                </div>
+              </dl>
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+                  onClick={copyHelpReference}
+                  type="button"
+                >
+                  Copy reference
+                </button>
+                <button
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                  onClick={closeHelpDialog}
+                  type="button"
+                >
+                  Done
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-semibold" id="send-help-title">
+                    Send Help Report
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    CarePland will include recent activity, technical errors,
+                    device information, and the current screen.
+                  </p>
+                </div>
+                <button
+                  className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700"
+                  disabled={helpStatus === "sending"}
+                  onClick={closeHelpDialog}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="mt-4 rounded-md bg-blue-50 p-3 text-sm text-blue-950">
+                Typed form values, passwords, tokens, and sensitive URL values
+                are excluded or redacted. Your notes below are saved separately
+                from the automatic diagnostics.
+              </div>
+              <div className="mt-4 grid gap-4">
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  What were you trying to do?
+                  <textarea
+                    className="min-h-20 rounded-md border border-slate-300 p-3 font-normal text-slate-900"
+                    maxLength={1200}
+                    onChange={(event) => setHelpTryingToDo(event.target.value)}
+                    value={helpTryingToDo}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+                  What happened instead?
+                  <textarea
+                    className="min-h-20 rounded-md border border-slate-300 p-3 font-normal text-slate-900"
+                    maxLength={1200}
+                    onChange={(event) =>
+                      setHelpHappenedInstead(event.target.value)
+                    }
+                    value={helpHappenedInstead}
+                  />
+                </label>
+              </div>
+              {helpSubmissionError ? (
+                <details className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  <summary className="cursor-pointer font-semibold">
+                    Report was not received
+                  </summary>
+                  <p className="mt-2">
+                    The report is still held locally in this dialog. You can try
+                    again, or cancel without sending.
+                  </p>
+                  <p className="mt-2 font-mono text-xs">{helpSubmissionError}</p>
+                </details>
+              ) : null}
+              <div className="mt-5 flex flex-wrap justify-end gap-2">
+                <button
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+                  disabled={helpStatus === "sending"}
+                  onClick={closeHelpDialog}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-400"
+                  disabled={helpStatus === "sending"}
+                  onClick={() => void handleSendHelp()}
+                  type="button"
+                >
+                  {helpStatus === "sending" ? "Sending..." : "Send Help Report"}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+    ) : null}
+    </>
   );
 }

@@ -1,4 +1,9 @@
-var CAREPLAND_CACHE_VERSION = "carepland-offline-v2";
+var CAREPLAND_CACHE_VERSION = "carepland-offline-v3";
+var CAREPLAND_IS_LOCAL_DEV =
+  self.location.hostname === "localhost" ||
+  self.location.hostname === "127.0.0.1" ||
+  self.location.hostname === "::1" ||
+  self.location.hostname === "[::1]";
 var CAREPLAND_APP_SHELL = [
   "/",
   "/offline.html",
@@ -63,7 +68,8 @@ self.addEventListener("fetch", function (event) {
   }
 
   if (
-    url.pathname.indexOf("/_next/static/") === 0 ||
+    (!CAREPLAND_IS_LOCAL_DEV &&
+      url.pathname.indexOf("/_next/static/") === 0) ||
     url.pathname.indexOf("/favicon") === 0 ||
     url.pathname.indexOf("/icon-") === 0 ||
     url.pathname.indexOf("/apple-touch-icon") === 0 ||

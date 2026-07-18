@@ -58,6 +58,7 @@ export const systemAdminTabs: AdminWorkspaceTab[] = [
 export const supportAdminTabs: AdminWorkspaceTab[] = [
   "assistantReview",
   "tickets",
+  "helpReports",
 ];
 
 export const usersAdminTabs: AdminWorkspaceTab[] = [
@@ -158,6 +159,7 @@ export function createAdminNavigationModel({
       label: "Ask - Review",
     },
     { ...adminAttentionCountsForTab("tickets"), key: "tickets", label: "Tickets" },
+    { ...adminAttentionCountsForTab("helpReports"), key: "helpReports", label: "Help Reports" },
   ];
   const systemAdminAttentionCounts = adminAttentionCountsForTabs(systemAdminTabs);
   const supportAdminAttentionCounts =

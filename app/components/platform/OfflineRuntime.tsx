@@ -90,11 +90,19 @@ export function OfflineRuntime() {
   }, []);
 
   useEffect(() => {
-    if (
-      process.env.NODE_ENV !== "production" ||
-      typeof navigator === "undefined" ||
-      !("serviceWorker" in navigator)
-    ) {
+    if (typeof window === "undefined" || typeof navigator === "undefined") {
+      return;
+    }
+
+    const canRegisterServiceWorker =
+      "serviceWorker" in navigator &&
+      (process.env.NODE_ENV === "production" ||
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1" ||
+        window.location.hostname === "::1" ||
+        window.location.hostname === "[::1]");
+
+    if (!canRegisterServiceWorker) {
       return;
     }
 

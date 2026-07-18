@@ -11,6 +11,7 @@ import { AdminContentPanel } from "./AdminContentPanel";
 import { AdminDashboardPanel } from "./AdminDashboardPanel";
 import { AdminEarlyAccessIntakePanel } from "./AdminEarlyAccessIntakePanel";
 import { AdminIntegrationErrorsPanel } from "./AdminIntegrationErrorsPanel";
+import { AdminHelpReportsPanel } from "./AdminHelpReportsPanel";
 import { AdminProductManagementPanel } from "./AdminProductManagementPanel";
 import { AdminRecommendationsReviewPanel } from "./AdminRecommendationsReviewPanel";
 import { AdminSupportTicketsPanel } from "./AdminSupportTicketsPanel";
@@ -28,6 +29,7 @@ export type AdminWorkspaceTab =
   | "assistantReview"
   | "content"
   | "errors"
+  | "helpReports"
   | "intake"
   | "product"
   | "recommendations"
@@ -137,6 +139,10 @@ export function AdminWorkspace({
 
       {activeSecondaryKey === "tickets" ? (
         <AdminSupportTicketsPanel {...tickets} />
+      ) : null}
+
+      {activeSecondaryKey === "helpReports" ? (
+        <AdminHelpReportsPanel />
       ) : null}
 
       {activeSecondaryKey === "assistantReview" ? (

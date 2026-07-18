@@ -4,6 +4,11 @@ import { createClient } from "@supabase/supabase-js";
 import { type ReactNode, useEffect, useState } from "react";
 
 import { carePlandSignInPath } from "../../../lib/platform/authRedirect";
+import {
+  currentReturnTo,
+  reportSessionLossFromError,
+  sessionValidityStore,
+} from "../../../lib/platform/sessionValidity";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -21,14 +26,16 @@ export function FamilyAdminGate({ children }: FamilyAdminGateProps) {
   useEffect(() => {
     let cancelled = false;
 
-    function currentReturnTo() {
-      return `${window.location.pathname}${window.location.search}`;
-    }
-
     async function verifyFamilyAccess() {
       setAccessState("checking");
 
-      const { data: userData } = await supabase.auth.getUser();
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        reportSessionLossFromError(userError, {
+          returnTo: currentReturnTo(),
+          surface: "family",
+        });
+      }
       const userId = userData.user?.id;
 
       if (cancelled) return;
@@ -63,8 +70,16 @@ export function FamilyAdminGate({ children }: FamilyAdminGateProps) {
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== "SIGNED_OUT" && event !== "TOKEN_REFRESHED") return;
       if (event === "SIGNED_OUT" || !session?.user?.id) {
+        sessionValidityStore.reportSessionLost(
+          "family",
+          "Family session ended.",
+          currentReturnTo()
+        );
         setAccessState("redirecting");
         window.location.replace(carePlandSignInPath(currentReturnTo()));
+      }
+      if (event === "TOKEN_REFRESHED" && session?.user?.id) {
+        sessionValidityStore.markAuthenticated();
       }
     });
 

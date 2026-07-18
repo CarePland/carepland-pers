@@ -11,6 +11,7 @@ type AuthGatewayPanelProps = {
   email: string;
   gentlePrimaryButtonClass: string;
   gentleSecondaryButtonClass: string;
+  heading?: string;
   loading: boolean;
   message: string;
   onChangeAuthMode: (mode: AuthMode) => void;
@@ -24,6 +25,8 @@ type AuthGatewayPanelProps = {
   onSignUp: (event: FormEvent<HTMLFormElement>) => void;
   password: string;
   passwordsMismatch: boolean;
+  signInButtonLabel?: string;
+  signInDescription?: string;
   signedInEmail: string | null;
 };
 
@@ -34,6 +37,7 @@ export function AuthGatewayPanel({
   email,
   gentlePrimaryButtonClass,
   gentleSecondaryButtonClass,
+  heading,
   loading,
   message,
   onChangeAuthMode,
@@ -47,6 +51,8 @@ export function AuthGatewayPanel({
   onSignUp,
   password,
   passwordsMismatch,
+  signInButtonLabel,
+  signInDescription,
   signedInEmail,
 }: AuthGatewayPanelProps) {
   return (
@@ -73,18 +79,19 @@ export function AuthGatewayPanel({
           }
         >
           <h2 className="text-xl font-semibold text-slate-950">
-            {authMode === "signUp"
+            {heading ??
+              (authMode === "signUp"
               ? "Create your account"
               : authMode === "reset"
                 ? "Reset password"
-                : "Welcome back"}
+                : "Welcome back")}
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-500">
             {authMode === "signUp"
               ? "Create an account with email, or continue directly with Google."
               : authMode === "reset"
                 ? "Enter your email and CarePland will send a reset link."
-                : "Choose how you'd like to continue"}
+                : signInDescription ?? "Choose how you'd like to continue"}
           </p>
           {authMode !== "reset" ? (
             <>
@@ -209,7 +216,7 @@ export function AuthGatewayPanel({
                 ? "Create account"
                 : authMode === "reset"
                   ? "Send reset email"
-                  : "Sign in"}
+                  : signInButtonLabel ?? "Sign in"}
           </button>
           <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
             {authMode === "reset" ? (

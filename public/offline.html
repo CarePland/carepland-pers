@@ -107,6 +107,13 @@
         outline: 3px solid #85a9cc;
         outline-offset: 3px;
       }
+
+      .reconnect-status {
+        color: #5f7f9d;
+        font-size: 0.95rem;
+        font-weight: 700;
+        margin-top: 14px;
+      }
     </style>
   </head>
   <body>
@@ -121,7 +128,10 @@
             Older information needs a fresh connection before CarePland can
             continue.
           </p>
-          <button type="button" onclick="window.location.reload()">Try again</button>
+          <button id="reconnect-now" type="button">Try again now</button>
+          <p class="reconnect-status" id="reconnect-status">
+            CarePland will keep trying automatically.
+          </p>
         </section>
       </main>
     </div>
@@ -129,6 +139,10 @@
       (function () {
         var snapshotStorageKey = "carepland-offline-visible-snapshot:v1";
         var root = document.getElementById("offline-root");
+        var reconnectTimer = 0;
+        var reconnectAttempts = 0;
+        var reconnectInFlight = false;
+        var retryDelays = [1000, 1500, 2500, 4000, 6000, 8000];
 
         function formatTimestamp(value) {
           try {
@@ -143,6 +157,81 @@
 
         function renderFallback() {
           if (root) root.hidden = false;
+          startReconnectLoop();
+        }
+
+        function reconnectStatusElement() {
+          return document.getElementById("reconnect-status");
+        }
+
+        function reconnectButtonElement() {
+          return document.getElementById("reconnect-now");
+        }
+
+        function updateReconnectStatus(message) {
+          var statusElement = reconnectStatusElement();
+          if (statusElement) statusElement.textContent = message;
+        }
+
+        function nextReconnectDelay() {
+          return retryDelays[
+            Math.min(reconnectAttempts, retryDelays.length - 1)
+          ];
+        }
+
+        function scheduleReconnectProbe(delay) {
+          window.clearTimeout(reconnectTimer);
+          reconnectTimer = window.setTimeout(probeReconnect, delay);
+        }
+
+        function startReconnectLoop() {
+          var button = reconnectButtonElement();
+          if (button && !button.getAttribute("data-reconnect-bound")) {
+            button.setAttribute("data-reconnect-bound", "true");
+            button.addEventListener("click", function () {
+              reconnectAttempts = 0;
+              probeReconnect();
+            });
+          }
+
+          scheduleReconnectProbe(800);
+        }
+
+        function probeReconnect() {
+          if (reconnectInFlight) return;
+
+          reconnectInFlight = true;
+          updateReconnectStatus("Checking for CarePland...");
+
+          function finishReconnectProbe() {
+            reconnectInFlight = false;
+          }
+
+          fetch(window.location.href, {
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: {
+              Accept: "text/html"
+            }
+          })
+            .then(function (response) {
+              var contentType = response.headers.get("content-type") || "";
+              if (!response.ok || contentType.indexOf("text/html") === -1) {
+                throw new Error("CarePland is not ready yet.");
+              }
+
+              updateReconnectStatus("CarePland is back. Reopening...");
+              window.location.replace(window.location.href);
+            })
+            .catch(function () {
+              reconnectAttempts += 1;
+              updateReconnectStatus("Still reconnecting. CarePland will reopen automatically.");
+              scheduleReconnectProbe(nextReconnectDelay());
+              finishReconnectProbe();
+            })
+            .then(function () {
+              finishReconnectProbe();
+            });
         }
 
         try {
@@ -179,6 +268,8 @@
             "<span>Frozen view from " +
             formatTimestamp(snapshot.capturedAt) +
             ". Actions are paused until CarePland reconnects.</span>" +
+            '<button id="reconnect-now" type="button">Try again now</button>' +
+            '<span class="reconnect-status" id="reconnect-status">CarePland will keep trying automatically.</span>' +
             "</aside>" +
             '<div class="offline-snapshot-root">' +
             snapshot.html +
@@ -187,11 +278,21 @@
           document.addEventListener(
             "click",
             function (event) {
+              var target = event.target;
+              if (
+                target &&
+                target.closest &&
+                target.closest("#reconnect-now")
+              ) {
+                return;
+              }
+
               event.preventDefault();
               event.stopPropagation();
             },
             true
           );
+          startReconnectLoop();
         } catch (error) {
           renderFallback();
         }

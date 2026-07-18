@@ -136,6 +136,7 @@ import {
   type CarePlandFocusOption,
 } from "./components/shared/CarePlandTopNav";
 import { InlineConfirmation } from "./components/shared/InlineConfirmation";
+import { LongOperationStatus } from "./components/shared/LongOperationStatus";
 import { ManagedCareVipHelp } from "./components/shared/ManagedCareVipHelp";
 import {
   CalendarIcon,
@@ -155,6 +156,10 @@ import {
   savePageViewState,
 } from "./lib/navigation/pageViewState";
 import { carePlandReturnToFromCurrentLocation } from "./lib/platform/authRedirect";
+import {
+  sessionValidityStore,
+  type SessionValiditySnapshot,
+} from "./lib/platform/sessionValidity";
 import { OnboardingGate } from "./components/personal/onboarding/OnboardingGate";
 import { PersonalOverlays } from "./components/personal/PersonalOverlays";
 import { PasswordUpdatePanel } from "./components/shared/auth/PasswordUpdatePanel";
@@ -189,6 +194,7 @@ import {
   buildHomeMessageSummary,
   homeMessageSummaryModelVersion,
 } from "./lib/personal/messages/homeMessageSummary";
+import { personHasAttachedReceiver } from "./lib/connect/messaging/receiverAttachment";
 import {
   buildWhatToKnowDisplayModel,
   type WhatToKnowDisplayItem,
@@ -612,6 +618,7 @@ type AdminTab =
   | "assistantReview"
   | "content"
   | "errors"
+  | "helpReports"
   | "intake"
   | "product"
   | "recommendations"
@@ -1300,6 +1307,13 @@ const careplandBuildDttm =
   process.env.NEXT_PUBLIC_CAREPLAND_BUILD_DTTM ?? generatedBuildDttm;
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const sessionValidityServerSnapshot: SessionValiditySnapshot = {
+  duplicateLossCount: 0,
+  reason: "",
+  returnTo: "",
+  state: "authenticated",
+  surface: "shared",
+};
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -2921,6 +2935,11 @@ export function CarePlandPers({
     getEntryHostMode,
     getEntryHostMode
   );
+  const sessionValidity = useSyncExternalStore(
+    sessionValidityStore.subscribe,
+    sessionValidityStore.getSnapshot,
+    () => sessionValidityServerSnapshot
+  );
   const [initialUiState] = useState<StoredUiState | null>(() => {
     if (typeof window === "undefined") {
       return null;
@@ -3754,6 +3773,16 @@ export function CarePlandPers({
   >(null);
   const [showOnboardingReady, setShowOnboardingReady] = useState(false);
   const [hasConfiguredReceiver, setHasConfiguredReceiver] = useState(false);
+  const [receiverDevices, setReceiverDevices] = useState<
+    Array<{
+      active?: boolean;
+      mainConnectUserPersonId?: string;
+      pairedAt?: string;
+      provisioningCompletedAt?: string;
+      receiverInstallId?: string;
+      status?: string;
+    }>
+  >([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [sessionProfileLoaded, setSessionProfileLoaded] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -4531,6 +4560,7 @@ export function CarePlandPers({
   useEffect(() => {
     if (!signedInEmail || needsBetaAgreement) {
       setHasConfiguredReceiver(false);
+      setReceiverDevices([]);
       return;
     }
 
@@ -4538,7 +4568,7 @@ export function CarePlandPers({
 
     async function loadReceiverStatus() {
       try {
-        const response = await fetch("/api/connect/provisioning/summary", {
+        const response = await fetch("/api/connect/provisioning", {
           cache: "no-store",
         });
         const payload: unknown = await response.json().catch(() => null);
@@ -4555,15 +4585,24 @@ export function CarePlandPers({
           payloadRecord?.receiverDevices ??
           payloadRecord?.provisioning?.receiverDevices;
         const receiverDevices = Array.isArray(receiverDeviceValue)
-          ? (receiverDeviceValue as Array<{ status?: unknown }>)
+          ? (receiverDeviceValue as Array<{
+              active?: boolean;
+              mainConnectUserPersonId?: string;
+              pairedAt?: string;
+              provisioningCompletedAt?: string;
+              receiverInstallId?: string;
+              status?: string;
+            }>)
           : [];
 
+        setReceiverDevices(receiverDevices);
         setHasConfiguredReceiver(
           receiverDevices.some((device) => device.status === "bound")
         );
       } catch {
         if (!cancelled) {
           setHasConfiguredReceiver(false);
+          setReceiverDevices([]);
         }
       }
     }
@@ -4891,6 +4930,7 @@ export function CarePlandPers({
         const sessionEmail = data.session?.user.email ?? null;
 
         if (sessionEmail) {
+          sessionValidityStore.markAuthenticated();
           setSessionProfileLoaded(false);
           setSignedInEmail(sessionEmail);
           setWelcomeGuideDismissed(false);
@@ -7568,6 +7608,7 @@ export function CarePlandPers({
       }
 
       const trimmedEmail = email.trim();
+      sessionValidityStore.markAuthenticated();
       setSessionProfileLoaded(false);
       setSignedInEmail(trimmedEmail);
       setWelcomeGuideDismissed(false);
@@ -12077,6 +12118,14 @@ export function CarePlandPers({
       const status = sampleDataStatusFromValue(data);
 
       if (status.status === "seeded" || status.status === "already_seeded") {
+        const { error: meaningLayerError } = await supabase.rpc(
+          "seed_sample_meaning_layer_for_current_user"
+        );
+
+        if (meaningLayerError) {
+          throw meaningLayerError;
+        }
+
         setSampleDataSeededAt(
           status.seeded_at ?? new Date().toISOString()
         );
@@ -12114,6 +12163,14 @@ export function CarePlandPers({
     setMessage("");
 
     try {
+      const { error: meaningLayerError } = await supabase.rpc(
+        "remove_sample_meaning_layer_for_current_user"
+      );
+
+      if (meaningLayerError) {
+        throw meaningLayerError;
+      }
+
       const { data, error } = await supabase.rpc(
         "remove_demo_data_for_current_user"
       );
@@ -12212,7 +12269,24 @@ export function CarePlandPers({
       }
 
       const status = sampleDataStatusFromValue(data);
-      setAdminSampleStatus(status);
+      if (status.status === "seeded" || status.status === "already_seeded") {
+        const { data: meaningData, error: meaningLayerError } =
+          await supabase.rpc("admin_seed_sample_meaning_layer", {
+            target_email: emailForSeed,
+          });
+
+        if (meaningLayerError) {
+          throw meaningLayerError;
+        }
+
+        const meaningStatus = sampleDataStatusFromValue(meaningData);
+        setAdminSampleStatus({
+          ...status,
+          seed_version: meaningStatus.seed_version ?? status.seed_version,
+        });
+      } else {
+        setAdminSampleStatus(status);
+      }
       showToast(sampleDataStatusText(status), {
         durationMs: 7000,
         type: status.status === "seeded" ? "success" : "info",
@@ -16539,10 +16613,32 @@ export function CarePlandPers({
                                 />
                               </label>
                             </div>
-                            {fileImportStatus ? (
-                              <p className="mt-2 text-xs text-slate-500">
-                                {fileImportStatus}
-                              </p>
+                            {fileImportStatus || processingTextIntake ? (
+                              <LongOperationStatus
+                                allowDiagnostics
+                                className="mt-2"
+                                delayMs={3500}
+                                escalationMs={45000}
+                                messages={[
+                                  "Reading the source text...",
+                                  "Large files and images can take a moment.",
+                                  "A few careful moments later...",
+                                  "Still reviewing. Notes can take a moment.",
+                                ]}
+                                operation="appointment_notes_review"
+                                stage={
+                                  fileImportStatus
+                                    ? "file_extraction"
+                                    : "ai_review"
+                                }
+                                title={
+                                  fileImportStatus ||
+                                  (processingTextIntake
+                                    ? "Reviewing visit notes."
+                                    : "Working.")
+                                }
+                                verySlowMs={30000}
+                              />
                             ) : null}
                             <button
                               className="mt-4 rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-[#eef7ff] disabled:text-slate-400"
@@ -16942,10 +17038,30 @@ export function CarePlandPers({
                               />
                             </label>
                           </div>
-                          {fileImportStatus ? (
-                            <p className="mt-3 text-sm font-medium text-slate-600">
-                              {fileImportStatus}
-                            </p>
+                          {fileImportStatus || processingTextIntake ? (
+                            <LongOperationStatus
+                              allowDiagnostics
+                              className="mt-3"
+                              delayMs={3500}
+                              escalationMs={45000}
+                              messages={[
+                                "Reading the source text...",
+                                "Large files and images can take a moment.",
+                                "A few careful moments later...",
+                                "Still reviewing. Notes can take a moment.",
+                              ]}
+                              operation="appointment_notes_review"
+                              stage={
+                                fileImportStatus ? "file_extraction" : "ai_review"
+                              }
+                              title={
+                                fileImportStatus ||
+                                (processingTextIntake
+                                  ? "Reviewing visit notes."
+                                  : "Working.")
+                              }
+                              verySlowMs={30000}
+                            />
                           ) : null}
                         </div>
                         <label className="mt-5 block text-sm font-medium text-slate-700">
@@ -17156,6 +17272,52 @@ export function CarePlandPers({
               Opening CarePland...
             </p>
           </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (sessionValidity.state === "session_lost") {
+    return (
+      <main className="min-h-screen bg-slate-50 px-3 py-6 text-slate-900 sm:px-4 lg:px-6">
+        <section className="mx-auto w-full max-w-3xl">
+          <header className="flex min-w-0 items-center gap-2">
+            <Image
+              alt="CarePland"
+              className="h-auto w-20 sm:w-24"
+              height={100}
+              priority
+              src="/carepland-logo.png"
+              width={160}
+            />
+          </header>
+          <aside className="mx-auto mt-8 max-w-xl rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <AuthGatewayPanel
+              authMode={authMode}
+              canSubmitAuth={canSubmitAuth}
+              confirmPassword={confirmPassword}
+              email={email}
+              gentlePrimaryButtonClass={gentlePrimaryButtonClass}
+              gentleSecondaryButtonClass={gentleSecondaryButtonClass}
+              heading="CarePland needs you to sign in again"
+              loading={loading}
+              message="Your session ended. Sign in to continue."
+              onChangeAuthMode={setAuthMode}
+              onChangeConfirmPassword={setConfirmPassword}
+              onChangeEmail={setEmail}
+              onChangePassword={setPassword}
+              onClearMessage={() => setMessage("")}
+              onGoogleSignIn={handleGoogleSignIn}
+              onPasswordReset={handlePasswordReset}
+              onSignIn={handleSignIn}
+              onSignUp={handleSignUp}
+              password={password}
+              passwordsMismatch={passwordsMismatch}
+              signInButtonLabel="Sign in again"
+              signInDescription="Your session ended. Sign in to continue."
+              signedInEmail={null}
+            />
+          </aside>
         </section>
       </main>
     );
@@ -17828,6 +17990,24 @@ export function CarePlandPers({
                   >
                     {processingTextIntake ? "Interpreting..." : "Interpret text"}
                   </button>
+                  {processingTextIntake ? (
+                    <LongOperationStatus
+                      allowDiagnostics
+                      className="mt-3"
+                      delayMs={3500}
+                      escalationMs={45000}
+                      messages={[
+                        "Looking for appointments, notes, and next steps...",
+                        "Longer text can take a moment.",
+                        "A few careful moments later...",
+                        "Still interpreting. Longer text can take a moment.",
+                      ]}
+                      operation="text_intake_ai_review"
+                      stage="interpreting_text"
+                      title="AI review in progress."
+                      verySlowMs={30000}
+                    />
+                  ) : null}
                 </form>
 
                 {textIntakeDraft && !textIntakeTargetAppointmentId ? (
@@ -18854,17 +19034,47 @@ export function CarePlandPers({
                           {fileImportStatus ||
                           extractingImageText ||
                           processingImportAnything ? (
-                            <div
-                              aria-live="polite"
-                              className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900"
-                              role="status"
-                            >
-                              {fileImportStatus
-                                ? fileImportStatus
-                                : extractingImageText
-                                ? "Importing files..."
-                                : "Reviewing everything found..."}
-                            </div>
+                            <LongOperationStatus
+                              allowDiagnostics
+                              className="mt-3"
+                              delayMs={3500}
+                              escalationMs={45000}
+                              messages={
+                                processingImportAnything
+                                  ? [
+                                      "Sorting appointments, notes, providers, and follow-ups...",
+                                      "Mixed documents can take a little patience.",
+                                      "A few careful moments later...",
+                                      "Still reviewing. Mixed documents take a little patience.",
+                                    ]
+                                  : [
+                                      "Extracting the useful text...",
+                                      "Large files and images can take a moment.",
+                                      "A few careful moments later...",
+                                      "Still reading. Big files and images can take a moment.",
+                                    ]
+                              }
+                              operation={
+                                processingImportAnything
+                                  ? "import_anything_ai_review"
+                                  : "import_anything_file_extraction"
+                              }
+                              stage={
+                                fileImportStatus
+                                  ? fileImportStatus
+                                  : extractingImageText
+                                    ? "ocr"
+                                    : "reviewing_sources"
+                              }
+                              title={
+                                fileImportStatus
+                                  ? fileImportStatus
+                                  : extractingImageText
+                                    ? "OCR in progress."
+                                    : "Import Anything review in progress."
+                              }
+                              verySlowMs={30000}
+                            />
                           ) : null}
                           {importAnythingSources.length > 0 ? (
                             <p className="mt-3 text-sm font-medium text-slate-600">
@@ -19616,13 +19826,22 @@ export function CarePlandPers({
                           ) : null
                         ) : null}
                         {savingImportAnything ? (
-                          <div
-                            aria-live="polite"
-                            className="mt-3 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900"
-                            role="status"
-                          >
-                            Saving approved items...
-                          </div>
+                          <LongOperationStatus
+                            allowDiagnostics
+                            className="mt-3 border-emerald-100 bg-emerald-50 text-emerald-900"
+                            delayMs={3500}
+                            escalationMs={45000}
+                            messages={[
+                              "Creating the approved records...",
+                              "This can take a moment when several items are being saved.",
+                              "A few careful moments later...",
+                              "Still saving. We will confirm when it lands.",
+                            ]}
+                            operation="import_anything_save"
+                            stage="saving_approved_items"
+                            title="Saving approved items."
+                            verySlowMs={30000}
+                          />
                         ) : null}
                         {!importAnythingExpertView ? (
                           <div className="mt-6">
@@ -20640,6 +20859,10 @@ export function CarePlandPers({
                   : null;
                 const appointmentSubject =
                   appointmentSubjectRecord?.display_name ?? "";
+                const appointmentSubjectHasReceiver = personHasAttachedReceiver(
+                  receiverDevices,
+                  appointment.care_subject_id ?? ""
+                );
                 const appointmentMessages = appointment.care_subject_id
                   ? homeMessageGroups
                       .find((group) => group.subjectId === appointment.care_subject_id)
@@ -20880,10 +21103,14 @@ export function CarePlandPers({
                                     "this appointment"
                                   }`}
                                   className="inline-flex h-7 w-7 items-center justify-center rounded-full text-blue-700 transition hover:bg-blue-100/70 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                  disabled={!appointmentSubjectHasReceiver}
                                   onClick={() =>
                                     openAppointmentMessageComposer(appointment)
                                   }
                                   title={
+                                    !appointmentSubjectHasReceiver
+                                      ? "Set up Receiver before sending messages"
+                                      :
                                     isMessageComposerOpen
                                       ? "Close message composer"
                                       : "Send message"
@@ -21062,10 +21289,10 @@ export function CarePlandPers({
                       </section>
                     ) : null}
 
-                    {isMessageComposerOpen ? (
-                      <div className="order-20 mt-4">
-                        {appointment.care_subject_id ? (
-                          <AppointmentMessageComposer
+	                    {isMessageComposerOpen ? (
+	                      <div className="order-20 mt-4">
+	                        {appointment.care_subject_id && appointmentSubjectHasReceiver ? (
+	                          <AppointmentMessageComposer
                             appointmentId={appointment.id}
                             initialDraft={
                               appointmentMessageDraft?.appointmentId === appointment.id
@@ -21093,11 +21320,13 @@ export function CarePlandPers({
                             recipientName={appointmentSubject || "Receiver"}
                             senderName={savedProfileLabel || signedInEmail || "CarePland coordinator"}
                           />
-                        ) : (
-                          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium text-amber-800">
-                            Choose a Care VIP for this appointment before sending a message.
-                          </p>
-                        )}
+	                        ) : (
+	                          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium text-amber-800">
+	                            {appointment.care_subject_id
+                                ? "Set up Receiver for this person before sending a message."
+                                : "Choose a Care VIP for this appointment before sending a message."}
+	                          </p>
+	                        )}
                       </div>
                     ) : null}
 
@@ -21580,9 +21809,23 @@ export function CarePlandPers({
                           </button>
                         </div>
                         {generatingCarePrepForId === appointment.id ? (
-                          <span className="mt-3 inline-flex rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-900">
-                            Generating...
-                          </span>
+                          <LongOperationStatus
+                            allowDiagnostics
+                            className="mt-3"
+                            delayMs={3500}
+                            escalationMs={45000}
+                            messages={[
+                              "Checking notes and messages for useful prep...",
+                              "This can take a moment when there is a lot of appointment context.",
+                              "A few careful moments later...",
+                              "Still refreshing. We will skip anything that is not useful.",
+                            ]}
+                            context={{ appointmentId: appointment.id }}
+                            operation="careprep_refresh"
+                            stage="refreshing_what_to_know"
+                            title="Refreshing What to Know."
+                            verySlowMs={30000}
+                          />
                         ) : null}
 
                         <div className="mt-4 grid gap-4">
@@ -21792,9 +22035,22 @@ export function CarePlandPers({
                             isCarePrepExpanded ? (
                               <>
                                 {generatingCarePrepForId === appointment.id ? (
-                                  <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-900">
-                                    Generating...
-                                  </span>
+                                  <LongOperationStatus
+                                    allowDiagnostics
+                                    delayMs={3500}
+                                    escalationMs={45000}
+                                    messages={[
+                                      "Checking the appointment context...",
+                                      "This can take a moment when there are detailed notes.",
+                                      "A few careful moments later...",
+                                      "Still preparing. Useful beats rushed.",
+                                    ]}
+                                    context={{ appointmentId: appointment.id }}
+                                    operation="careprep_generation"
+                                    stage="generating_careprep"
+                                    title="CarePrep is generating."
+                                    verySlowMs={30000}
+                                  />
                                 ) : null}
                               </>
                             ) : null}
