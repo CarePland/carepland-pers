@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildHelpReportTimeline,
   deriveHelpReportSummary,
+  extractProblemReportSummary,
   generateHelpReportReference,
   groupedHelpReportLogs,
   isHelpReportResolutionCategory,
@@ -169,4 +170,48 @@ test("guards status and resolution categories", () => {
   assert.equal(isHelpReportStatus("closed"), false);
   assert.equal(isHelpReportResolutionCategory("code_defect"), true);
   assert.equal(isHelpReportResolutionCategory("surprise"), false);
+});
+
+test("extracts Something Went Wrong decision trace from diagnostics", () => {
+  const packet = sanitizeDiagnosticPacket({
+    ...basePacket,
+    breadcrumbs: [
+      ...basePacket.breadcrumbs,
+      {
+        at: "2026-07-17T18:00:08.000Z",
+        detail: {
+          entryPoint: "something_went_wrong",
+          reportCorrelationId: "SWW-123",
+        },
+        kind: "diagnostic",
+        label: "something_went_wrong_opened",
+      },
+      {
+        at: "2026-07-17T18:00:09.000Z",
+        detail: {
+          decisionTrace: {
+            confidence: 0.86,
+            entryPoint: "something_went_wrong",
+            interpretedQuestion: "send stayed spinning",
+            relevantContextUsed: ["route:/connect/dashboard", "recent_failed_api"],
+            selectedInteractionFamily: "unexpected_behavior",
+            selectedWorkflow: "failed_message_delivery",
+          },
+          reportCorrelationId: "SWW-123",
+        },
+        kind: "diagnostic",
+        label: "something_went_wrong_interpreted",
+      },
+    ],
+  });
+
+  assert.deepEqual(extractProblemReportSummary(packet), {
+    confidence: 0.86,
+    entryPoint: "something_went_wrong",
+    interpretedQuestion: "send stayed spinning",
+    interactionFamily: "unexpected_behavior",
+    relevantContextUsed: ["route:/connect/dashboard", "recent_failed_api"],
+    reportCorrelationId: "SWW-123",
+    selectedWorkflow: "failed_message_delivery",
+  });
 });

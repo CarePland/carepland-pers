@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   buildHelpReportTimeline,
+  extractProblemReportSummary,
   groupedHelpReportLogs,
   helpReportResolutionCategories,
   helpReportStatuses,
@@ -301,6 +302,7 @@ function serializeReport(row: HelpReportRow, includePacket: boolean) {
     id: row.id,
     likelyCategory: row.likely_category ?? "unknown",
     packet: includePacket ? packet : null,
+    problemReport: extractProblemReportSummary(packet),
     referenceId: row.reference_id,
     resolutionCategory: row.resolution_category,
     resolvedAt: row.resolved_at,

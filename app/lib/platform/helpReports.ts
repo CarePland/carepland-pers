@@ -73,6 +73,16 @@ export type HelpReportDerivedSummary = {
   warningCount: number;
 };
 
+export type HelpReportProblemReportSummary = {
+  confidence: number | null;
+  entryPoint: string;
+  interpretedQuestion: string;
+  interactionFamily: string;
+  relevantContextUsed: string[];
+  reportCorrelationId: string;
+  selectedWorkflow: string;
+};
+
 export type HelpReportTimelineItem = {
   at: string;
   detail: string;
@@ -281,6 +291,38 @@ export function groupedHelpReportLogs(packet: HelpReportPacket) {
   return Array.from(grouped.values());
 }
 
+export function extractProblemReportSummary(
+  packet: HelpReportPacket
+): HelpReportProblemReportSummary | null {
+  const breadcrumbs = arrayOfRecords(packet.breadcrumbs);
+  const interpreted = [...breadcrumbs]
+    .reverse()
+    .find((entry) => stringValue(entry.label) === "something_went_wrong_interpreted");
+  const opened = [...breadcrumbs]
+    .reverse()
+    .find((entry) => stringValue(entry.label) === "something_went_wrong_opened");
+  const detail = recordValue(interpreted?.detail);
+  const decisionTrace = recordValue(detail.decisionTrace);
+  const openDetail = recordValue(opened?.detail);
+  const entryPoint =
+    stringValue(decisionTrace.entryPoint) ||
+    stringValue(detail.entryPoint) ||
+    stringValue(openDetail.entryPoint);
+
+  if (entryPoint !== "something_went_wrong") return null;
+
+  return {
+    confidence: numberValue(decisionTrace.confidence),
+    entryPoint,
+    interpretedQuestion: stringValue(decisionTrace.interpretedQuestion),
+    interactionFamily: stringValue(decisionTrace.selectedInteractionFamily),
+    relevantContextUsed: arrayOfStrings(decisionTrace.relevantContextUsed),
+    reportCorrelationId:
+      stringValue(detail.reportCorrelationId) || stringValue(openDetail.reportCorrelationId),
+    selectedWorkflow: stringValue(decisionTrace.selectedWorkflow),
+  };
+}
+
 export function isHelpReportStatus(value: unknown): value is HelpReportStatus {
   return typeof value === "string" && helpReportStatuses.includes(value as HelpReportStatus);
 }
@@ -375,6 +417,10 @@ function sanitizeValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.slice(0, 80).map(sanitizeValue);
   if (isRecord(value)) return sanitizeRecord(value);
   return "";
+}
+
+function arrayOfStrings(value: unknown) {
+  return Array.isArray(value) ? value.map(String).filter(Boolean).slice(0, 20) : [];
 }
 
 function redactSecrets(value: string) {

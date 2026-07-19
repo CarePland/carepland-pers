@@ -11,6 +11,9 @@ Supabase SQL editor history.
 - `2026-07-17_meaning_sample_data_refresh.sql`
   Migration/admin utility: layers current meaning/action sample data on top of the existing Health Focus seed, including Recommendations, Today's Focus, Track Events, Connect Messages, Focus cadence preferences, and CarePland Work Events. It also adds removal support for the new sample rows and keeps the normal app-facing Add/Remove demo data controls as the entry point.
 
+- `2026-07-18_receiver_messages_sample_data.sql`
+  Migration/admin utility: adds the next demo-data layer for Receiver and Messages. It creates a bound sample Receiver, Connect participant/settings rows, richer message lifecycle examples, appointment-linked MessagePrep, Receiver interaction attempts, a call-summary example, and Admin operational examples for Help/Priorities/Checkpoint, with matching removal support.
+
 - `2026-07-01_care_recommendations_foundation.sql`
   Migration: adds reviewable CarePland Recommendation candidates and supporting evidence rows. Recommendations bridge existing CarePland knowledge to possible Focus Items, but are not automatically shown or converted; initial generation is deterministic and evidence-based, with no AI prompt seeded. The v1 backend uses `dedupe_key` and `evidence_hash` so repeated scans can update open candidates without duplicating evidence.
 

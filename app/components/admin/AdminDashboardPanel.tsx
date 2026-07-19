@@ -3,6 +3,16 @@
 import { useEffect, useState } from "react";
 
 import {
+  filterAdminPriorities,
+  prioritySourceLabel,
+  sortAdminPriorities,
+  type AdminPriority,
+  type AdminPriorityCategory,
+  type AdminPrioritySort,
+  type AdminPriorityStatus,
+  type AdminPrioritySummary,
+} from "../../lib/admin/priorities";
+import {
   platformModuleVisibilityOverrideChangedEvent,
   readShowAllPlatformModulesOverride,
   writeShowAllPlatformModulesOverride,
@@ -36,12 +46,19 @@ type AdminDashboardPanelProps = {
   aiOperationCostUserRows: AiOperationCostUserSummaryRow[];
   aiOperationCostViewMode: AiOperationCostViewMode;
   followupCount: number;
+  loadingAdminPriorities: boolean;
   loadingAiOperationCosts: boolean;
   newCount: number;
   onChangeAiOperationCostRange: (rangeDays: number) => void;
   onChangeAiOperationCostViewMode: (viewMode: AiOperationCostViewMode) => void;
+  onChangePriorityStatus: (priority: AdminPriority, status: AdminPriorityStatus) => void;
+  onDeferPriority: (priority: AdminPriority) => void;
+  onOpenPriorityDestination: (destination: string) => void;
   onOpenPrioritizationPrompt: () => void;
   onRefreshSignals: () => void;
+  priorities: AdminPriority[];
+  prioritiesError: string;
+  prioritiesSummary: AdminPrioritySummary;
 };
 
 const aiOperationCostRangeOptions = [
@@ -57,6 +74,25 @@ const aiOperationCostViewOptions: Array<{
 }> = [
   { label: "By workflow", value: "workflow" },
   { label: "By user", value: "user" },
+];
+
+const priorityFilterOptions: Array<{
+  label: string;
+  value: "active" | AdminPriorityCategory | AdminPriorityStatus;
+}> = [
+  { label: "Active", value: "active" },
+  { label: "Needs Attention", value: "needs_attention" },
+  { label: "Review", value: "review" },
+  { label: "Watch", value: "watch" },
+  { label: "Deferred", value: "deferred" },
+  { label: "Resolved", value: "resolved" },
+];
+
+const prioritySortOptions: Array<{ label: string; value: AdminPrioritySort }> = [
+  { label: "Severity", value: "severity" },
+  { label: "Newest", value: "newest" },
+  { label: "Oldest", value: "oldest" },
+  { label: "Last activity", value: "last_activity" },
 ];
 
 function formatCost(value: number): string {
@@ -87,14 +123,26 @@ export function AdminDashboardPanel({
   aiOperationCostUserRows,
   aiOperationCostViewMode,
   followupCount,
+  loadingAdminPriorities,
   loadingAiOperationCosts,
   newCount,
   onChangeAiOperationCostRange,
   onChangeAiOperationCostViewMode,
+  onChangePriorityStatus,
+  onDeferPriority,
+  onOpenPriorityDestination,
   onOpenPrioritizationPrompt,
   onRefreshSignals,
+  priorities,
+  prioritiesError,
+  prioritiesSummary,
 }: AdminDashboardPanelProps) {
   const [showAllPlatformModules, setShowAllPlatformModules] = useState(false);
+  const [priorityFilter, setPriorityFilter] = useState<
+    "active" | AdminPriorityCategory | AdminPriorityStatus
+  >("active");
+  const [prioritySort, setPrioritySort] =
+    useState<AdminPrioritySort>("severity");
   const visibleAiCostRows =
     aiOperationCostViewMode === "user"
       ? aiOperationCostUserRows
@@ -109,6 +157,10 @@ export function AdminDashboardPanel({
   );
   const topAiCostRows = aiOperationCostRows.slice(0, 5);
   const topAiCostUserRows = aiOperationCostUserRows.slice(0, 5);
+  const visiblePriorities = sortAdminPriorities(
+    filterAdminPriorities(priorities, priorityFilter),
+    prioritySort
+  );
 
   useEffect(() => {
     function syncShowAllPlatformModules() {
@@ -132,7 +184,8 @@ export function AdminDashboardPanel({
   }, []);
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="space-y-5">
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="grid items-stretch gap-3 lg:grid-cols-[minmax(9rem,1fr)_minmax(9rem,1fr)_minmax(13rem,1fr)_auto]">
         <div className="rounded-md border border-red-200 bg-red-50 p-4">
           <p className="text-sm font-semibold text-red-950">New / unseen</p>
@@ -186,10 +239,212 @@ export function AdminDashboardPanel({
         </div>
       </div>
 
-      <div className="mt-5 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
-        Admin HQ is currently a read-only placeholder. Next step is to feed
-        Admin-safe signals into the prioritization prompt and show a ranked brief
-        here.
+      <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-base font-semibold text-slate-950">Priorities</p>
+            <p className="mt-1 text-sm text-slate-600">
+              {prioritiesSummary.needsAttentionCount} need attention ·{" "}
+              {prioritiesSummary.reviewCount} to review ·{" "}
+              {prioritiesSummary.deferredCount} deferred
+            </p>
+          </div>
+          <button
+            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+            onClick={onRefreshSignals}
+            type="button"
+          >
+            {loadingAdminPriorities ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+
+        <div className="mt-4 rounded-md border border-slate-200 bg-white p-3">
+          <p className="text-sm font-semibold text-slate-900">Today</p>
+          {prioritiesSummary.activeCount > 0 ? (
+            <p className="mt-1 text-sm text-slate-600">
+              {prioritiesSummary.needsAttentionCount} issue
+              {prioritiesSummary.needsAttentionCount === 1 ? "" : "s"} need
+              attention. {prioritiesSummary.reviewCount} item
+              {prioritiesSummary.reviewCount === 1 ? "" : "s"} are awaiting
+              review.
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-slate-600">
+              Nothing needs your attention right now.
+              {prioritiesSummary.recoveredCount > 0
+                ? ` ${prioritiesSummary.recoveredCount} issue${
+                    prioritiesSummary.recoveredCount === 1 ? "" : "s"
+                  } recovered.`
+                : ""}
+            </p>
+          )}
+        </div>
+
+        {prioritiesError ? (
+          <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-950">
+            {prioritiesError}
+          </p>
+        ) : null}
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <fieldset className="flex flex-wrap items-center gap-2">
+            <legend className="sr-only">Priority filter</legend>
+            {priorityFilterOptions.map((option) => (
+              <label
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+                key={option.value}
+              >
+                <input
+                  checked={priorityFilter === option.value}
+                  className="h-4 w-4 border-slate-300 text-blue-700 focus:ring-blue-500"
+                  name="admin-priority-filter"
+                  onChange={() => setPriorityFilter(option.value)}
+                  type="radio"
+                />
+                {option.label}
+              </label>
+            ))}
+          </fieldset>
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            Sort
+            <select
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
+              onChange={(event) =>
+                setPrioritySort(event.target.value as AdminPrioritySort)
+              }
+              value={prioritySort}
+            >
+              {prioritySortOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {visiblePriorities.length > 0 ? (
+          <div className="mt-4 grid gap-3">
+            {visiblePriorities.map((priority) => (
+              <article
+                className="rounded-md border border-slate-200 bg-white p-4"
+                key={priority.id}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {priority.title}
+                      </p>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${severityClass(priority.severity)}`}>
+                        {readableLabel(priority.severity)}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
+                        {readableLabel(priority.status)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-700">
+                      {priority.summary}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      {priority.reason}
+                    </p>
+                    <p className="mt-2 text-xs font-medium text-slate-500">
+                      {prioritySourceLabel(priority.sourceType)} · Last occurrence:{" "}
+                      {formatDateTime(priority.lastObservedAt)}
+                    </p>
+                  </div>
+                  <div className="min-w-40 text-right">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Recommended action
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">
+                      {priority.recommendedAction?.label ?? "Review details"}
+                    </p>
+                  </div>
+                </div>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-sm font-semibold text-slate-700">
+                    Why this is a priority
+                  </summary>
+                  <p className="mt-2 text-sm text-slate-600">
+                    {priority.explanation}
+                  </p>
+                </details>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {priority.recommendedAction?.destination ? (
+                    <button
+                      className="rounded-md bg-blue-700 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-800"
+                      onClick={() =>
+                        onOpenPriorityDestination(
+                          priority.recommendedAction?.destination ?? ""
+                        )
+                      }
+                      type="button"
+                    >
+                      {priority.recommendedAction.label}
+                    </button>
+                  ) : null}
+                  {priority.status === "open" ? (
+                    <button
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                      onClick={() =>
+                        onChangePriorityStatus(priority, "acknowledged")
+                      }
+                      type="button"
+                    >
+                      Acknowledge
+                    </button>
+                  ) : null}
+                  {priority.status !== "in_progress" && priority.status !== "resolved" ? (
+                    <button
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                      onClick={() =>
+                        onChangePriorityStatus(priority, "in_progress")
+                      }
+                      type="button"
+                    >
+                      Mark in progress
+                    </button>
+                  ) : null}
+                  {priority.status !== "deferred" && priority.status !== "resolved" ? (
+                    <button
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                      onClick={() => onDeferPriority(priority)}
+                      type="button"
+                    >
+                      Defer
+                    </button>
+                  ) : null}
+                  {priority.status !== "resolved" ? (
+                    <button
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                      onClick={() => onChangePriorityStatus(priority, "resolved")}
+                      type="button"
+                    >
+                      Resolve
+                    </button>
+                  ) : null}
+                  {priority.status !== "dismissed" ? (
+                    <button
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                      onClick={() => onChangePriorityStatus(priority, "dismissed")}
+                      type="button"
+                    >
+                      Dismiss
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-600">
+            {priorityFilter === "active"
+              ? "Nothing urgent needs your attention. CarePland has no unresolved critical or high-priority operational issues."
+              : "No priorities match this view."}
+          </div>
+        )}
       </div>
 
       <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4">
@@ -320,6 +575,31 @@ export function AdminDashboardPanel({
           </p>
         )}
       </div>
+    </div>
     </section>
   );
+}
+
+function readableLabel(value: string) {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function severityClass(severity: string) {
+  if (severity === "critical") return "bg-red-100 text-red-800";
+  if (severity === "high") return "bg-amber-100 text-amber-900";
+  if (severity === "medium") return "bg-blue-100 text-blue-800";
+  return "bg-slate-100 text-slate-700";
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }

@@ -363,6 +363,9 @@ function redactScreenHtml(root: HTMLElement) {
   root.querySelectorAll("script, style, svg, img").forEach((element) => {
     element.remove();
   });
+  root.querySelectorAll("[data-diagnostic-exclude]").forEach((element) => {
+    element.remove();
+  });
   root.querySelectorAll("input, textarea, select").forEach((element) => {
     element.setAttribute("data-diagnostic-redacted", "true");
     element.removeAttribute("value");

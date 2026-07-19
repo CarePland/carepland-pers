@@ -218,6 +218,153 @@ describe("receiver shell claim store", () => {
     });
   });
 
+  it("reuses a pending browser Receiver for the same browser install", async () => {
+    await withClaimIndex(async (indexPath) => {
+      const first = await createReceiverShellPairingSession(
+        {
+          deviceProfile: "web_receiver",
+          hardwareProfile: "web",
+          locationLabel: "Kitchen Browser Receiver",
+          receiverInstallId: "web-install-1",
+        },
+        { indexPath, now: new Date("2026-06-27T12:00:00.000Z") }
+      );
+      const second = await createReceiverShellPairingSession(
+        {
+          deviceProfile: "web_receiver",
+          hardwareProfile: "web",
+          locationLabel: "Kitchen Browser Receiver",
+          receiverInstallId: "web-install-1",
+        },
+        { indexPath, now: new Date("2026-06-27T12:01:00.000Z") }
+      );
+
+      assert.equal(second.receiverDeviceId, first.receiverDeviceId);
+
+      const firstSession = await getReceiverShellPairingSession(
+        { pairingCode: first.pairingCode, receiverDeviceId: first.receiverDeviceId },
+        { indexPath, now: new Date("2026-06-27T12:02:00.000Z") }
+      );
+      assert.equal(firstSession.status, "expired");
+
+      const secondSession = await getReceiverShellPairingSession(
+        { pairingCode: second.pairingCode, receiverDeviceId: second.receiverDeviceId },
+        { indexPath, now: new Date("2026-06-27T12:02:00.000Z") }
+      );
+      assert.equal(secondSession.status, "pending");
+    });
+  });
+
+  it("re-pairs an existing browser Receiver without keeping the old browser install valid", async () => {
+    await withClaimIndex(async (indexPath) => {
+      const existing = await createReceiverShellPairingSession(
+        {
+          deviceProfile: "web_receiver",
+          hardwareProfile: "web",
+          receiverInstallId: "web-old",
+        },
+        { indexPath, now: new Date("2026-06-27T12:00:00.000Z") }
+      );
+      const pairedExisting = await pairReceiverShellPairingCode(
+        {
+          careCircleId: "care-circle-1",
+          mainConnectUserDisplayName: "Rob",
+          mainConnectUserPersonId: "person-rob",
+          pairingCode: existing.pairingCode,
+        },
+        { indexPath, now: new Date("2026-06-27T12:01:00.000Z") }
+      );
+      await redeemReceiverShellClaim(
+        { claim: pairedExisting.claim, receiverInstallId: "web-old" },
+        { indexPath, now: new Date("2026-06-27T12:02:00.000Z") }
+      );
+
+      const replacement = await createReceiverShellPairingSession(
+        {
+          deviceProfile: "web_receiver",
+          hardwareProfile: "web",
+          receiverInstallId: "web-new",
+        },
+        { indexPath, now: new Date("2026-06-27T12:03:00.000Z") }
+      );
+      const pairedReplacement = await pairReceiverShellPairingCode(
+        {
+          careCircleId: "care-circle-1",
+          mainConnectUserDisplayName: "Rob",
+          mainConnectUserPersonId: "person-rob",
+          pairingCode: replacement.pairingCode,
+          targetReceiverDeviceId: existing.receiverDeviceId,
+        },
+        { indexPath, now: new Date("2026-06-27T12:04:00.000Z") }
+      );
+      await redeemReceiverShellClaim(
+        { claim: pairedReplacement.claim, receiverInstallId: "web-new" },
+        { indexPath, now: new Date("2026-06-27T12:05:00.000Z") }
+      );
+
+      await assert.rejects(
+        () =>
+          verifyReceiverShellBinding(
+            {
+              receiverDeviceId: existing.receiverDeviceId,
+              receiverInstallId: "web-old",
+            },
+            { indexPath, now: new Date("2026-06-27T12:06:00.000Z") }
+          ),
+        (error) =>
+          error instanceof ReceiverShellBindingError &&
+          error.status === 404 &&
+          error.message === "Receiver binding not found."
+      );
+
+      const replacementBinding = await verifyReceiverShellBinding(
+        {
+          receiverDeviceId: existing.receiverDeviceId,
+          receiverInstallId: "web-new",
+        },
+        { indexPath, now: new Date("2026-06-27T12:06:00.000Z") }
+      );
+      assert.equal(replacementBinding.receiverDeviceId, existing.receiverDeviceId);
+      assert.equal(replacementBinding.receiverInstallId, "web-new");
+    });
+  });
+
+  it("keeps a browser Receiver paired when the same browser install returns later", async () => {
+    await withClaimIndex(async (indexPath) => {
+      const session = await createReceiverShellPairingSession(
+        {
+          deviceProfile: "web_receiver",
+          hardwareProfile: "web",
+          receiverInstallId: "web-returning",
+        },
+        { indexPath, now: new Date("2026-06-27T12:00:00.000Z") }
+      );
+      const paired = await pairReceiverShellPairingCode(
+        {
+          careCircleId: "care-circle-1",
+          mainConnectUserPersonId: "person-rob",
+          pairingCode: session.pairingCode,
+        },
+        { indexPath, now: new Date("2026-06-27T12:01:00.000Z") }
+      );
+      await redeemReceiverShellClaim(
+        { claim: paired.claim, receiverInstallId: "web-returning" },
+        { indexPath, now: new Date("2026-06-27T12:02:00.000Z") }
+      );
+
+      const binding = await verifyReceiverShellBinding(
+        {
+          receiverDeviceId: session.receiverDeviceId,
+          receiverInstallId: "web-returning",
+        },
+        { indexPath, now: new Date("2026-08-27T12:02:00.000Z") }
+      );
+
+      assert.equal(binding.receiverDeviceId, session.receiverDeviceId);
+      assert.equal(binding.receiverInstallId, "web-returning");
+    });
+  });
+
   it("rejects expired receiver pairing codes", async () => {
     await withClaimIndex(async (indexPath) => {
       const session = await createReceiverShellPairingSession(

@@ -52,6 +52,11 @@ import {
   type AiOperationCostUserSummaryRow,
   type AiOperationCostViewMode,
 } from "./components/admin/AdminDashboardPanel";
+import type {
+  AdminPriority,
+  AdminPriorityStatus,
+  AdminPrioritySummary,
+} from "./lib/admin/priorities";
 import {
   type EarlyAccessIntakeDraft,
   type EarlyAccessIntakeRow,
@@ -620,6 +625,7 @@ type AdminTab =
   | "errors"
   | "helpReports"
   | "intake"
+  | "layout"
   | "product"
   | "recommendations"
   | "tickets"
@@ -628,6 +634,29 @@ type AdminTab =
   | "users"
   | "workflows";
 type StoredAdminTab = AdminTab | "messages";
+const adminTabs = [
+  "checkpoint",
+  "connect",
+  "dashboard",
+  "ai",
+  "assistantReview",
+  "content",
+  "errors",
+  "helpReports",
+  "intake",
+  "layout",
+  "product",
+  "recommendations",
+  "tickets",
+  "tools",
+  "userAudit",
+  "users",
+  "workflows",
+] as const satisfies readonly AdminTab[];
+
+function isAdminTab(value: string | null): value is AdminTab {
+  return Boolean(value && adminTabs.includes(value as AdminTab));
+}
 type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
 type MainTab = "admin" | "appointments" | "home" | "profile";
@@ -3199,6 +3228,18 @@ export function CarePlandPers({
   const [aiOperationCostRangeDays, setAiOperationCostRangeDays] = useState(30);
   const [aiOperationCostViewMode, setAiOperationCostViewMode] =
     useState<AiOperationCostViewMode>("workflow");
+  const [adminPriorities, setAdminPriorities] = useState<AdminPriority[]>([]);
+  const [adminPrioritiesSummary, setAdminPrioritiesSummary] =
+    useState<AdminPrioritySummary>({
+      activeCount: 0,
+      deferredCount: 0,
+      needsAttentionCount: 0,
+      recoveredCount: 0,
+      reviewCount: 0,
+      watchCount: 0,
+    });
+  const [adminPrioritiesError, setAdminPrioritiesError] = useState("");
+  const [loadingAdminPriorities, setLoadingAdminPriorities] = useState(false);
   const [loadingInstructions, setLoadingInstructions] = useState(false);
   const [loadingCarePrepHistory, setLoadingCarePrepHistory] = useState(false);
   const [savingInstructions, setSavingInstructions] = useState(false);
@@ -6502,6 +6543,24 @@ export function CarePlandPers({
     );
   }
 
+  function openTestReceiver() {
+    const params = new URLSearchParams({
+      device: "gxv3370",
+      hardwareProfile: "studio_gxv3370_1024x600",
+      receiverBindingStatus: "local_test",
+      receiverDeviceId: "test-receiver-living-room",
+      receiverInstallId: "test-receiver-browser",
+      setupCode: "12345",
+      uiLayout: "desk_phone_1024x600",
+    });
+
+    window.open(
+      `/connect/receiver?${params.toString()}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  }
+
   async function handleHomeContextQuestion(
     question: string,
     askContext: HomeContextAskContext = { level: "global" }
@@ -7811,8 +7870,158 @@ export function CarePlandPers({
     void loadAiOperationCostSummary(rangeDays);
   }
 
+  async function adminApiAuthHeaders() {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error) {
+      throw error;
+    }
+
+    const accessToken = session?.access_token;
+
+    if (!accessToken) {
+      throw new Error("Please sign in before opening Admin.");
+    }
+
+    return { Authorization: `Bearer ${accessToken}` };
+  }
+
+  async function loadAdminPriorities() {
+    setLoadingAdminPriorities(true);
+    setAdminPrioritiesError("");
+
+    try {
+      const response = await fetch("/api/admin/priorities", {
+        headers: await adminApiAuthHeaders(),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        priorities?: AdminPriority[];
+        summary?: AdminPrioritySummary;
+      };
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Priorities could not be loaded.");
+      }
+
+      setAdminPriorities(body.priorities ?? []);
+      setAdminPrioritiesSummary(
+        body.summary ?? {
+          activeCount: 0,
+          deferredCount: 0,
+          needsAttentionCount: 0,
+          recoveredCount: 0,
+          reviewCount: 0,
+          watchCount: 0,
+        }
+      );
+    } catch (error) {
+      console.warn("Unable to load admin priorities", error);
+      setAdminPriorities([]);
+      setAdminPrioritiesError(
+        error instanceof Error
+          ? error.message
+          : "CarePland could not load Priorities."
+      );
+    } finally {
+      setLoadingAdminPriorities(false);
+    }
+  }
+
+  async function handleChangeAdminPriorityStatus(
+    priority: AdminPriority,
+    status: AdminPriorityStatus
+  ) {
+    const requiresNote = status === "resolved" || status === "dismissed";
+    const note = requiresNote
+      ? window.prompt("Optional note for this priority") ?? ""
+      : "";
+
+    try {
+      const response = await fetch("/api/admin/priorities", {
+        body: JSON.stringify({
+          incidentKey: priority.incidentKey,
+          note,
+          sourceType: priority.sourceType,
+          status,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(await adminApiAuthHeaders()),
+        },
+        method: "PATCH",
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Priority could not be updated.");
+      }
+
+      await loadAdminPriorities();
+    } catch (error) {
+      setAdminPrioritiesError(
+        error instanceof Error
+          ? error.message
+          : "Priority could not be updated."
+      );
+    }
+  }
+
+  async function handleDeferAdminPriority(priority: AdminPriority) {
+    const hoursText = window.prompt("Defer for how many hours?", "24");
+    if (hoursText === null) return;
+
+    const hours = Number(hoursText);
+    if (!Number.isFinite(hours) || hours <= 0) {
+      setAdminPrioritiesError("Enter a positive number of hours to defer.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/admin/priorities", {
+        body: JSON.stringify({
+          deferredUntil: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(),
+          incidentKey: priority.incidentKey,
+          note: `Deferred for ${hours} hours.`,
+          sourceType: priority.sourceType,
+          status: "deferred",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(await adminApiAuthHeaders()),
+        },
+        method: "PATCH",
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(body.error ?? "Priority could not be deferred.");
+      }
+
+      await loadAdminPriorities();
+    } catch (error) {
+      setAdminPrioritiesError(
+        error instanceof Error
+          ? error.message
+          : "Priority could not be deferred."
+      );
+    }
+  }
+
+  function openAdminPriorityDestination(destination: string) {
+    const url = new URL(destination, window.location.origin);
+    const tab = url.searchParams.get("tab");
+    if (isAdminTab(tab)) {
+      void handleChangeAdminTab(tab);
+    }
+  }
+
   async function loadAdminAttentionOverview() {
     await Promise.allSettled([
+      loadAdminPriorities(),
       loadAdminViewStates(),
       loadAdminAttentionSummary(),
       loadAdminSupportTickets(),
@@ -12126,6 +12335,14 @@ export function CarePlandPers({
           throw meaningLayerError;
         }
 
+        const { error: receiverMessagesLayerError } = await supabase.rpc(
+          "seed_sample_receiver_messages_layer_for_current_user"
+        );
+
+        if (receiverMessagesLayerError) {
+          throw receiverMessagesLayerError;
+        }
+
         setSampleDataSeededAt(
           status.seeded_at ?? new Date().toISOString()
         );
@@ -12152,7 +12369,7 @@ export function CarePlandPers({
 
   async function handleRemoveSampleData() {
     const confirmed = window.confirm(
-      "Remove demo data? This deletes only appointments, notes, and CarePrep marked as demo data. Your real information will stay."
+      "Remove demo data? This deletes only rows clearly marked as demo data, including sample appointments, notes, CarePrep, Receiver, Messages, and meaning/action examples. Your real information will stay."
     );
 
     if (!confirmed) {
@@ -12163,6 +12380,14 @@ export function CarePlandPers({
     setMessage("");
 
     try {
+      const { error: receiverMessagesLayerError } = await supabase.rpc(
+        "remove_sample_receiver_messages_layer_for_current_user"
+      );
+
+      if (receiverMessagesLayerError) {
+        throw receiverMessagesLayerError;
+      }
+
       const { error: meaningLayerError } = await supabase.rpc(
         "remove_sample_meaning_layer_for_current_user"
       );
@@ -12279,10 +12504,24 @@ export function CarePlandPers({
           throw meaningLayerError;
         }
 
+        const { data: receiverMessagesData, error: receiverMessagesLayerError } =
+          await supabase.rpc("admin_seed_sample_receiver_messages_layer", {
+            target_email: emailForSeed,
+          });
+
+        if (receiverMessagesLayerError) {
+          throw receiverMessagesLayerError;
+        }
+
         const meaningStatus = sampleDataStatusFromValue(meaningData);
+        const receiverMessagesStatus =
+          sampleDataStatusFromValue(receiverMessagesData);
         setAdminSampleStatus({
           ...status,
-          seed_version: meaningStatus.seed_version ?? status.seed_version,
+          seed_version:
+            receiverMessagesStatus.seed_version ??
+            meaningStatus.seed_version ??
+            status.seed_version,
         });
       } else {
         setAdminSampleStatus(status);
@@ -16451,13 +16690,22 @@ export function CarePlandPers({
                     Install, pair, and configure a CarePland Receiver.
                   </p>
                 </div>
-                <button
-                  className="min-h-10 rounded-full border border-blue-100 bg-blue-50 px-4 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100"
-                  onClick={openReceiverSetup}
-                  type="button"
-                >
-                  Set Up Receiver
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className="min-h-10 rounded-full border border-blue-100 bg-blue-50 px-4 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100"
+                    onClick={openTestReceiver}
+                    type="button"
+                  >
+                    Launch Test Receiver
+                  </button>
+                  <button
+                    className="min-h-10 rounded-full border border-blue-100 bg-blue-50 px-4 text-sm font-semibold text-blue-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-100"
+                    onClick={openReceiverSetup}
+                    type="button"
+                  >
+                    Set Up Receiver
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -17336,6 +17584,7 @@ export function CarePlandPers({
     activeAdminTopTab, adminAccessEvents, adminAttentionFor, adminDashboardFollowupCount,
     adminDashboardNewCount, adminEmailUpdateCurrentEmail, adminEmailUpdateNewEmail, adminEmailUpdateReason,
     adminEmailUpdateResult, adminIntegrationErrorRowKey, adminIntegrationErrorStats, adminIntegrationErrors,
+    adminPriorities, adminPrioritiesError, adminPrioritiesSummary,
     adminLastViewedAt, adminReadonlyPanelRef, adminReadonlySnapshot, adminRevealedSensitiveData,
     setAdminRecommendationsReviewDraftSummary,
     adminSampleEmail, adminSampleForceDeclined, adminSampleStatus, adminSupportTickets,
@@ -17363,9 +17612,10 @@ export function CarePlandPers({
     earlyAccessIntakeStats, editingProductMgmtItemId, expandedAdminUserCareVipRows, filteredAdminUserActivity,
     filteredAppContentOptions, filteredAssistantReviewInteractions, filteredEarlyAccessIntakeRows,
     formatDate, formatDateOnly, handleAddAdminInternalNote, handleAddAdminTicketReply,
-    handleAdminUpdateUserEmail, handleAnalyzeFilteredAssistantReviews, handleChangeAdminTab, handleChangeAiOperationCostRange, handleChangeAiAdminTab,
+    handleAdminUpdateUserEmail, handleAnalyzeFilteredAssistantReviews, handleChangeAdminPriorityStatus, handleChangeAdminTab, handleChangeAiOperationCostRange, handleChangeAiAdminTab,
     handleChangeAiWorkflow, handleChangeAppContentCategory, handleChangeAppContentKey, handleChangeHistoryAppointment,
     handleChangeProductMgmtSection, handleCreateAssistantAdminReview, handleCreateEarlyAccessIntake, handleCreateProductMgmtArea,
+    handleDeferAdminPriority,
     handleCreateProductMgmtItem, handleLoadAdminSampleStatus, handlePublishAgentKnowledgeProposal, handleQueueAgentKnowledgeManualCheck,
     handleResolveProductMgmtItem, handleRetireProductMgmtArea, handleRevertAppContent, handleRevertInstructionVersion,
     handleReviewAgentKnowledgeProposalItem, handleRunAskModuleLab, handleSaveAgentKnowledge, handleSaveAgentKnowledgeAutomationSettings,
@@ -17375,15 +17625,15 @@ export function CarePlandPers({
     handleUpdateEarlyAccessIntake, handleUpdateProductMgmtItem, historyAppointmentId, instructionChangeNote,
     instructionModel, instructionOutputSchema, instructionSystemPrompt, instructionUserPrompt,
     intakeHistory, isNewForAdmin, loadAdminAccessEvents, loadAdminAttentionOverview,
-    loadAdminIntegrationErrors, loadAdminSupportTickets, loadAdminUserActivity, loadAgentKnowledgeProposals,
+    loadAdminIntegrationErrors, loadAdminPriorities, loadAdminSupportTickets, loadAdminUserActivity, loadAgentKnowledgeProposals,
     loadAiInstructions, loadAppContent, loadAskReviewSubmissions, loadAssistantReviewInteractions,
     loadCarePrepHistory, loadEarlyAccessIntake, loadInstructionVersionIntoEditor, loadIntakeHistory,
-    loadingAdminAccessEvents, loadingAdminIntegrationErrors, loadingAdminReadonlyUserId, loadingAdminSampleStatus,
+    loadingAdminAccessEvents, loadingAdminIntegrationErrors, loadingAdminPriorities, loadingAdminReadonlyUserId, loadingAdminSampleStatus,
     loadingAdminTickets, loadingAdminUserActivity, loadingAgentKnowledgeProposals, loadingAiOperationCosts,
     loadingAppContent, loadingAskReviews, loadingAskRoutingSettings, loadingAssistantReviews,
     loadingCarePrepHistory, loadingEarlyAccessIntake, loadingInstructions, loadingProductMgmt,
     newProductMgmtAreaDescription, newProductMgmtAreaLabel, newProductMgmtBody, newProductMgmtChangeNote,
-    newProductMgmtPriority, newProductMgmtStatus, newProductMgmtTitle, openAdminReadonlyUserView,
+    newProductMgmtPriority, newProductMgmtStatus, newProductMgmtTitle, openAdminPriorityDestination, openAdminReadonlyUserView,
     openAskRelatedItem, openAskSubmissionReview, productMgmtAreas, productMgmtItemDraft,
     productMgmtItems, publishingAgentKnowledgeProposalId, queueingAgentKnowledgeRun, recordAskRecommendationDecision,
     resetAppContentEditor, resolveAskAnswerRecommendation, resolvingProductMgmtItemId, retiringProductMgmtAreaId,

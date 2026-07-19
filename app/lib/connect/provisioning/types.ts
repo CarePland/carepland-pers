@@ -99,6 +99,7 @@ export type ConnectReceiverDevice = {
   receiverHouseholdId?: string;
   receiverId?: string;
   receiverMode?: "dedicated" | "personal" | string;
+  receiverUrl?: string;
   receiverContactDisplayName?: string;
   receiverContactIsReceiverUser?: boolean;
   receiverContactUserId?: string;

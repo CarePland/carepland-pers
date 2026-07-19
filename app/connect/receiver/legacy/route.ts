@@ -10,16 +10,83 @@ export const dynamic = "force-dynamic";
 
 export function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
+  const layoutPreview = searchParams.get("layoutPreview") === "1";
   const runtimeContract = createReceiverRuntimeContract(
     classicReceiverRuntimeInput(searchParams)
   );
-  const displayName = searchParams.get("receiverName") || "Receiver setup required";
+  const displayName =
+    searchParams.get("receiverName") ||
+    (layoutPreview ? searchParams.get("mainConnectUserDisplayName") : "") ||
+    "Receiver setup required";
   const locationLabel = searchParams.get("locationLabel") || "Living Rm";
   const appointmentTitle = searchParams.get("appointmentTitle") || "Cardiology Follow-Up";
   const appointmentDay = searchParams.get("appointmentDay") || "Tomorrow";
   const appointmentTime = searchParams.get("appointmentTime") || "2 PM";
   const primaryCoordinatorName =
-    searchParams.get("primaryCoordinatorName") || searchParams.get("coordinatorName") || "Care coordinator";
+    searchParams.get("primaryCoordinatorName") ||
+    searchParams.get("primaryCoordinatorDisplayName") ||
+    searchParams.get("coordinatorName") ||
+    "Care coordinator";
+  const previewData = layoutPreview
+    ? {
+        appointments: [
+          {
+            id: "layout-preview-classic-cardiology-follow-up",
+            locationName: "Heart Clinic",
+            startsAt: appointmentAt(1, 14),
+            title: appointmentTitle,
+          },
+        ],
+        binding: {
+          bindingStatus: "local_test",
+          hardwareProfile: searchParams.get("hardwareProfile") || "grandstream_gxv3370",
+          locationLabel,
+          mainConnectUserDisplayName: displayName,
+          mainConnectUserPersonId:
+            searchParams.get("mainConnectUserPersonId") || "sample-receiver-user-andrew",
+          primaryCoordinatorDisplayName: primaryCoordinatorName,
+          receiverDeviceId: searchParams.get("receiverDeviceId") || "layout-preview-old-web",
+          receiverInstallId:
+            searchParams.get("receiverInstallId") || "layout-preview-old-web-browser",
+          uiLayout: searchParams.get("uiLayout") || "desk_phone_1024x600",
+        },
+        messages: [
+          {
+            allowsCallbackRequest: true,
+            body: `${displayName}, remember your cardiology follow-up is tomorrow at 2 PM.`,
+            createdAt: appointmentAt(0, 9, 20),
+            from: primaryCoordinatorName,
+            id: "layout-preview-classic-message-appointment",
+            mainConnectUserPersonId:
+              searchParams.get("mainConnectUserPersonId") || "sample-receiver-user-andrew",
+            requiresAcknowledgement: true,
+            to: displayName,
+          },
+          {
+            allowsCallbackRequest: true,
+            body: "I added milk to the list. Press Call Back if you want to talk.",
+            createdAt: appointmentAt(0, 8, 45),
+            from: primaryCoordinatorName,
+            heardAt: appointmentAt(0, 8, 50),
+            id: "layout-preview-classic-message-grocery",
+            mainConnectUserPersonId:
+              searchParams.get("mainConnectUserPersonId") || "sample-receiver-user-andrew",
+            readAt: appointmentAt(0, 8, 50),
+            to: displayName,
+          },
+        ],
+        todayFocusItems: [
+          {
+            id: "layout-preview-classic-focus-walk",
+            title: "Morning walk",
+          },
+          {
+            id: "layout-preview-classic-focus-water",
+            title: "Drink water",
+          },
+        ],
+      }
+    : null;
 
   return new Response(
     classicWebViewReceiverHtml({
@@ -29,6 +96,7 @@ export function GET(request: NextRequest) {
       displayName,
       locationLabel,
       primaryCoordinatorName,
+      previewData,
       runtimeContract,
     }),
     {
@@ -47,6 +115,7 @@ function classicWebViewReceiverHtml({
   displayName,
   locationLabel,
   primaryCoordinatorName,
+  previewData,
   runtimeContract,
 }: {
   appointmentDay: string;
@@ -55,6 +124,7 @@ function classicWebViewReceiverHtml({
   displayName: string;
   locationLabel: string;
   primaryCoordinatorName: string;
+  previewData: Record<string, unknown> | null;
   runtimeContract: ReceiverRuntimeContract;
 }) {
   const schemaClass = safeCssClass(`schema-${runtimeContract.layout.uiSchemaId}`);
@@ -63,6 +133,8 @@ function classicWebViewReceiverHtml({
   const viewportHeight = runtimeContract.hardware.displayHeightPx || runtimeContract.hardware.displayHeightDp || 600;
   const escapedPrimaryCoordinatorName = escapeHtml(primaryCoordinatorName);
   const primaryCoordinatorNameJson = JSON.stringify(primaryCoordinatorName);
+  const previewDataJson = safeJsonScript(previewData);
+  const layoutPreviewModeJson = JSON.stringify(Boolean(previewData));
 
   return `<!doctype html>
 <html>
@@ -273,31 +345,31 @@ function classicWebViewReceiverHtml({
       border-color: #1d4c73;
     }
     .receiverFooter {
-      bottom: 12px;
+      background: #1b1b1b;
+      bottom: 0;
       box-sizing: border-box;
+      color: #e4e7e5;
       display: table;
-      height: 76px;
-      left: 28px;
+      height: 96px;
+      left: 0;
+      padding: 10px 24px 10px 28px;
       position: absolute;
-      right: 24px;
+      right: 0;
       table-layout: fixed;
     }
     .classicReceiverIdentity {
-      background: rgba(251, 250, 245, 0.86);
-      border: 2px solid rgba(23, 35, 29, 0.36);
-      border-radius: 6px;
       bottom: 4px;
       box-sizing: border-box;
-      color: rgba(23, 35, 29, 0.82);
-      font-size: 16px;
+      color: #e4e7e5;
+      font-size: 10px;
       font-weight: 900;
-      left: 28px;
       line-height: 1.05;
-      max-width: 460px;
+      max-width: 280px;
       overflow: hidden;
-      padding: 5px 8px;
+      padding: 2px 4px;
       pointer-events: none;
       position: absolute;
+      right: 8px;
       text-overflow: ellipsis;
       white-space: nowrap;
       z-index: 24;
@@ -338,7 +410,7 @@ function classicWebViewReceiverHtml({
       width: 52px;
     }
     .footerGreeting {
-      color: #5d6961;
+      color: inherit;
       font-size: 27px;
       font-weight: 900;
       overflow: hidden;
@@ -346,14 +418,14 @@ function classicWebViewReceiverHtml({
       width: 420px;
     }
     .footerGreeting .name {
-      color: #101915;
+      color: inherit;
       display: inline;
       font-size: 31px;
       line-height: 1;
       margin-left: 18px;
     }
     .footerClock {
-      color: #101915;
+      color: inherit;
       font-size: 56px;
       font-weight: 900;
       line-height: 1;
@@ -362,7 +434,7 @@ function classicWebViewReceiverHtml({
       width: 245px;
     }
     .footerDate {
-      color: #5d6961;
+      color: inherit;
       font-size: 29px;
       font-weight: 900;
       line-height: 1;
@@ -1220,17 +1292,15 @@ function classicWebViewReceiverHtml({
     <div class="guideRectLabel" id="guideRectLabel">CarePland is pointing here.</div>
   </div>
   <div class="guideIdentifyCode" id="guideIdentifyCode" aria-hidden="true"></div>
-  <div class="classicReceiverIdentity" id="receiverIdentityBadge">Receiver ID: starting</div>
+  <div class="classicReceiverIdentity" id="receiverIdentityBadge"></div>
   </div>
 
   <button class="fullscreenPrompt" id="fullscreenPrompt" type="button">Fill Screen</button>
   <div class="layoutMenuWrap">
     <button class="layoutButton" id="layoutButton" type="button" aria-haspopup="menu" aria-expanded="false">LAYOUT</button>
     <div class="layoutMenu" id="layoutMenu" role="menu" aria-label="Receiver layout">
-      <button class="activeLayout" type="button" role="menuitemradio" aria-checked="true" data-layout-choice="old">Old Web</button>
-      <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="classic">Classic</button>
-      <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="focus">Focus</button>
-      <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="ask_tell">Ask/Tell</button>
+      <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="appliance">Appliance</button>
+      <button type="button" role="menuitemradio" aria-checked="false" data-layout-choice="modern">Modern</button>
     </div>
   </div>
 
@@ -1242,6 +1312,8 @@ function classicWebViewReceiverHtml({
       var fallbackPairingCode = "";
       var fallbackPairingDeviceId = "";
       var fallbackPairingPollTimer = null;
+      var fallbackLayoutPreviewMode = ${layoutPreviewModeJson};
+      if (fallbackLayoutPreviewMode) return;
 
       function fallbackText(value) {
         return value === null || value === undefined ? "" : String(value);
@@ -1298,13 +1370,12 @@ function classicWebViewReceiverHtml({
         var badge = document.getElementById("receiverIdentityBadge");
         if (!badge) return;
         var full = fallbackText(deviceId || installId || "classic-webview-receiver");
-        var prefix = deviceId ? "Receiver ID" : "Local ID";
         var label = fallbackCompactReceiverIdentifier(full);
-        badge.innerHTML = (prefix + ": " + label)
+        badge.innerHTML = label
           .replace(/&/g, "&amp;")
           .replace(/</g, "&lt;")
           .replace(/>/g, "&gt;");
-        badge.setAttribute("title", prefix + ": " + full);
+        badge.setAttribute("title", full);
       }
       function fallbackReceiverUrl() {
         return window.location.protocol + "//" + window.location.host + "/connect/receiver/legacy?receiver_runtime=classic_webview";
@@ -1463,6 +1534,8 @@ function classicWebViewReceiverHtml({
         todayFocusItems: [],
         online: false
       };
+      var layoutPreviewData = ${previewDataJson};
+      var layoutPreviewMode = !!(layoutPreviewData && layoutPreviewData.binding);
       var browserBindingStorageKey = "carepland-connect-receiver-binding";
       var browserInstallStorageKey = "carepland-connect-classic-receiver-install-id";
       var classicCachePrefix = "carepland-connect-classic-cache";
@@ -1813,28 +1886,33 @@ function classicWebViewReceiverHtml({
         menu.className = open ? "layoutMenu layoutMenuOpen" : "layoutMenu";
         button.setAttribute("aria-expanded", open ? "true" : "false");
       }
-      function modernReceiverUrl(homeLayout) {
+      function applianceReceiverUrl() {
         var url = new URL("/connect/receiver", window.location.origin);
         url.searchParams.set("receiver_runtime", "modern_web");
         url.searchParams.set("device", "gxv3370");
         url.searchParams.set("hardwareProfile", "grandstream_gxv3370");
         url.searchParams.set("uiLayout", "desk_phone_1024x600");
-        if (homeLayout) url.searchParams.set("homeLayout", homeLayout);
+        url.searchParams.set("homeLayout", "ask_tell_2");
+        return url.toString();
+      }
+      function modernReceiverUrl() {
+        var url = new URL("/connect/receiver", window.location.origin);
+        url.searchParams.set("receiver_runtime", "modern_web");
+        url.searchParams.set("device", "web");
+        url.searchParams.set("hardwareProfile", "web");
+        url.searchParams.set("uiLayout", "default_receiver");
+        url.searchParams.set("receiverLayout", "modern");
         return url.toString();
       }
       function chooseReceiverLayout(choice) {
         setLayoutMenuOpen(false);
         if (nativeReceiverShellPresent()) return;
-        if (choice === "classic") {
-          window.location.assign(modernReceiverUrl(""));
+        if (choice === "modern") {
+          window.location.assign(modernReceiverUrl());
           return;
         }
-        if (choice === "focus") {
-          window.location.assign(modernReceiverUrl("focus_v1"));
-          return;
-        }
-        if (choice === "ask_tell") {
-          window.location.assign(modernReceiverUrl("ask_tell"));
+        if (choice === "appliance") {
+          window.location.assign(applianceReceiverUrl());
         }
       }
       function bindButtons() {
@@ -1997,15 +2075,27 @@ function classicWebViewReceiverHtml({
       }
       function updateReceiverIdentityBadge() {
         var full = receiverState.receiverDeviceId || receiverState.receiverInstallId || "classic-webview-receiver";
-        var prefix = receiverState.receiverDeviceId ? "Receiver ID" : "Local ID";
         var badge = document.getElementById("receiverIdentityBadge");
         if (!badge) return;
         var label = compactReceiverIdentifier(full);
-        var receiverName = text(receiverState.locationLabel);
-        badge.innerHTML = receiverName
-          ? "<span class=\\"classicReceiverIdentityName\\">" + escapeHtml(receiverName) + "</span><span class=\\"classicReceiverIdentityId\\">" + escapeHtml(prefix + ": " + label) + "</span>"
-          : escapeHtml(prefix + ": " + label);
-        badge.setAttribute("title", receiverName ? receiverName + " · " + prefix + ": " + full : prefix + ": " + full);
+        badge.innerHTML = escapeHtml(label);
+        badge.setAttribute("title", full);
+      }
+      function startLayoutPreviewReceiver() {
+        var binding = layoutPreviewData.binding || {};
+        setPrimaryCoordinatorName(binding.primaryCoordinatorDisplayName || receiverState.primaryCoordinatorName);
+        receiverState.receiverDeviceId = binding.receiverDeviceId || "layout-preview-old-web";
+        receiverState.receiverInstallId = binding.receiverInstallId || "layout-preview-old-web-browser";
+        receiverState.locationLabel = binding.locationLabel || receiverState.locationLabel;
+        receiverState.personId = binding.mainConnectUserPersonId || "sample-receiver-user-andrew";
+        receiverState.online = true;
+        writeStoredBinding(binding);
+        updateReceiverIdentityBadge();
+        setText("connectionStatus", "Online");
+        showScreen("homeScreen");
+        renderAppointments(layoutPreviewData.appointments || []);
+        renderTodayFocusItems(layoutPreviewData.todayFocusItems || []);
+        renderMessages(layoutPreviewData.messages || []);
       }
       function mergedReceiverConfig(config) {
         var stored = readStoredBinding();
@@ -2846,6 +2936,11 @@ function classicWebViewReceiverHtml({
         });
       };
       window.setInterval(updateClock, 30000);
+      if (layoutPreviewMode) {
+        startLayoutPreviewReceiver();
+        markReady();
+        return;
+      }
       connectNativeReceiver(function (binding) {
         if (!binding) return;
         showScreen("homeScreen");
@@ -2855,6 +2950,7 @@ function classicWebViewReceiverHtml({
         startIncomingCallPolling();
       });
       function refreshClassicReceiverWhenActive() {
+        if (layoutPreviewMode) return;
         if (document.hidden) return;
         if (!receiverState.receiverDeviceId) return;
         connectNativeReceiver(function (binding) {
@@ -2888,4 +2984,15 @@ function escapeHtml(value: string) {
 
 function safeCssClass(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function appointmentAt(dayOffset: number, hour: number, minute = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + dayOffset);
+  date.setHours(hour, minute, 0, 0);
+  return date.toISOString();
+}
+
+function safeJsonScript(value: unknown) {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
 }

@@ -11,6 +11,7 @@ type ReceiverSetupPageProps = {
   searchParams: Promise<{
     code?: string;
     new?: string;
+    receiverUrl?: string;
     receiverKey?: string;
   }>;
 };
@@ -23,6 +24,7 @@ export default async function ReceiverSetupPage({
   return (
     <ReceiverApkSetupPageClient
       initialPairingCode={params.code || ""}
+      initialReceiverUrl={params.receiverUrl || ""}
       selectedReceiverKey={params.new === "1" ? "" : params.receiverKey ?? ""}
     />
   );

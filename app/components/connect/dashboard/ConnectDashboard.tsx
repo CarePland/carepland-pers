@@ -4188,6 +4188,28 @@ function SetupPanel({
     await copySetupLink(link);
   }
 
+  function currentReceiverLink(device: ConnectReceiverDevice) {
+    const savedReceiverUrl = device.receiverUrl?.trim();
+    const origin =
+      typeof window === "undefined" ? "https://app.carepland.com" : window.location.origin;
+    const receiverUrl = savedReceiverUrl || "/connect/receiver";
+
+    try {
+      return new URL(receiverUrl, origin).toString();
+    } catch {
+      return new URL("/connect/receiver", origin).toString();
+    }
+  }
+
+  async function copyCurrentReceiverLink(device: ConnectReceiverDevice) {
+    try {
+      await navigator.clipboard.writeText(currentReceiverLink(device));
+      setSetupStatus("Receiver link copied.");
+    } catch {
+      setSetupStatus("Copy failed. Open the Receiver and copy the link from the browser.");
+    }
+  }
+
   async function revokeReceiverDevice(device: ConnectReceiverDevice) {
     if (!device.id) {
       setSetupStatus("Select a receiver first.");
@@ -4503,6 +4525,30 @@ function SetupPanel({
                           <path d="M12 20h9" />
                           <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
                         </svg>
+                      </button>
+                    ) : null}
+                    {selectedDevice && currentReceiverAction !== "rename" ? (
+                      <button
+                        className="inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-black text-blue-700 hover:bg-[#edf5fc] hover:text-blue-900 disabled:opacity-55"
+                        disabled={!selectedDevice}
+                        onClick={() => void copyCurrentReceiverLink(selectedDevice)}
+                        title="Copy Receiver link"
+                        type="button"
+                      >
+                        <svg
+                          aria-hidden="true"
+                          className="h-3.5 w-3.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <rect height="14" rx="2" width="14" x="8" y="8" />
+                          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                        </svg>
+                        <span>Copy Receiver link</span>
                       </button>
                     ) : null}
                     {selectedDevice && currentReceiverAction === "rename" ? (

@@ -25,6 +25,7 @@ export type ReceiverSetupDraft = {
   lastCompletedSection?: ReceiverSetupSection;
   nativeClaim?: string;
   pairingCode: string;
+  pairingError: string;
   pairingStatus: ReceiverSetupPairingStatus;
   receiverContactUserId: string;
   receiverUserPersonId: string;

@@ -13,6 +13,7 @@ export async function POST(request: Request) {
     const session = await createReceiverShellPairingSession({
       deviceProfile: stringValue(body.deviceProfile),
       hardwareProfile: stringValue(body.hardwareProfile),
+      locationLabel: stringValue(body.locationLabel),
       receiverDeviceId: stringValue(body.receiverDeviceId),
       receiverInstallId: stringValue(body.receiverInstallId),
       receiverUrl: stringValue(body.receiverUrl),

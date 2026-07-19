@@ -4,6 +4,7 @@ import { connectAuthHeaders } from "@/app/lib/connect/context/client";
 import {
   browserReceiverPairingCodeReady,
   formatBrowserReceiverPairingCode,
+  normalizeBrowserReceiverPairingCode,
 } from "@/app/lib/connect/receiverShell/browserPairing";
 import { LongOperationStatus } from "@/app/components/shared/LongOperationStatus";
 
@@ -39,12 +40,13 @@ export function ReceiverPairStep({
   const receiverUserMissing = !selectedUser;
 
   async function checkCode() {
-    if (!draft.pairingCode.trim()) return;
-    setDraft((current) => ({ ...current, pairingStatus: "checking" }));
+    const pairingCode = normalizeBrowserReceiverPairingCode(draft.pairingCode);
+    if (!pairingCode) return;
+    setDraft((current) => ({ ...current, pairingError: "", pairingStatus: "checking" }));
     try {
       const response = await fetch(
         `/api/connect/receiver-shell/pairing-sessions?code=${encodeURIComponent(
-          draft.pairingCode
+          pairingCode
         )}`,
         { cache: "no-store" }
       );
@@ -54,6 +56,7 @@ export function ReceiverPairStep({
       };
       setDraft((current) => ({
         ...current,
+        pairingError: response.ok ? "" : pairingErrorMessage(payload.error),
         pairingStatus:
           response.ok && payload.status === "paired"
             ? "paired"
@@ -62,21 +65,27 @@ export function ReceiverPairStep({
               : "error",
       }));
     } catch {
-      setDraft((current) => ({ ...current, pairingStatus: "error" }));
+      setDraft((current) => ({
+        ...current,
+        pairingError: "CarePland could not check that code. Check the connection and try again.",
+        pairingStatus: "error",
+      }));
     }
   }
 
   async function pairReceiver() {
     if (!selectedUser?.id || !codeReady) return;
-    setDraft((current) => ({ ...current, pairingStatus: "pending" }));
+    const pairingCode = normalizeBrowserReceiverPairingCode(draft.pairingCode);
+    setDraft((current) => ({ ...current, pairingError: "", pairingStatus: "pending" }));
     try {
       const response = await fetch("/api/connect/receiver-shell/pairing-sessions/pair", {
         body: JSON.stringify({
           deviceProfile: "web_receiver",
           hardwareProfile: "web",
           mainConnectUserPersonId: selectedUser.id,
-          pairingCode: draft.pairingCode,
+          pairingCode,
           receiverUrl,
+          targetReceiverDeviceId: selectedDevice?.id || selectedDevice?.receiverId,
           uiLayout: "default_receiver",
         }),
         cache: "no-store",
@@ -99,14 +108,22 @@ export function ReceiverPairStep({
         ...current,
         lastCompletedSection: "pair",
         nativeClaim: payload.claim || current.nativeClaim,
+        pairingError: "",
         pairingStatus: "paired",
         selectedReceiverDeviceId: payload.receiverDeviceId || current.selectedReceiverDeviceId,
       }));
       void onPairingComplete().catch((error) => {
         console.warn("Receiver Setup could not refresh after pairing.", error);
       });
-    } catch {
-      setDraft((current) => ({ ...current, pairingStatus: "error" }));
+    } catch (error) {
+      setDraft((current) => ({
+        ...current,
+        pairingError:
+          error instanceof Error
+            ? pairingErrorMessage(error.message)
+            : "CarePland could not pair this Receiver. Check the code and try again.",
+        pairingStatus: "error",
+      }));
     }
   }
 
@@ -140,6 +157,7 @@ export function ReceiverPairStep({
               setDraft((current) => ({
                 ...current,
                 pairingCode: "",
+                pairingError: "",
                 pairingStatus: "idle",
               }))
             }
@@ -160,6 +178,7 @@ export function ReceiverPairStep({
                 setDraft((current) => ({
                   ...current,
                   pairingCode: formatBrowserReceiverPairingCode(event.target.value),
+                  pairingError: "",
                   pairingStatus: "idle",
                 }))
               }
@@ -236,10 +255,22 @@ export function ReceiverPairStep({
         />
       ) : draft.pairingStatus === "error" ? (
         <ReceiverSetupStatus tone="error">
-          Pairing code is invalid, expired, or unavailable. Check the Receiver screen and try again.
+          {draft.pairingError ||
+            "Pairing code is invalid, expired, or unavailable. Check the Receiver screen and try again."}
         </ReceiverSetupStatus>
       ) : null}
 
     </section>
   );
+}
+
+function pairingErrorMessage(message?: string) {
+  const trimmed = message?.trim();
+  if (!trimmed) {
+    return "Pairing code is invalid, expired, or unavailable. Check the Receiver screen and try again.";
+  }
+  if (/not found/i.test(trimmed)) {
+    return "Pairing code was not found. Make sure the setup page and Receiver are using the same CarePland address, then try the code on the Receiver screen.";
+  }
+  return trimmed;
 }

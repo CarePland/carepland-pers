@@ -336,16 +336,15 @@
 
 .receiverIdentityBadge {
   position: absolute;
-  right: 14px;
-  bottom: 8px;
+  right: 8px;
+  bottom: 3px;
   z-index: 24;
   display: grid;
-  gap: 2px;
   justify-items: end;
-  max-width: min(54cqw, 460px);
+  max-width: min(38cqw, 280px);
   overflow: hidden;
   color: rgba(23, 35, 29, 0.56);
-  font-size: clamp(0.62rem, 1.45cqw, 0.78rem);
+  font-size: clamp(0.5rem, 1.05cqw, 0.6rem);
   font-weight: 800;
   line-height: 1;
   padding: 0;
@@ -366,10 +365,15 @@
 }
 
 .deskPhoneMode .receiverIdentityBadge {
-  right: 10px;
-  bottom: 6px;
-  max-width: 380px;
-  font-size: 0.64rem;
+  right: 8px;
+  bottom: 3px;
+  max-width: 260px;
+  font-size: 0.5rem;
+}
+
+.gxvAskTell2HomeMode .receiverIdentityBadge,
+.gxvAskTell2HomeMode .receiverIdentityName {
+  color: #e4e7e5;
 }
 
 .receiverTraceButton {
@@ -986,6 +990,15 @@
   text-align: left;
 }
 
+.modernAskTellCard.offlineDisabledAction {
+  background:
+    linear-gradient(135deg, rgba(31, 105, 70, 0.94), rgba(31, 82, 112, 0.9)),
+    #1f6946 !important;
+  color: #ffffff !important;
+  filter: none;
+  box-shadow: 0 18px 48px rgba(36, 62, 48, 0.1) !important;
+}
+
 .modernAskTellCard span {
   color: rgba(255, 255, 255, 0.78);
   font-size: 1rem;
@@ -1149,6 +1162,7 @@
 }
 
 .modernModalPanel {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 18px;
@@ -1423,6 +1437,98 @@
   font-size: 1.04rem;
   font-weight: 760;
   line-height: 1.36;
+}
+
+.modernSettingsPanel {
+  width: min(760px, 100%);
+  min-height: min(520px, calc(100dvh - 48px));
+}
+
+.modernSettingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-content: start;
+}
+
+.modernSettingsGridFour {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.modernSettingButton {
+  min-height: 104px;
+  border: 1px solid rgba(20, 34, 27, 0.12);
+  border-radius: 18px;
+  background: #f6faf7;
+  color: #14221b;
+  font: inherit;
+  font-size: 1.22rem;
+  font-weight: 920;
+  line-height: 1.12;
+  padding: 18px;
+  text-align: left;
+}
+
+.modernSettingButtonSelected {
+  border-color: rgba(36, 109, 72, 0.44);
+  background: #246d48;
+  color: #ffffff;
+  box-shadow: 0 14px 28px rgba(31, 105, 70, 0.18);
+}
+
+.modernContactPanel {
+  width: min(860px, 100%);
+}
+
+.modernContactBody {
+  display: grid;
+  grid-template-rows: auto minmax(260px, 1fr) auto;
+  gap: 12px;
+}
+
+.modernNestedOverlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: rgba(15, 26, 20, 0.38);
+  padding: 22px;
+}
+
+.modernNestedPrompt {
+  display: grid;
+  gap: 12px;
+  width: min(520px, 100%);
+  border: 1px solid rgba(20, 34, 27, 0.14);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.98);
+  color: #14221b;
+  padding: 24px;
+  box-shadow: 0 22px 54px rgba(15, 26, 20, 0.24);
+}
+
+.modernNestedPrompt h3,
+.modernNestedPrompt p {
+  margin: 0;
+}
+
+.modernNestedPrompt h3 {
+  font-size: 1.42rem;
+  font-weight: 950;
+}
+
+.modernNestedPrompt p {
+  color: #4c5b52;
+  font-size: 1.05rem;
+  font-weight: 780;
+}
+
+.modernNestedPrompt div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .modernStatusPill {
@@ -2154,17 +2260,34 @@
   grid-column: 1;
   grid-row: 1;
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  grid-template-rows: 184px 142px 34px 28px 38px 68px;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  grid-template-rows: 156px 104px 74px 28px 58px 68px;
   grid-template-areas:
-    "focus focus focus focus focus focus ask ask ask ask ask ask"
-    "upcoming upcoming upcoming upcoming upcoming upcoming ask ask ask ask ask ask"
-    "notification notification notification notification notification notification secondary secondary secondary secondary secondary secondary"
-    "notification notification notification notification notification notification secondary secondary secondary secondary secondary secondary"
-    "max max max max max max secondary secondary secondary secondary secondary secondary"
-    "greeting greeting greeting time time time utilities utilities utilities utilities utilities utilities";
+    "focus focus focus focus focus focus focus focus ask ask ask ask ask ask ask ask"
+    "upcoming upcoming upcoming upcoming upcoming upcoming upcoming upcoming ask ask ask ask ask ask ask ask"
+    "notification notification notification notification notification notification notification notification secondary secondary secondary secondary secondary secondary secondary secondary"
+    "notification notification notification notification notification notification notification notification secondary secondary secondary secondary secondary secondary secondary secondary"
+    "max max max max max max max max help help help help help help help help"
+    "greeting greeting greeting greeting time time time time time time utilities utilities utilities utilities utilities utilities";
   gap: 12px 14px;
-  padding: 10px 18px 12px;
+  padding: 10px 4px 12px;
+}
+
+.gxvAskTell2HomeMode .actionZone::before {
+  content: "";
+  position: absolute;
+  right: -4px;
+  bottom: 0;
+  left: -4px;
+  height: 82px;
+  background: #1b1b1b;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.gxvAskTell2HomeMode .actionZone > * {
+  position: relative;
+  z-index: 1;
 }
 
 .focusHomeGreetingPanel,
@@ -2251,15 +2374,24 @@
 
 .gxvAskTell2HomeMode .focusHomeGreetingPanel {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 46px minmax(0, 1fr);
   grid-template-areas:
     "logo greeting"
     "logo name";
   align-content: center;
   align-items: center;
-  column-gap: 10px;
+  column-gap: 6px;
   row-gap: 2px;
-  padding: 0 6px;
+  min-width: 0;
+  padding: 0;
+  color: #e4e7e5;
+  transform: translateY(9px);
+}
+
+.gxvAskTell2HomeMode .focusHomeGreetingPanel .focusHomeLogo,
+.gxvAskTell2HomeMode .focusHomeGreetingPanel .focusHomeLogo img {
+  width: 44px;
+  height: 44px;
 }
 
 .gxvAskTell2HomeMode .focusHomeGreetingPanel .focusHomeLogo {
@@ -2269,7 +2401,8 @@
 .gxvAskTell2HomeMode .focusHomeGreetingPanel span {
   grid-area: greeting;
   min-width: 0;
-  font-size: 0.92rem;
+  color: inherit;
+  font-size: 1.02rem;
 }
 
 .gxvAskTell2HomeMode .focusHomeGreetingPanel strong {
@@ -2278,7 +2411,7 @@
   min-width: 0;
   max-height: 2.1em;
   overflow: hidden;
-  font-size: 1.05rem;
+  font-size: 1.34rem;
   line-height: 1.02;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -2748,8 +2881,41 @@
 
 .gxvAskTell2HomeMode .focusHomeAppointmentPanel {
   align-content: center;
+  align-self: end;
+  justify-self: stretch;
+  box-sizing: border-box;
+  grid-area: upcoming;
+  grid-column: 1 / 9;
+  grid-row: 2;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  padding-block: 20px;
+  position: static;
+  top: auto;
+  left: auto;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  overflow: hidden;
+  padding: 12px 22px 14px;
+  transform: none;
+  z-index: 1;
+}
+
+.gxvAskTell2HomeMode .askTellPrimaryAction {
+  z-index: 2;
+}
+
+.gxvAskTell2HomeMode .focusHomeAppointmentPanel strong {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: clamp(1.35rem, 2.35cqw, 1.75rem);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.gxvAskTell2HomeMode .focusHomeAppointmentPanel span {
+  font-size: clamp(1rem, 1.6cqw, 1.18rem);
 }
 
 .focusHomeAppointmentPanel:active {
@@ -2930,6 +3096,16 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+.gxvAskTell2HomeMode .askTell2SendHelpAction {
+  grid-area: help;
+  align-self: stretch;
+  justify-self: end;
+  width: 75%;
+  min-height: 0;
+  height: 100%;
+  font-size: 1.5rem;
+}
+
 .askTell2PrimaryAction span {
   font-size: 4rem;
 }
@@ -2957,35 +3133,65 @@
 
 .gxvAskTell2HomeMode .focusHomeTimePanel {
   align-content: center;
-  justify-content: end;
-  justify-items: end;
-  padding: 0 8px 0 0;
-  text-align: right;
+  justify-content: stretch;
+  justify-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  color: #e4e7e5;
+  text-align: left;
+  transform: translateY(9px);
+  z-index: 1;
 }
 
 .gxvAskTell2HomeMode .focusHomeTimePanel strong {
-  font-size: 2.65rem;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 2.38rem;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.gxvAskTell2HomeMode .focusHomeTimePanel .dateControlRow span {
+  color: inherit;
 }
 
 .askTell2TimePanel {
   display: grid;
-  grid-template-columns: max-content;
-  grid-template-areas:
-    "time"
-    "date";
-  row-gap: 2px;
+  grid-template-columns: max-content max-content;
+  grid-template-areas: "time date";
+  align-items: center;
+  justify-content: start;
+  column-gap: clamp(14px, 2cqw, 30px);
+  min-width: 0;
   width: 100%;
+  overflow: hidden;
 }
 
 .askTell2TimePanel .dateControlRow {
   grid-area: date;
-  justify-self: end;
+  display: grid;
+  justify-items: end;
+  min-width: 0;
+  overflow: hidden;
+  justify-self: start;
   line-height: 1;
+  text-align: right;
+}
+
+.askTell2TimePanel .dateControlRow span {
+  display: block;
+  overflow: hidden;
+  font-size: 1.08rem;
+  font-weight: 950;
+  line-height: 1.02;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .askTell2TimePanel strong {
   grid-area: time;
-  justify-self: end;
+  justify-self: start;
 }
 
 .askTell2ConnectionPanel {
@@ -3011,8 +3217,13 @@
   transform: translateY(1px);
 }
 
-.askTell2ConnectionStatus .onlineStatus,
 .askTell2ConnectionStatus .offlineStatus {
+  color: #e4e7e5;
+  font-size: 1.05rem;
+}
+
+.askTell2ConnectionStatus .onlineStatus {
+  color: #3cac42;
   font-size: 1.05rem;
 }
 
@@ -3032,10 +3243,6 @@
 
 .askTell2ConnectionLightOffline {
   background: #303833;
-}
-
-.gxvAskTell2HomeMode .focusHomeGreetingPanel {
-  padding: 4px 10px 4px 8px;
 }
 
 .receiverHomeDisabledAction,
@@ -3361,8 +3568,15 @@
 }
 
 .gxvAskTell2HomeMode .focusHomeUtilityStack {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  min-width: 0;
+  overflow: visible;
+  grid-template-columns: minmax(310px, 1fr) max-content 62px;
+  gap: 12px;
+  align-items: center;
+  justify-content: end;
+  padding-right: 2px;
+  transform: translateY(9px);
+  z-index: 2;
 }
 
 .gxvAskTell2HomeMode .focusHomeUtilityStack .focusHomeUtilityAction:first-child:nth-last-child(2) {
@@ -3373,21 +3587,22 @@
   grid-column: 2;
 }
 
-.gxvAskTell2HomeMode .focusHomeUtilityStack .askTell2SettingsAction:nth-child(2):last-child {
-  grid-column: 2 / -1;
+.gxvAskTell2HomeMode .focusHomeUtilityStack .askTell2SettingsAction:nth-child(3):last-child {
+  grid-column: 3;
 }
 
 .gxvAskTell2HomeMode .focusHomeUtilityStack .focusHomeUtilityAction {
   display: grid;
   align-content: center;
   justify-items: center;
-  align-self: start;
+  align-self: center;
   justify-self: center;
   width: 100%;
   height: 54px;
   border: 3px solid #919892;
   border-radius: 6px;
   background: transparent;
+  color: #e4e7e5;
   padding: 5px 10px 7px;
   line-height: 1.02;
   box-shadow:
@@ -3401,6 +3616,81 @@
 
 .gxvAskTell2HomeMode .focusHomeUtilityStack .askTell2SettingsAction > span {
   font-size: 1.28rem;
+}
+
+.gxvAskTell2HomeMode .focusHomeUtilityStack .askTell2SettingsAction {
+  align-content: center;
+  align-self: center;
+  justify-self: start;
+  justify-items: end;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  color: #e4e7e5;
+  transform: none;
+}
+
+.gxvAskTell2HomeMode .focusHomeUtilityStack .askTell2ConnectionPanel {
+  align-self: center;
+  grid-column: 2;
+  justify-items: end;
+  padding-right: 0;
+  transform: translateX(-12px);
+}
+
+.gxvAskTell2HomeMode .focusHomeUtilityStack .askTell2ConnectionStatus {
+  width: auto;
+}
+
+.askTell2FooterTextSlot {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  align-self: center;
+  justify-self: end;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  height: 54px;
+  overflow: hidden;
+  color: #e4e7e5;
+  line-height: 1;
+  text-align: left;
+  transform: translateX(-48px);
+}
+
+.askTell2FooterReceiverName,
+.askTell2FooterReceiverType {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.askTell2FooterReceiverName {
+  font-size: clamp(1.08rem, 1.48cqw, 1.3rem);
+  font-weight: 900;
+}
+
+.askTell2FooterReceiverType {
+  align-self: flex-start;
+  color: rgba(228, 231, 229, 0.82);
+  font-size: clamp(0.68rem, 1.2cqw, 0.9rem);
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.askTell2SettingsGear {
+  display: block;
+  width: 58px;
+  height: 58px;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.32));
+}
+
+.askTell2SettingsGearHole {
+  fill: #1b1b1b;
 }
 
 .cleaningFooterRow {
@@ -4694,6 +4984,29 @@
   font-size: clamp(1.75rem, 3.4vw, 2.35rem);
 }
 
+.receiverTalkOperationStatus {
+  width: 100%;
+  border: 4px solid #17440f;
+  border-radius: 10px;
+  background: #f7fbf5;
+  color: #14221b;
+  padding: 16px 18px;
+  font-size: 1.35rem;
+  line-height: 1.25;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.receiverTalkOperationStatus button {
+  min-height: 56px;
+  border-radius: 8px;
+  font-size: 1.1rem;
+}
+
+.receiverTalkOperationStatus p {
+  font-size: 1.1rem;
+  line-height: 1.35;
+}
+
 .recordReviewText {
   margin: 0;
   min-height: clamp(120px, 20dvh, 180px);
@@ -5258,6 +5571,249 @@
   border-color: #2f6c9f;
   box-shadow: 0 0 0 4px rgba(47, 108, 159, 0.18);
   outline: none;
+}
+
+.receiverHelpPanel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  align-content: stretch;
+  gap: clamp(14px, 2.4dvh, 22px);
+  width: min(100%, 980px);
+  height: min(100%, 560px);
+  max-height: 100%;
+  border-width: 4px;
+  padding: clamp(22px, 4dvh, 34px);
+}
+
+.applianceFullscreenModal .receiverHelpPanel {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.receiverHelpHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, auto);
+  align-items: center;
+  gap: 18px;
+}
+
+.receiverHelpHeader span {
+  display: block;
+  margin-bottom: 6px;
+  color: #5d675f;
+  font-size: clamp(0.82rem, 1.55vw, 1.08rem);
+  font-weight: 950;
+  line-height: 1;
+}
+
+.receiverHelpHeader h2 {
+  margin: 0;
+  color: #17231d;
+  font-size: clamp(2.35rem, 6vw, 4.2rem);
+  font-weight: 950;
+  line-height: 0.95;
+  white-space: nowrap;
+}
+
+.receiverHelpStartTitle {
+  font-size: clamp(2.1rem, 5.15vw, 3.65rem) !important;
+  text-transform: none;
+}
+
+.receiverHelpReviewTitle {
+  font-size: clamp(2rem, 4.8vw, 3.45rem) !important;
+  text-transform: none;
+}
+
+.receiverHelpHeaderActions {
+  display: grid;
+  grid-template-columns: minmax(176px, auto);
+  align-items: center;
+  gap: 12px;
+}
+
+.receiverHelpHeaderActions:has(.receiverHelpSizeRow) {
+  grid-template-columns: auto minmax(176px, auto);
+}
+
+.receiverHelpCancelButton {
+  min-width: 176px;
+  min-height: 72px;
+  font-size: clamp(1.45rem, 3vw, 2.05rem);
+}
+
+.receiverHelpSizeRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(52px, 1fr));
+  gap: 8px;
+}
+
+.receiverHelpSizeRow .askTellSizeButton {
+  min-height: 58px;
+}
+
+.receiverHelpStartPrompt,
+.receiverHelpComposePrompt {
+  margin: 0;
+  color: #34443b;
+  font-weight: 950;
+  line-height: 1.08;
+}
+
+.receiverHelpStartPrompt {
+  font-size: clamp(2rem, 4.8vw, 3.6rem);
+}
+
+.receiverHelpComposePrompt {
+  font-size: clamp(1.85rem, 4.4vw, 3.2rem);
+}
+
+.receiverHelpChoiceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 18px;
+  min-height: 0;
+}
+
+.receiverHelpChoiceButton {
+  height: 100%;
+  min-height: 220px;
+  border: 5px solid #17440f;
+  border-radius: 10px;
+  background: #236b1b;
+  color: #ffffff;
+  font: inherit;
+  font-size: clamp(2.6rem, 6vw, 4.35rem);
+  font-weight: 950;
+  line-height: 1;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.22),
+    0 6px 0 #143a0e,
+    0 10px 16px rgba(50, 37, 22, 0.22);
+}
+
+.receiverHelpChoiceButton.recordingActive {
+  border-color: #7a1010;
+  background: #b91c1c;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.18),
+    0 6px 0 #681010,
+    0 10px 16px rgba(50, 37, 22, 0.22);
+}
+
+.receiverHelpChoiceButton:disabled {
+  opacity: 0.72;
+}
+
+.receiverHelpTextField {
+  display: grid;
+  grid-row: 3;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.receiverHelpTextField span {
+  color: #34443b;
+  font-size: clamp(1.2rem, 2.6vw, 1.65rem);
+  font-weight: 950;
+}
+
+.receiverHelpTextField textarea {
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: 3px solid #b9beb8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17231d;
+  font: inherit;
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  font-weight: 820;
+  line-height: 1.22;
+  padding: 14px 16px;
+}
+
+.receiverHelpTextField textarea.readerTextStandard {
+  font-size: clamp(1.8rem, 3.4vw, 2.25rem);
+}
+
+.receiverHelpTextField textarea.readerTextLarge {
+  font-size: clamp(2.55rem, 5.2vw, 3.5rem);
+}
+
+.receiverHelpTextField textarea.readerTextExtra {
+  font-size: clamp(3.2rem, 7vw, 4.8rem);
+}
+
+.receiverHelpTextField textarea:focus {
+  outline: 5px solid #2f6fdd;
+  outline-offset: 3px;
+}
+
+.receiverHelpFooterNav {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(78px, 0.28fr) auto minmax(78px, 0.28fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.receiverHelpFooterNav .modalButton {
+  min-height: clamp(70px, 12dvh, 92px);
+  font-size: clamp(1.35rem, 3vw, 2.1rem);
+}
+
+.receiverHelpFooterNav span {
+  color: #34443b;
+  font-size: clamp(1.5rem, 3.3vw, 2.3rem);
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.receiverHelpExitOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(16, 17, 16, 0.52);
+  padding: clamp(24px, 5dvh, 42px);
+}
+
+.receiverHelpExitPrompt {
+  display: grid;
+  gap: 24px;
+  width: min(760px, 100%);
+  border: 4px solid #b9beb8;
+  border-radius: 8px;
+  background: #fffdf7;
+  color: #17231d;
+  padding: clamp(28px, 5dvh, 44px);
+  text-align: center;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+}
+
+.receiverHelpExitPrompt h3 {
+  margin: 0;
+  font-size: clamp(1.8rem, 4.2vw, 2.75rem);
+  font-weight: 950;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+
+.receiverHelpExitPrompt div {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.85fr);
+  gap: 14px;
+}
+
+.receiverHelpExitPrompt .modalButton {
+  min-height: clamp(76px, 12dvh, 98px);
+  font-size: clamp(1.35rem, 3.2vw, 2.05rem);
 }
 
 .allMessagesPanel {
@@ -6232,6 +6788,50 @@
   background: #050505;
   color: white;
   padding: 18px;
+}
+
+.modernCallPhonePanel {
+  border: 1px solid rgba(20, 34, 27, 0.12);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #14221b;
+  box-shadow: 0 22px 54px rgba(15, 26, 20, 0.18);
+}
+
+.modernCallPhonePanel .callPhoneClock span,
+.modernCallPhonePanel .callPhoneStatus {
+  color: #65716a;
+}
+
+.modernCallPhonePanel .liveCaptionNotice {
+  color: #246d48;
+}
+
+.modernCallPhonePanel .endedCallSummaryStatus {
+  color: #244237;
+}
+
+.modernCallPhonePanel .callControlButton {
+  border: 1px solid rgba(20, 34, 27, 0.12);
+  border-radius: 999px;
+  background: #eef4f0;
+  color: #244237;
+}
+
+.modernCallPhonePanel .callControlButton span {
+  color: #65716a;
+}
+
+.modernCallPhonePanel .callEndButton {
+  border-color: rgba(142, 38, 38, 0.28);
+  background: #a71f1f;
+  color: #ffffff;
+}
+
+.modernCallPhonePanel .callControlActive {
+  border-color: rgba(167, 31, 31, 0.38);
+  background: #f7e9e9;
+  color: #8a1515;
 }
 
 .deskPhoneMode .callPhonePanel {

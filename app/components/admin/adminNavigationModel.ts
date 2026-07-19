@@ -177,6 +177,7 @@ export function createAdminNavigationModel({
     { key: "dashboard", label: "Dashboard" },
     { key: "checkpoint", label: "Checkpoint" },
     { key: "connect", label: "Connect" },
+    { key: "layout", label: "Layout" },
     { key: "workflows", label: "Workflow View" },
     { key: "recommendations", label: "Today's Focus" },
     { key: "tools", label: "Tools" },
@@ -200,9 +201,11 @@ export function createAdminNavigationModel({
           ? "recommendations"
           : adminTab === "connect"
           ? "connect"
-          : adminTab === "dashboard"
-            ? "dashboard"
-            : "tools";
+          : adminTab === "layout"
+            ? "layout"
+            : adminTab === "dashboard"
+              ? "dashboard"
+              : "tools";
   const adminTabForTopTab = (
     topTab: AdminWorkspaceTopTab
   ): AdminWorkspaceTab => {

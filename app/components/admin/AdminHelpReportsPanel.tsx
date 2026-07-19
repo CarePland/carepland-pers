@@ -45,6 +45,15 @@ type HelpReportSummary = {
   id: string;
   likelyCategory: string;
   packet: Record<string, unknown> | null;
+  problemReport: {
+    confidence: number | null;
+    entryPoint: string;
+    interpretedQuestion: string;
+    interactionFamily: string;
+    relevantContextUsed: string[];
+    reportCorrelationId: string;
+    selectedWorkflow: string;
+  } | null;
   referenceId: string;
   resolutionCategory: string | null;
   resolvedAt: string | null;
@@ -395,6 +404,45 @@ export function AdminHelpReportsPanel() {
                 value={selectedReport.userHappenedInstead || "Not provided"}
               />
             </section>
+
+            {selectedReport.problemReport ? (
+              <section className="rounded-md border border-slate-200 p-3">
+                <h4 className="font-semibold text-slate-900">Something Went Wrong</h4>
+                <dl className="mt-2 grid gap-2 text-sm md:grid-cols-2">
+                  <Metric
+                    label="Interpreted question"
+                    value={selectedReport.problemReport.interpretedQuestion || "Unknown"}
+                  />
+                  <Metric
+                    label="Interaction family"
+                    value={selectedReport.problemReport.interactionFamily || "Unknown"}
+                  />
+                  <Metric
+                    label="AI confidence"
+                    value={
+                      selectedReport.problemReport.confidence === null
+                        ? "Unknown"
+                        : `${Math.round(selectedReport.problemReport.confidence * 100)}%`
+                    }
+                  />
+                  <Metric
+                    label="Selected workflow"
+                    value={selectedReport.problemReport.selectedWorkflow || "Unknown"}
+                  />
+                  <Metric
+                    label="Correlation ID"
+                    value={selectedReport.problemReport.reportCorrelationId || selectedReport.referenceId}
+                  />
+                  <Metric
+                    label="Context used"
+                    value={
+                      selectedReport.problemReport.relevantContextUsed.join(" · ") ||
+                      "No extra context recorded"
+                    }
+                  />
+                </dl>
+              </section>
+            ) : null}
 
             <section className="rounded-md border border-slate-200 p-3">
               <h4 className="font-semibold text-slate-900">Overview</h4>

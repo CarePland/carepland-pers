@@ -49,6 +49,7 @@ export function ReceiverSetupOverlay({
   activeDevices,
   connectContext,
   initialPairingCode = "",
+  initialReceiverUrl = "",
   initialSection = "start",
   installModeLock,
   onClose,
@@ -60,6 +61,7 @@ export function ReceiverSetupOverlay({
   activeDevices: ConnectReceiverDevice[];
   connectContext: ConnectMainUserContext | null;
   initialPairingCode?: string;
+  initialReceiverUrl?: string;
   initialSection?: ReceiverSetupSection;
   installModeLock?: "android";
   onClose: () => void;
@@ -264,9 +266,11 @@ export function ReceiverSetupOverlay({
     onClose();
   }, [onClose, unsavedChangePages.length]);
   const receiverUrl = useMemo(() => {
+    const receiverUrlFromSetupLink = safeReceiverUrl(initialReceiverUrl);
+    if (receiverUrlFromSetupLink) return receiverUrlFromSetupLink;
     if (!browserOrigin) return "/connect/receiver";
     return new URL("/connect/receiver", browserOrigin).toString();
-  }, [browserOrigin]);
+  }, [browserOrigin, initialReceiverUrl]);
   const provisioningUrl = useMemo(() => {
     const url = new URL("carepland://receiver/provision");
     url.searchParams.set("receiver_url", receiverUrl);
@@ -824,4 +828,19 @@ function canMoveNext(draft: ReceiverSetupDraft, props: ReceiverSetupStepProps) {
   if (draft.section === "install") return Boolean(draft.installMode ?? "web");
   if (draft.section === "pair") return draft.pairingStatus === "paired";
   return true;
+}
+
+function safeReceiverUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    url.pathname = "/connect/receiver";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }

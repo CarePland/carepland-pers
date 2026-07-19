@@ -22,6 +22,7 @@ export const defaultReceiverSetupDraft: ReceiverSetupDraft = {
   installMode: undefined,
   installViewed: false,
   pairingCode: "",
+  pairingError: "",
   pairingStatus: "idle",
   receiverContactUserId: "",
   receiverUserPersonId: "",

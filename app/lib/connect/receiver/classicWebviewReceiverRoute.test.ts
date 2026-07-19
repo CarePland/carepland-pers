@@ -88,6 +88,37 @@ describe("Classic WebView receiver route runtime input", () => {
     assert.match(html, /window\.location\.reload\(\); return false/);
   });
 
+  it("offers only approved Receiver layout choices from Old Web", async () => {
+    const response = getClassicReceiverRoute({
+      nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),
+    } as never);
+    const html = await response.text();
+
+    assert.match(html, /data-layout-choice="appliance">Appliance/);
+    assert.match(html, /data-layout-choice="modern">Modern/);
+    assert.doesNotMatch(html, /data-layout-choice="classic"/);
+    assert.doesNotMatch(html, /data-layout-choice="focus"/);
+    assert.doesNotMatch(html, /data-layout-choice="ask_tell"/);
+    assert.doesNotMatch(html, /data-layout-choice="old"/);
+  });
+
+  it("starts Old Web layout previews with fake receiver data instead of pairing", async () => {
+    const response = getClassicReceiverRoute({
+      nextUrl: new URL(
+        "https://receiver.carepland.test/connect/receiver/legacy?layoutPreview=1&mainConnectUserDisplayName=Andrew&mainConnectUserPersonId=sample-receiver-user-andrew&primaryCoordinatorDisplayName=CarePland%20Preview&receiverDeviceId=layout-preview-old-web&receiverInstallId=layout-preview-old-web-browser&hardwareProfile=grandstream_gxv3370&uiLayout=desk_phone_1024x600"
+      ),
+    } as never);
+    const html = await response.text();
+
+    assert.match(html, /var fallbackLayoutPreviewMode = true/);
+    assert.match(html, /var layoutPreviewMode = !!\(layoutPreviewData && layoutPreviewData\.binding\)/);
+    assert.match(html, /startLayoutPreviewReceiver\(\)/);
+    assert.match(html, /layout-preview-classic-message-appointment/);
+    assert.match(html, /Morning walk/);
+    assert.match(html, /Andrew/);
+    assert.match(html, /CarePland Preview/);
+  });
+
   it("resets a revoked browser binding back into Receiver pairing", async () => {
     const response = getClassicReceiverRoute({
       nextUrl: new URL("https://receiver.carepland.test/connect/receiver/legacy"),

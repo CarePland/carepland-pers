@@ -68,3 +68,182 @@ body {
     0 18px 44px rgb(15 23 42 / 0.085),
     0 3px 8px rgb(15 23 42 / 0.055);
 }
+@media print {
+  .something-went-wrong-root {
+    display: none !important;
+  }
+}
+
+.something-went-wrong-root {
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right));
+  z-index: 90;
+}
+
+.something-went-wrong-button {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+  color: white;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-height: 2.5rem;
+  padding: 0.55rem 0.85rem;
+}
+
+.something-went-wrong-panel {
+  background: white;
+  border: 1px solid rgb(226, 232, 240);
+  border-radius: 0.5rem;
+  bottom: calc(100% + 0.75rem);
+  box-shadow: 0 22px 50px rgba(15, 23, 42, 0.22);
+  color: rgb(15, 23, 42);
+  max-height: min(78vh, 40rem);
+  overflow: auto;
+  padding: 1rem;
+  position: absolute;
+  right: 0;
+  width: min(24rem, calc(100vw - 2rem));
+}
+
+.something-went-wrong-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.something-went-wrong-header h2 {
+  font-size: 1.1rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.something-went-wrong-header p,
+.something-went-wrong-footnote,
+.something-went-wrong-status,
+.something-went-wrong-note,
+.something-went-wrong-trace {
+  color: rgb(71, 85, 105);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.something-went-wrong-label {
+  display: grid;
+  font-size: 0.82rem;
+  font-weight: 700;
+  gap: 0.35rem;
+  margin-top: 0.9rem;
+}
+
+.something-went-wrong-label textarea {
+  border: 1px solid rgb(203, 213, 225);
+  border-radius: 0.45rem;
+  color: rgb(15, 23, 42);
+  font-size: 0.95rem;
+  font-weight: 500;
+  min-height: 7rem;
+  padding: 0.65rem;
+  resize: vertical;
+}
+
+.something-went-wrong-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.something-went-wrong-actions button,
+.something-went-wrong-ghost {
+  background: rgb(15, 23, 42);
+  border: 1px solid rgb(15, 23, 42);
+  border-radius: 0.45rem;
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 700;
+  min-height: 2.35rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.something-went-wrong-actions button:disabled {
+  background: rgb(148, 163, 184);
+  border-color: rgb(148, 163, 184);
+}
+
+.something-went-wrong-actions .something-went-wrong-secondary,
+.something-went-wrong-ghost {
+  background: white;
+  border-color: rgb(203, 213, 225);
+  color: rgb(51, 65, 85);
+}
+
+.something-went-wrong-recording {
+  background: rgb(254, 242, 242);
+  border: 1px solid rgb(254, 202, 202);
+  border-radius: 0.5rem;
+  margin-top: 1rem;
+  padding: 0.9rem;
+}
+
+.something-went-wrong-recording-state {
+  color: rgb(153, 27, 27);
+  font-size: 0.85rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.something-went-wrong-time {
+  color: rgb(127, 29, 29);
+  font-size: 1rem;
+  font-weight: 750;
+  margin-top: 0.25rem;
+}
+
+.something-went-wrong-result,
+.something-went-wrong-success,
+.something-went-wrong-note {
+  background: rgb(248, 250, 252);
+  border: 1px solid rgb(226, 232, 240);
+  border-radius: 0.5rem;
+  margin-top: 0.85rem;
+  padding: 0.75rem;
+}
+
+.something-went-wrong-result h3 {
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.something-went-wrong-result p {
+  font-size: 0.9rem;
+  margin-top: 0.35rem;
+}
+
+.something-went-wrong-success {
+  background: rgb(236, 253, 245);
+  border-color: rgb(167, 243, 208);
+  color: rgb(6, 95, 70);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 520px) {
+  .something-went-wrong-root {
+    left: max(0.75rem, env(safe-area-inset-left));
+    right: max(0.75rem, env(safe-area-inset-right));
+  }
+
+  .something-went-wrong-button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .something-went-wrong-panel {
+    width: 100%;
+  }
+}

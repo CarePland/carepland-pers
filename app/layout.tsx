@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { HelpDiagnosticsRuntime } from "./components/platform/HelpDiagnosticsRuntime";
 import { OfflineRuntime } from "./components/platform/OfflineRuntime";
+import { SomethingWentWrongRuntime } from "./components/platform/SomethingWentWrongRuntime";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -52,6 +53,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <HelpDiagnosticsRuntime />
         <OfflineRuntime />
+        <SomethingWentWrongRuntime />
         {children}
       </body>
     </html>

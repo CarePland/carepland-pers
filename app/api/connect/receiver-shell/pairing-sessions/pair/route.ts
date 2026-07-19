@@ -66,6 +66,7 @@ export async function POST(request: Request) {
       mainConnectUserPersonId: personResolution.personId,
       pairingCode: stringValue(body.pairingCode),
       receiverUrl: stringValue(body.receiverUrl),
+      targetReceiverDeviceId: stringValue(body.targetReceiverDeviceId),
       uiLayout: stringValue(body.uiLayout) || "default_receiver",
     });
 

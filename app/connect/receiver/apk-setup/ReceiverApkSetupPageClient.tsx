@@ -16,9 +16,11 @@ import {
 
 export function ReceiverApkSetupPageClient({
   initialPairingCode = "",
+  initialReceiverUrl = "",
   selectedReceiverKey,
 }: {
   initialPairingCode?: string;
+  initialReceiverUrl?: string;
   selectedReceiverKey: string;
 }) {
   const [connectContext, setConnectContext] = useState<ConnectMainUserContext | null>(null);
@@ -74,6 +76,7 @@ export function ReceiverApkSetupPageClient({
         activeDevices={activeDevices}
         connectContext={connectContext}
         initialPairingCode={initialPairingCode}
+        initialReceiverUrl={initialReceiverUrl}
         initialSection="start"
         onClose={closeSetup}
         onRefresh={refresh}

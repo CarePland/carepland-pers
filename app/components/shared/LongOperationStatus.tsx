@@ -9,17 +9,25 @@ import {
 
 type LongOperationStatusProps = {
   allowDiagnostics?: boolean;
+  assistanceDetail?: string;
+  assistanceTitle?: string;
   className?: string;
+  continueLabel?: string;
   context?: Record<string, unknown>;
   delayMs?: number;
+  diagnosticsLabel?: string;
+  diagnosticsSendingLabel?: string;
+  diagnosticsSentLabel?: string;
   escalationMs?: number;
   longerThanUsualMs?: number;
   messages?: string[];
   onContinueWaiting?: () => void;
   onRetry?: () => void;
   operation?: string;
+  retryLabel?: string;
   stage?: string;
   verySlowMs?: number;
+  verySlowTitle?: string;
   title: string;
 };
 
@@ -42,16 +50,24 @@ const feedbackOptions = [
 
 export function LongOperationStatus({
   allowDiagnostics = false,
+  assistanceDetail = "This is not typical, although it can happen occasionally.",
+  assistanceTitle = "This is taking longer than expected.",
   className = "",
+  continueLabel = "Continue Waiting",
   context = {},
   delayMs = 4500,
+  diagnosticsLabel = "Send Diagnostics",
+  diagnosticsSendingLabel = "Sending Diagnostics",
+  diagnosticsSentLabel = "Diagnostics Sent",
   escalationMs = defaultEscalationMs,
   longerThanUsualMs = defaultLongerThanUsualMs,
   messages = defaultMessages,
   onContinueWaiting,
   onRetry,
   operation,
+  retryLabel = "Try Again",
   stage = "",
+  verySlowTitle = "Still working.",
   title,
   verySlowMs = defaultVerySlowMs,
 }: LongOperationStatusProps) {
@@ -232,7 +248,10 @@ export function LongOperationStatus({
   function currentDetail() {
     if (!shouldUseOperationFlow) return detail;
     if (elapsedMs >= escalationMs) {
-      return "This is taking longer than expected.";
+      return assistanceTitle;
+    }
+    if (elapsedMs >= verySlowMs) {
+      return safeMessages[2] || safeMessages[1] || safeMessages[0] || "";
     }
     if (elapsedMs >= longerThanUsualMs) {
       return safeMessages[1] || safeMessages[0] || "";
@@ -245,14 +264,17 @@ export function LongOperationStatus({
 
   if (shouldUseOperationFlow) {
     const showLongerThanUsual = elapsedMs >= longerThanUsualMs;
+    const showVerySlow = elapsedMs >= verySlowMs;
     const showAssistance = elapsedMs >= escalationMs && !assistanceDismissed;
     const statusTitle = showAssistance
-      ? "This is taking longer than expected."
-      : showLongerThanUsual
+      ? assistanceTitle
+      : showVerySlow
+        ? verySlowTitle
+        : showLongerThanUsual
         ? "This is taking a little longer than usual."
         : title;
     const statusDetail = showAssistance
-      ? "This is not typical, although it can happen occasionally."
+      ? assistanceDetail
       : currentDetail();
 
     return (
@@ -275,7 +297,7 @@ export function LongOperationStatus({
                 onClick={handleContinueWaiting}
                 type="button"
               >
-                Continue Waiting
+                {continueLabel}
               </button>
               <button
                 className="rounded-md border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-900 shadow-sm hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-55"
@@ -283,7 +305,7 @@ export function LongOperationStatus({
                 onClick={handleRetry}
                 type="button"
               >
-                Try Again
+                {retryLabel}
               </button>
               {allowDiagnostics ? (
                 <button
@@ -293,10 +315,10 @@ export function LongOperationStatus({
                   type="button"
                 >
                   {diagnosticsStatus === "sending"
-                    ? "Sending Diagnostics"
+                    ? diagnosticsSendingLabel
                     : diagnosticsStatus === "sent"
-                      ? "Diagnostics Sent"
-                      : "Send Diagnostics"}
+                      ? diagnosticsSentLabel
+                      : diagnosticsLabel}
                 </button>
               ) : null}
             </div>

@@ -13,6 +13,7 @@ import { AdminEarlyAccessIntakePanel } from "./AdminEarlyAccessIntakePanel";
 import { AdminIntegrationErrorsPanel } from "./AdminIntegrationErrorsPanel";
 import { AdminHelpReportsPanel } from "./AdminHelpReportsPanel";
 import { AdminProductManagementPanel } from "./AdminProductManagementPanel";
+import { AdminReceiverLayoutPanel } from "./AdminReceiverLayoutPanel";
 import { AdminRecommendationsReviewPanel } from "./AdminRecommendationsReviewPanel";
 import { AdminSupportTicketsPanel } from "./AdminSupportTicketsPanel";
 import { AdminToolsPanel } from "./AdminToolsPanel";
@@ -31,6 +32,7 @@ export type AdminWorkspaceTab =
   | "errors"
   | "helpReports"
   | "intake"
+  | "layout"
   | "product"
   | "recommendations"
   | "tickets"
@@ -43,6 +45,7 @@ export type AdminWorkspaceTopTab =
   | "checkpoint"
   | "connect"
   | "dashboard"
+  | "layout"
   | "recommendations"
   | "support"
   | "system"
@@ -159,6 +162,10 @@ export function AdminWorkspace({
 
       {activeSecondaryKey === "connect" ? (
         <AdminConnectPanel ai={ai} />
+      ) : null}
+
+      {activeSecondaryKey === "layout" ? (
+        <AdminReceiverLayoutPanel />
       ) : null}
 
       {activeSecondaryKey === "product" ? (

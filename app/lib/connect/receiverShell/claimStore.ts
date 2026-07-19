@@ -38,6 +38,7 @@ export type ReceiverShellClaimRecord = {
   nativeVersionName?: string;
   provisioningCompletedAt?: string;
   receiverDeviceId: string;
+  lastSeenAt?: string;
   receiverUrl: string;
   redeemedAt?: string;
   receiverInstallId?: string;
@@ -261,6 +262,7 @@ export async function createReceiverShellSetupClaim(
     locationLabel?: string;
     mainConnectUserPersonId?: string;
     receiverDeviceId?: string;
+    receiverInstallId?: string;
     receiverUrl?: string;
     setupCode?: string;
     uiLayout?: string;
@@ -279,12 +281,15 @@ export async function createReceiverShellSetupClaim(
     if (supabaseClaim) return supabaseClaim;
   }
 
-  const receiverDeviceId =
-    input.receiverDeviceId?.trim() || `receiver-${randomUUID().replace(/-/g, "")}`;
-  const locationLabel =
-    input.locationLabel?.trim() || defaultReceiverLocationLabel(receiverDeviceId);
   const indexPath = options.indexPath ?? defaultIndexPath;
   const index = await readReceiverShellClaimIndex(indexPath);
+  const receiverInstallId = input.receiverInstallId?.trim() || "";
+  const receiverDeviceId =
+    input.receiverDeviceId?.trim() ||
+    receiverDeviceIdForUnpairedInstall(index, receiverInstallId) ||
+    `receiver-${randomUUID().replace(/-/g, "")}`;
+  const locationLabel =
+    input.locationLabel?.trim() || defaultReceiverLocationLabel(receiverDeviceId);
   const expiresAt = new Date(now.getTime() + ttlMs);
   const claim: ReceiverShellClaimRecord = {
     careCircleId: input.careCircleId?.trim() || undefined,
@@ -297,6 +302,7 @@ export async function createReceiverShellSetupClaim(
     locationLabel,
     mainConnectUserPersonId: input.mainConnectUserPersonId?.trim() || undefined,
     receiverDeviceId,
+    receiverInstallId: receiverInstallId || undefined,
     receiverUrl: input.receiverUrl?.trim() || "",
     setupCode,
     storageSource: "local_file",
@@ -304,7 +310,14 @@ export async function createReceiverShellSetupClaim(
     uiLayout: input.uiLayout?.trim() || "desk_phone_1024x600",
   };
 
-  index.claims = [claim, ...compactClaims(index.claims, now)];
+  index.claims = [
+    claim,
+    ...compactClaims(index.claims, now).map((record) =>
+      record.receiverDeviceId === receiverDeviceId && record.status === "available"
+        ? { ...record, status: "expired" as const }
+        : record
+    ),
+  ];
   await writeReceiverShellClaimIndex(index, indexPath);
   return claim;
 }
@@ -313,6 +326,7 @@ export async function createReceiverShellPairingSession(
   input: {
     deviceProfile?: string;
     hardwareProfile?: string;
+    locationLabel?: string;
     receiverDeviceId?: string;
     receiverInstallId?: string;
     receiverUrl?: string;
@@ -326,7 +340,9 @@ export async function createReceiverShellPairingSession(
       deviceProfile: input.deviceProfile || "android_receiver",
       expiresInMinutes: Math.ceil((options.ttlMs ?? 10 * 60 * 1000) / 60_000),
       hardwareProfile: input.hardwareProfile || "generic_landscape_android",
+      locationLabel: input.locationLabel,
       receiverDeviceId: input.receiverDeviceId,
+      receiverInstallId: input.receiverInstallId,
       receiverUrl: input.receiverUrl,
       setupCode: pairingCode,
       uiLayout: input.uiLayout || "default_receiver",
@@ -389,6 +405,7 @@ export async function pairReceiverShellPairingCode(
     mainConnectUserPersonId?: string;
     pairingCode?: string;
     receiverUrl?: string;
+    targetReceiverDeviceId?: string;
     uiLayout?: string;
   },
   options: { indexPath?: string; now?: Date } = {}
@@ -420,6 +437,7 @@ export async function pairReceiverShellPairingCode(
 
   const current = index.claims[claimIndex];
   assertPairableClaim(current, now);
+  const receiverDeviceId = input.targetReceiverDeviceId?.trim() || current.receiverDeviceId;
 
   const paired: ReceiverShellClaimRecord = {
     ...current,
@@ -430,7 +448,7 @@ export async function pairReceiverShellPairingCode(
     locationLabel:
       input.locationLabel?.trim() ||
       receiverLocationLabelForPairing(
-        current.receiverDeviceId,
+        receiverDeviceId,
         current.locationLabel,
         input.mainConnectUserDisplayName
       ),
@@ -438,10 +456,24 @@ export async function pairReceiverShellPairingCode(
       input.mainConnectUserPersonId?.trim() || current.mainConnectUserPersonId,
     mainConnectUserDisplayName:
       input.mainConnectUserDisplayName?.trim() || current.mainConnectUserDisplayName,
+    receiverDeviceId,
     receiverUrl: input.receiverUrl?.trim() || current.receiverUrl,
     uiLayout: input.uiLayout?.trim() || current.uiLayout,
   };
-  index.claims[claimIndex] = paired;
+  index.claims = index.claims
+    .map((record, indexValue) =>
+      indexValue === claimIndex
+        ? paired
+        : record.receiverDeviceId === receiverDeviceId && record.status === "available"
+          ? { ...record, status: "expired" as const }
+          : record
+    )
+    .filter(
+      (record) =>
+        current.receiverDeviceId === receiverDeviceId ||
+        record.receiverDeviceId !== current.receiverDeviceId ||
+        !receiverShellClaimIsUnpairedPlaceholder(record)
+    );
   await writeReceiverShellClaimIndex(index, indexPath);
   return paired;
 }
@@ -489,11 +521,22 @@ export async function redeemReceiverShellClaim(
 
   const redeemed: ReceiverShellClaimRecord = {
     ...current,
+    lastSeenAt: now.toISOString(),
     receiverInstallId: input.receiverInstallId?.trim() || current.receiverInstallId,
     redeemedAt: now.toISOString(),
     status: "used",
   };
-  index.claims[claimIndex] = redeemed;
+  index.claims = index.claims.map((record, indexValue) => {
+    if (indexValue === claimIndex) return redeemed;
+    if (
+      record.receiverDeviceId === redeemed.receiverDeviceId &&
+      record.status === "used" &&
+      record.receiverInstallId !== redeemed.receiverInstallId
+    ) {
+      return { ...record, status: "revoked" as const };
+    }
+    return record;
+  });
   await writeReceiverShellClaimIndex(index, indexPath);
   return redeemed;
 }
@@ -544,8 +587,10 @@ export async function verifyReceiverShellBinding(
     throw new ReceiverShellBindingError("Receiver binding not found.", 404);
   }
 
+  const currentClaim = index.claims[claimIndex];
   const claim = {
-    ...index.claims[claimIndex],
+    ...currentClaim,
+    lastSeenAt: now.toISOString(),
     ...definedFields(receiverShellReportFields(input)),
   };
   index.claims[claimIndex] = claim;
@@ -850,10 +895,24 @@ function receiverShellClaimIsUnpairedPlaceholder(record: ReceiverShellClaimRecor
     ["available", "expired"].includes(record.status) &&
     !record.careCircleId?.trim() &&
     !record.mainConnectUserPersonId?.trim() &&
-    !record.receiverInstallId?.trim() &&
     !record.redeemedAt?.trim() &&
     !record.provisioningCompletedAt?.trim()
   );
+}
+
+function receiverDeviceIdForUnpairedInstall(
+  index: ReceiverShellClaimIndex,
+  receiverInstallId: string
+) {
+  if (!receiverInstallId.trim()) return "";
+  const reusable = index.claims
+    .filter(
+      (record) =>
+        receiverShellClaimIsUnpairedPlaceholder(record) &&
+        record.receiverInstallId === receiverInstallId
+    )
+    .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt))[0];
+  return reusable?.receiverDeviceId || "";
 }
 
 async function readReceiverShellClaimIndex(indexPath: string) {
@@ -988,6 +1047,7 @@ async function tryCreateSupabaseReceiverShellSetupClaim(
     locationLabel?: string;
     mainConnectUserPersonId?: string;
     receiverDeviceId?: string;
+    receiverInstallId?: string;
     receiverUrl?: string;
     setupCode?: string;
     uiLayout?: string;
@@ -998,8 +1058,14 @@ async function tryCreateSupabaseReceiverShellSetupClaim(
     const supabase = createSupabaseServiceClient();
     const now = options.now;
     const expiresAt = new Date(now.getTime() + options.ttlMs);
+    const receiverInstallId = input.receiverInstallId?.trim() || "";
+    const reusableReceiverDeviceId = receiverInstallId
+      ? await tryFindSupabaseUnpairedReceiverDeviceForInstall(receiverInstallId)
+      : "";
     const receiverDeviceId =
-      input.receiverDeviceId?.trim() || `receiver-${randomUUID().replace(/-/g, "")}`;
+      input.receiverDeviceId?.trim() ||
+      reusableReceiverDeviceId ||
+      `receiver-${randomUUID().replace(/-/g, "")}`;
     const claim = `cpclaim_${randomUUID().replace(/-/g, "")}`;
     const { data: existingDevice, error: existingDeviceError } = await supabase
       .from("connect_receiver_devices")
@@ -1045,6 +1111,7 @@ async function tryCreateSupabaseReceiverShellSetupClaim(
           id: receiverDeviceId,
           location_label: locationLabel,
           main_connect_user_person_id: mainConnectUserPersonId,
+          receiver_install_id: receiverInstallId,
           receiver_url: receiverUrl,
           status: receiverStatus,
           ui_layout: uiLayout,
@@ -1065,6 +1132,7 @@ async function tryCreateSupabaseReceiverShellSetupClaim(
           expires_at: expiresAt.toISOString(),
           hardware_profile: hardwareProfile,
           receiver_device_id: receiverDeviceId,
+          receiver_install_id: receiverInstallId,
           receiver_url: receiverUrl,
           setup_code: setupCode,
           status: "available",
@@ -1075,6 +1143,13 @@ async function tryCreateSupabaseReceiverShellSetupClaim(
       .single();
     if (error) throw error;
 
+    await supabase
+      .from("connect_receiver_claims")
+      .update({ status: "expired" })
+      .eq("receiver_device_id", receiverDeviceId)
+      .eq("status", "available")
+      .neq("claim", claim);
+
     return supabaseClaimRecord(data);
   } catch (error) {
     if (isMissingServerEnvError(error) || supabaseProvisioningUnavailable(error)) {
@@ -1082,6 +1157,23 @@ async function tryCreateSupabaseReceiverShellSetupClaim(
     }
     throw error;
   }
+}
+
+async function tryFindSupabaseUnpairedReceiverDeviceForInstall(receiverInstallId: string) {
+  if (!receiverInstallId.trim()) return "";
+  const supabase = createSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("connect_receiver_devices")
+    .select(
+      "id, bound_at, care_circle_id, last_seen_at, main_connect_user_person_id, provisioning_completed_at, receiver_install_id, status"
+    )
+    .eq("receiver_install_id", receiverInstallId)
+    .in("status", ["setup_pending", "claim_pending"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return supabaseReceiverDeviceIsUnpairedPlaceholder(data) ? stringFromRow(data?.id) : "";
 }
 
 async function tryGetSupabaseReceiverShellPairingSession(
@@ -1145,6 +1237,7 @@ async function tryPairSupabaseReceiverShellPairingCode(
     mainConnectUserPersonId?: string;
     pairingCode?: string;
     receiverUrl?: string;
+    targetReceiverDeviceId?: string;
     uiLayout?: string;
   },
   options: { now?: Date }
@@ -1175,15 +1268,16 @@ async function tryPairSupabaseReceiverShellPairingCode(
     const careCircleId = input.careCircleId?.trim() || current.careCircleId;
     const mainConnectUserPersonId =
       input.mainConnectUserPersonId?.trim() || current.mainConnectUserPersonId;
+    const receiverDeviceId = input.targetReceiverDeviceId?.trim() || current.receiverDeviceId;
     const locationLabel =
       input.locationLabel?.trim() ||
       receiverLocationLabelForPairing(
-        current.receiverDeviceId,
+        receiverDeviceId,
         current.locationLabel,
         input.mainConnectUserDisplayName
       );
 
-    const { error: deviceError } = await supabase
+    const { data: updatedDevice, error: deviceError } = await supabase
       .from("connect_receiver_devices")
       .update(
         definedFields({
@@ -1198,9 +1292,19 @@ async function tryPairSupabaseReceiverShellPairingCode(
           updated_at: now.toISOString(),
         })
       )
-      .eq("id", current.receiverDeviceId)
-      .neq("status", "revoked");
-    if (deviceError) throw deviceError;
+      .eq("id", receiverDeviceId)
+      .neq("status", "revoked")
+      .select("id")
+      .single();
+    if (deviceError) {
+      if (supabaseRecordNotFound(deviceError)) {
+        throw new ReceiverShellClaimError("Receiver device is unavailable for pairing.", 410);
+      }
+      throw deviceError;
+    }
+    if (!updatedDevice) {
+      throw new ReceiverShellClaimError("Receiver device is unavailable for pairing.", 410);
+    }
 
     const { data: updated, error: updateError } = await supabase
       .from("connect_receiver_claims")
@@ -1209,6 +1313,7 @@ async function tryPairSupabaseReceiverShellPairingCode(
           created_by_user_id: uuidOrUndefined(input.createdByUserId),
           device_profile: deviceProfile,
           hardware_profile: hardwareProfile,
+          receiver_device_id: receiverDeviceId,
           receiver_url: receiverUrl,
           ui_layout: uiLayout,
         })
@@ -1218,6 +1323,12 @@ async function tryPairSupabaseReceiverShellPairingCode(
       .select("*, connect_receiver_devices(*)")
       .single();
     if (updateError) throw updateError;
+
+    if (receiverDeviceId !== current.receiverDeviceId) {
+      await tryDeleteSupabaseUnpairedReceiverShellDevice({
+        receiverDeviceId: current.receiverDeviceId,
+      });
+    }
 
     return supabaseClaimRecordWithDevice(updated);
   } catch (error) {
@@ -1689,6 +1800,7 @@ async function listLocalReceiverShellDeviceProfiles() {
       hardwareProfile: claim.hardwareProfile,
       lastRecoveryAction: claim.lastRecoveryAction,
       lastRecoveryAt: claim.lastRecoveryAt,
+      lastSeenAt: claim.lastSeenAt,
       lockTaskActive: claim.lockTaskActive,
       lockTaskPermitted: claim.lockTaskPermitted,
       locationLabel: claim.locationLabel,
@@ -1783,7 +1895,6 @@ async function tryDeleteExpiredSupabaseUnpairedReceiverShellDevices(input: { cut
       .is("last_seen_at", null)
       .is("main_connect_user_person_id", null)
       .is("provisioning_completed_at", null)
-      .is("receiver_install_id", null)
       .lte("created_at", cutoff);
     if (error) throw error;
 
@@ -1823,8 +1934,7 @@ function supabaseReceiverDeviceIsUnpairedPlaceholder(row: unknown) {
     !stringFromRow(record.care_circle_id) &&
     !stringFromRow(record.last_seen_at) &&
     !stringFromRow(record.main_connect_user_person_id) &&
-    !stringFromRow(record.provisioning_completed_at) &&
-    !stringFromRow(record.receiver_install_id)
+    !stringFromRow(record.provisioning_completed_at)
   );
 }
 
