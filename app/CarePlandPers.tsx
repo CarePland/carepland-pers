@@ -37,16 +37,25 @@ import {
 } from "./components/admin/AdminAiHistoryPanel";
 import { type AppContentVersion } from "./components/admin/AdminContentPanel";
 import {
+  type AskAnswerQuality,
+  type AskCaseStatus,
+  type AdminAskMessage,
+  type AdminAskProductArea,
+  type AdminAskProductItemInput,
+  type AdminAskReviewInput,
+  type AdminAskSendInput,
+  type AdminAskSubmission,
+  type AdminAskSubmissionReview,
+  type AdminAskThread,
+  type AskImprovementCategory,
+} from "./components/admin/AdminAskWorkspace";
+import {
+  type AdminAskQualityItem,
+  type AskAnalysisRun,
   type AskModuleLabKey,
   type AskModuleLabResult,
-  type AdminAskSubmission,
-  type AskRecommendationDecision,
-  type AskRecommendationDecisionSummaryRow,
-  type AskReviewProductTarget,
   type AskRoutingSettings,
-  type AskRoutingState,
-  type AskSubmissionLink,
-} from "./components/admin/AdminAskIntakePanel";
+} from "./components/admin/AdminAskConsole";
 import {
   type AiOperationCostSummaryRow,
   type AiOperationCostUserSummaryRow,
@@ -71,12 +80,6 @@ import {
   type ProductMgmtSection,
   type ProductMgmtStatus,
 } from "./components/admin/AdminProductManagementPanel";
-import {
-  type SupportTicket,
-  type SupportTicketMessage,
-  type SupportTicketPriority,
-  type SupportTicketStatus,
-} from "./components/admin/AdminSupportTicketsPanel";
 import {
   type AdminUserActivityFilter,
   type AdminUserActivityRow,
@@ -511,20 +514,37 @@ const getEntryHostMode = () =>
 
 const subscribeEntryHostMode = () => () => {};
 
-type SupportAssistantResult = {
-  answer: string;
-  category: string;
-  confidence: number;
-  escalationRecommended: boolean;
-  escalationReason: string;
-  interactionId: string;
-  priority: SupportTicketPriority;
-  suggestedNextStep: string;
-};
-
 type AskConversationMessage = {
   body: string;
   role: "assistant" | "user";
+};
+
+// The Home page's Ask card is a projection of the canonical Ask
+// conversation (ask_threads / ask_messages / ask_submissions) -- not a
+// separate ticket-shaped widget. It intentionally uses its own narrow
+// row shapes rather than the full AdminAskThread/AdminAskMessage types
+// the admin workspace uses, since it only ever needs a handful of fields.
+type AskThreadCard = {
+  case_status: "open" | "waiting_on_user" | "waiting_on_admin" | "resolved" | "closed";
+  id: string;
+  needs_admin_followup: boolean;
+  resolved_at: string | null;
+  updated_at: string;
+  user_has_unread_update: boolean;
+};
+
+type AskThreadCardMessage = {
+  author_role: "user" | "assistant" | "admin" | "system";
+  created_at: string;
+  id: string;
+  message_body: string;
+  thread_id: string;
+};
+
+type AskThreadCardSubmission = {
+  id: string;
+  outcome: "answered" | "helpful" | "not_helpful" | "escalated";
+  user_feedback: string | null;
 };
 
 const defaultAskRoutingSettings: AskRoutingSettings = {
@@ -532,78 +552,6 @@ const defaultAskRoutingSettings: AskRoutingSettings = {
   auto_route_enabled: false,
   clarify_absolute_max_turns: 5,
   clarify_default_max_turns: 3,
-};
-
-type SupportAssistantInteraction = {
-  id: string;
-  assistant_answer: string;
-  category: string;
-  confidence: number;
-  context: Record<string, unknown> | null;
-  created_at: string;
-  current_page: string | null;
-  escalation_reason: string;
-  escalation_recommended: boolean;
-  instruction_version_id: string | null;
-  model: string | null;
-  outcome: SupportAssistantOutcome;
-  priority: SupportTicketPriority;
-  profiles?: {
-    display_name: string | null;
-    email: string | null;
-    family_name: string | null;
-    given_name: string | null;
-  } | null;
-  prompt_version: string | null;
-  question_body: string;
-  question_subject: string;
-  raw_response: Record<string, unknown> | null;
-  suggested_next_step: string;
-  ticket_id: string | null;
-  updated_at: string;
-  user_feedback: string | null;
-  user_id: string;
-};
-
-type SupportAssistantAdminReview = {
-  id: string;
-  admin_note: string;
-  created_at: string;
-  interaction_id: string;
-  recommended_action: string | null;
-  review_status: SupportAssistantReviewStatus;
-  reviewer_user_id: string;
-  updated_at: string;
-};
-
-type SupportAssistantAnalysisResult = {
-  id: string;
-  analysisSummary: string;
-  failurePatterns: string[];
-  promptRecommendations: string[];
-  recommendations: string[];
-  strengths: string[];
-  uiRecommendations: string[];
-};
-
-type SupportAssistantAnalysisRun = {
-  id: string;
-  admin_note: string | null;
-  admin_status: SupportAssistantAnalysisStatus;
-  analysis_summary: string;
-  created_at: string;
-  criteria: Record<string, unknown> | null;
-  failure_patterns: string[];
-  interaction_count: number;
-  interaction_ids: string[];
-  model: string;
-  prompt_recommendations: string[];
-  prompt_versions: string[];
-  recommendations: string[];
-  requested_by_user_id: string;
-  strengths: string[];
-  ui_recommendations: string[];
-  updated_at: string;
 };
 
 type AppointmentView = "archived" | "logged" | "upcoming";
@@ -620,7 +568,7 @@ type AdminTab =
   | "connect"
   | "dashboard"
   | "ai"
-  | "assistantReview"
+  | "askConsole"
   | "content"
   | "errors"
   | "helpReports"
@@ -628,7 +576,6 @@ type AdminTab =
   | "layout"
   | "product"
   | "recommendations"
-  | "tickets"
   | "tools"
   | "userAudit"
   | "users"
@@ -639,7 +586,7 @@ const adminTabs = [
   "connect",
   "dashboard",
   "ai",
-  "assistantReview",
+  "askConsole",
   "content",
   "errors",
   "helpReports",
@@ -647,7 +594,6 @@ const adminTabs = [
   "layout",
   "product",
   "recommendations",
-  "tickets",
   "tools",
   "userAudit",
   "users",
@@ -657,31 +603,18 @@ const adminTabs = [
 function isAdminTab(value: string | null): value is AdminTab {
   return Boolean(value && adminTabs.includes(value as AdminTab));
 }
-type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
+type AuthMode =
+  | "reset"
+  | "signIn"
+  | "signUp"
+  | "signUpConfirmation"
+  | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
 type MainTab = "admin" | "appointments" | "home" | "profile";
 type PendingImportLeaveAction =
   | { kind: "appointmentPanel"; panel: AppointmentPanel }
   | { kind: "appointmentView"; view: AppointmentView }
   | { kind: "ask" };
-type SupportAssistantOutcome =
-  | "answered"
-  | "escalated"
-  | "helpful"
-  | "not_helpful";
-type SupportAssistantReviewStatus =
-  | "good_answer"
-  | "needs_prompt_work"
-  | "needs_review"
-  | "needs_ui_work"
-  | "not_actionable"
-  | "should_escalate";
-type SupportAssistantAnalysisStatus =
-  | "accepted"
-  | "needs_more_data"
-  | "new"
-  | "rejected"
-  | "reviewed";
 type PendingModifierSwitch = {
   appointmentId: string;
   target: AppointmentModifier | "careprep" | null;
@@ -1802,10 +1735,6 @@ function toDatetimeLocalValue(value: string | null): string {
 
 function stringArrayFromJson(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
-}
-
-function supportAnalysisStatusLabel(status: SupportAssistantAnalysisStatus) {
-  return status.replaceAll("_", " ");
 }
 
 function startOfToday(): Date {
@@ -3010,6 +2939,8 @@ export function CarePlandPers({
   const [showAuthGateway, setShowAuthGateway] = useState(
     adminRoute || shouldStayOnPersonalRoute()
   );
+  const accountCreationInFlightRef = useRef(false);
+  const [signUpConfirmationEmail, setSignUpConfirmationEmail] = useState("");
   const [planHelpExpanded, setPlanHelpExpanded] = useState(false);
   const [adminPlanPreviewId, setAdminPlanPreviewId] = useState("");
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
@@ -3224,6 +3155,8 @@ export function CarePlandPers({
     AiOperationCostUserSummaryRow[]
   >([]);
   const [aiOperationCostError, setAiOperationCostError] = useState("");
+  const [aiOperationCostLogFailureCount, setAiOperationCostLogFailureCount] =
+    useState<number | null>(null);
   const [loadingAiOperationCosts, setLoadingAiOperationCosts] = useState(false);
   const [aiOperationCostRangeDays, setAiOperationCostRangeDays] = useState(30);
   const [aiOperationCostViewMode, setAiOperationCostViewMode] =
@@ -3419,18 +3352,16 @@ export function CarePlandPers({
   ] = useState<string[]>([]);
   const [deletingAdminIntegrationErrors, setDeletingAdminIntegrationErrors] =
     useState(false);
-  const [userSupportTickets, setUserSupportTickets] = useState<SupportTicket[]>([]);
-  const [userSupportTicketMessages, setUserSupportTicketMessages] = useState<
-    SupportTicketMessage[]
-  >([]);
-  const [adminSupportTickets, setAdminSupportTickets] = useState<SupportTicket[]>([]);
-  const [adminSupportTicketMessages, setAdminSupportTicketMessages] = useState<
-    SupportTicketMessage[]
-  >([]);
-  const [supportQuestionExpanded, setSupportQuestionExpanded] = useState(false);
-  const [askingSupportQuestion, setAskingSupportQuestion] = useState(false);
-  const [savingSupportQuestion, setSavingSupportQuestion] = useState(false);
-  const [savingSupportReply, setSavingSupportReply] = useState(false);
+  // Home Ask card state -- see the AskThreadCard* type comments above.
+  // Starting a brand-new question still happens through the Ask panel
+  // modal (askPanelOpen, below); this state is for glancing at / replying
+  // within a conversation that already exists.
+  const [homeAskThread, setHomeAskThread] = useState<AskThreadCard | null>(null);
+  const [homeAskMessages, setHomeAskMessages] = useState<AskThreadCardMessage[]>([]);
+  const [homeAskSubmission, setHomeAskSubmission] =
+    useState<AskThreadCardSubmission | null>(null);
+  const [homeAskExpanded, setHomeAskExpanded] = useState(false);
+  const [savingHomeAskReply, setSavingHomeAskReply] = useState(false);
   const [askPanelOpen, setAskPanelOpen] = useState(shouldOpenAskFromRoute);
   const [askThreadId, setAskThreadId] = useState<string | null>(null);
   const [askInput, setAskInput] = useState("");
@@ -3445,60 +3376,63 @@ export function CarePlandPers({
     string[]
   >([]);
   const [sendingAskMessage, setSendingAskMessage] = useState(false);
-  const [supportQuestionSubject, setSupportQuestionSubject] = useState("");
-  const [supportQuestionBody, setSupportQuestionBody] = useState("");
-  const [supportReplyBody, setSupportReplyBody] = useState("");
-  const [supportAssistantResult, setSupportAssistantResult] =
-    useState<SupportAssistantResult | null>(null);
-  const [supportAssistantFeedback, setSupportAssistantFeedback] = useState("");
-  const [supportAssistantFeedbackMode, setSupportAssistantFeedbackMode] =
-    useState<"helpful" | "not_helpful" | null>(null);
-  const [supportAssistantResolution, setSupportAssistantResolution] = useState<
-    "helpful" | "not_helpful_saved" | "escalated" | null
+  const [homeAskReplyBody, setHomeAskReplyBody] = useState("");
+  const [homeAskFeedbackMode, setHomeAskFeedbackMode] = useState<
+    "not_helpful" | null
   >(null);
-  const [askingSupportAssistant, setAskingSupportAssistant] = useState(false);
-  const [savingSupportAssistantFeedback, setSavingSupportAssistantFeedback] =
+  const [homeAskFeedbackNote, setHomeAskFeedbackNote] = useState("");
+  const [savingHomeAskFeedback, setSavingHomeAskFeedback] = useState(false);
+  // Unified Ask admin workspace (AdminAskConsole + AdminAskWorkspace) --
+  // replaces the old separate ticket / ask-intake / assistant-review admin
+  // state. Two queues (needs-response threads, quality-review submissions)
+  // both open the same selected-thread workspace state below. Module lab
+  // and routing settings are unchanged from the old Ask intake panel --
+  // reused as-is, just re-parented under the new console.
+  const [adminAskNeedsResponse, setAdminAskNeedsResponse] = useState<
+    AdminAskThread[]
+  >([]);
+  const [adminAskQualitySubmissions, setAdminAskQualitySubmissions] = useState<
+    AdminAskQualityItem[]
+  >([]);
+  const [loadingAdminAskQueues, setLoadingAdminAskQueues] = useState(false);
+  const [selectedAdminAskThreadId, setSelectedAdminAskThreadId] = useState<
+    string | null
+  >(null);
+  // Bumped at the start of every loadAdminAskWorkspaceForThreadId call so an
+  // in-flight request whose response arrives after a newer selection was
+  // made can recognize it's stale and drop its results instead of
+  // clobbering whatever the admin has since clicked into.
+  const adminAskWorkspaceRequestIdRef = useRef(0);
+  const [adminAskWorkspaceThread, setAdminAskWorkspaceThread] =
+    useState<AdminAskThread | null>(null);
+  const [adminAskWorkspaceMessages, setAdminAskWorkspaceMessages] = useState<
+    AdminAskMessage[]
+  >([]);
+  const [adminAskWorkspaceSubmission, setAdminAskWorkspaceSubmission] =
+    useState<AdminAskSubmission | null>(null);
+  const [adminAskWorkspaceReviews, setAdminAskWorkspaceReviews] = useState<
+    AdminAskSubmissionReview[]
+  >([]);
+  const [loadingAdminAskWorkspace, setLoadingAdminAskWorkspace] =
     useState(false);
-  const [loadingAdminTickets, setLoadingAdminTickets] = useState(false);
-  const [selectedAdminTicketId, setSelectedAdminTicketId] = useState("");
-  const [adminTicketReplyBody, setAdminTicketReplyBody] = useState("");
-  const [adminTicketInternalNote, setAdminTicketInternalNote] = useState("");
-  const [adminTicketStatus, setAdminTicketStatus] =
-    useState<SupportTicketStatus>("open");
-  const [adminTicketPriority, setAdminTicketPriority] =
-    useState<SupportTicketPriority>("medium");
-  const [adminTicketCategory, setAdminTicketCategory] = useState("general");
-  const [adminTicketNeedsFollowup, setAdminTicketNeedsFollowup] =
-    useState(true);
-  const [adminTicketChangeNote, setAdminTicketChangeNote] = useState("");
-  const [savingAdminTicketReply, setSavingAdminTicketReply] = useState(false);
-  const [savingAdminTicketStatus, setSavingAdminTicketStatus] = useState(false);
-  const [assistantReviewInteractions, setAssistantReviewInteractions] =
-    useState<SupportAssistantInteraction[]>([]);
-  const [assistantReviewAdminReviews, setAssistantReviewAdminReviews] =
-    useState<SupportAssistantAdminReview[]>([]);
-  const [askReviewSubmissions, setAskReviewSubmissions] = useState<
-    AdminAskSubmission[]
+  const [savingAdminAskSend, setSavingAdminAskSend] = useState(false);
+  const [savingAdminAskQuickStatus, setSavingAdminAskQuickStatus] =
+    useState(false);
+  const [savingAdminAskProductItem, setSavingAdminAskProductItem] =
+    useState(false);
+  const [adminAskAnalysisSelectionIds, setAdminAskAnalysisSelectionIds] =
+    useState<string[]>([]);
+  const [analyzingAdminAskSubmissions, setAnalyzingAdminAskSubmissions] =
+    useState(false);
+  const [adminAskAnalysisRuns, setAdminAskAnalysisRuns] = useState<
+    AskAnalysisRun[]
   >([]);
-  const [askRecommendationDecisions, setAskRecommendationDecisions] = useState<
-    AskRecommendationDecision[]
-  >([]);
-  const [askSubmissionLinks, setAskSubmissionLinks] = useState<
-    AskSubmissionLink[]
-  >([]);
-  const [
-    askRecommendationDecisionSummary,
-    setAskRecommendationDecisionSummary,
-  ] = useState<AskRecommendationDecisionSummaryRow[]>([]);
-  const [loadingAskReviews, setLoadingAskReviews] = useState(false);
   const [loadingAskRoutingSettings, setLoadingAskRoutingSettings] =
     useState(false);
-  const [selectedAskReviewId, setSelectedAskReviewId] = useState("");
-  const [askReviewRoutingState, setAskReviewRoutingState] =
-    useState<AskRoutingState>("needs_review");
-  const [askReviewNote, setAskReviewNote] = useState("");
   const [askRoutingSettingsDraft, setAskRoutingSettingsDraft] =
     useState<AskRoutingSettings>(defaultAskRoutingSettings);
+  const [savingAskRoutingSettings, setSavingAskRoutingSettings] =
+    useState(false);
   const [askModuleLabInput, setAskModuleLabInput] = useState("");
   const [askModuleLabKey, setAskModuleLabKey] =
     useState<AskModuleLabKey>("ask_router");
@@ -3506,40 +3440,6 @@ export function CarePlandPers({
     AskModuleLabResult[]
   >([]);
   const [runningAskModuleLab, setRunningAskModuleLab] = useState(false);
-  const [savingAskReviewAction, setSavingAskReviewAction] = useState(false);
-  const [savingAskRoutingSettings, setSavingAskRoutingSettings] =
-    useState(false);
-  const [savingAskReview, setSavingAskReview] = useState(false);
-  const [loadingAssistantReviews, setLoadingAssistantReviews] = useState(false);
-  const [selectedAssistantReviewId, setSelectedAssistantReviewId] = useState("");
-  const [assistantReviewOutcomeFilter, setAssistantReviewOutcomeFilter] =
-    useState<"all" | SupportAssistantOutcome>("all");
-  const [assistantReviewPromptFilter, setAssistantReviewPromptFilter] =
-    useState("all");
-  const [assistantReviewConfidenceFilter, setAssistantReviewConfidenceFilter] =
-    useState<"all" | "high" | "low" | "medium" | "needs_review">("all");
-  const [assistantReviewHasFeedbackOnly, setAssistantReviewHasFeedbackOnly] =
-    useState(false);
-  const [assistantReviewStatus, setAssistantReviewStatus] =
-    useState<SupportAssistantReviewStatus>("needs_review");
-  const [assistantReviewNote, setAssistantReviewNote] = useState("");
-  const [assistantReviewRecommendedAction, setAssistantReviewRecommendedAction] =
-    useState("");
-  const [savingAssistantAdminReview, setSavingAssistantAdminReview] =
-    useState(false);
-  const [analyzingAssistantReviews, setAnalyzingAssistantReviews] = useState(false);
-  const [assistantAnalysisResult, setAssistantAnalysisResult] =
-    useState<SupportAssistantAnalysisResult | null>(null);
-  const [assistantAnalysisRuns, setAssistantAnalysisRuns] = useState<
-    SupportAssistantAnalysisRun[]
-  >([]);
-  const [selectedAssistantAnalysisRunId, setSelectedAssistantAnalysisRunId] =
-    useState("");
-  const [assistantAnalysisRunStatus, setAssistantAnalysisRunStatus] =
-    useState<SupportAssistantAnalysisStatus>("reviewed");
-  const [assistantAnalysisRunNote, setAssistantAnalysisRunNote] = useState("");
-  const [savingAssistantAnalysisRunReview, setSavingAssistantAnalysisRunReview] =
-    useState(false);
   const [loadingAppContent, setLoadingAppContent] = useState(false);
   const [savingAppContent, setSavingAppContent] = useState(false);
   const [revertingAppContentForId, setRevertingAppContentForId] = useState<
@@ -4077,90 +3977,26 @@ export function CarePlandPers({
   const selectedProductMgmtItems = productMgmtItems.filter(
     (item) => item.area_id === selectedProductMgmtArea?.id
   );
-  const openSupportTickets = userSupportTickets.filter(
-    (ticket) => !["closed", "resolved"].includes(ticket.status)
-  );
-  const currentSupportTicket =
-    openSupportTickets[0] ??
-    userSupportTickets.find((ticket) => ticket.status === "resolved") ??
-    null;
-  const currentSupportMessages = currentSupportTicket
-    ? userSupportTicketMessages.filter(
-        (messageRow) => messageRow.ticket_id === currentSupportTicket.id
-      )
-    : [];
-  const latestVisibleSupportMessage = [...currentSupportMessages]
+  const latestVisibleSupportMessage = [...homeAskMessages]
     .reverse()
-    .find((messageRow) => !messageRow.is_internal);
-  const hasUpdatedSupportQuestion = Boolean(
-    currentSupportTicket?.user_has_unread_update
+    .find((messageRow) => messageRow.author_role !== "system");
+  const hasUpdatedSupportQuestion = Boolean(homeAskThread?.user_has_unread_update);
+  // "Can reply inline" means the loop is still open on either side --
+  // waiting_on_user (the AI/admin asked something and needs the user's
+  // reply) or waiting_on_admin (already routed for review, but the user
+  // can still add a comment). resolved/closed threads show "Ask another"
+  // instead, which opens a fresh conversation in the Ask panel modal.
+  const homeAskCanReply = Boolean(
+    homeAskThread &&
+      (homeAskThread.case_status === "waiting_on_user" ||
+        homeAskThread.case_status === "waiting_on_admin")
   );
-  const adminOpenTickets = adminSupportTickets.filter(
-    (ticket) => !["closed", "resolved"].includes(ticket.status)
+  const homeAskFeedbackPending = Boolean(
+    homeAskThread &&
+      homeAskThread.case_status === "resolved" &&
+      homeAskSubmission &&
+      homeAskSubmission.outcome === "answered"
   );
-  const adminTicketsNeedingFollowup = adminOpenTickets.filter(
-    (ticket) => ticket.needs_admin_followup
-  );
-  const adminNewTickets = adminOpenTickets.filter(
-    (ticket) => !ticket.needs_admin_followup
-  );
-  const selectedAdminTicket =
-    adminSupportTickets.find((ticket) => ticket.id === selectedAdminTicketId) ??
-    adminTicketsNeedingFollowup[0] ??
-    adminOpenTickets[0] ??
-    adminSupportTickets[0] ??
-    null;
-  const selectedAdminTicketMessages = selectedAdminTicket
-    ? adminSupportTicketMessages.filter(
-        (messageRow) => messageRow.ticket_id === selectedAdminTicket.id
-      )
-    : [];
-  const assistantReviewPromptVersions = Array.from(
-    new Set(
-      assistantReviewInteractions
-        .map((interaction) => interaction.prompt_version || "Unknown prompt")
-        .filter(Boolean)
-    )
-  ).sort();
-  const filteredAssistantReviewInteractions = assistantReviewInteractions.filter(
-    (interaction) => {
-      const promptVersion = interaction.prompt_version || "Unknown prompt";
-      const confidenceLevel = aiReviewLevel(Number(interaction.confidence));
-
-      return (
-        (assistantReviewOutcomeFilter === "all" ||
-          interaction.outcome === assistantReviewOutcomeFilter) &&
-        (assistantReviewPromptFilter === "all" ||
-          promptVersion === assistantReviewPromptFilter) &&
-        (assistantReviewConfidenceFilter === "all" ||
-          confidenceLevel === assistantReviewConfidenceFilter) &&
-        (!assistantReviewHasFeedbackOnly ||
-          Boolean(interaction.user_feedback?.trim()))
-      );
-    }
-  );
-  const selectedAssistantReviewInteraction =
-    filteredAssistantReviewInteractions.find(
-      (interaction) => interaction.id === selectedAssistantReviewId
-    ) ??
-    filteredAssistantReviewInteractions[0] ??
-    null;
-  const selectedAssistantAdminReviews = selectedAssistantReviewInteraction
-    ? assistantReviewAdminReviews.filter(
-        (review) => review.interaction_id === selectedAssistantReviewInteraction.id
-      )
-    : [];
-  const selectedAskReviewSubmission =
-    askReviewSubmissions.find(
-      (submission) => submission.id === selectedAskReviewId
-    ) ??
-    askReviewSubmissions.find((submission) => submission.routing_state !== "closed") ??
-    askReviewSubmissions[0] ??
-    null;
-  const selectedAssistantAnalysisRun =
-    assistantAnalysisRuns.find((run) => run.id === selectedAssistantAnalysisRunId) ??
-    assistantAnalysisRuns[0] ??
-    null;
   const adminUserActivityStats = useMemo(
     () => buildAdminUserActivityStats(adminUserActivity),
     [adminUserActivity]
@@ -4199,14 +4035,11 @@ export function CarePlandPers({
     usersAdminNavItems,
   } = createAdminNavigationModel({
     actionableAdminAttentionSummaries,
+    adminAskNeedsResponseThreads: adminAskNeedsResponse,
     adminAttentionFor,
     adminIntegrationErrors,
     adminLastViewedAt,
-    adminNewTicketsLength: adminNewTickets.length,
     adminTab,
-    adminTicketsNeedingFollowupLength: adminTicketsNeedingFollowup.length,
-    assistantReviewAdminReviews,
-    assistantReviewInteractions,
     earlyAccessIntakeFollowupCount,
     earlyAccessIntakeNewCount,
     isNewForAdmin,
@@ -4986,7 +4819,7 @@ export function CarePlandPers({
               initialAppointmentsPageViewState?.appointmentView,
               initialAppointmentsPageViewState?.selectedSubjectId
             );
-            void loadCurrentUserSupportTickets();
+            void loadCurrentUserAskThread();
 
             if (initialUiState?.mainTab === "admin") {
               if (initialUiState.adminTab === "ai") {
@@ -4997,13 +4830,8 @@ export function CarePlandPers({
                 ]);
               } else if (initialUiState.adminTab === "product") {
                 void loadProductMgmt();
-              } else if (initialUiState.adminTab === "tickets") {
-                void loadAdminSupportTickets();
-              } else if (initialUiState.adminTab === "assistantReview") {
-                void Promise.all([
-                  loadAskReviewSubmissions(),
-                  loadAssistantReviewInteractions(),
-                ]);
+              } else if (initialUiState.adminTab === "askConsole") {
+                void loadAdminAskQueues();
               } else if (initialUiState.adminTab === "users") {
                 void loadAdminUserActivity();
               } else if (initialUiState.adminTab === "intake") {
@@ -5091,8 +4919,7 @@ export function CarePlandPers({
       window.removeEventListener("resize", updateStickyOffset);
     };
   }, [
-    adminOpenTickets.length,
-    adminTicketsNeedingFollowup.length,
+    adminAskNeedsResponse.length,
     authMode,
     isAdmin,
     needsBetaAgreement,
@@ -7853,10 +7680,24 @@ export function CarePlandPers({
           (left, right) => right.estimated_cost_usd - left.estimated_cost_usd
         )
       );
+
+      // Separate from the cost totals themselves: this surfaces failed
+      // ai_operation_logs inserts (previously only ever console.error'd,
+      // invisible to Admin) so a broken logging call site can be noticed
+      // instead of silently undercounting usage indefinitely.
+      const { data: failureCount, error: failureCountError } =
+        await supabase.rpc("ai_operation_cost_log_failure_count", {
+          p_since: since,
+        });
+
+      setAiOperationCostLogFailureCount(
+        failureCountError ? null : Number(failureCount ?? 0)
+      );
     } catch (error) {
       console.warn("Unable to load AI operation cost summary", error);
       setAiOperationCostSummary([]);
       setAiOperationCostUserSummary([]);
+      setAiOperationCostLogFailureCount(null);
       setAiOperationCostError(
         "AI operation cost tracking is ready in the app, but the database migration has not been applied yet."
       );
@@ -8024,12 +7865,10 @@ export function CarePlandPers({
       loadAdminPriorities(),
       loadAdminViewStates(),
       loadAdminAttentionSummary(),
-      loadAdminSupportTickets(),
+      loadAdminAskQueues(),
       loadAdminIntegrationErrors(),
       loadProductMgmt(),
       loadAgentKnowledgeProposals(),
-      loadAssistantReviewInteractions(),
-      loadAskReviewSubmissions(),
       loadAiOperationCostSummary(),
     ]);
   }
@@ -8061,6 +7900,11 @@ export function CarePlandPers({
 
   async function handleSignUp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (accountCreationInFlightRef.current) {
+      return;
+    }
+
+    accountCreationInFlightRef.current = true;
     setLoading(true);
     setMessage("");
 
@@ -8100,6 +7944,7 @@ export function CarePlandPers({
       if (data.session) {
         setSessionProfileLoaded(false);
         setSignedInEmail(trimmedEmail);
+        setSignUpConfirmationEmail("");
         setWelcomeGuideDismissed(false);
         setMessage("Account created and signed in. Finish profile setup to continue.");
         recordSessionActivity();
@@ -8108,14 +7953,59 @@ export function CarePlandPers({
         return;
       }
 
-      setAuthMode("signIn");
+      setSignUpConfirmationEmail(trimmedEmail);
+      setAuthMode("signUpConfirmation");
       setPassword("");
       setConfirmPassword("");
-      setMessage(
-        "If this email can be used to create an account, CarePland will send a confirmation link. If you already have an account, sign in or reset your password."
-      );
+      setMessage("");
     } catch (error) {
       logAuthError("signUp", error);
+      setMessage(getAuthErrorMessage(error));
+    } finally {
+      accountCreationInFlightRef.current = false;
+      setLoading(false);
+    }
+  }
+
+  async function handleResendSignUpConfirmationEmail() {
+    const trimmedEmail = (signUpConfirmationEmail || email).trim();
+
+    if (!trimmedEmail || loading) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error(
+          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel."
+        );
+      }
+
+      if (!isLikelyEmail(trimmedEmail)) {
+        throw new Error("Enter a valid email address.");
+      }
+
+      const { error } = await supabase.auth.resend({
+        email: trimmedEmail,
+        options: {
+          emailRedirectTo: emailConfirmationRedirectUrl(),
+        },
+        type: "signup",
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setSignUpConfirmationEmail(trimmedEmail);
+      setMessage(
+        "If this email can be used to create an account, CarePland will send a confirmation link. Check your inbox and junk folder."
+      );
+    } catch (error) {
+      logAuthError("resendSignUpConfirmation", error);
       setMessage(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
@@ -9378,7 +9268,7 @@ export function CarePlandPers({
     applyAppointmentPanel(panel);
   }
 
-  async function loadCurrentUserSupportTickets() {
+  async function loadCurrentUserAskThread() {
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
 
@@ -9387,41 +9277,38 @@ export function CarePlandPers({
       }
 
       if (!userData.user) {
-        setUserSupportTickets([]);
-        setUserSupportTicketMessages([]);
+        setHomeAskThread(null);
+        setHomeAskMessages([]);
+        setHomeAskSubmission(null);
         return;
       }
 
-      const { data: ticketRows, error: ticketError } = await supabase
-        .from("support_tickets")
+      const { data: threadRows, error: threadError } = await supabase
+        .from("ask_threads")
         .select(
-          "id,user_id,subject,status,priority,category,current_page,needs_admin_followup,user_has_unread_update,created_at,updated_at,ask_submission_id"
+          "id,case_status,needs_admin_followup,user_has_unread_update,resolved_at,updated_at"
         )
         .eq("user_id", userData.user.id)
         .order("updated_at", { ascending: false })
-        .limit(5);
+        .limit(1);
 
-      if (ticketError) {
-        throw ticketError;
+      if (threadError) {
+        throw threadError;
       }
 
-      const loadedTickets = (ticketRows ?? []) as SupportTicket[];
-      setUserSupportTickets(loadedTickets);
+      const loadedThread = ((threadRows ?? [])[0] ?? null) as AskThreadCard | null;
+      setHomeAskThread(loadedThread);
 
-      if (loadedTickets.length === 0) {
-        setUserSupportTicketMessages([]);
+      if (!loadedThread) {
+        setHomeAskMessages([]);
+        setHomeAskSubmission(null);
         return;
       }
 
       const { data: messageRows, error: messageError } = await supabase
-        .from("support_ticket_messages")
-        .select(
-          "id,ticket_id,author_role,message_body,is_internal,created_at"
-        )
-        .in(
-          "ticket_id",
-          loadedTickets.map((ticket) => ticket.id)
-        )
+        .from("ask_messages")
+        .select("id,thread_id,author_role,message_body,created_at")
+        .eq("thread_id", loadedThread.id)
         .eq("is_internal", false)
         .order("created_at", { ascending: true });
 
@@ -9429,7 +9316,27 @@ export function CarePlandPers({
         throw messageError;
       }
 
-      setUserSupportTicketMessages((messageRows ?? []) as SupportTicketMessage[]);
+      setHomeAskMessages((messageRows ?? []) as AskThreadCardMessage[]);
+
+      // Most recent submission on this thread, if any -- ask_threads and
+      // ask_submissions are separate tables (a thread accumulates messages;
+      // a submission is a single AI verdict on that thread), so this is a
+      // second, small query rather than a join. Used only to know whether
+      // there is an un-rated answer to show thumbs feedback for.
+      const { data: submissionRows, error: submissionError } = await supabase
+        .from("ask_submissions")
+        .select("id,outcome,user_feedback")
+        .eq("thread_id", loadedThread.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (submissionError) {
+        throw submissionError;
+      }
+
+      setHomeAskSubmission(
+        ((submissionRows ?? [])[0] ?? null) as AskThreadCardSubmission | null
+      );
     } catch (error) {
       setMessage(getErrorMessage(error));
     }
@@ -10007,28 +9914,68 @@ export function CarePlandPers({
     }
   }
 
-  async function loadAdminSupportTickets() {
-    setLoadingAdminTickets(true);
+  // Two queues, one canonical workspace -- see AdminAskConsole/AdminAskWorkspace.
+  // "Needs response" is thread-driven (needs_admin_followup = true, the
+  // single source of truth for "an admin owes this user something," kept in
+  // sync by add_ask_message_with_case_transition and set_ask_thread_case_status).
+  // "AI quality review" is submission-driven and deliberately independent of
+  // whether a human ever got involved -- a cleanly auto-resolved thread still
+  // needs to be sample-able for quality.
+  async function loadAdminAskQueues() {
+    setLoadingAdminAskQueues(true);
+    setMessage("");
 
     try {
-      const { data: ticketRows, error: ticketError } = await supabase
-        .from("support_tickets")
-        .select(
-          "id,user_id,subject,status,priority,category,current_page,needs_admin_followup,user_has_unread_update,created_at,updated_at"
-        )
-        .order("needs_admin_followup", { ascending: false })
-        .order("updated_at", { ascending: false });
+      void loadAskRoutingSettings();
 
-      if (ticketError) {
-        throw ticketError;
+      const [
+        { data: threadRows, error: threadError },
+        { data: submissionRows, error: submissionError },
+      ] = await Promise.all([
+        supabase
+          .from("ask_threads")
+          .select(
+            "id,user_id,case_status,needs_admin_followup,user_has_unread_update,resolved_at,created_at,updated_at"
+          )
+          .eq("needs_admin_followup", true)
+          .order("updated_at", { ascending: false })
+          .limit(200),
+        supabase
+          .from("ask_submissions")
+          .select(
+            "id,thread_id,user_id,source,current_page,context,transcript,original_user_wording,ai_summary,router_category,router_confidence,router_rationale,recommended_actions,safety_flags,routing_state,outcome,user_feedback,prompt_version,model,created_at,updated_at"
+          )
+          .order("created_at", { ascending: false })
+          .limit(200),
+      ]);
+
+      if (threadError) {
+        throw threadError;
       }
 
+      if (submissionError) {
+        throw submissionError;
+      }
+
+      const loadedSubmissions = (submissionRows ?? []) as Array<
+        AdminAskSubmission & { user_id: string }
+      >;
       const userIds = Array.from(
-        new Set((ticketRows ?? []).map((ticket) => ticket.user_id).filter(Boolean))
+        new Set(
+          [
+            ...(threadRows ?? []).map((thread) => thread.user_id),
+            ...loadedSubmissions.map((submission) => submission.user_id),
+          ].filter(Boolean)
+        )
       );
       const profileById = new Map<
         string,
-        NonNullable<SupportTicket["profiles"]>
+        {
+          display_name: string | null;
+          email: string | null;
+          family_name: string | null;
+          given_name: string | null;
+        }
       >();
 
       if (userIds.length > 0) {
@@ -10049,79 +9996,346 @@ export function CarePlandPers({
         }
       }
 
-      const loadedTickets = (ticketRows ?? []).map((ticket) => ({
-        ...ticket,
-        profiles: profileById.get(ticket.user_id) ?? null,
-      })) as SupportTicket[];
-      setAdminSupportTickets(loadedTickets);
+      const hydratedThreads = (threadRows ?? []).map((thread) => ({
+        ...thread,
+        user_label: profileLabel(profileById.get(thread.user_id)) || thread.user_id,
+      })) as AdminAskThread[];
 
-      if (loadedTickets.length === 0) {
-        setAdminSupportTicketMessages([]);
-        setSelectedAdminTicketId("");
+      setAdminAskNeedsResponse(hydratedThreads);
+
+      const submissionIds = loadedSubmissions.map((submission) => submission.id);
+      const reviewCountBySubmission = new Map<string, number>();
+
+      if (submissionIds.length > 0) {
+        const { data: reviewRows, error: reviewError } = await supabase
+          .from("ask_submission_reviews")
+          .select("ask_submission_id")
+          .in("ask_submission_id", submissionIds);
+
+        if (reviewError) {
+          throw reviewError;
+        }
+
+        (reviewRows ?? []).forEach((row) => {
+          reviewCountBySubmission.set(
+            row.ask_submission_id,
+            (reviewCountBySubmission.get(row.ask_submission_id) ?? 0) + 1
+          );
+        });
+      }
+
+      setAdminAskQualitySubmissions(
+        loadedSubmissions.map((submission) => ({
+          ...submission,
+          reviewed_count: reviewCountBySubmission.get(submission.id) ?? 0,
+          user_label:
+            profileLabel(profileById.get(submission.user_id)) || submission.user_id,
+        }))
+      );
+
+      await loadAdminAskAnalysisRuns();
+
+      // Refresh -- and initial load of a tab restored with a thread already
+      // selected -- should bring the open conversation up to date too, not
+      // just the two queue lists. Goes through the same guarded loader as
+      // every other workspace load, so an in-flight thread switch still wins
+      // over this if the admin clicks away before it resolves.
+      if (selectedAdminAskThreadId) {
+        void loadAdminAskWorkspaceForThreadId(
+          selectedAdminAskThreadId,
+          adminAskWorkspaceThread?.user_label ?? ""
+        );
+      }
+
+      void loadAdminAttentionSummary();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAdminAskQueues(false);
+    }
+  }
+
+  // Append-only review history for the AI panel -- reviewer_label is
+  // resolved client-side since ask_submission_reviews only stores
+  // reviewer_user_id, mirroring the profile-label pattern used everywhere
+  // else in the admin surface rather than adding a denormalized column.
+  async function loadAdminAskReviewHistory(submissionId: string) {
+    try {
+      const { data: reviewRows, error: reviewError } = await supabase
+        .from("ask_submission_reviews")
+        .select(
+          "id,ask_submission_id,reviewer_user_id,answer_quality,improvement_category,admin_note,recommended_action,created_at"
+        )
+        .eq("ask_submission_id", submissionId)
+        .order("created_at", { ascending: false });
+
+      if (reviewError) {
+        throw reviewError;
+      }
+
+      const reviewerIds = Array.from(
+        new Set(
+          (reviewRows ?? []).map((row) => row.reviewer_user_id).filter(Boolean)
+        )
+      );
+      const profileById = new Map<
+        string,
+        {
+          display_name: string | null;
+          email: string | null;
+          family_name: string | null;
+          given_name: string | null;
+        }
+      >();
+
+      if (reviewerIds.length > 0) {
+        const { data: profileRows, error: profileError } = await supabase
+          .from("profiles")
+          .select("id,email,display_name,given_name,family_name")
+          .in("id", reviewerIds);
+
+        if (!profileError) {
+          (profileRows ?? []).forEach((profile) => {
+            profileById.set(profile.id, {
+              display_name: profile.display_name,
+              email: profile.email,
+              family_name: profile.family_name,
+              given_name: profile.given_name,
+            });
+          });
+        }
+      }
+
+      setAdminAskWorkspaceReviews(
+        (reviewRows ?? []).map((row) => ({
+          admin_note: row.admin_note ?? "",
+          answer_quality: row.answer_quality,
+          ask_submission_id: row.ask_submission_id,
+          created_at: row.created_at,
+          id: row.id,
+          improvement_category: row.improvement_category,
+          recommended_action: row.recommended_action,
+          reviewer_label:
+            profileLabel(profileById.get(row.reviewer_user_id)) || "Admin",
+        })) as AdminAskSubmissionReview[]
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
+  }
+
+  async function loadAdminAskAnalysisRuns() {
+    try {
+      const { data: runRows, error: runError } = await supabase
+        .from("ask_analysis_runs")
+        .select(
+          "id,requested_by_user_id,ask_submission_ids,submission_count,model,analysis_summary,failure_patterns,strengths,recommendations,prompt_recommendations,ui_recommendations,admin_status,admin_note,created_at,updated_at"
+        )
+        .order("created_at", { ascending: false })
+        .limit(25);
+
+      if (runError) {
+        const runErrorCode =
+          runError && typeof runError === "object" && "code" in runError
+            ? String(runError.code)
+            : "";
+
+        if (runErrorCode === "PGRST205") {
+          setAdminAskAnalysisRuns([]);
+          return;
+        }
+
+        throw runError;
+      }
+
+      setAdminAskAnalysisRuns(
+        (runRows ?? []).map((run) => ({
+          ...run,
+          ask_submission_ids: stringArrayFromJson(run.ask_submission_ids),
+          failure_patterns: stringArrayFromJson(run.failure_patterns),
+          prompt_recommendations: stringArrayFromJson(run.prompt_recommendations),
+          recommendations: stringArrayFromJson(run.recommendations),
+          strengths: stringArrayFromJson(run.strengths),
+          ui_recommendations: stringArrayFromJson(run.ui_recommendations),
+        })) as AskAnalysisRun[]
+      );
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
+  }
+
+  // Shared by both queues' "open this" action, by Refresh, and by the
+  // send/quick-status handlers refreshing in place -- always re-reads the
+  // canonical thread row by id rather than trusting whatever partial object
+  // a queue list handed in, so the workspace never shows a stale
+  // case_status after its own write.
+  //
+  // Two correctness guarantees on top of that:
+  // 1. thread/submission (not just messages/reviews) are cleared to
+  //    null/empty the instant this starts, and only repopulated on a
+  //    successful, still-current fetch. A thrown error or a stale response
+  //    therefore can never leave a *previous* thread's data on screen
+  //    looking current -- worst case the admin sees "Select a conversation"
+  //    again, never a silently wrong one.
+  // 2. requestId/adminAskWorkspaceRequestIdRef makes this last-write-wins by
+  //    call order, not by network arrival order: if two selections happen
+  //    in quick succession, whichever call is no longer the newest one
+  //    drops its results (and its loading/error state) instead of
+  //    overwriting what the more recent selection already applied.
+  async function loadAdminAskWorkspaceForThreadId(
+    threadId: string,
+    fallbackUserLabel: string
+  ) {
+    const requestId = ++adminAskWorkspaceRequestIdRef.current;
+    const isCurrentRequest = () =>
+      adminAskWorkspaceRequestIdRef.current === requestId;
+
+    setLoadingAdminAskWorkspace(true);
+    setAdminAskWorkspaceThread(null);
+    setAdminAskWorkspaceMessages([]);
+    setAdminAskWorkspaceSubmission(null);
+    setAdminAskWorkspaceReviews([]);
+
+    try {
+      const [
+        { data: threadRows, error: threadError },
+        { data: messageRows, error: messageError },
+        { data: submissionRows, error: submissionError },
+      ] = await Promise.all([
+        supabase
+          .from("ask_threads")
+          .select(
+            "id,user_id,case_status,needs_admin_followup,user_has_unread_update,resolved_at,created_at,updated_at"
+          )
+          .eq("id", threadId)
+          .limit(1),
+        supabase
+          .from("ask_messages")
+          .select("id,thread_id,author_role,message_body,is_internal,created_at")
+          .eq("thread_id", threadId)
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("ask_submissions")
+          .select(
+            "id,thread_id,user_id,source,current_page,context,transcript,original_user_wording,ai_summary,router_category,router_confidence,router_rationale,recommended_actions,safety_flags,routing_state,outcome,user_feedback,prompt_version,model,created_at,updated_at"
+          )
+          .eq("thread_id", threadId)
+          .order("created_at", { ascending: false })
+          .limit(1),
+      ]);
+
+      if (!isCurrentRequest()) {
+        // A newer selection has already started (and will apply its own
+        // results); this response is stale, drop it silently.
         return;
       }
 
-      const effectiveTicketId =
-        loadedTickets.find((ticket) => ticket.id === selectedAdminTicketId)?.id ??
-        loadedTickets.find((ticket) => ticket.needs_admin_followup)?.id ??
-        loadedTickets[0].id;
-
-      setSelectedAdminTicketId(effectiveTicketId);
-      const effectiveTicket = loadedTickets.find(
-        (ticket) => ticket.id === effectiveTicketId
-      );
-
-      if (effectiveTicket) {
-        setAdminTicketStatus(effectiveTicket.status);
-        setAdminTicketPriority(effectiveTicket.priority);
-        setAdminTicketCategory(effectiveTicket.category);
-        setAdminTicketNeedsFollowup(effectiveTicket.needs_admin_followup);
+      if (threadError) {
+        throw threadError;
       }
-
-      const { data: messageRows, error: messageError } = await supabase
-        .from("support_ticket_messages")
-        .select(
-          "id,ticket_id,author_role,message_body,is_internal,created_at"
-        )
-        .in(
-          "ticket_id",
-          loadedTickets.map((ticket) => ticket.id)
-        )
-        .order("created_at", { ascending: true });
 
       if (messageError) {
         throw messageError;
       }
 
-      setAdminSupportTicketMessages((messageRows ?? []) as SupportTicketMessage[]);
-      void loadAdminAttentionSummary();
+      if (submissionError) {
+        throw submissionError;
+      }
+
+      const freshThreadRow = (threadRows ?? [])[0] ?? null;
+      setAdminAskWorkspaceThread(
+        freshThreadRow
+          ? ({ ...freshThreadRow, user_label: fallbackUserLabel } as AdminAskThread)
+          : null
+      );
+      setAdminAskWorkspaceMessages((messageRows ?? []) as AdminAskMessage[]);
+
+      const submission = ((submissionRows ?? [])[0] ?? null) as AdminAskSubmission | null;
+      setAdminAskWorkspaceSubmission(submission);
+
+      if (submission) {
+        await loadAdminAskReviewHistory(submission.id);
+      }
     } catch (error) {
-      setMessage(getErrorMessage(error));
+      if (isCurrentRequest()) {
+        setMessage(getErrorMessage(error));
+      }
     } finally {
-      setLoadingAdminTickets(false);
+      if (isCurrentRequest()) {
+        setLoadingAdminAskWorkspace(false);
+      }
     }
   }
 
-  function selectAdminTicket(ticket: SupportTicket) {
-    setSelectedAdminTicketId(ticket.id);
-    setAdminTicketStatus(ticket.status);
-    setAdminTicketPriority(ticket.priority);
-    setAdminTicketCategory(ticket.category);
-    setAdminTicketNeedsFollowup(ticket.needs_admin_followup);
-    setAdminTicketChangeNote("");
-    setAdminTicketReplyBody("");
-    setAdminTicketInternalNote("");
+  function selectAdminAskThread(thread: AdminAskThread) {
+    setSelectedAdminAskThreadId(thread.id);
+    void loadAdminAskWorkspaceForThreadId(thread.id, thread.user_label);
   }
 
-  function assistantInteractionUserLabel(interaction: SupportAssistantInteraction) {
-    const profile = interaction.profiles;
-    const displayName = profile?.display_name?.trim();
-    const fullName = [profile?.given_name, profile?.family_name]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
+  function selectAdminAskSubmission(submission: AdminAskQualityItem) {
+    setSelectedAdminAskThreadId(submission.thread_id);
+    void loadAdminAskWorkspaceForThreadId(submission.thread_id, submission.user_label);
+  }
 
-    return displayName || fullName || profile?.email || interaction.user_id;
+  // Replaces the old product-mgmt "openAskSubmissionReview" jump into the
+  // now-deleted assistantReview tab -- opens the same canonical workspace
+  // any other queue would, since a product item created from Ask still
+  // points at an ask_submission_id, not a parallel record.
+  async function openAdminAskSubmissionInConsole(submissionId: string) {
+    if (!submissionId) {
+      return;
+    }
+
+    try {
+      const { data: submissionRows, error: submissionError } = await supabase
+        .from("ask_submissions")
+        .select("thread_id")
+        .eq("id", submissionId)
+        .limit(1);
+
+      if (submissionError) {
+        throw submissionError;
+      }
+
+      const threadId = submissionRows?.[0]?.thread_id as string | undefined;
+
+      if (!threadId) {
+        showToast("Could not find the originating Ask conversation.", {
+          type: "error",
+        });
+        return;
+      }
+
+      const { data: threadRows, error: threadError } = await supabase
+        .from("ask_threads")
+        .select("user_id")
+        .eq("id", threadId)
+        .limit(1);
+
+      if (threadError) {
+        throw threadError;
+      }
+
+      const threadUserId = threadRows?.[0]?.user_id as string | undefined;
+      let userLabel = threadUserId ?? "";
+
+      if (threadUserId) {
+        const { data: profileRows } = await supabase
+          .from("profiles")
+          .select("email,display_name,given_name,family_name")
+          .eq("id", threadUserId)
+          .limit(1);
+
+        userLabel = profileLabel(profileRows?.[0]) || threadUserId;
+      }
+
+      await handleChangeAdminTab("askConsole");
+      setSelectedAdminAskThreadId(threadId);
+      void loadAdminAskWorkspaceForThreadId(threadId, userLabel);
+      showToast("Opened the originating Ask conversation.", { type: "success" });
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
   }
 
   function profileLabel(profile: {
@@ -10139,106 +10353,6 @@ export function CarePlandPers({
     return displayName || fullName || profile?.email || "";
   }
 
-  function askActionText(value: unknown) {
-    return typeof value === "string" ? value.trim() : "";
-  }
-
-  function askRecommendationTitle(
-    submission: AdminAskSubmission,
-    action: Record<string, unknown>,
-    target: AskReviewProductTarget
-  ) {
-    const actionTitle =
-      askActionText(action.title) ||
-      askActionText(action.action) ||
-      submission.ai_summary ||
-      submission.original_user_wording;
-    const prefix =
-      target === "bug"
-        ? "Ask bug"
-        : target === "wishlist"
-          ? "Ask wishlist"
-          : "Ask workflow";
-
-    return `${prefix}: ${actionTitle}`.slice(0, 180);
-  }
-
-  function askRecommendationBody(
-    submission: AdminAskSubmission,
-    action: Record<string, unknown>
-  ) {
-    return [
-      askActionText(action.rationale)
-        ? `AI recommendation rationale: ${askActionText(action.rationale)}`
-        : "",
-      askActionText(action.app_area)
-        ? `Affected app area: ${askActionText(action.app_area)}`
-        : "",
-      askActionText(action.category)
-        ? `Recommended category: ${askActionText(action.category)}`
-        : "",
-      askActionText(action.priority)
-        ? `Priority clue: ${askActionText(action.priority)}`
-        : "",
-      askActionText(action.suggested_feature)
-        ? `Suggested feature/workflow: ${askActionText(action.suggested_feature)}`
-        : "",
-      submission.router_rationale
-        ? `Router rationale: ${submission.router_rationale}`
-        : "",
-      askActionText(action.tried_to_do)
-        ? `Tried to do: ${askActionText(action.tried_to_do)}`
-        : "",
-      askActionText(action.expected_behavior)
-        ? `Expected behavior: ${askActionText(action.expected_behavior)}`
-        : "",
-      askActionText(action.actual_behavior)
-        ? `Actual behavior: ${askActionText(action.actual_behavior)}`
-        : "",
-      askActionText(action.reproducibility_clues)
-        ? `Reproducibility clues: ${askActionText(action.reproducibility_clues)}`
-        : "",
-      submission.original_user_wording
-        ? `Original user wording: ${submission.original_user_wording}`
-        : "",
-      submission.transcript ? `Ask transcript:\n${submission.transcript}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-  }
-
-  function askSupportTicketSubject(
-    submission: AdminAskSubmission,
-    action: Record<string, unknown>
-  ) {
-    return (
-      askActionText(action.title) ||
-      submission.ai_summary ||
-      submission.original_user_wording ||
-      "Ask support follow-up"
-    ).slice(0, 180);
-  }
-
-  function askSupportTicketMessage(
-    submission: AdminAskSubmission,
-    action: Record<string, unknown>
-  ) {
-    return [
-      submission.original_user_wording
-        ? `Original user wording: ${submission.original_user_wording}`
-        : "",
-      submission.ai_summary ? `Ask summary: ${submission.ai_summary}` : "",
-      askActionText(action.rationale)
-        ? `AI recommendation rationale: ${askActionText(action.rationale)}`
-        : "",
-      submission.router_rationale
-        ? `Router rationale: ${submission.router_rationale}`
-        : "",
-      submission.transcript ? `Ask transcript:\n${submission.transcript}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-  }
 
   function normalizeAskRoutingSettings(
     value: Partial<AskRoutingSettings> | null | undefined
@@ -10300,224 +10414,6 @@ export function CarePlandPers({
       setMessage(getErrorMessage(error));
     } finally {
       setLoadingAskRoutingSettings(false);
-    }
-  }
-
-  async function loadAskReviewSubmissions() {
-    setLoadingAskReviews(true);
-
-    try {
-      void loadAskRoutingSettings();
-
-      const { data: submissionRows, error: submissionError } = await supabase
-        .from("ask_submissions")
-        .select(
-          "id,thread_id,user_id,source,current_page,context,transcript,original_user_wording,ai_summary,router_category,router_confidence,router_rationale,recommended_actions,safety_flags,routing_state,reviewed_at,review_note,prompt_version,model,created_at,updated_at"
-        )
-        .order("created_at", { ascending: false })
-        .limit(200);
-
-      if (submissionError) {
-        throw submissionError;
-      }
-
-      const loadedSubmissions = (submissionRows ?? []) as Array<
-        Omit<AdminAskSubmission, "user_label">
-      >;
-      const userIds = Array.from(
-        new Set(
-          loadedSubmissions
-            .map((submission) => submission.user_id)
-            .filter(Boolean)
-        )
-      );
-      const profileById = new Map<
-        string,
-        {
-          display_name: string | null;
-          email: string | null;
-          family_name: string | null;
-          given_name: string | null;
-        }
-      >();
-
-      if (userIds.length > 0) {
-        const { data: profileRows, error: profileError } = await supabase
-          .from("profiles")
-          .select("id,email,display_name,given_name,family_name")
-          .in("id", userIds);
-
-        if (!profileError) {
-          (profileRows ?? []).forEach((profile) => {
-            profileById.set(profile.id, {
-              display_name: profile.display_name,
-              email: profile.email,
-              family_name: profile.family_name,
-              given_name: profile.given_name,
-            });
-          });
-        }
-      }
-
-      const hydratedSubmissions = loadedSubmissions.map((submission) => ({
-        ...submission,
-        user_label:
-          profileLabel(profileById.get(submission.user_id)) ||
-          submission.user_id,
-      }));
-
-      setAskReviewSubmissions(hydratedSubmissions);
-
-      if (hydratedSubmissions.length > 0) {
-        const submissionIds = hydratedSubmissions.map(
-          (submission) => submission.id
-        );
-        const [
-          { data: decisionRows, error: decisionError },
-          { data: linkRows, error: linkError },
-        ] = await Promise.all([
-          supabase
-            .from("ask_recommendation_decisions")
-            .select(
-              "id,ask_submission_id,recommended_action_index,recommended_action,decision,created_target_table,created_target_id,override_action,decision_note,created_at"
-            )
-            .in("ask_submission_id", submissionIds)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("ask_submission_links")
-            .select(
-              "id,ask_submission_id,target_table,target_id,relationship_type,label,is_active,created_at"
-            )
-            .in("ask_submission_id", submissionIds)
-            .eq("is_active", true)
-            .order("created_at", { ascending: false }),
-        ]);
-
-        if (decisionError) {
-          throw decisionError;
-        }
-
-        if (linkError) {
-          throw linkError;
-        }
-
-        setAskRecommendationDecisions(
-          (decisionRows ?? []) as AskRecommendationDecision[]
-        );
-        setAskSubmissionLinks((linkRows ?? []) as AskSubmissionLink[]);
-      } else {
-        setAskRecommendationDecisions([]);
-        setAskSubmissionLinks([]);
-      }
-
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: decisionSummaryRows, error: decisionSummaryError } =
-        await supabase.rpc("ask_recommendation_decision_summary", {
-          p_since: since,
-        });
-
-      if (decisionSummaryError) {
-        throw decisionSummaryError;
-      }
-
-      setAskRecommendationDecisionSummary(
-        (decisionSummaryRows ?? []) as AskRecommendationDecisionSummaryRow[]
-      );
-
-      const currentSelectionStillExists = hydratedSubmissions.some(
-        (submission) => submission.id === selectedAskReviewId
-      );
-      const nextSelection = currentSelectionStillExists
-        ? hydratedSubmissions.find(
-            (submission) => submission.id === selectedAskReviewId
-          ) ?? null
-        : hydratedSubmissions.find(
-            (submission) => submission.routing_state !== "closed"
-          ) ??
-          hydratedSubmissions[0] ??
-          null;
-
-      if (nextSelection) {
-        setSelectedAskReviewId(nextSelection.id);
-        setAskReviewRoutingState(nextSelection.routing_state);
-        setAskReviewNote(nextSelection.review_note ?? "");
-      } else {
-        setSelectedAskReviewId("");
-        setAskReviewRoutingState("needs_review");
-        setAskReviewNote("");
-      }
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setLoadingAskReviews(false);
-    }
-  }
-
-  function selectAskReviewSubmission(submission: AdminAskSubmission) {
-    setSelectedAskReviewId(submission.id);
-    setAskReviewRoutingState(submission.routing_state);
-    setAskReviewNote(submission.review_note ?? "");
-  }
-
-  async function openAskSubmissionReview(askSubmissionId: string) {
-    if (!askSubmissionId) {
-      return;
-    }
-
-    setSelectedAskReviewId(askSubmissionId);
-    await handleChangeAdminTab("assistantReview");
-    setSelectedAskReviewId(askSubmissionId);
-    showToast("Opened Ask review item.", { type: "success" });
-  }
-
-  async function openAskRelatedItem(link: AskSubmissionLink) {
-    if (!link.target_id) {
-      return;
-    }
-
-    try {
-      if (link.target_table === "support_tickets") {
-        await handleChangeAdminTab("tickets");
-        setSelectedAdminTicketId(link.target_id);
-        showToast("Opened linked support ticket.", { type: "success" });
-        return;
-      }
-
-      if (link.target_table === "product_mgmt_items") {
-        const { data: linkedItem, error: linkedItemError } = await supabase
-          .from("product_mgmt_items")
-          .select("area_id")
-          .eq("id", link.target_id)
-          .maybeSingle();
-
-        if (linkedItemError) {
-          throw linkedItemError;
-        }
-
-        const { data: linkedArea, error: linkedAreaError } = linkedItem?.area_id
-          ? await supabase
-              .from("product_mgmt_areas")
-              .select("area_key")
-              .eq("id", linkedItem.area_id)
-              .maybeSingle()
-          : { data: null, error: null };
-
-        if (linkedAreaError) {
-          throw linkedAreaError;
-        }
-
-        if (linkedArea) {
-          setSelectedProductMgmtSection(linkedArea.area_key);
-        }
-
-        await handleChangeAdminTab("product");
-        showToast("Opened Product Management.", { type: "success" });
-        return;
-      }
-
-      showToast("Related item link saved.", { type: "success" });
-    } catch (error) {
-      setMessage(getErrorMessage(error));
     }
   }
 
@@ -10610,81 +10506,26 @@ export function CarePlandPers({
     }
   }
 
-  async function recordAskRecommendationDecision(
-    decision: "overridden" | "rejected",
-    actionIndex: number | null,
-    action: Record<string, unknown>,
-    overrideAction?: string
+  async function handleCreateAdminAskProductItem(
+    input: AdminAskProductItemInput
   ) {
-    if (!selectedAskReviewSubmission) {
+    if (!adminAskWorkspaceSubmission) {
       return;
     }
 
-    setSavingAskReviewAction(true);
-    setMessage("");
-
-    try {
-      const { error } = await supabase.rpc(
-        "record_ask_recommendation_decision",
-        {
-          p_ask_submission_id: selectedAskReviewSubmission.id,
-          p_created_target_id: null,
-          p_created_target_table: null,
-          p_decision: decision,
-          p_decision_note: askReviewNote.trim() || null,
-          p_override_action: overrideAction ?? null,
-          p_recommended_action: action,
-          p_recommended_action_index: actionIndex,
-        }
-      );
-
-      if (error) {
-        throw error;
-      }
-
-      await loadAskReviewSubmissions();
-      showToast("Ask recommendation decision saved.", { type: "success" });
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setSavingAskReviewAction(false);
-    }
-  }
-
-  async function createProductItemFromAskRecommendation(
-    target: AskReviewProductTarget,
-    actionIndex: number | null,
-    action: Record<string, unknown>
-  ) {
-    if (!selectedAskReviewSubmission) {
-      return;
-    }
-
-    setSavingAskReviewAction(true);
+    setSavingAdminAskProductItem(true);
     setMessage("");
 
     try {
       const { error } = await supabase.rpc(
         "create_product_mgmt_item_from_ask",
         {
-          p_area_key: target,
-          p_ask_submission_id: selectedAskReviewSubmission.id,
-          p_body: askRecommendationBody(selectedAskReviewSubmission, action),
-          p_decision_note: askReviewNote.trim() || null,
-          p_priority:
-            askActionText(action.priority) === "high" ||
-            askActionText(action.priority) === "low" ||
-            askActionText(action.priority) === "medium"
-              ? askActionText(action.priority)
-              : "medium",
-          p_recommended_action: action,
-          p_recommended_action_index: actionIndex,
+          p_area_key: input.areaKey,
+          p_ask_submission_id: adminAskWorkspaceSubmission.id,
+          p_body: input.body,
+          p_priority: "medium",
           p_status: "open",
-          p_title: askRecommendationTitle(
-            selectedAskReviewSubmission,
-            action,
-            target
-          ),
+          p_title: input.title,
         }
       );
 
@@ -10692,360 +10533,30 @@ export function CarePlandPers({
         throw error;
       }
 
-      await Promise.all([loadAskReviewSubmissions(), loadProductMgmt()]);
-      showToast("Linked Product Mgmt item created from Ask.", {
-        type: "success",
-      });
+      showToast("Sent to product backlog.", { type: "success" });
+      await loadProductMgmt();
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
-      setSavingAskReviewAction(false);
+      setSavingAdminAskProductItem(false);
     }
   }
 
-  async function resolveAskAnswerRecommendation(
-    actionIndex: number | null,
-    action: Record<string, unknown>
-  ) {
-    if (!selectedAskReviewSubmission) {
+  function toggleAdminAskAnalysisSelection(submissionId: string) {
+    setAdminAskAnalysisSelectionIds((current) =>
+      current.includes(submissionId)
+        ? current.filter((id) => id !== submissionId)
+        : [...current, submissionId]
+    );
+  }
+
+  async function handleRunAdminAskAnalysis() {
+    if (adminAskAnalysisSelectionIds.length === 0) {
+      setMessage("Select at least one Ask answer to analyze.");
       return;
     }
 
-    setSavingAskReviewAction(true);
-    setMessage("");
-
-    try {
-      const { error } = await supabase.rpc("resolve_ask_answer_from_review", {
-        p_ask_submission_id: selectedAskReviewSubmission.id,
-        p_decision_note: askReviewNote.trim() || null,
-        p_recommended_action: action,
-        p_recommended_action_index: actionIndex,
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      await loadAskReviewSubmissions();
-      showToast("Ask answer accepted and closed.", { type: "success" });
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setSavingAskReviewAction(false);
-    }
-  }
-
-  async function createSupportTicketFromAskRecommendation(
-    actionIndex: number | null,
-    action: Record<string, unknown>
-  ) {
-    if (!selectedAskReviewSubmission) {
-      return;
-    }
-
-    setSavingAskReviewAction(true);
-    setMessage("");
-
-    try {
-      const priority = askActionText(action.priority);
-      const { error } = await supabase.rpc("create_support_ticket_from_ask", {
-        p_ask_submission_id: selectedAskReviewSubmission.id,
-        p_category: selectedAskReviewSubmission.router_category,
-        p_decision_note: askReviewNote.trim() || null,
-        p_message: askSupportTicketMessage(selectedAskReviewSubmission, action),
-        p_priority:
-          priority === "high" ||
-          priority === "low" ||
-          priority === "medium" ||
-          priority === "urgent"
-            ? priority
-            : "medium",
-        p_recommended_action: action,
-        p_recommended_action_index: actionIndex,
-        p_subject: askSupportTicketSubject(selectedAskReviewSubmission, action),
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      await Promise.all([loadAskReviewSubmissions(), loadAdminSupportTickets()]);
-      showToast("Linked support ticket created from Ask.", {
-        type: "success",
-      });
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setSavingAskReviewAction(false);
-    }
-  }
-
-  async function handleUpdateAskReview(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!selectedAskReviewSubmission) {
-      return;
-    }
-
-    setSavingAskReview(true);
-
-    try {
-      const { error } = await supabase
-        .from("ask_submissions")
-        .update({
-          review_note: askReviewNote.trim() || null,
-          reviewed_at: new Date().toISOString(),
-          routing_state: askReviewRoutingState,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", selectedAskReviewSubmission.id);
-
-      if (error) {
-        throw error;
-      }
-
-      await loadAskReviewSubmissions();
-      setMessage("Ask review saved.");
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setSavingAskReview(false);
-    }
-  }
-
-  async function loadAssistantReviewInteractions() {
-    setLoadingAssistantReviews(true);
-
-    try {
-      const { data: interactionRows, error: interactionError } = await supabase
-        .from("support_assistant_interactions")
-        .select(
-          "id,user_id,care_circle_id,ticket_id,question_subject,question_body,assistant_answer,suggested_next_step,confidence,escalation_recommended,escalation_reason,category,priority,outcome,user_feedback,current_page,context,instruction_version_id,prompt_version,model,raw_response,created_at,updated_at"
-        )
-        .order("created_at", { ascending: false })
-        .limit(200);
-
-      if (interactionError) {
-        throw interactionError;
-      }
-
-      const loadedInteractions =
-        (interactionRows ?? []) as SupportAssistantInteraction[];
-      const userIds = Array.from(
-        new Set(
-          loadedInteractions
-            .map((interaction) => interaction.user_id)
-            .filter(Boolean)
-        )
-      );
-      const profileById = new Map<
-        string,
-        NonNullable<SupportAssistantInteraction["profiles"]>
-      >();
-
-      if (userIds.length > 0) {
-        const { data: profileRows, error: profileError } = await supabase
-          .from("profiles")
-          .select("id,email,display_name,given_name,family_name")
-          .in("id", userIds);
-
-        if (!profileError) {
-          (profileRows ?? []).forEach((profile) => {
-            profileById.set(profile.id, {
-              display_name: profile.display_name,
-              email: profile.email,
-              family_name: profile.family_name,
-              given_name: profile.given_name,
-            });
-          });
-        }
-      }
-
-      const hydratedInteractions = loadedInteractions.map((interaction) => ({
-        ...interaction,
-        profiles: profileById.get(interaction.user_id) ?? null,
-      }));
-
-      setAssistantReviewInteractions(hydratedInteractions);
-
-      if (hydratedInteractions.length === 0) {
-        setAssistantReviewAdminReviews([]);
-        setSelectedAssistantReviewId("");
-        await loadAssistantAnalysisRuns();
-        return;
-      }
-
-      if (
-        !hydratedInteractions.some(
-          (interaction) => interaction.id === selectedAssistantReviewId
-        )
-      ) {
-        setSelectedAssistantReviewId(hydratedInteractions[0].id);
-      }
-
-      const { data: reviewRows, error: reviewError } = await supabase
-        .from("support_assistant_admin_reviews")
-        .select(
-          "id,interaction_id,reviewer_user_id,review_status,admin_note,recommended_action,created_at,updated_at"
-        )
-        .in(
-          "interaction_id",
-          hydratedInteractions.map((interaction) => interaction.id)
-        )
-        .order("created_at", { ascending: false });
-
-      if (reviewError) {
-        throw reviewError;
-      }
-
-      setAssistantReviewAdminReviews(
-        (reviewRows ?? []) as SupportAssistantAdminReview[]
-      );
-      await loadAssistantAnalysisRuns();
-      void loadAdminAttentionSummary();
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setLoadingAssistantReviews(false);
-    }
-  }
-
-  async function loadAssistantAnalysisRuns() {
-    try {
-      const { data: runRows, error: runError } = await supabase
-        .from("support_assistant_analysis_runs")
-        .select(
-          "id,requested_by_user_id,criteria,interaction_ids,prompt_versions,interaction_count,model,analysis_summary,failure_patterns,strengths,recommendations,prompt_recommendations,ui_recommendations,admin_status,admin_note,created_at,updated_at"
-        )
-        .order("created_at", { ascending: false })
-        .limit(25);
-
-      if (runError) {
-        const runErrorCode =
-          runError && typeof runError === "object" && "code" in runError
-            ? String(runError.code)
-            : "";
-
-        if (runErrorCode === "PGRST205") {
-          setAssistantAnalysisRuns([]);
-          return;
-        }
-
-        throw runError;
-      }
-
-      const loadedRuns = (runRows ?? []).map((run) => ({
-        ...run,
-        failure_patterns: stringArrayFromJson(run.failure_patterns),
-        interaction_ids: stringArrayFromJson(run.interaction_ids),
-        prompt_recommendations: stringArrayFromJson(run.prompt_recommendations),
-        prompt_versions: stringArrayFromJson(run.prompt_versions),
-        recommendations: stringArrayFromJson(run.recommendations),
-        strengths: stringArrayFromJson(run.strengths),
-        ui_recommendations: stringArrayFromJson(run.ui_recommendations),
-      })) as SupportAssistantAnalysisRun[];
-
-      setAssistantAnalysisRuns(loadedRuns);
-
-      if (
-        loadedRuns.length > 0 &&
-        !loadedRuns.some((run) => run.id === selectedAssistantAnalysisRunId)
-      ) {
-        setSelectedAssistantAnalysisRunId(loadedRuns[0].id);
-        setAssistantAnalysisRunStatus(loadedRuns[0].admin_status);
-        setAssistantAnalysisRunNote(loadedRuns[0].admin_note ?? "");
-      }
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    }
-  }
-
-  function selectAssistantAnalysisRun(run: SupportAssistantAnalysisRun) {
-    setSelectedAssistantAnalysisRunId(run.id);
-    setAssistantAnalysisRunStatus(run.admin_status);
-    setAssistantAnalysisRunNote(run.admin_note ?? "");
-  }
-
-  async function handleUpdateAssistantAnalysisRun(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!selectedAssistantAnalysisRun) {
-      return;
-    }
-
-    setSavingAssistantAnalysisRunReview(true);
-    setMessage("");
-
-    try {
-      const { error } = await supabase.rpc(
-        "update_support_assistant_analysis_run",
-        {
-          p_admin_note: assistantAnalysisRunNote,
-          p_admin_status: assistantAnalysisRunStatus,
-          p_run_id: selectedAssistantAnalysisRun.id,
-        }
-      );
-
-      if (error) {
-        throw error;
-      }
-
-      showToast("Analysis run review saved.", { type: "success" });
-      await loadAssistantAnalysisRuns();
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setSavingAssistantAnalysisRunReview(false);
-    }
-  }
-
-  async function handleCreateAssistantAdminReview(
-    event: FormEvent<HTMLFormElement>
-  ) {
-    event.preventDefault();
-
-    if (!selectedAssistantReviewInteraction) {
-      return;
-    }
-
-    setSavingAssistantAdminReview(true);
-    setMessage("");
-
-    try {
-      const { error } = await supabase.rpc(
-        "create_support_assistant_admin_review",
-        {
-          p_admin_note: assistantReviewNote,
-          p_interaction_id: selectedAssistantReviewInteraction.id,
-          p_recommended_action: assistantReviewRecommendedAction,
-          p_review_status: assistantReviewStatus,
-        }
-      );
-
-      if (error) {
-        throw error;
-      }
-
-      setAssistantReviewNote("");
-      setAssistantReviewRecommendedAction("");
-      setAssistantReviewStatus("needs_review");
-      showToast("Assistant review saved.", { type: "success" });
-      await loadAssistantReviewInteractions();
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setSavingAssistantAdminReview(false);
-    }
-  }
-
-  async function handleAnalyzeFilteredAssistantReviews() {
-    if (filteredAssistantReviewInteractions.length === 0) {
-      setMessage("No assistant answers match these filters.");
-      return;
-    }
-
-    setAnalyzingAssistantReviews(true);
-    setAssistantAnalysisResult(null);
+    setAnalyzingAdminAskSubmissions(true);
     setMessage("");
 
     try {
@@ -11059,20 +10570,11 @@ export function CarePlandPers({
       const accessToken = sessionData.session?.access_token;
 
       if (!accessToken) {
-        throw new Error("Please sign in before analyzing assistant answers.");
+        throw new Error("Please sign in before analyzing Ask answers.");
       }
 
-      const selectedInteractions = filteredAssistantReviewInteractions.slice(0, 50);
-      const response = await fetch("/api/support-assistant-analysis", {
-        body: JSON.stringify({
-          criteria: {
-            confidence: assistantReviewConfidenceFilter,
-            has_user_feedback: assistantReviewHasFeedbackOnly,
-            outcome: assistantReviewOutcomeFilter,
-            prompt_version: assistantReviewPromptFilter,
-          },
-          interactionIds: selectedInteractions.map((interaction) => interaction.id),
-        }),
+      const response = await fetch("/api/ask-analysis", {
+        body: JSON.stringify({ submissionIds: adminAskAnalysisSelectionIds }),
         headers: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
@@ -11082,78 +10584,39 @@ export function CarePlandPers({
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error ?? "Assistant QA analysis failed.");
+        throw new Error(result.error ?? "Ask QA analysis failed.");
       }
 
-      setAssistantAnalysisResult(result as SupportAssistantAnalysisResult);
-      showToast("Assistant analysis saved.", { type: "success" });
-      await loadAssistantAnalysisRuns();
+      setAdminAskAnalysisSelectionIds([]);
+      showToast("Ask analysis saved.", { type: "success" });
+      await loadAdminAskAnalysisRuns();
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
-      setAnalyzingAssistantReviews(false);
+      setAnalyzingAdminAskSubmissions(false);
     }
   }
 
-  async function handleAskSupportAssistant(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!supportQuestionSubject.trim() || !supportQuestionBody.trim()) {
-      setMessage("Add a short subject and a few details before asking.");
-      return;
-    }
-
-    setAskingSupportAssistant(true);
-    setSupportAssistantResult(null);
-    setSupportAssistantFeedback("");
-    setSupportAssistantFeedbackMode(null);
-    setSupportAssistantResolution(null);
-    setMessage("");
-
+  async function handleUpdateAdminAskAnalysisRun(
+    runId: string,
+    status: AskAnalysisRun["admin_status"],
+    note: string
+  ) {
     try {
-      const { data: sessionData, error: sessionError } =
-        await supabase.auth.getSession();
-
-      if (sessionError) {
-        throw sessionError;
-      }
-
-      const accessToken = sessionData.session?.access_token;
-
-      if (!accessToken) {
-        throw new Error("Please sign in before asking for help.");
-      }
-
-      const response = await fetch("/api/support-assistant", {
-        body: JSON.stringify({
-          context: {
-            email: signedInEmail,
-            has_open_support_ticket: Boolean(currentSupportTicket),
-            profile_label: savedProfileLabel,
-          },
-          currentPage: mainTab,
-          message: supportQuestionBody,
-          subject: supportQuestionSubject,
-        }),
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        method: "POST",
+      const { error } = await supabase.rpc("update_ask_analysis_run", {
+        p_admin_note: note,
+        p_admin_status: status,
+        p_run_id: runId,
       });
-      const result = await response.json();
 
-      if (!response.ok) {
-        throw new Error(result.error ?? "The support assistant could not answer.");
+      if (error) {
+        throw error;
       }
 
-      setSupportAssistantResult(result as SupportAssistantResult);
-      setSupportAssistantFeedbackMode(null);
-      setSupportAssistantResolution(null);
+      await loadAdminAskAnalysisRuns();
+      showToast("Analysis run updated.", { type: "success" });
     } catch (error) {
       setMessage(getErrorMessage(error));
-    } finally {
-      setAskingSupportAssistant(false);
     }
   }
 
@@ -11264,7 +10727,7 @@ export function CarePlandPers({
         body: JSON.stringify({
           context: {
             email: signedInEmail,
-            has_open_support_ticket: Boolean(currentSupportTicket),
+            has_open_support_ticket: homeAskCanReply,
             active_ask_context: activeAskContext,
             is_profile_setup: needsOnboarding,
             profile_label: savedProfileLabel,
@@ -11313,6 +10776,12 @@ export function CarePlandPers({
       if (typeof result.threadId === "string") {
         setAskThreadId(result.threadId);
       }
+
+      // Keeps the Home Ask card in sync with whatever this modal just did
+      // to the underlying thread -- the card and the modal both read/write
+      // the same ask_threads/ask_messages rows, there is no separate copy
+      // of the conversation to reconcile.
+      void loadCurrentUserAskThread();
 
       const isTerminalAskAction = result.action !== "ask_clarifying_question";
 
@@ -11380,310 +10849,336 @@ export function CarePlandPers({
     resetAskPanelState();
   }
 
-  async function handleSupportAssistantFeedback(
-    outcome: "helpful" | "not_helpful" | "escalated",
-    ticketId?: string
-  ) {
-    if (!supportAssistantResult) {
+  async function handleHomeAskFeedback(outcome: "helpful" | "not_helpful") {
+    if (!homeAskThread || !homeAskSubmission) {
       return;
     }
 
-    setSavingSupportAssistantFeedback(true);
+    setSavingHomeAskFeedback(true);
     setMessage("");
 
     try {
-      const { error } = await supabase.rpc(
-        "update_support_assistant_interaction",
+      const { error: outcomeError } = await supabase.rpc(
+        "update_ask_submission_outcome",
         {
-          p_interaction_id: supportAssistantResult.interactionId,
+          p_ask_submission_id: homeAskSubmission.id,
           p_outcome: outcome,
-          p_ticket_id: ticketId ?? null,
-          p_user_feedback: supportAssistantFeedback,
+          p_user_feedback: outcome === "not_helpful" ? homeAskFeedbackNote : null,
         }
       );
 
-      if (error) {
-        throw error;
+      if (outcomeError) {
+        throw outcomeError;
       }
 
-      setSupportAssistantFeedbackMode(null);
-      setSupportAssistantResolution(
-        outcome === "helpful"
-          ? "helpful"
-          : outcome === "escalated"
-            ? "escalated"
-            : "not_helpful_saved"
-      );
+      // "Not helpful" on an already-resolved answer reopens the thread for
+      // a human to look at -- through the same canonical message RPC every
+      // other Ask write goes through (add_ask_message_with_case_transition),
+      // rather than a second, separate "escalate" RPC/path. The note
+      // becomes a real, visible message in the conversation, not an
+      // invisible flag only admins can see in a feedback column.
+      if (outcome === "not_helpful") {
+        const { error: messageError } = await supabase.rpc(
+          "add_ask_message_with_case_transition",
+          {
+            p_author_role: "user",
+            p_message_body:
+              homeAskFeedbackNote.trim() ||
+              "This answer didn't fully help -- could someone take a look?",
+            p_thread_id: homeAskThread.id,
+          }
+        );
+
+        if (messageError) {
+          throw messageError;
+        }
+      }
+
+      setHomeAskFeedbackMode(null);
+      setHomeAskFeedbackNote("");
       showToast(
         outcome === "helpful"
           ? "Thanks. Your feedback was saved."
-          : outcome === "escalated"
-            ? "This was sent for review."
-            : "Thanks. We will use this to improve CarePland answers.",
+          : "Thanks -- we've flagged this for a closer look.",
         { type: "success" }
       );
+      await loadCurrentUserAskThread();
 
       if (outcome === "helpful") {
-        window.setTimeout(() => {
-          setSupportQuestionSubject("");
-          setSupportQuestionBody("");
-          setSupportAssistantResult(null);
-          setSupportAssistantFeedback("");
-          setSupportAssistantFeedbackMode(null);
-          setSupportAssistantResolution(null);
-          setAskingSupportQuestion(false);
-          setSupportQuestionExpanded(false);
-        }, 1400);
+        window.setTimeout(() => setHomeAskExpanded(false), 1400);
       }
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
-      setSavingSupportAssistantFeedback(false);
+      setSavingHomeAskFeedback(false);
     }
   }
 
-  async function handleEscalateSupportAssistant() {
-    if (!supportAssistantResult) {
-      return;
-    }
-
-    setSavingSupportQuestion(true);
-    setMessage("");
-
-    try {
-      const escalationDetails = [
-        supportQuestionBody,
-        "",
-        "--- CarePland support assistant ---",
-        `Answer: ${supportAssistantResult.answer}`,
-        supportAssistantResult.suggestedNextStep
-          ? `Suggested next step: ${supportAssistantResult.suggestedNextStep}`
-          : "",
-        `Confidence: ${Math.round(supportAssistantResult.confidence * 100)}%`,
-        supportAssistantResult.escalationReason
-          ? `Escalation reason: ${supportAssistantResult.escalationReason}`
-          : "",
-        supportAssistantFeedback
-          ? `${appContentText("support_missing_feedback_prompt")} ${supportAssistantFeedback}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      const { data: ticket, error } = await supabase.rpc(
-        "create_support_question",
-        {
-          p_context: {
-            assistant_category: supportAssistantResult.category,
-            assistant_confidence: supportAssistantResult.confidence,
-            assistant_interaction_id: supportAssistantResult.interactionId,
-            assistant_priority: supportAssistantResult.priority,
-            browser_timezone: browserTimezone().timezone,
-            signed_in_email: signedInEmail,
-            tab: mainTab,
-          },
-          p_current_page: mainTab,
-          p_message: escalationDetails,
-          p_subject: supportQuestionSubject,
-        }
-      );
-
-      if (error) {
-        throw error;
-      }
-
-      const ticketId =
-        ticket && typeof ticket === "object" && "id" in ticket
-          ? String(ticket.id)
-          : undefined;
-      await handleSupportAssistantFeedback("escalated", ticketId);
-
-      setSupportQuestionSubject("");
-      setSupportQuestionBody("");
-      setSupportAssistantResult(null);
-      setSupportAssistantFeedback("");
-      setSupportAssistantFeedbackMode(null);
-      setSupportAssistantResolution(null);
-      setAskingSupportQuestion(false);
-      setSupportQuestionExpanded(true);
-      await loadCurrentUserSupportTickets();
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setSavingSupportQuestion(false);
-    }
-  }
-
-  async function handleAddSupportReply(event: FormEvent<HTMLFormElement>) {
+  async function handleSendHomeAskReply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!currentSupportTicket || !supportReplyBody.trim()) {
+    const outgoingReply = homeAskReplyBody.trim();
+
+    if (!homeAskThread || !outgoingReply) {
       return;
     }
 
-    setSavingSupportReply(true);
+    setSavingHomeAskReply(true);
     setMessage("");
 
     try {
-      const { error } = await supabase.rpc("add_support_ticket_message", {
-        p_is_internal: false,
-        p_message: supportReplyBody,
-        p_ticket_id: currentSupportTicket.id,
-      });
+      if (homeAskThread.case_status === "waiting_on_user") {
+        // The AI is mid-conversation and asked the user something -- route
+        // this reply back through /api/ask (same endpoint the Ask panel
+        // modal uses) so the clarifying flow continues, rather than adding
+        // a plain comment the AI pipeline would never see.
+        const { data: sessionData, error: sessionError } =
+          await supabase.auth.getSession();
 
-      if (error) {
-        throw error;
+        if (sessionError) {
+          throw sessionError;
+        }
+
+        const accessToken = sessionData.session?.access_token;
+
+        if (!accessToken) {
+          throw new Error("Please sign in before replying.");
+        }
+
+        const response = await fetch("/api/ask", {
+          body: JSON.stringify({
+            context: { email: signedInEmail, profile_label: savedProfileLabel },
+            currentPage: mainTab,
+            message: outgoingReply,
+            threadId: homeAskThread.id,
+          }),
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error ?? "Ask is temporarily unavailable.");
+        }
+      } else {
+        // Already routed for human review (waiting_on_admin) -- this is
+        // just a follow-up comment for the admin to see, not another AI
+        // turn, so it goes straight through the canonical message RPC.
+        const { error } = await supabase.rpc(
+          "add_ask_message_with_case_transition",
+          {
+            p_author_role: "user",
+            p_message_body: outgoingReply,
+            p_thread_id: homeAskThread.id,
+          }
+        );
+
+        if (error) {
+          throw error;
+        }
       }
 
-      setSupportReplyBody("");
-      await loadCurrentUserSupportTickets();
+      setHomeAskReplyBody("");
+      await loadCurrentUserAskThread();
       showToast("Your reply was added.", { type: "success" });
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
-      setSavingSupportReply(false);
+      setSavingHomeAskReply(false);
     }
   }
 
-  async function handleAddAdminTicketReply(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!selectedAdminTicket || !adminTicketReplyBody.trim()) {
-      return;
-    }
-
-    setSavingAdminTicketReply(true);
-    setMessage("");
-
+  // Fire-and-forget, admin-side-only: tells the recipient a visible reply
+  // is waiting. Never called for internal notes (the route itself also
+  // refuses to send for is_internal/non-admin messages -- this check is
+  // belt-and-suspenders, not the only guard). Failure here must never block
+  // or roll back the already-saved message; the message is the source of
+  // truth; the email is best-effort on top of it.
+  async function notifyUserOfAdminAskReply(messageId: string) {
     try {
-      const { data: replyMessage, error } = await supabase.rpc(
-        "add_support_ticket_message",
-        {
-          p_is_internal: false,
-          p_message: adminTicketReplyBody,
-          p_ticket_id: selectedAdminTicket.id,
-        }
-      );
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
 
-      if (error) {
-        throw error;
+      if (sessionError) {
+        throw sessionError;
       }
 
-      const replyMessageId =
-        replyMessage && typeof replyMessage === "object" && "id" in replyMessage
-          ? String(replyMessage.id)
-          : "";
+      const accessToken = sessionData.session?.access_token;
 
-      if (replyMessageId) {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData.session?.access_token;
-
-        if (accessToken) {
-          fetch("/api/support-ticket-notifications", {
-            body: JSON.stringify({ messageId: replyMessageId }),
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type": "application/json",
-            },
-            method: "POST",
-          }).catch((notificationError) => {
-            console.error("Support reply notification failed", notificationError);
-          });
-        }
+      if (!accessToken) {
+        return;
       }
 
-      setAdminTicketReplyBody("");
-      await loadAdminSupportTickets();
-      showToast("Reply added to the question.", { type: "success" });
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setSavingAdminTicketReply(false);
-    }
-  }
-
-  async function handleAddAdminInternalNote(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!selectedAdminTicket || !adminTicketInternalNote.trim()) {
-      return;
-    }
-
-    setSavingAdminTicketReply(true);
-    setMessage("");
-
-    try {
-      const { error } = await supabase.rpc("add_support_ticket_message", {
-        p_is_internal: true,
-        p_message: adminTicketInternalNote,
-        p_ticket_id: selectedAdminTicket.id,
+      await fetch("/api/ask-message-notifications", {
+        body: JSON.stringify({ messageId }),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
       });
-
-      if (error) {
-        throw error;
-      }
-
-      setAdminTicketInternalNote("");
-      await loadAdminSupportTickets();
-      showToast("Internal note added.", { type: "success" });
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setSavingAdminTicketReply(false);
+    } catch (notificationError) {
+      console.error("Ask reply notification failed", notificationError);
     }
   }
 
-  async function handleUpdateAdminTicketStatus(
-    event: FormEvent<HTMLFormElement>
+  // The single normal admin action: reply/note, optionally a case-status
+  // change, optionally a review verdict, all in one write. admin-authored
+  // add_ask_message_with_case_transition calls are not restricted in which
+  // case_status they may set (only user/assistant-authored calls are), so
+  // "reply + resolve" is one RPC call, not two. A review-only save (no
+  // message text) still records the reviewer's judgment without forcing a
+  // throwaway message; a status-only change with no text goes through
+  // set_ask_thread_case_status instead, which is what it exists for.
+  async function handleSendAdminAsk(
+    input: AdminAskSendInput,
+    review: AdminAskReviewInput | null
   ) {
-    event.preventDefault();
-
-    if (!selectedAdminTicket) {
+    if (!adminAskWorkspaceThread) {
       return;
     }
 
-    setSavingAdminTicketStatus(true);
+    setSavingAdminAskSend(true);
     setMessage("");
 
     try {
-      const { error } = await supabase.rpc("update_support_ticket_status", {
-        p_category: adminTicketCategory,
-        p_needs_admin_followup: adminTicketNeedsFollowup,
-        p_note: adminTicketChangeNote,
-        p_priority: adminTicketPriority,
-        p_status: adminTicketStatus,
-        p_ticket_id: selectedAdminTicket.id,
+      const trimmedBody = input.messageBody.trim();
+      const threadIsTerminal =
+        adminAskWorkspaceThread.case_status === "resolved" ||
+        adminAskWorkspaceThread.case_status === "closed";
+      // A visible reply into an already-resolved/closed thread, sent with
+      // no explicit status choice, must not silently stay resolved/closed
+      // -- that would hide a live reply from every queue. Default to the
+      // same "we replied, waiting on them" state a reply from open/
+      // waiting_on_admin already lands in via the RPC's own inference;
+      // an admin who explicitly picks something else (including
+      // re-confirming resolved) is never overridden here.
+      const effectiveCaseStatusOverride =
+        input.caseStatusOverride ??
+        (threadIsTerminal ? "waiting_on_user" : null);
+
+      if (trimmedBody) {
+        const { data: sentMessage, error } = await supabase.rpc(
+          "add_ask_message_with_case_transition",
+          {
+            p_author_role: "admin",
+            p_case_status_override: input.isInternal
+              ? null
+              : effectiveCaseStatusOverride,
+            p_is_internal: input.isInternal,
+            p_message_body: trimmedBody,
+            p_thread_id: adminAskWorkspaceThread.id,
+          }
+        );
+
+        if (error) {
+          throw error;
+        }
+
+        const sentMessageId =
+          sentMessage && typeof sentMessage === "object" && "id" in sentMessage
+            ? String(sentMessage.id)
+            : "";
+
+        if (sentMessageId && !input.isInternal) {
+          void notifyUserOfAdminAskReply(sentMessageId);
+        }
+      } else if (!input.isInternal && effectiveCaseStatusOverride) {
+        const { error } = await supabase.rpc("set_ask_thread_case_status", {
+          p_case_status: effectiveCaseStatusOverride,
+          p_thread_id: adminAskWorkspaceThread.id,
+        });
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      if (review && adminAskWorkspaceSubmission) {
+        const { error: reviewError } = await supabase.rpc(
+          "create_ask_submission_review",
+          {
+            p_admin_note: review.adminNote || null,
+            p_answer_quality: review.answerQuality,
+            p_ask_submission_id: adminAskWorkspaceSubmission.id,
+            p_improvement_category: review.improvementCategory,
+            p_recommended_action: review.recommendedAction || null,
+          }
+        );
+
+        if (reviewError) {
+          throw reviewError;
+        }
+      }
+
+      showToast("Sent.", { type: "success" });
+      await loadAdminAskWorkspaceForThreadId(
+        adminAskWorkspaceThread.id,
+        adminAskWorkspaceThread.user_label
+      );
+      void loadAdminAskQueues();
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setSavingAdminAskSend(false);
+    }
+  }
+
+  // Secondary, explicit one-click action for a status change with nothing
+  // new to say -- e.g. confirming an already-correct AI answer. The primary
+  // path for changing case_status stays the reply/note form above, since
+  // most resolves/reopens naturally come with something to tell the user.
+  async function handleAdminAskQuickStatus(status: AskCaseStatus) {
+    if (!adminAskWorkspaceThread) {
+      return;
+    }
+
+    setSavingAdminAskQuickStatus(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.rpc("set_ask_thread_case_status", {
+        p_case_status: status,
+        p_thread_id: adminAskWorkspaceThread.id,
       });
 
       if (error) {
         throw error;
       }
 
-      setAdminTicketChangeNote("");
-      await loadAdminSupportTickets();
-      showToast("Ticket updated.", { type: "success" });
+      showToast(status === "resolved" ? "Marked resolved." : "Reopened.", {
+        type: "success",
+      });
+      await loadAdminAskWorkspaceForThreadId(
+        adminAskWorkspaceThread.id,
+        adminAskWorkspaceThread.user_label
+      );
+      void loadAdminAskQueues();
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
-      setSavingAdminTicketStatus(false);
+      setSavingAdminAskQuickStatus(false);
     }
   }
 
-  async function handleMarkSupportQuestionSeen(ticket: SupportTicket) {
-    if (!ticket.user_has_unread_update) {
+  async function handleMarkHomeAskThreadSeen(thread: AskThreadCard) {
+    if (!thread.user_has_unread_update) {
       return;
     }
 
     try {
-      const { error } = await supabase.rpc("mark_support_ticket_seen", {
-        p_ticket_id: ticket.id,
+      const { error } = await supabase.rpc("mark_ask_thread_seen", {
+        p_thread_id: thread.id,
       });
 
       if (error) {
         throw error;
       }
 
-      await loadCurrentUserSupportTickets();
+      await loadCurrentUserAskThread();
     } catch (error) {
       setMessage(getErrorMessage(error));
     }
@@ -11744,10 +11239,6 @@ export function CarePlandPers({
       await loadProductMgmt();
     }
 
-    if (tab === "tickets") {
-      await loadAdminSupportTickets();
-    }
-
     if (tab === "users") {
       await loadAdminUserActivity();
     }
@@ -11764,11 +11255,8 @@ export function CarePlandPers({
       await loadAdminIntegrationErrors();
     }
 
-    if (tab === "assistantReview") {
-      await Promise.all([
-        loadAskReviewSubmissions(),
-        loadAssistantReviewInteractions(),
-      ]);
+    if (tab === "askConsole") {
+      await loadAdminAskQueues();
     }
 
     await markAdminScopeViewed("admin_tab", tab);
@@ -17557,12 +17045,21 @@ export function CarePlandPers({
               onClearMessage={() => setMessage("")}
               onGoogleSignIn={handleGoogleSignIn}
               onPasswordReset={handlePasswordReset}
+              onResendConfirmationEmail={handleResendSignUpConfirmationEmail}
               onSignIn={handleSignIn}
               onSignUp={handleSignUp}
+              onUseDifferentSignUpEmail={() => {
+                setAuthMode("signUp");
+                setSignUpConfirmationEmail("");
+                setEmail("");
+                setPassword("");
+                setConfirmPassword("");
+              }}
               password={password}
               passwordsMismatch={passwordsMismatch}
               signInButtonLabel="Sign in again"
               signInDescription="Your session ended. Sign in to continue."
+              signUpConfirmationEmail={signUpConfirmationEmail}
               signedInEmail={null}
             />
           </aside>
@@ -17577,97 +17074,99 @@ export function CarePlandPers({
     !showAuthGateway &&
     entryHostMode === "public"
   ) {
-    return <PublicWebsite onOpenApp={() => setShowAuthGateway(true)} />;
+    return (
+      <PublicWebsite
+        onGetStarted={() => {
+          setAuthMode("signUp");
+          setShowAuthGateway(true);
+        }}
+        onOpenApp={() => {
+          setAuthMode("signIn");
+          setShowAuthGateway(true);
+        }}
+      />
+    );
   }
 
   const adminWorkspaceProps = createAdminWorkspaceProps({
-    activeAdminTopTab, adminAccessEvents, adminAttentionFor, adminDashboardFollowupCount,
+    activeAdminTopTab, adminAccessEvents, adminAskAnalysisRuns, adminAskAnalysisSelectionIds,
+    adminAskNeedsResponse, adminAskQualitySubmissions, adminAskWorkspaceMessages, adminAskWorkspaceReviews,
+    adminAskWorkspaceSubmission, adminAskWorkspaceThread, adminAttentionFor, adminDashboardFollowupCount,
     adminDashboardNewCount, adminEmailUpdateCurrentEmail, adminEmailUpdateNewEmail, adminEmailUpdateReason,
     adminEmailUpdateResult, adminIntegrationErrorRowKey, adminIntegrationErrorStats, adminIntegrationErrors,
     adminPriorities, adminPrioritiesError, adminPrioritiesSummary,
     adminLastViewedAt, adminReadonlyPanelRef, adminReadonlySnapshot, adminRevealedSensitiveData,
     setAdminRecommendationsReviewDraftSummary,
-    adminSampleEmail, adminSampleForceDeclined, adminSampleStatus, adminSupportTickets,
-    adminTab, adminTabForTopTab, adminTicketCategory, adminTicketChangeNote,
-    adminTicketInternalNote, adminTicketNeedsFollowup, adminTicketPriority, adminTicketReplyBody,
-    adminTicketStatus, adminUserActivity, adminUserActivityFilter, adminUserActivitySort,
+    adminSampleEmail, adminSampleForceDeclined, adminSampleStatus,
+    adminTab, adminTabForTopTab, adminUserActivity, adminUserActivityFilter, adminUserActivitySort,
     adminUserActivityStats, agentEscalationGuidance, agentKnowledgeAutomationSettings, agentKnowledgeChangeNote,
     agentKnowledgeCheckRuns, agentKnowledgeProposalDrafts, agentKnowledgeProposalNotes, agentKnowledgeProposalPublishNote,
     agentKnowledgeProposals, agentKnowledgeVersions, agentKnownLimitations, agentProductFacts,
     agentVoiceGuidance, aiAdminTab, aiInstructionVersion, aiInstructionVersions,
-    aiOperationCostError, aiOperationCostRangeDays, aiOperationCostSummary, aiOperationCostUserSummary,
-    aiOperationCostViewMode, aiWorkflows, allAdminIntegrationErrorsSelected,
-    analyzingAssistantReviews, appContentBody, appContentCategories, appContentChangeNote,
+    aiOperationCostError, aiOperationCostLogFailureCount, aiOperationCostRangeDays, aiOperationCostSummary,
+    aiOperationCostUserSummary, aiOperationCostViewMode, aiWorkflows, allAdminIntegrationErrorsSelected,
+    analyzingAdminAskSubmissions, appContentBody, appContentCategories, appContentChangeNote,
     appContentDescription, appContentLabel, appContentOptions, appContentSaveMessage,
     appContentVersions, appSessionSettings, appointments, askModuleLabInput,
-    askModuleLabKey, askModuleLabResults, askRecommendationDecisionSummary, askRecommendationDecisions,
-    askReviewNote, askReviewRoutingState, askReviewSubmissions, askRoutingSettingsDraft,
-    askSubmissionLinks, assistantAnalysisResult, assistantAnalysisRunNote, assistantAnalysisRunStatus,
-    assistantAnalysisRuns, assistantInteractionUserLabel, assistantReviewAdminReviews, assistantReviewConfidenceFilter,
-    assistantReviewHasFeedbackOnly, assistantReviewInteractions, assistantReviewNote, assistantReviewOutcomeFilter,
-    assistantReviewPromptFilter, assistantReviewPromptVersions, assistantReviewRecommendedAction, assistantReviewStatus,
-    cancelEditingProductMgmtItem, careSubjects, carePrepHistory, closeAdminReadonlyUserView, createProductItemFromAskRecommendation,
-    createSupportTicketFromAskRecommendation, deleteSelectedAdminIntegrationErrors, deletingAdminIntegrationErrors, draftSourceVersion,
+    askModuleLabKey, askModuleLabResults, askRoutingSettingsDraft,
+    cancelEditingProductMgmtItem, careSubjects, carePrepHistory, closeAdminReadonlyUserView,
+    deleteSelectedAdminIntegrationErrors, deletingAdminIntegrationErrors, draftSourceVersion,
     earlyAccessIntakeAdminNotes, earlyAccessIntakeDraft, earlyAccessIntakeFilter, earlyAccessIntakeRows,
     earlyAccessIntakeStats, editingProductMgmtItemId, expandedAdminUserCareVipRows, filteredAdminUserActivity,
-    filteredAppContentOptions, filteredAssistantReviewInteractions, filteredEarlyAccessIntakeRows,
-    formatDate, formatDateOnly, handleAddAdminInternalNote, handleAddAdminTicketReply,
-    handleAdminUpdateUserEmail, handleAnalyzeFilteredAssistantReviews, handleChangeAdminPriorityStatus, handleChangeAdminTab, handleChangeAiOperationCostRange, handleChangeAiAdminTab,
+    filteredAppContentOptions, filteredEarlyAccessIntakeRows,
+    formatDate, formatDateOnly,
+    handleAdminAskQuickStatus, handleAdminUpdateUserEmail, handleChangeAdminPriorityStatus, handleChangeAdminTab, handleChangeAiOperationCostRange, handleChangeAiAdminTab,
     handleChangeAiWorkflow, handleChangeAppContentCategory, handleChangeAppContentKey, handleChangeHistoryAppointment,
-    handleChangeProductMgmtSection, handleCreateAssistantAdminReview, handleCreateEarlyAccessIntake, handleCreateProductMgmtArea,
+    handleChangeProductMgmtSection, handleCreateAdminAskProductItem, handleCreateEarlyAccessIntake, handleCreateProductMgmtArea,
     handleDeferAdminPriority,
     handleCreateProductMgmtItem, handleLoadAdminSampleStatus, handlePublishAgentKnowledgeProposal, handleQueueAgentKnowledgeManualCheck,
     handleResolveProductMgmtItem, handleRetireProductMgmtArea, handleRevertAppContent, handleRevertInstructionVersion,
-    handleReviewAgentKnowledgeProposalItem, handleRunAskModuleLab, handleSaveAgentKnowledge, handleSaveAgentKnowledgeAutomationSettings,
+    handleReviewAgentKnowledgeProposalItem, handleRunAdminAskAnalysis, handleRunAskModuleLab, handleSaveAgentKnowledge, handleSaveAgentKnowledgeAutomationSettings,
     handleSaveAiInstructions, handleSaveAppContent, handleSaveAppSessionSettings, handleSeedAdminSampleData,
-    handleSetUserAdmin,
-    handleUpdateAdminTicketStatus, handleUpdateAskReview, handleUpdateAskRoutingSettings, handleUpdateAssistantAnalysisRun,
+    handleSendAdminAsk, handleSetUserAdmin,
+    handleUpdateAdminAskAnalysisRun, handleUpdateAskRoutingSettings,
     handleUpdateEarlyAccessIntake, handleUpdateProductMgmtItem, historyAppointmentId, instructionChangeNote,
     instructionModel, instructionOutputSchema, instructionSystemPrompt, instructionUserPrompt,
-    intakeHistory, isNewForAdmin, loadAdminAccessEvents, loadAdminAttentionOverview,
-    loadAdminIntegrationErrors, loadAdminPriorities, loadAdminSupportTickets, loadAdminUserActivity, loadAgentKnowledgeProposals,
-    loadAiInstructions, loadAppContent, loadAskReviewSubmissions, loadAssistantReviewInteractions,
+    intakeHistory, isNewForAdmin, loadAdminAccessEvents, loadAdminAskQueues, loadAdminAttentionOverview,
+    loadAdminIntegrationErrors, loadAdminPriorities, loadAdminUserActivity, loadAgentKnowledgeProposals,
+    loadAiInstructions, loadAppContent,
     loadCarePrepHistory, loadEarlyAccessIntake, loadInstructionVersionIntoEditor, loadIntakeHistory,
-    loadingAdminAccessEvents, loadingAdminIntegrationErrors, loadingAdminPriorities, loadingAdminReadonlyUserId, loadingAdminSampleStatus,
-    loadingAdminTickets, loadingAdminUserActivity, loadingAgentKnowledgeProposals, loadingAiOperationCosts,
-    loadingAppContent, loadingAskReviews, loadingAskRoutingSettings, loadingAssistantReviews,
+    loadingAdminAccessEvents, loadingAdminAskQueues, loadingAdminAskWorkspace, loadingAdminIntegrationErrors, loadingAdminPriorities, loadingAdminReadonlyUserId, loadingAdminSampleStatus,
+    loadingAdminUserActivity, loadingAgentKnowledgeProposals, loadingAiOperationCosts,
+    loadingAppContent, loadingAskRoutingSettings,
     loadingCarePrepHistory, loadingEarlyAccessIntake, loadingInstructions, loadingProductMgmt,
     newProductMgmtAreaDescription, newProductMgmtAreaLabel, newProductMgmtBody, newProductMgmtChangeNote,
-    newProductMgmtPriority, newProductMgmtStatus, newProductMgmtTitle, openAdminPriorityDestination, openAdminReadonlyUserView,
-    openAskRelatedItem, openAskSubmissionReview, productMgmtAreas, productMgmtItemDraft,
-    productMgmtItems, publishingAgentKnowledgeProposalId, queueingAgentKnowledgeRun, recordAskRecommendationDecision,
-    resetAppContentEditor, resolveAskAnswerRecommendation, resolvingProductMgmtItemId, retiringProductMgmtAreaId,
+    newProductMgmtPriority, newProductMgmtStatus, newProductMgmtTitle, openAdminAskSubmissionInConsole, openAdminPriorityDestination, openAdminReadonlyUserView,
+    productMgmtAreas, productMgmtItemDraft,
+    productMgmtItems, publishingAgentKnowledgeProposalId, queueingAgentKnowledgeRun,
+    resetAppContentEditor, resolvingProductMgmtItemId, retiringProductMgmtAreaId,
     revealAdminSensitiveData, revealingAdminSensitiveKey, revertingAppContentForId, revertingInstructionForId,
     runningAskModuleLab, sampleDataStatusText, saveAdminContactDetails, savingAdminContactDetails,
-    savingAdminTicketReply, savingAdminTicketStatus, savingAgentKnowledge, savingAgentKnowledgeAutomationSettings,
-    savingAgentKnowledgeProposalItemId, savingAppContent, savingAppSessionSettings, savingAskReview,
-    savingAskReviewAction, savingAskRoutingSettings, savingAssistantAdminReview, savingAssistantAnalysisRunReview,
+    savingAdminAskProductItem, savingAdminAskQuickStatus, savingAdminAskSend, savingAgentKnowledge, savingAgentKnowledgeAutomationSettings,
+    savingAgentKnowledgeProposalItemId, savingAppContent, savingAppSessionSettings,
+    savingAskRoutingSettings,
     savingEarlyAccessIntake, savingInstructions, savingProductMgmtArea, savingProductMgmtEditItemId,
-    savingProductMgmtItem, seedingAdminSampleData, selectAdminTicket, selectAskReviewSubmission,
-    selectAssistantAnalysisRun, selectedAdminIntegrationErrorKeys, selectedAdminTicket, selectedAdminTicketMessages,
+    savingProductMgmtItem, seedingAdminSampleData, selectAdminAskSubmission, selectAdminAskThread,
+    selectedAdminIntegrationErrorKeys,
     selectedAgentKnowledgeProposal, selectedAgentKnowledgeProposalItems, selectedAgentKnowledgeProposalPublishableCount, selectedAiWorkflow,
     selectedAiWorkflowConfig, selectedAppContent, selectedAppContentCategory, selectedAppContentCategoryConfig,
-    selectedAppContentKey, selectedAskReviewSubmission, selectedAssistantAdminReviews, selectedAssistantAnalysisRun,
-    selectedAssistantReviewInteraction, selectedProductMgmtArea, selectedProductMgmtItems, selectedProductMgmtSection,
+    selectedAppContentKey, selectedProductMgmtArea, selectedProductMgmtItems, selectedProductMgmtSection,
     selectedProductMgmtSectionConfig, selectedVisibleAdminIntegrationErrorKeys, setAdminEmailUpdateCurrentEmail, setAdminEmailUpdateNewEmail,
     setAdminEmailUpdateReason, setAdminEmailUpdateResult, setAdminSampleEmail, setAdminSampleForceDeclined,
-    setAdminSampleStatus, setAdminTicketCategory, setAdminTicketChangeNote, setAdminTicketInternalNote,
-    setAdminTicketNeedsFollowup, setAdminTicketPriority, setAdminTicketReplyBody, setAdminTicketStatus,
+    setAdminSampleStatus,
     setAdminUserActivityFilter, setAgentEscalationGuidance, setAgentKnowledgeAutomationSettings, setAgentKnowledgeChangeNote,
     setAgentKnowledgeProposalDrafts, setAgentKnowledgeProposalNotes, setAgentKnowledgeProposalPublishNote, setAgentKnownLimitations,
     setAgentProductFacts, setAgentVoiceGuidance, setAppContentBody, setAppContentChangeNote,
     setAppContentDescription, setAppContentLabel, setAppSessionSettings, setAskModuleLabInput,
-    setAskModuleLabKey, setAskReviewNote, setAskReviewRoutingState, setAskRoutingSettingsDraft,
-    setAssistantAnalysisRunNote, setAssistantAnalysisRunStatus, setAssistantReviewConfidenceFilter, setAssistantReviewHasFeedbackOnly,
-    setAssistantReviewNote, setAssistantReviewOutcomeFilter, setAssistantReviewPromptFilter, setAssistantReviewRecommendedAction,
-    setAssistantReviewStatus, setEarlyAccessIntakeAdminNotes, setEarlyAccessIntakeFilter, setExpandedAdminUserCareVipRows,
+    setAskModuleLabKey, setAskRoutingSettingsDraft,
+    setEarlyAccessIntakeAdminNotes, setEarlyAccessIntakeFilter, setExpandedAdminUserCareVipRows,
     setAiOperationCostViewMode, setInstructionChangeNote, setInstructionModel, setInstructionOutputSchema, setInstructionSystemPrompt,
     setInstructionUserPrompt, setNewProductMgmtAreaDescription, setNewProductMgmtAreaLabel, setNewProductMgmtBody,
     setNewProductMgmtChangeNote, setNewProductMgmtPriority, setNewProductMgmtStatus, setNewProductMgmtTitle,
-    setSelectedAgentKnowledgeProposalId, setSelectedAiWorkflow, setSelectedAssistantReviewId, setShowProductMgmtAreaForm,
+    setSelectedAgentKnowledgeProposalId, setSelectedAiWorkflow, setShowProductMgmtAreaForm,
     showProductMgmtAreaForm, startEditingProductMgmtItem, stickySecondaryOffset,
-    supportAdminNavItems, supportAdminTabs, supportAnalysisStatusLabel, systemAdminNavItems,
-    systemAdminTabs, toggleAdminIntegrationErrorSelection, toggleAdminUserActivitySort, toggleAllAdminIntegrationErrors,
+    supportAdminNavItems, supportAdminTabs, systemAdminNavItems,
+    systemAdminTabs, toggleAdminAskAnalysisSelection, toggleAdminIntegrationErrorSelection, toggleAdminUserActivitySort, toggleAllAdminIntegrationErrors,
     topAdminNavItems, updateEarlyAccessIntakeDraft, updateProductMgmtItemDraft, updatingAdminUserEmail,
     updatingEarlyAccessIntakeId, usersAdminNavItems, visibleProductMgmtSections,
   });
@@ -17801,17 +17300,10 @@ export function CarePlandPers({
                 isAdmin
                   ? [
                       {
-                        count: adminNewTickets.length,
-                        label: "New",
-                        tone: adminNewTickets.length > 0 ? "urgent" : "neutral",
-                      },
-                      {
-                        count: adminTicketsNeedingFollowup.length,
-                        label: "f/u",
+                        count: adminAskNeedsResponse.length,
+                        label: "Needs response",
                         tone:
-                          adminTicketsNeedingFollowup.length > 0
-                            ? "attention"
-                            : "neutral",
+                          adminAskNeedsResponse.length > 0 ? "urgent" : "neutral",
                       },
                     ]
                   : []
@@ -18125,10 +17617,19 @@ export function CarePlandPers({
               onClearMessage={() => setMessage("")}
               onGoogleSignIn={handleGoogleSignIn}
               onPasswordReset={handlePasswordReset}
+              onResendConfirmationEmail={handleResendSignUpConfirmationEmail}
               onSignIn={handleSignIn}
               onSignUp={handleSignUp}
+              onUseDifferentSignUpEmail={() => {
+                setAuthMode("signUp");
+                setSignUpConfirmationEmail("");
+                setEmail("");
+                setPassword("");
+                setConfirmPassword("");
+              }}
               password={password}
               passwordsMismatch={passwordsMismatch}
+              signUpConfirmationEmail={signUpConfirmationEmail}
               signedInEmail={signedInEmail}
             />
 
@@ -18688,36 +18189,24 @@ export function CarePlandPers({
             {signedInEmail &&
             !needsBetaAgreement &&
             !needsOnboarding &&
-            (hasUpdatedSupportQuestion ||
-              askingSupportQuestion ||
-              supportQuestionExpanded) ? (
+            (hasUpdatedSupportQuestion || homeAskExpanded) ? (
               <section
                 className={`rounded-lg border p-3 shadow-sm ${
                   hasUpdatedSupportQuestion
                     ? "border-amber-200 bg-amber-50 text-amber-950"
-                    : currentSupportTicket
-                      ? "border-slate-200 bg-slate-100 text-slate-800"
-                      : askingSupportQuestion
-                        ? "border-blue-200 bg-blue-50 text-blue-950"
-                        : "border-slate-200 bg-white text-slate-800"
+                    : "border-slate-200 bg-slate-100 text-slate-800"
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold">
                       {hasUpdatedSupportQuestion
-                          ? "We have more info about your question."
-                        : currentSupportTicket
-                          ? "You have an open question."
-                          : "Need a hand? Ask a question"}
+                        ? "We have more info about your question."
+                        : "You have an open question."}
                     </p>
-                    {currentSupportTicket ? (
-                      <p className="mt-1 text-sm opacity-80">
-                        {currentSupportTicket.subject}
-                      </p>
-                    ) : askingSupportQuestion ? (
-                      <p className="mt-1 text-sm opacity-80">
-                        Tell us what happened or what you were trying to do.
+                    {latestVisibleSupportMessage ? (
+                      <p className="mt-1 line-clamp-1 text-sm opacity-80">
+                        {latestVisibleSupportMessage.message_body}
                       </p>
                     ) : null}
                   </div>
@@ -18725,307 +18214,142 @@ export function CarePlandPers({
                     <button
                       className={gentleSmallSecondaryButtonClass}
                       onClick={() => {
-                        setSupportQuestionExpanded((isExpanded) => !isExpanded);
-                        if (currentSupportTicket?.user_has_unread_update) {
-                          void handleMarkSupportQuestionSeen(currentSupportTicket);
+                        setHomeAskExpanded((isExpanded) => !isExpanded);
+                        if (homeAskThread?.user_has_unread_update) {
+                          void handleMarkHomeAskThreadSeen(homeAskThread);
                         }
                       }}
                       type="button"
                     >
-                      {supportQuestionExpanded ? "Hide" : currentSupportTicket ? "More" : "Ask a question"}
+                      {homeAskExpanded ? "Hide" : "More"}
                     </button>
-                    {currentSupportTicket ? (
-                      <button
-                        className={gentleSmallSecondaryButtonClass}
-                        onClick={() => {
-                          setAskingSupportQuestion(true);
-                          setSupportQuestionExpanded(true);
-                          setSupportAssistantResult(null);
-                          setSupportAssistantFeedback("");
-                          setSupportAssistantFeedbackMode(null);
-                          setSupportAssistantResolution(null);
-                        }}
-                        type="button"
-                      >
-                        Ask another
-                      </button>
-                    ) : null}
+                    <button
+                      className={gentleSmallSecondaryButtonClass}
+                      onClick={() => setAskPanelOpen(true)}
+                      type="button"
+                    >
+                      Ask another
+                    </button>
                   </div>
                 </div>
 
-                {supportQuestionExpanded ? (
+                {homeAskExpanded && homeAskThread ? (
                   <div className="mt-3 rounded-md border border-white/70 bg-white p-3 text-slate-800">
-                    {currentSupportTicket && !askingSupportQuestion ? (
-                      <div>
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <p className="font-semibold text-slate-950">
-                              {currentSupportTicket.subject}
-                            </p>
-                            <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
-                              {currentSupportTicket.status.replace("_", " ")} · updated {formatDate(currentSupportTicket.updated_at)}
-                            </p>
-                          </div>
-                          <button
-                            className={gentleSmallSecondaryButtonClass}
-                            onClick={() => {
-                              setAskingSupportQuestion(true);
-                              setSupportAssistantResult(null);
-                              setSupportAssistantFeedback("");
-                              setSupportAssistantFeedbackMode(null);
-                              setSupportAssistantResolution(null);
-                            }}
-                            type="button"
-                          >
-                            New question
-                          </button>
-                        </div>
-                        {latestVisibleSupportMessage ? (
-                          <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
-                            <p className="font-semibold text-slate-900">
-                              {latestVisibleSupportMessage.author_role === "admin"
-                                ? "CarePland replied"
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      {homeAskThread.case_status.replace(/_/g, " ")} · updated{" "}
+                      {formatDate(homeAskThread.updated_at)}
+                    </p>
+
+                    <div className="mt-3 space-y-2">
+                      {homeAskMessages.map((messageRow) => (
+                        <div
+                          className="rounded-md bg-slate-50 p-3 text-sm text-slate-700"
+                          key={messageRow.id}
+                        >
+                          <p className="font-semibold text-slate-900">
+                            {messageRow.author_role === "admin"
+                              ? "CarePland replied"
+                              : messageRow.author_role === "assistant"
+                                ? "CarePland assistant"
                                 : "You wrote"}
-                            </p>
-                            <p className="mt-1 whitespace-pre-wrap">
-                              {latestVisibleSupportMessage.message_body}
-                            </p>
-                          </div>
-                        ) : null}
-                        <form className="mt-3" onSubmit={handleAddSupportReply}>
-                          <label className="block text-sm font-medium text-slate-700">
-                            Add a comment
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap">
+                            {messageRow.message_body}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {homeAskFeedbackPending ? (
+                      <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-slate-800">
+                        {homeAskFeedbackMode === "not_helpful" ? (
+                          <label className="block font-medium text-slate-700">
+                            {appContentText("support_missing_feedback_prompt")}
                             <textarea
-                              className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                              disabled={savingSupportReply}
+                              className="mt-1 min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                              disabled={savingHomeAskFeedback}
                               onChange={(event) =>
-                                setSupportReplyBody(event.target.value)
+                                setHomeAskFeedbackNote(event.target.value)
                               }
-                              placeholder="Add a quick follow-up or let us know whether this helped."
-                              value={supportReplyBody}
+                              placeholder="Optional"
+                              value={homeAskFeedbackNote}
                             />
                           </label>
-                          <button
-                            className={`mt-2 ${gentlePrimaryButtonClass} text-sm`}
-                            disabled={savingSupportReply || !supportReplyBody.trim()}
-                            type="submit"
-                          >
-                            {savingSupportReply ? "Sending..." : "Send comment"}
-                          </button>
-                        </form>
-                      </div>
-                    ) : (
-                      <form onSubmit={handleAskSupportAssistant}>
-                        <h2 className="text-lg font-semibold text-slate-950">
-                          Ask a question
-                        </h2>
-                        <p className="mt-1 text-sm text-slate-600">
-                          Tell us what happened or what you were trying to do.
-                        </p>
-                        {!supportAssistantResult ? (
-                          <>
-                            <label className="mt-3 block text-sm font-medium text-slate-700">
-                              Short subject
-                              <input
-                                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                disabled={savingSupportQuestion || askingSupportAssistant}
-                                onChange={(event) =>
-                                  setSupportQuestionSubject(event.target.value)
-                                }
-                                placeholder="e.g. I cannot save an appointment"
-                                required
-                                value={supportQuestionSubject}
-                              />
-                            </label>
-                            <label className="mt-3 block text-sm font-medium text-slate-700">
-                              Details
-                              <textarea
-                                className="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                                disabled={savingSupportQuestion || askingSupportAssistant}
-                                onChange={(event) =>
-                                  setSupportQuestionBody(event.target.value)
-                                }
-                                placeholder="What did you expect? What happened instead?"
-                                required
-                                value={supportQuestionBody}
-                              />
-                            </label>
-                          </>
                         ) : (
-                          <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-700">
-                            <p className="font-semibold text-slate-900">
-                              {supportQuestionSubject}
-                            </p>
-                            <p className="mt-1 line-clamp-2 whitespace-pre-wrap">
-                              {supportQuestionBody}
-                            </p>
-                          </div>
+                          <p className="font-semibold text-slate-900">
+                            Was this answer helpful?
+                          </p>
                         )}
-
-                        {supportAssistantResult ? (
-                          <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-slate-800">
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <div>
-                                <p className="font-semibold text-slate-950">
-                                  CarePland assistant
-                                </p>
-                                <div className="mt-2">
-                                  <AIReviewBadge confidence={supportAssistantResult.confidence} />
-                                </div>
-                              </div>
-                              {supportAssistantResult.escalationRecommended ? (
-                                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                                  May need review
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="mt-3 whitespace-pre-wrap">
-                              {supportAssistantResult.answer}
-                            </p>
-                            {supportAssistantResult.suggestedNextStep ? (
-                              <p className="mt-3 font-semibold text-slate-900">
-                                {supportAssistantResult.suggestedNextStep}
-                              </p>
-                            ) : null}
-                            {supportAssistantResult.escalationReason ? (
-                              <p className="mt-2 text-xs text-slate-600">
-                                Review note: {supportAssistantResult.escalationReason}
-                              </p>
-                            ) : null}
-
-                            {supportAssistantResolution === "not_helpful_saved" ? (
-                              <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
-                                <p className="font-semibold text-slate-950">
-                                  Thank you for submitting this.
-                                </p>
-                                <p className="mt-1">
-                                  We use this information to improve the quality of CarePland answers. If this still needs attention, send it for review.
-                                </p>
-                              </div>
-                            ) : null}
-
-                            {supportAssistantFeedbackMode === "not_helpful" ? (
-                              <label className="mt-3 block font-medium text-slate-700">
-                                {appContentText("support_missing_feedback_prompt")}
-                                <textarea
-                                  className="mt-1 min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-                                  disabled={savingSupportAssistantFeedback || savingSupportQuestion}
-                                  onChange={(event) =>
-                                    setSupportAssistantFeedback(event.target.value)
-                                  }
-                                  placeholder="Optional"
-                                  value={supportAssistantFeedback}
-                                />
-                              </label>
-                            ) : null}
-
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {!supportAssistantFeedbackMode && !supportAssistantResolution ? (
-                                <>
-                                  <button
-                                    className={gentleSmallSecondaryButtonClass}
-                                    disabled={savingSupportAssistantFeedback}
-                                    onClick={() => handleSupportAssistantFeedback("helpful")}
-                                    type="button"
-                                  >
-                                    Helpful
-                                  </button>
-                                  <button
-                                    className={gentleSmallSecondaryButtonClass}
-                                    disabled={savingSupportAssistantFeedback}
-                                    onClick={() => {
-                                      setSupportAssistantFeedbackMode("not_helpful");
-                                      setSupportAssistantResolution(null);
-                                    }}
-                                    type="button"
-                                  >
-                                    Not helpful
-                                  </button>
-                                </>
-                              ) : null}
-                              {supportAssistantFeedbackMode === "not_helpful" ? (
-                                <button
-                                  className={gentleSmallBlueButtonClass}
-                                  disabled={savingSupportAssistantFeedback}
-                                  onClick={() => handleSupportAssistantFeedback("not_helpful")}
-                                  type="button"
-                                >
-                                  {savingSupportAssistantFeedback ? "Saving..." : "Save feedback"}
-                                </button>
-                              ) : null}
-                              {supportAssistantFeedbackMode === "not_helpful" ? (
-                                <button
-                                  className={gentleSmallSecondaryButtonClass}
-                                  disabled={savingSupportAssistantFeedback || savingSupportQuestion}
-                                  onClick={() => {
-                                    setSupportAssistantFeedbackMode(null);
-                                    setSupportAssistantFeedback("");
-                                  }}
-                                  type="button"
-                                >
-                                  Back
-                                </button>
-                              ) : null}
-                              {supportAssistantResolution === "not_helpful_saved" ? (
-                                <button
-                                  className={gentleSmallSecondaryButtonClass}
-                                  disabled={savingSupportQuestion}
-                                  onClick={() => {
-                                    setSupportQuestionSubject("");
-                                    setSupportQuestionBody("");
-                                    setSupportAssistantResult(null);
-                                    setSupportAssistantFeedback("");
-                                    setSupportAssistantFeedbackMode(null);
-                                    setSupportAssistantResolution(null);
-                                    setAskingSupportQuestion(false);
-                                    setSupportQuestionExpanded(false);
-                                  }}
-                                  type="button"
-                                >
-                                  Done
-                                </button>
-                              ) : null}
-                              {supportAssistantResolution !== "helpful" ? (
-                                <button
-                                className={gentleSmallBlueButtonClass}
-                                disabled={savingSupportQuestion}
-                                onClick={handleEscalateSupportAssistant}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {homeAskFeedbackMode !== "not_helpful" ? (
+                            <>
+                              <button
+                                className={gentleSmallSecondaryButtonClass}
+                                disabled={savingHomeAskFeedback}
+                                onClick={() => handleHomeAskFeedback("helpful")}
                                 type="button"
                               >
-                                {savingSupportQuestion ? "Sending..." : "Send for review"}
-                                </button>
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : null}
+                                Helpful
+                              </button>
+                              <button
+                                className={gentleSmallSecondaryButtonClass}
+                                disabled={savingHomeAskFeedback}
+                                onClick={() => setHomeAskFeedbackMode("not_helpful")}
+                                type="button"
+                              >
+                                Not helpful
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className={gentleSmallBlueButtonClass}
+                                disabled={savingHomeAskFeedback}
+                                onClick={() => handleHomeAskFeedback("not_helpful")}
+                                type="button"
+                              >
+                                {savingHomeAskFeedback ? "Saving..." : "Save feedback"}
+                              </button>
+                              <button
+                                className={gentleSmallSecondaryButtonClass}
+                                disabled={savingHomeAskFeedback}
+                                onClick={() => {
+                                  setHomeAskFeedbackMode(null);
+                                  setHomeAskFeedbackNote("");
+                                }}
+                                type="button"
+                              >
+                                Back
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
 
-                        {!supportAssistantResult ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            className={`${gentlePrimaryButtonClass} text-sm`}
-                            disabled={
-                              askingSupportAssistant ||
-                              !supportQuestionSubject.trim() ||
-                              !supportQuestionBody.trim()
+                    {homeAskCanReply ? (
+                      <form className="mt-3" onSubmit={handleSendHomeAskReply}>
+                        <label className="block text-sm font-medium text-slate-700">
+                          Add a comment
+                          <textarea
+                            className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                            disabled={savingHomeAskReply}
+                            onChange={(event) =>
+                              setHomeAskReplyBody(event.target.value)
                             }
-                            type="submit"
-                          >
-                            {askingSupportAssistant ? "Checking..." : "Ask the CarePland Assistant"}
-                          </button>
-                          {currentSupportTicket ? (
-                            <button
-                              className={`${gentleSecondaryButtonClass} text-sm`}
-                              disabled={savingSupportQuestion}
-                              onClick={() => setAskingSupportQuestion(false)}
-                              type="button"
-                            >
-                              Back to open question
-                            </button>
-                          ) : null}
-                          </div>
-                        ) : null}
+                            placeholder="Add a quick follow-up or let us know whether this helped."
+                            value={homeAskReplyBody}
+                          />
+                        </label>
+                        <button
+                          className={`mt-2 ${gentlePrimaryButtonClass} text-sm`}
+                          disabled={savingHomeAskReply || !homeAskReplyBody.trim()}
+                          type="submit"
+                        >
+                          {savingHomeAskReply ? "Sending..." : "Send comment"}
+                        </button>
                       </form>
-                    )}
+                    ) : null}
                   </div>
                 ) : null}
               </section>

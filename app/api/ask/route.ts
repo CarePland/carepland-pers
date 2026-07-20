@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 import { estimateOpenAiResponseCost } from "@/app/lib/platform/ai/usageCosts";
+import { appContentDefaults } from "@/app/lib/platform/content/appContentConfig";
 
 type JsonObject = Record<string, unknown>;
 
@@ -338,7 +339,7 @@ const askUserFacingResponseRubric =
   "Global user-facing response rubric: Ask should sound like a CarePland routing surface, not a human agent. Avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical. Prefer neutral constructions such as \"This will be raised for review,\" \"This may need a closer look,\" \"A little more detail would help route this correctly,\" or \"Thanks for adding this.\" Do not deny that Ask is AI or pretend to be human. If AI identity is directly relevant, explain it plainly without overemphasizing it. Keep responses brief, calm, respectful, and non-corporate.";
 
 const fallbackAskRouterPrompt =
-  `You are the CarePland Personal Ask router. Your job is triage and recommendation, not doing every downstream task yourself. Review the current Ask conversation and decide whether to answer a safe app-use question, ask one useful clarifying question, route the intake for review, or mark it off-topic. Keep CarePland patient-facing language calm and plain. ${askUserFacingResponseRubric} If a user asks what you are, you may say: "This is an AI assistant designed to help route questions, feedback, and ideas throughout CarePland. It is not a replacement for real people; its purpose is to help the CarePland team better understand and respond to what users need, almost like CarePrep for support and product feedback." Do not provide medical, legal, privacy, account-security, billing, or emergency advice. Do not perform destructive actions or claim that data has been changed. Prefer human review for account/access, privacy/security, possible data loss, medical/emergency, abusive/spam, or unclear cases. If asking a clarifying question, ask only when the answer would materially improve routing, troubleshooting, or admin usefulness. Clarifying questions should sound conversational, brief, and a little forgiving, not formal or interrogative. For likely typos or near-matches, prefer simple language such as "Just to confirm — did you mean 'prep'?" or "The word 'perp' may have been a typo. Did you mean 'prep'?" Return valid JSON exactly matching the schema.`;
+  `You are the CarePland Personal Ask router. Your job is triage and recommendation, not doing every downstream task yourself. Review the current Ask conversation and decide whether to answer a safe app-use question, ask one useful clarifying question, route the intake for review, or mark it off-topic. Keep CarePland patient-facing language calm and plain. ${askUserFacingResponseRubric} If a user asks what you are, you may say: "This is an AI assistant designed to help route questions, feedback, and ideas throughout CarePland. It is not a replacement for real people; its purpose is to help the CarePland team better understand and respond to what users need, almost like CarePrep for support and product feedback." Do not provide medical, legal, privacy, account-security, billing, or emergency advice. Do not perform destructive actions or claim that data has been changed. Prefer human review for account/access, privacy/security, possible data loss, medical/emergency, abusive/spam, or unclear cases. If asking a clarifying question, ask only when the answer would materially improve routing, troubleshooting, or admin usefulness. Clarifying questions should sound conversational, brief, and a little forgiving, not formal or interrogative. For likely typos or near-matches, prefer simple language such as "Just to confirm — did you mean 'prep'?" or "The word 'perp' may have been a typo. Did you mean 'prep'?" Use answer_now only for genuine feature or "how do I..." questions that are directly answered by the current product facts and known limitations supplied in the product context below. When you do answer directly, write a clear, specific assistant_response grounded in those supplied facts -- never invent or guess at capabilities that are not listed there. If a question is not covered by the supplied facts, or you are not genuinely confident, do not fabricate an answer: choose route_now, needs_human_review, or ask_clarifying_question instead so it can be turned into actionable feedback or forwarded to a person, and be honest in the assistant_response that CarePland does not have a clear answer yet. If the message is really feedback, a complaint, a bug report, or an idea rather than a genuine question, do not use answer_now even if you could technically respond -- route it normally. Set confidence to honestly reflect how well the supplied product facts actually support your answer; do not report high confidence out of habit. Return valid JSON exactly matching the schema.`;
 
 const fallbackAskClarifierPrompt =
   `You are The Clarifier for CarePland Personal Ask. Your job is not to route everything; your job is to decide whether one more user question would materially improve routing, troubleshooting, or Admin review. Ask at most one concise follow-up question at a time. Sound conversational, brief, and forgiving, especially for likely typos. ${askUserFacingResponseRubric} If another question is low value, say not to ask and provide a brief understanding summary so the item can be routed for review. Do not interrogate the user. Do not ask questions just to be exhaustive. Return valid JSON exactly matching the schema.`;
@@ -354,6 +355,16 @@ const fallbackAskOffTopicHandlerPrompt =
 
 const fallbackAskOnboardingHelperPrompt =
   `You are the CarePland Personal Ask onboarding helper. Answer low-risk getting-started questions about profile setup, Early Access acknowledgements, Care Circle setup, the first-run Home welcome guide, adding a first appointment, importing appointment details, and demo examples. For profile setup, explain that CarePland keeps profile details lighter when a user authenticates with Google or Apple: email comes from auth, and extra contact details are optional unless the UI marks them otherwise. For email/password or email-update setup, the UI may require basic account/contact fields such as first and last name, phone, time zone, and ZIP so dates, account recovery, and support follow-up work correctly. Keep this from sounding like a medical intake form. If the user says they are confused, lost, unsure what the welcome screen means, or asks what to do next, respond with gentle orientation: reassure them briefly, explain that CarePland helps carry important appointment context forward from one visit to the next, name a few examples such as what changed, what mattered, and what to ask next, then suggest the easiest next step: adding or importing a first appointment. Keep answers brief, calm, and practical. ${askUserFacingResponseRubric} Do not give medical, legal, privacy, account-security, billing, or emergency advice. Do not claim to change data. Escalate if the user appears blocked by account state, email update, authentication, profile saving, missing Care Circle setup, data loss, or frustration. Return valid JSON exactly matching the schema.`;
+
+// Minimum router-reported confidence required to let an "answer_now" action
+// reach the user as a direct answer. Below this, Home Ask downgrades to the
+// normal routing flow instead of showing a possibly-ungrounded answer --
+// this is a code-level guarantee rather than relying purely on the prompt,
+// per the UX principle: if CarePland knows the answer, answer it; if it
+// doesn't, be honest and turn it into feedback. Not yet admin-tunable (see
+// ask_routing_settings.auto_create_min_confidence for the precedent) --
+// deliberately hardcoded for this first pass to keep the change scoped.
+const askAnswerNowMinConfidence = 0.75;
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -459,12 +470,60 @@ function isConnectAskContext({
   );
 }
 
-function productContextForAsk({
+// Home Ask's product-knowledge content keys reuse the same admin-editable
+// app_content_versions rows already maintained for the (currently unwired)
+// support assistant, rather than forking a second copy of the same facts.
+// Editing "Agent product facts" / "Agent known limitations" in Admin content
+// now also updates what Home Ask can answer directly.
+const askProductKnowledgeContentKeys = [
+  "support_agent_product_facts",
+  "support_agent_known_limitations",
+] as const;
+
+async function loadAskProductKnowledge(supabase: SupabaseClient) {
+  try {
+    const { data: rows, error } = await supabase
+      .from("app_content_versions")
+      .select("content_key,body")
+      .in("content_key", askProductKnowledgeContentKeys)
+      .eq("is_current", true);
+
+    if (error) {
+      throw error;
+    }
+
+    const byKey = new Map(
+      (rows ?? []).map((row) => [row.content_key as string, row.body as string])
+    );
+
+    return {
+      knownLimitations:
+        byKey.get("support_agent_known_limitations") ||
+        appContentDefaults.support_agent_known_limitations,
+      productFacts:
+        byKey.get("support_agent_product_facts") ||
+        appContentDefaults.support_agent_product_facts,
+    };
+  } catch (error) {
+    // Product knowledge is an enhancement to routing, not a hard dependency --
+    // if this lookup fails, fall back to the built-in defaults so Ask still
+    // routes normally instead of erroring out.
+    console.error("Ask: failed to load product knowledge content", error);
+    return {
+      knownLimitations: appContentDefaults.support_agent_known_limitations,
+      productFacts: appContentDefaults.support_agent_product_facts,
+    };
+  }
+}
+
+async function productContextForAsk({
   context,
   currentPage,
+  supabase,
 }: {
   context: JsonObject;
   currentPage: string;
+  supabase: SupabaseClient;
 }) {
   if (isConnectAskContext({ context, currentPage })) {
     return [
@@ -477,7 +536,18 @@ function productContextForAsk({
     ].join("\n");
   }
 
-  return "Product context:\nCarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Ask has a separate onboarding helper module for low-risk getting-started questions. Ask is intended for questions, ideas, workflow feedback, bugs, confusing moments, and things that may need review. Do not deny being AI or pretend to be human, but keep AI framing in the background unless the user asks or it matters for trust/review. If a user asks what you are, it is okay to say you are an AI assistant designed to help route questions, feedback, and ideas throughout CarePland, and that you are not a replacement for real people.";
+  const { knownLimitations, productFacts } = await loadAskProductKnowledge(
+    supabase
+  );
+
+  return [
+    "Product context:",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Ask has a separate onboarding helper module for low-risk getting-started questions.",
+    `Current product facts: ${productFacts}`,
+    `Known limitations: ${knownLimitations}`,
+    "Ask is intended for questions, ideas, workflow feedback, bugs, confusing moments, and things that may need review. When a user asks a straightforward feature or \"how do I...\" question that the product facts or known limitations above answer, respond directly and specifically using answer_now -- do not just acknowledge the question. If the facts above do not cover it, or the honest answer is that something is not available yet, say so plainly rather than guessing, and let it route to the team as feedback instead of inventing an answer.",
+    "Do not deny being AI or pretend to be human, but keep AI framing in the background unless the user asks or it matters for trust/review. If a user asks what you are, it is okay to say you are an AI assistant designed to help route questions, feedback, and ideas throughout CarePland, and that you are not a replacement for real people.",
+  ].join("\n");
 }
 
 function isLikelyOnboardingAsk({
@@ -750,6 +820,18 @@ async function logAskOperationCost({
 }
 
 export async function POST(request: NextRequest) {
+  // Declared outside try/catch (unlike askThread, which is scoped to the
+  // try block) so a failure partway through the flow can still surface
+  // which thread was in progress. Without this, a client whose request
+  // fails after the thread was created has no way to know threadId and
+  // will submit its retry with threadId empty -- creating a second, empty
+  // orphaned thread instead of resuming the one that already exists. This
+  // does not make the overall flow atomic (it still can't be: OpenAI calls
+  // sit between database writes, so a single all-or-nothing transaction
+  // across the whole request isn't achievable here) -- it only stops
+  // failures from silently multiplying abandoned threads.
+  let resumableThreadId: string | null = null;
+
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
       throw new Error("Missing Supabase server configuration.");
@@ -773,7 +855,6 @@ export async function POST(request: NextRequest) {
     const currentPage =
       typeof body.currentPage === "string" ? body.currentPage.trim() : "";
     const context = safeObject(body.context);
-    const productContext = productContextForAsk({ context, currentPage });
 
     if (!message) {
       throw new Error("Add a question, idea, or detail before using Ask.");
@@ -786,6 +867,12 @@ export async function POST(request: NextRequest) {
           Authorization: `Bearer ${accessToken}`,
         },
       },
+    });
+
+    const productContext = await productContextForAsk({
+      context,
+      currentPage,
+      supabase,
     });
 
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -896,6 +983,7 @@ export async function POST(request: NextRequest) {
       }
 
       askThread = existingThread;
+      resumableThreadId = existingThread.id;
     } else {
       const { data: newThread, error: createThreadError } = await supabase
         .from("ask_threads")
@@ -915,15 +1003,23 @@ export async function POST(request: NextRequest) {
       }
 
       askThread = newThread;
+      resumableThreadId = newThread.id;
     }
 
-    const { error: messageError } = await supabase.from("ask_messages").insert({
-      author_role: "user",
-      author_user_id: userId,
-      message_body: message,
-      metadata: { current_page: currentPage || null },
-      thread_id: askThread.id,
-    });
+    // Phase 2 cutover: route through the transactional transition RPC
+    // (Phase 1) instead of inserting directly, so case_status,
+    // needs_admin_followup, unread state, and latest_*_message_at all
+    // update atomically with the message itself rather than staying frozen
+    // at their defaults for live Ask traffic.
+    const { error: messageError } = await supabase.rpc(
+      "add_ask_message_with_case_transition",
+      {
+        p_author_role: "user",
+        p_message_body: message,
+        p_metadata: { current_page: currentPage || null },
+        p_thread_id: askThread.id,
+      }
+    );
 
     if (messageError) {
       throw messageError;
@@ -985,6 +1081,29 @@ export async function POST(request: NextRequest) {
     const aiSummary = String(parsed.brief_summary ?? "").trim();
     const clarifyingQuestion = String(parsed.clarifying_question ?? "").trim();
     let assistantResponse = String(parsed.assistant_response ?? "").trim();
+
+    // Code-level guarantee behind the "answer if we know, be honest if we
+    // don't" UX principle: don't let a low-confidence answer_now reach the
+    // user looking like a confident, grounded answer. Downgrade to the
+    // normal routing flow instead so it becomes actionable feedback.
+    if (action === "answer_now" && confidence < askAnswerNowMinConfidence) {
+      action = "route_now";
+      assistantResponse =
+        "CarePland doesn't have a confident answer for that yet. This has been saved so the team can follow up.";
+      recommendedActions = [
+        {
+          action: "needs_human_review",
+          category: "support_question",
+          confidence,
+          priority: "medium",
+          rationale:
+            rationale ||
+            "Router considered answering directly, but confidence was below the threshold for answering without review.",
+          title: "Review unanswered product question",
+        },
+      ];
+    }
+
     const clarifyingLimit = Math.min(
       askThread.clarifying_turn_limit,
       settings.clarify_absolute_max_turns
@@ -1076,12 +1195,16 @@ export async function POST(request: NextRequest) {
       const clarifierRationale =
         String(clarifierRun?.parsed.stop_reason ?? "").trim() || rationale;
 
-      const { error: assistantMessageError } = await supabase
-        .from("ask_messages")
-        .insert({
-          author_role: "assistant",
-          message_body: outgoingQuestion,
-          metadata: {
+      const { error: assistantMessageError } = await supabase.rpc(
+        "add_ask_message_with_case_transition",
+        {
+          // A clarifying question is a genuine "the AI needs the user to
+          // say more" moment -- the generic assistant-role rule (move to
+          // waiting_on_user) is exactly right here, so no case_status
+          // override is passed.
+          p_author_role: "assistant",
+          p_message_body: outgoingQuestion,
+          p_metadata: {
             action,
             category,
             confidence: clarifierConfidence,
@@ -1089,8 +1212,10 @@ export async function POST(request: NextRequest) {
             rationale: clarifierRationale,
             router_prompt_version: routerRun.promptVersion,
           },
-          thread_id: askThread.id,
-        });
+          p_needs_admin_followup: false,
+          p_thread_id: askThread.id,
+        }
+      );
 
       if (assistantMessageError) {
         throw assistantMessageError;
@@ -1367,20 +1492,36 @@ export async function POST(request: NextRequest) {
         ? "This can be answered here."
         : "Thanks. I saved this for review.");
 
-    const { error: terminalMessageError } = await supabase
-      .from("ask_messages")
-      .insert({
-        author_role: "assistant",
-        message_body: terminalMessage,
-        metadata: {
-            action,
-            category,
-            confidence,
-            prompt_version: routerRun.promptVersion,
-            rationale,
-          },
-          thread_id: askThread.id,
-      });
+    const routingState = action === "answer_now" || action === "off_topic"
+      ? "closed"
+      : "needs_review";
+
+    // Ask's own routing outcome has more specific meaning than the generic
+    // "assistant replied -> waiting_on_user" rule: a closed action (a
+    // confident direct answer, or a harmless off-topic redirect) means
+    // nobody needs to act further, so the case should land on resolved --
+    // not sit in a "waiting on the user" state nobody is actually waiting
+    // on. Anything routed for review genuinely is waiting on an admin, not
+    // the user. Both are explicit here rather than inferred.
+    const terminalCaseStatus = routingState === "closed" ? "resolved" : "waiting_on_admin";
+
+    const { error: terminalMessageError } = await supabase.rpc(
+      "add_ask_message_with_case_transition",
+      {
+        p_author_role: "assistant",
+        p_case_status_override: terminalCaseStatus,
+        p_message_body: terminalMessage,
+        p_metadata: {
+          action,
+          category,
+          confidence,
+          prompt_version: routerRun.promptVersion,
+          rationale,
+        },
+        p_needs_admin_followup: routingState !== "closed",
+        p_thread_id: askThread.id,
+      }
+    );
 
     if (terminalMessageError) {
       throw terminalMessageError;
@@ -1390,9 +1531,6 @@ export async function POST(request: NextRequest) {
       ...conversation,
       { author_role: "assistant", message_body: terminalMessage },
     ]);
-    const routingState = action === "answer_now" || action === "off_topic"
-      ? "closed"
-      : "needs_review";
 
     const { data: submission, error: submissionError } = await supabase
       .from("ask_submissions")
@@ -1402,6 +1540,12 @@ export async function POST(request: NextRequest) {
         current_page: currentPage || null,
         instruction_version_id: routerRun.instructionVersion?.id ?? null,
         model: routerRun.model,
+        // Seeds the outcome/feedback loop added in Phase 2: a confident
+        // direct answer starts as "answered" so a later thumbs up/down can
+        // move it to helpful/not_helpful; anything routed for human review
+        // was never really "answered" by the AI, so it starts as
+        // "escalated" rather than implying a direct answer was given.
+        outcome: action === "answer_now" ? "answered" : "escalated",
         original_user_wording: message,
         prompt_version: routerRun.promptVersion,
         raw_response: {
@@ -1591,6 +1735,15 @@ export async function POST(request: NextRequest) {
       threadId: askThread.id,
     });
   } catch (error) {
-    return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: errorMessage(error),
+        // Lets the client retry against the same thread instead of
+        // submitting with an empty threadId and creating a new, empty
+        // orphaned thread on every failed attempt.
+        threadId: resumableThreadId,
+      },
+      { status: 400 }
+    );
   }
 }

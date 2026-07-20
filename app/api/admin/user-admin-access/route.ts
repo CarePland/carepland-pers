@@ -84,13 +84,15 @@ export async function POST(request: NextRequest) {
       throw new Error("Choose a user before updating admin access.");
     }
 
-    if (isAdmin && !password) {
-      throw new Error("Enter your password before granting admin access.");
+    if (!password) {
+      throw new Error(
+        isAdmin
+          ? "Enter your password before granting admin access."
+          : "Enter your password before removing admin access."
+      );
     }
 
-    if (isAdmin) {
-      await verifyAdminPassword(adminUser.email, password);
-    }
+    await verifyAdminPassword(adminUser.email, password);
 
     const serviceClient = createSupabaseServiceClient();
     const { data: targetProfile, error: targetProfileError } =

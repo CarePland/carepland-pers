@@ -5,7 +5,7 @@ import { ComponentProps } from "react";
 import { AdminAiPanel } from "./AdminAiPanel";
 import { AdminCheckpointPanel } from "./AdminCheckpointPanel";
 import { AdminConnectPanel } from "./AdminConnectPanel";
-import { AdminAssistantReviewPanel } from "./AdminAssistantReviewPanel";
+import { AdminAskConsole } from "./AdminAskConsole";
 import { AdminAuditTrailPanel } from "./AdminAuditTrailPanel";
 import { AdminContentPanel } from "./AdminContentPanel";
 import { AdminDashboardPanel } from "./AdminDashboardPanel";
@@ -15,7 +15,6 @@ import { AdminHelpReportsPanel } from "./AdminHelpReportsPanel";
 import { AdminProductManagementPanel } from "./AdminProductManagementPanel";
 import { AdminReceiverLayoutPanel } from "./AdminReceiverLayoutPanel";
 import { AdminRecommendationsReviewPanel } from "./AdminRecommendationsReviewPanel";
-import { AdminSupportTicketsPanel } from "./AdminSupportTicketsPanel";
 import { AdminToolsPanel } from "./AdminToolsPanel";
 import { AdminUsersPanel } from "./AdminUsersPanel";
 import { AdminWorkflowViewPanel } from "./AdminWorkflowViewPanel";
@@ -27,7 +26,7 @@ export type AdminWorkspaceTab =
   | "connect"
   | "dashboard"
   | "ai"
-  | "assistantReview"
+  | "askConsole"
   | "content"
   | "errors"
   | "helpReports"
@@ -35,7 +34,6 @@ export type AdminWorkspaceTab =
   | "layout"
   | "product"
   | "recommendations"
-  | "tickets"
   | "tools"
   | "userAudit"
   | "users"
@@ -57,7 +55,7 @@ export type AdminWorkspaceProps = {
   activeSecondaryKey: AdminWorkspaceTab;
   activeTopKey: AdminWorkspaceTopTab;
   ai: Omit<ComponentProps<typeof AdminAiPanel>, "adminArea">;
-  assistantReview: ComponentProps<typeof AdminAssistantReviewPanel>;
+  askConsole: ComponentProps<typeof AdminAskConsole>;
   audit: ComponentProps<typeof AdminAuditTrailPanel<AdminWorkspaceTab>>;
   content: ComponentProps<typeof AdminContentPanel>;
   checkpoint: ComponentProps<typeof AdminCheckpointPanel>;
@@ -70,7 +68,6 @@ export type AdminWorkspaceProps = {
   recommendations: ComponentProps<typeof AdminRecommendationsReviewPanel>;
   secondaryItems?: AdminNavItem<AdminWorkspaceTab>[];
   stickyTop: number;
-  tickets: ComponentProps<typeof AdminSupportTicketsPanel>;
   tools: ComponentProps<typeof AdminToolsPanel>;
   topItems: AdminNavItem<AdminWorkspaceTopTab>[];
   users: ComponentProps<typeof AdminUsersPanel<AdminWorkspaceTab>>;
@@ -80,7 +77,7 @@ export function AdminWorkspace({
   activeSecondaryKey,
   activeTopKey,
   ai,
-  assistantReview,
+  askConsole,
   audit,
   content,
   checkpoint,
@@ -93,7 +90,6 @@ export function AdminWorkspace({
   recommendations,
   secondaryItems,
   stickyTop,
-  tickets,
   tools,
   topItems,
   users,
@@ -140,16 +136,12 @@ export function AdminWorkspace({
         <AdminIntegrationErrorsPanel {...errors} />
       ) : null}
 
-      {activeSecondaryKey === "tickets" ? (
-        <AdminSupportTicketsPanel {...tickets} />
-      ) : null}
-
       {activeSecondaryKey === "helpReports" ? (
         <AdminHelpReportsPanel />
       ) : null}
 
-      {activeSecondaryKey === "assistantReview" ? (
-        <AdminAssistantReviewPanel {...assistantReview} />
+      {activeSecondaryKey === "askConsole" ? (
+        <AdminAskConsole {...askConsole} />
       ) : null}
 
       {activeSecondaryKey === "content" ? (

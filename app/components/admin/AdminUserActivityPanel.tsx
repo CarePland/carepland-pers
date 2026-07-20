@@ -475,7 +475,7 @@ export function AdminUserActivityPanel({
             )}
             <p className="mt-4 font-semibold text-slate-900">Are you sure?</p>
 
-            {adminChangeConfirmed && pendingAdminValue ? (
+            {adminChangeConfirmed ? (
               <label className="mt-4 block text-sm font-medium text-slate-700">
                 Your password
                 <input
@@ -485,7 +485,7 @@ export function AdminUserActivityPanel({
                   onChange={(event) =>
                     setAdminChangePassword(event.target.value)
                   }
-                  required={pendingAdminValue}
+                  required
                   type="password"
                   value={adminChangePassword}
                 />
@@ -510,10 +510,7 @@ export function AdminUserActivityPanel({
               {adminChangeConfirmed ? (
                 <button
                   className="rounded-md bg-blue-700 px-4 py-2 font-semibold text-white disabled:bg-slate-300"
-                  disabled={
-                    savingAdminChange ||
-                    (pendingAdminValue && !adminChangePassword)
-                  }
+                  disabled={savingAdminChange || !adminChangePassword}
                   type="submit"
                 >
                   {savingAdminChange ? "Saving..." : "Confirm"}

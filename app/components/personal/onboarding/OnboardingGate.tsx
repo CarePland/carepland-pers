@@ -123,6 +123,7 @@ export function OnboardingGate({
     : "profileBasics";
   const [activeStep, setActiveStep] =
     useState<PersonalOnboardingStep>(firstStep);
+  const [stepValidationMessage, setStepValidationMessage] = useState("");
   const visibleStep =
     showReady
       ? "ready"
@@ -163,6 +164,7 @@ export function OnboardingGate({
 
   function goToProfileBasics() {
     onReviewStep();
+    setStepValidationMessage("");
     setActiveStep("profileBasics");
   }
 
@@ -179,8 +181,21 @@ export function OnboardingGate({
     form?.requestSubmit();
   }
 
+  function handleProfileBasicsNextClick() {
+    if (profileDetailsRequired && !profileBasicsComplete) {
+      setStepValidationMessage(
+        "Please fill in your first name, last name, phone, and time zone to continue."
+      );
+      return;
+    }
+
+    setStepValidationMessage("");
+    submitProfileBasicsForm();
+  }
+
   function goToProfileAddress() {
     onReviewStep();
+    setStepValidationMessage("");
     setActiveStep("profileAddress");
   }
 
@@ -189,6 +204,7 @@ export function OnboardingGate({
       onReviewStep();
     }
 
+    setStepValidationMessage("");
     setActiveStep(step);
   }
 
@@ -198,6 +214,18 @@ export function OnboardingGate({
     ) as HTMLFormElement | null;
 
     form?.requestSubmit();
+  }
+
+  function handleProfileAddressNextClick() {
+    if (profileDetailsRequired && !profileAddressComplete) {
+      setStepValidationMessage(
+        "Please fill in your street address, city, state, and a valid ZIP code to continue."
+      );
+      return;
+    }
+
+    setStepValidationMessage("");
+    submitProfileAddressForm();
   }
 
   if (needsBetaAgreement) {
@@ -260,6 +288,7 @@ export function OnboardingGate({
       <PersonalOnboardingShell
         currentStep={visibleStep}
         message=""
+        stepValidationMessage={stepValidationMessage}
         onBack={
           visibleStep === "profileAddress"
             ? goToProfileBasics
@@ -280,9 +309,9 @@ export function OnboardingGate({
           visibleStep === "ready"
             ? onOpenCarePland
             : visibleStep === "profileBasics"
-              ? submitProfileBasicsForm
+              ? handleProfileBasicsNextClick
             : visibleStep === "profileAddress"
-              ? submitProfileAddressForm
+              ? handleProfileAddressNextClick
               : undefined
         }
         secondaryDisabled={visibleStep === "ready" ? false : undefined}
@@ -339,6 +368,7 @@ export function OnboardingGate({
       <PersonalOnboardingShell
         currentStep={visibleStep}
         message={message}
+        stepValidationMessage={stepValidationMessage}
         onBack={
           visibleStep === "profileAddress"
             ? goToProfileBasics
@@ -359,9 +389,9 @@ export function OnboardingGate({
           visibleStep === "ready"
             ? onOpenCarePland
             : visibleStep === "profileBasics"
-              ? submitProfileBasicsForm
+              ? handleProfileBasicsNextClick
             : visibleStep === "profileAddress"
-              ? submitProfileAddressForm
+              ? handleProfileAddressNextClick
               : undefined
         }
         secondaryDisabled={visibleStep === "ready" ? false : undefined}
@@ -420,6 +450,7 @@ function PersonalOnboardingShell({
   children,
   currentStep,
   message,
+  stepValidationMessage,
   onBack,
   onSelectStep,
   onSignOut,
@@ -437,6 +468,7 @@ function PersonalOnboardingShell({
   children: ReactNode;
   currentStep: PersonalOnboardingStep;
   message: string;
+  stepValidationMessage?: string;
   onBack?: () => void;
   onSelectStep: (step: PersonalOnboardingStep) => void;
   onSignOut: () => void;
@@ -553,7 +585,7 @@ function PersonalOnboardingShell({
                         )}
                         <button
                           aria-current={active ? "step" : undefined}
-                          className={`block w-full rounded-full px-4 py-3 text-center text-base font-black transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#4e84b2] ${itemClassName}`}
+                          className={`block w-full rounded-full px-4 py-3 text-center text-base font-black hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#4e84b2] ${itemClassName}`}
                           onClick={() => onSelectStep(item.id)}
                           type="button"
                         >
@@ -569,6 +601,14 @@ function PersonalOnboardingShell({
 
         <div className="flex-1 overflow-y-auto px-8 py-6 sm:px-12 lg:px-14">
           {children}
+          {stepValidationMessage ? (
+            <p
+              className="mt-5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold leading-snug text-amber-900"
+              role="alert"
+            >
+              {stepValidationMessage}
+            </p>
+          ) : null}
           {message ? (
             <p className="mt-5 rounded-lg border border-[#d6e3f2] bg-[#f8fbff] px-4 py-3 text-sm font-bold leading-snug text-[#345d83]">
               {message}

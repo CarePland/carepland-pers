@@ -178,11 +178,22 @@ export async function submitHelpDiagnostics(
   });
 
   if (!response.ok) {
+    // Surface the server's actual reason rather than a generic message --
+    // this used to be discarded here, so every failure (a real validation
+    // error, a missing table, a config gap) looked identical and undiagnosable.
+    const serverErrorMessage = await response
+      .json()
+      .then((body: { error?: string }) => body.error?.trim() || "")
+      .catch(() => "");
     record("diagnostic", "help_report_submit_failed", {
       path: currentPath(),
+      serverError: serverErrorMessage || undefined,
       status: response.status,
     });
-    throw new Error("CarePland could not send diagnostics right now.");
+    throw new Error(
+      serverErrorMessage ||
+        `CarePland could not send diagnostics right now (HTTP ${response.status}).`
+    );
   }
 
   const result = (await response.json()) as HelpDiagnosticsSubmissionResult;

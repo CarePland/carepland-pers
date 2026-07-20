@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 const publicWebsiteSlides = [
   {
@@ -47,7 +47,13 @@ function errorMessage(error: unknown) {
     : "Early Access signup is temporarily unavailable.";
 }
 
-export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
+export function PublicWebsite({
+  onGetStarted,
+  onOpenApp,
+}: {
+  onGetStarted: () => void;
+  onOpenApp: () => void;
+}) {
   const [selectedSlideIndex, setSelectedSlideIndex] = useState<number | null>(
     null
   );
@@ -62,6 +68,16 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
   const [signupMessage, setSignupMessage] = useState("");
   const selectedSlide =
     selectedSlideIndex === null ? null : publicWebsiteSlides[selectedSlideIndex];
+
+  useEffect(() => {
+    document.body.dataset.careplandPublicHomepage = "true";
+    window.dispatchEvent(new Event("carepland:visibility-context-change"));
+
+    return () => {
+      delete document.body.dataset.careplandPublicHomepage;
+      window.dispatchEvent(new Event("carepland:visibility-context-change"));
+    };
+  }, []);
 
   async function handleEarlyAccessSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -152,12 +168,13 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
           >
             Sign in
           </button>
-          <a
+          <button
             className="inline-flex min-h-11 items-center justify-center rounded-md bg-[#256d85] px-4 font-bold text-white"
-            href="#early-access"
+            onClick={onGetStarted}
+            type="button"
           >
-            Find out more
-          </a>
+            Get Started
+          </button>
         </div>
       </header>
 
@@ -422,7 +439,7 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
           <p className="mt-5 max-w-[760px] text-xl font-semibold leading-relaxed text-[#39735a]">
             <button
               className="font-extrabold text-[#256d85] underline decoration-[#256d85]/35 underline-offset-4 hover:text-[#182421]"
-              onClick={onOpenApp}
+              onClick={onGetStarted}
               type="button"
             >
               Try CarePland today
@@ -459,7 +476,7 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
                 value={lastName}
               />
             </div>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center">
               <label className="sr-only" htmlFor="marketing-email">
                 Email address
               </label>
@@ -479,6 +496,16 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
                 type="submit"
               >
                 {signupStatus === "saving" ? "Saving..." : "Stay in the Loop"}
+              </button>
+              <span className="text-center text-sm font-extrabold uppercase tracking-[0.08em] text-[#596864] sm:px-1">
+                or
+              </span>
+              <button
+                className="inline-flex min-h-12 items-center justify-center rounded-lg border border-[#256d85] bg-white px-5 font-bold text-[#256d85] hover:bg-[#f2f6f4]"
+                onClick={onGetStarted}
+                type="button"
+              >
+                Sign Up Now
               </button>
             </div>
             <label className="sr-only" htmlFor="marketing-interest-context">
@@ -519,33 +546,6 @@ export function PublicWebsite({ onOpenApp }: { onOpenApp: () => void }) {
           </form>
         </section>
       </div>
-
-      <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-[#d8e0dc] px-5 py-7 text-sm text-[#596864] md:px-[5vw]">
-        <span className="text-xs font-semibold text-[#687672]">
-          © 2026 CarePland.
-        </span>
-        <nav
-          aria-label="Footer navigation"
-          className="flex flex-wrap items-center gap-5"
-        >
-          <a className="hover:text-[#256d85]" href="#early-access">
-            Early Access
-          </a>
-          <a className="hover:text-[#256d85]" href="#trust">
-            Trust
-          </a>
-          <a className="hover:text-[#256d85]" href="/connect">
-            Connect
-          </a>
-          <button
-            className="font-semibold hover:text-[#256d85]"
-            onClick={onOpenApp}
-            type="button"
-          >
-            Sign in
-          </button>
-        </nav>
-      </footer>
 
       {selectedSlide ? (
         <div

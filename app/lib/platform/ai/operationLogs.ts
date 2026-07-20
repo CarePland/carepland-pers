@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { isMissingServerEnvError } from "../server/env";
+import { createSupabaseServiceClient } from "../server/supabase";
 import {
   estimateOpenAiResponseCost,
   type JsonObject,
@@ -61,5 +63,55 @@ export async function logOpenAiOperationCost({
 
   if (error) {
     console.error(`Failed to log ${operationKey} AI operation cost`, error);
+    await recordCostLogFailure(operationKey, error, {
+      careCircleId,
+      sourceId,
+      sourceTable,
+      userId,
+    });
   }
+}
+
+// Best-effort, admin-visible record of a failed cost-log insert. Previously
+// this class of failure only ever reached a server console -- there was no
+// way for Admin to notice that usage was quietly not being counted. Uses the
+// service-role client deliberately so this write can never itself fail due
+// to the same RLS/auth conditions that may have caused the original insert
+// to fail, and is wrapped defensively so a missing service-role
+// configuration (e.g. a local/dev environment) can't turn a logging problem
+// into a request failure.
+async function recordCostLogFailure(
+  operationKey: string,
+  originalError: unknown,
+  metadata: JsonObject
+) {
+  try {
+    const serviceClient = createSupabaseServiceClient();
+    await serviceClient.from("ai_operation_cost_log_failures").insert({
+      error_message: errorMessage(originalError),
+      metadata,
+      operation_key: operationKey,
+    });
+  } catch (recordingError) {
+    if (isMissingServerEnvError(recordingError)) {
+      return;
+    }
+
+    console.error(
+      `Failed to record cost-log failure for ${operationKey}`,
+      recordingError
+    );
+  }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+
+  return String(error || "Unknown error");
 }

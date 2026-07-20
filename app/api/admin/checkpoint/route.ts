@@ -11,6 +11,7 @@ import {
   type CheckpointEvaluationTag,
 } from "@/app/lib/checkpoint/careprep";
 import { normalizeTopicSlug } from "@/app/lib/personal/healthTopics";
+import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
 import {
   buildTopicContextSignature,
   healthFocusCardSummary,
@@ -863,7 +864,10 @@ async function generateCarePrepCheckpointRun({
     appointmentRow,
     careSubjectId
   );
-  const guidance = await runCarePrepGeneration(instructionVersion, evidencePacket);
+  const { guidance, model, openAiJson } = await runCarePrepGeneration(
+    instructionVersion,
+    evidencePacket
+  );
   const generatedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const structuredInterpretation = buildCarePrepStructuredInterpretation(
@@ -911,6 +915,29 @@ async function generateCarePrepCheckpointRun({
     .single();
 
   if (insertError) throw insertError;
+
+  // Checkpoint's own CarePrep generation calls OpenAI directly and was the
+  // one AI workflow in the app that never fed the shared cost-log table --
+  // every other generation path (personal CarePrep, Import Anything, Ask,
+  // Home context) does. Logging here closes that specific gap rather than
+  // leaving Admin cost totals silently undercounting Checkpoint usage.
+  await logOpenAiOperationCost({
+    careCircleId,
+    metadata: {
+      admin_user_id: adminUserId,
+      appointment_id: appointmentId,
+      care_subject_id: careSubjectId,
+    },
+    model,
+    openAiJson,
+    operationKey: "checkpoint_careprep_generation",
+    operationLabel: "Checkpoint CarePrep generation",
+    promptVersion,
+    sourceId: runId,
+    sourceTable: "checkpoint_runs",
+    supabase: adminClient,
+    userId: accountUserId,
+  });
 
   await auditCheckpointAccess(adminClient, adminUserId, "checkpoint_run_generated", {
     appointment_id: appointmentId,
@@ -1013,7 +1040,11 @@ async function buildEvidencePacket(
 async function runCarePrepGeneration(
   instructionVersion: InstructionVersionRow,
   evidencePacket: CarePrepCheckpointEvidencePacket
-): Promise<CarePrepCheckpointGuidance> {
+): Promise<{
+  guidance: CarePrepCheckpointGuidance;
+  model: string;
+  openAiJson: JsonObject;
+}> {
   const schema =
     instructionVersion.output_schema &&
     typeof instructionVersion.output_schema === "object"
@@ -1037,13 +1068,14 @@ async function runCarePrepGeneration(
   ]
     .filter(Boolean)
     .join("\n\n");
+  const model = instructionVersion.model ?? "gpt-4.1-mini";
   const openAiResponse = await fetch("https://api.openai.com/v1/responses", {
     body: JSON.stringify({
       input: [
         { content: instructionVersion.system_prompt, role: "system" },
         { content: userPrompt, role: "user" },
       ],
-      model: instructionVersion.model ?? "gpt-4.1-mini",
+      model,
       temperature: instructionVersion.temperature ?? 0.2,
       text: {
         format: {
@@ -1073,12 +1105,16 @@ async function runCarePrepGeneration(
   const parsed = JSON.parse(responseText(openAiJson)) as JsonObject;
 
   return {
-    beforeVisit: textList(parsed.beforeVisit ?? parsed.before_visit ?? parsed.bring_list).slice(0, 3),
-    duringVisit: textList(parsed.duringVisit ?? parsed.during_visit ?? parsed.key_questions).slice(0, 4),
-    intro:
-      typeof (parsed.intro ?? parsed.summary) === "string"
-        ? String(parsed.intro ?? parsed.summary).trim().slice(0, 180)
-        : "",
+    guidance: {
+      beforeVisit: textList(parsed.beforeVisit ?? parsed.before_visit ?? parsed.bring_list).slice(0, 3),
+      duringVisit: textList(parsed.duringVisit ?? parsed.during_visit ?? parsed.key_questions).slice(0, 4),
+      intro:
+        typeof (parsed.intro ?? parsed.summary) === "string"
+          ? String(parsed.intro ?? parsed.summary).trim().slice(0, 180)
+          : "",
+    },
+    model,
+    openAiJson,
   };
 }
 

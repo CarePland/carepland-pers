@@ -17,18 +17,15 @@ type IntegrationErrorLike = {
   latest_occurred_at: string | null;
 };
 
-type AssistantReviewInteractionLike = {
+type AdminAskThreadLike = {
   created_at: string | null;
   id: string;
   updated_at: string | null;
 };
 
-type AssistantAdminReviewLike = {
-  interaction_id: string;
-};
-
 type AdminNavigationModelParams = {
   actionableAdminAttentionSummaries: AdminAttentionSummaryLike[];
+  adminAskNeedsResponseThreads: AdminAskThreadLike[];
   adminAttentionFor: (
     scopeType: AdminViewScopeType,
     scopeKey: string
@@ -38,11 +35,7 @@ type AdminNavigationModelParams = {
     scopeType: AdminViewScopeType,
     scopeKey: string
   ) => string | null;
-  adminNewTicketsLength: number;
   adminTab: AdminWorkspaceTab;
-  adminTicketsNeedingFollowupLength: number;
-  assistantReviewAdminReviews: AssistantAdminReviewLike[];
-  assistantReviewInteractions: AssistantReviewInteractionLike[];
   earlyAccessIntakeFollowupCount: number;
   earlyAccessIntakeNewCount: number;
   isNewForAdmin: (value: string | null, lastViewedAt: string | null) => boolean;
@@ -56,8 +49,7 @@ export const systemAdminTabs: AdminWorkspaceTab[] = [
 ];
 
 export const supportAdminTabs: AdminWorkspaceTab[] = [
-  "assistantReview",
-  "tickets",
+  "askConsole",
   "helpReports",
 ];
 
@@ -69,14 +61,11 @@ export const usersAdminTabs: AdminWorkspaceTab[] = [
 
 export function createAdminNavigationModel({
   actionableAdminAttentionSummaries,
+  adminAskNeedsResponseThreads,
   adminAttentionFor,
   adminIntegrationErrors,
   adminLastViewedAt,
-  adminNewTicketsLength,
   adminTab,
-  adminTicketsNeedingFollowupLength,
-  assistantReviewAdminReviews,
-  assistantReviewInteractions,
   earlyAccessIntakeFollowupCount,
   earlyAccessIntakeNewCount,
   isNewForAdmin,
@@ -86,9 +75,17 @@ export function createAdminNavigationModel({
     let fallbackNewCount = 0;
     let fallbackFollowupCount = 0;
 
-    if (tabKey === "tickets") {
-      fallbackNewCount = adminNewTicketsLength;
-      fallbackFollowupCount = adminTicketsNeedingFollowupLength;
+    if (tabKey === "askConsole") {
+      // Every thread in this queue already needs an admin response --
+      // followupCount is just its size. "New to me" is whichever of those
+      // threads updated since this admin last opened the console.
+      fallbackFollowupCount = adminAskNeedsResponseThreads.length;
+      fallbackNewCount = adminAskNeedsResponseThreads.filter((thread) =>
+        isNewForAdmin(
+          thread.updated_at || thread.created_at,
+          adminLastViewedAt("admin_tab", "askConsole")
+        )
+      ).length;
     } else if (tabKey === "users" || tabKey === "intake") {
       fallbackNewCount = earlyAccessIntakeNewCount;
       fallbackFollowupCount = earlyAccessIntakeFollowupCount;
@@ -100,19 +97,6 @@ export function createAdminNavigationModel({
         )
       ).length;
       fallbackFollowupCount = adminIntegrationErrors.length;
-    } else if (tabKey === "assistantReview") {
-      fallbackNewCount = assistantReviewInteractions.filter((interaction) =>
-        isNewForAdmin(
-          interaction.updated_at || interaction.created_at,
-          adminLastViewedAt("admin_tab", "assistantReview")
-        )
-      ).length;
-      fallbackFollowupCount = assistantReviewInteractions.filter(
-        (interaction) =>
-          !assistantReviewAdminReviews.some(
-            (review) => review.interaction_id === interaction.id
-          )
-      ).length;
     }
 
     return {
@@ -153,12 +137,7 @@ export function createAdminNavigationModel({
     { key: "product", label: "Prod Mgmt" },
   ];
   const supportAdminNavItems: AdminNavItem<AdminWorkspaceTab>[] = [
-    {
-      ...adminAttentionCountsForTab("assistantReview"),
-      key: "assistantReview",
-      label: "Ask - Review",
-    },
-    { ...adminAttentionCountsForTab("tickets"), key: "tickets", label: "Tickets" },
+    { ...adminAttentionCountsForTab("askConsole"), key: "askConsole", label: "Ask" },
     { ...adminAttentionCountsForTab("helpReports"), key: "helpReports", label: "Help Reports" },
   ];
   const systemAdminAttentionCounts = adminAttentionCountsForTabs(systemAdminTabs);
@@ -218,7 +197,7 @@ export function createAdminNavigationModel({
     }
 
     if (topTab === "support") {
-      return supportAdminTabs.includes(adminTab) ? adminTab : "assistantReview";
+      return supportAdminTabs.includes(adminTab) ? adminTab : "askConsole";
     }
 
     return topTab;

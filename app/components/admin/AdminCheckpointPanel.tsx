@@ -2,7 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { HealthFocusTopicSummary } from "@/app/components/personal/healthTopics/HealthFocusCard";
 import {
@@ -140,6 +140,7 @@ export function AdminCheckpointPanel({
     useState<HealthFocusTopicDetailData | null>(null);
   const [history, setHistory] = useState<CheckpointRun[]>([]);
   const [message, setMessage] = useState("");
+  const messageRef = useRef<HTMLDivElement | null>(null);
   const [notes, setNotes] = useState("");
   const [reviewType, setReviewType] = useState<CheckpointReviewType>("careprep");
   const [run, setRun] = useState<CheckpointRun | null>(null);
@@ -171,6 +172,20 @@ export function AdminCheckpointPanel({
   useEffect(() => {
     void loadContext();
   }, []);
+
+  // The status/error banner renders at the top of a long panel, while the
+  // actions that can produce it (Generate CarePrep Checkpoint, Save
+  // Decision, etc.) live further down. Without this, a failure can produce
+  // a real, correctly-worded banner that's simply off-screen from wherever
+  // the admin's scroll position and attention already are -- the same
+  // "feedback exists but you can't see it" failure mode as the appointment
+  // delete confirmation. Scroll it into view whenever it appears so a
+  // click never reads as having done nothing.
+  useEffect(() => {
+    if (message) {
+      messageRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [message]);
 
   useEffect(() => {
     if (selectedAccount?.id && selectedCareSubject?.id) {
@@ -476,7 +491,10 @@ export function AdminCheckpointPanel({
       </div>
 
       {message ? (
-        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div
+          className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          ref={messageRef}
+        >
           {message}
         </div>
       ) : null}

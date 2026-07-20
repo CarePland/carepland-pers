@@ -49,6 +49,8 @@ export function SomethingWentWrongRuntime() {
     function syncAvailability() {
       const path = window.location.pathname;
       const params = new URLSearchParams(window.location.search);
+      const isPublicHomepage =
+        document.body.dataset.careplandPublicHomepage === "true";
       const receiverLayout = String(
         params.get("receiverLayout") || params.get("layout") || ""
       ).toLowerCase();
@@ -56,6 +58,7 @@ export function SomethingWentWrongRuntime() {
         path.startsWith("/connect/receiver") &&
         (receiverLayout === "modern" || receiverLayout === "modern2");
       const inappropriate =
+        isPublicHomepage ||
         hiddenExactPaths.includes(path) ||
         hiddenPathPrefixes.some((prefix) => path.startsWith(prefix)) ||
         (path.startsWith("/connect/receiver") && !isReceiverModern) ||
@@ -68,6 +71,10 @@ export function SomethingWentWrongRuntime() {
 
     syncAvailability();
     window.addEventListener("popstate", syncAvailability);
+    window.addEventListener(
+      "carepland:visibility-context-change",
+      syncAvailability
+    );
     const originalPushState = window.history.pushState;
     const originalReplaceState = window.history.replaceState;
     window.history.pushState = function pushState(...args) {
@@ -83,6 +90,10 @@ export function SomethingWentWrongRuntime() {
 
     return () => {
       window.removeEventListener("popstate", syncAvailability);
+      window.removeEventListener(
+        "carepland:visibility-context-change",
+        syncAvailability
+      );
       window.history.pushState = originalPushState;
       window.history.replaceState = originalReplaceState;
     };
@@ -112,7 +123,7 @@ export function SomethingWentWrongRuntime() {
 
   const canRecord = useMemo(() => {
     return typeof window !== "undefined" && browserConnectAudioRecordingAvailable();
-  }, [open]);
+  }, []);
 
   if (!available) return null;
 

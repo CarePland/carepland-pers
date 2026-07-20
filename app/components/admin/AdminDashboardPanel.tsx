@@ -42,6 +42,7 @@ export type AiOperationCostViewMode = "user" | "workflow";
 type AdminDashboardPanelProps = {
   aiOperationCostRows: AiOperationCostSummaryRow[];
   aiOperationCostError: string;
+  aiOperationCostLogFailureCount: number | null;
   aiOperationCostRangeDays: number;
   aiOperationCostUserRows: AiOperationCostUserSummaryRow[];
   aiOperationCostViewMode: AiOperationCostViewMode;
@@ -118,6 +119,7 @@ function readableOperationKey(value: string | null): string {
 
 export function AdminDashboardPanel({
   aiOperationCostError,
+  aiOperationCostLogFailureCount,
   aiOperationCostRangeDays,
   aiOperationCostRows,
   aiOperationCostUserRows,
@@ -466,6 +468,14 @@ export function AdminDashboardPanel({
             </p>
           </div>
         </div>
+
+        {aiOperationCostLogFailureCount ? (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+            {aiOperationCostLogFailureCount} cost-log{" "}
+            {aiOperationCostLogFailureCount === 1 ? "insert" : "inserts"} failed
+            in this date range -- usage above may be undercounted.
+          </div>
+        ) : null}
 
         <fieldset className="mt-4 flex flex-wrap items-center gap-3">
           <legend className="sr-only">AI operation cost date range</legend>

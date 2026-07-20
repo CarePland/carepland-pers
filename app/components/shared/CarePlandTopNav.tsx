@@ -314,6 +314,7 @@ export function CarePlandTopNav({
   const [helpTryingToDo, setHelpTryingToDo] = useState("");
   const [helpHappenedInstead, setHelpHappenedInstead] = useState("");
   const [helpSubmissionError, setHelpSubmissionError] = useState("");
+  const [helpFailureCount, setHelpFailureCount] = useState(0);
   const [helpPendingPacket, setHelpPendingPacket] =
     useState<HelpDiagnosticsPacket | null>(null);
   const [helpSubmissionResult, setHelpSubmissionResult] =
@@ -431,6 +432,7 @@ export function CarePlandTopNav({
   function openHelpDialog() {
     setHelpSubmissionError("");
     setHelpSubmissionResult(null);
+    setHelpFailureCount(0);
     setHelpPendingPacket(
       typeof window === "undefined"
         ? null
@@ -461,9 +463,17 @@ export function CarePlandTopNav({
       );
       setHelpSubmissionResult(result);
       setHelpStatus("sent");
-    } catch {
-      setHelpSubmissionError("CarePland did not receive this report.");
+      setHelpFailureCount(0);
+    } catch (error) {
+      // Show the real reason (now threaded through from the server) instead
+      // of a generic message, so a failure here is actually diagnosable.
+      setHelpSubmissionError(
+        error instanceof Error && error.message
+          ? error.message
+          : "CarePland did not receive this report."
+      );
       setHelpStatus("failed");
+      setHelpFailureCount((count) => count + 1);
     }
   }
 
@@ -474,7 +484,20 @@ export function CarePlandTopNav({
       setHelpSubmissionError("");
       setHelpSubmissionResult(null);
       setHelpPendingPacket(null);
+      setHelpFailureCount(0);
     }
+  }
+
+  async function copyHelpFallbackDetails() {
+    if (typeof navigator === "undefined") return;
+    const details = [
+      `Trying to do: ${helpTryingToDo || "(not entered)"}`,
+      `Happened instead: ${helpHappenedInstead || "(not entered)"}`,
+      `Page: ${helpPendingPacket?.screen.path || "(unknown)"}`,
+      `Error: ${helpSubmissionError || "(unknown)"}`,
+      `Time: ${new Date().toISOString()}`,
+    ].join("\n");
+    await navigator.clipboard?.writeText(details).catch(() => undefined);
   }
 
   function copyHelpReference() {
@@ -929,7 +952,7 @@ export function CarePlandTopNav({
                 </label>
               </div>
               {helpSubmissionError ? (
-                <details className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                <details className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" open>
                   <summary className="cursor-pointer font-semibold">
                     Report was not received
                   </summary>
@@ -938,6 +961,22 @@ export function CarePlandTopNav({
                     again, or cancel without sending.
                   </p>
                   <p className="mt-2 font-mono text-xs">{helpSubmissionError}</p>
+                  {helpFailureCount >= 2 ? (
+                    <div className="mt-3 border-t border-red-200 pt-3">
+                      <p>
+                        This has failed more than once, so it may not go through
+                        on another try. Copy what you typed and the error above
+                        so you have it saved outside this dialog.
+                      </p>
+                      <button
+                        className="mt-2 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-semibold text-red-800"
+                        onClick={() => void copyHelpFallbackDetails()}
+                        type="button"
+                      >
+                        Copy report details
+                      </button>
+                    </div>
+                  ) : null}
                 </details>
               ) : null}
               <div className="mt-5 flex flex-wrap justify-end gap-2">

@@ -13,14 +13,31 @@ import {
   connectProvisioningPrototypeProxyEndpoints,
   provisioningSearchParams,
 } from "@/app/lib/connect/provisioning/server/prototypeProvisioningProxy";
+import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
 
 export async function GET(request: Request) {
   try {
     const payload = await fetchPrototypeProvisioningSnapshot(request);
     const receiverShellProfiles = await listReceiverShellDeviceProfiles();
-    return NextResponse.json(overlayReceiverShellProfiles(payload, receiverShellProfiles), {
-      status: 200,
-    });
+    const snapshot = overlayReceiverShellProfiles(payload, receiverShellProfiles);
+
+    // The prototype provisioning backend (see docs/CONNECT_PROTOTYPE_CONTRACTS.md)
+    // has no account/household concept yet -- it returns every receiver
+    // household/device across every account. That's correct for the Admin
+    // Connect surface, which calls this route with no Authorization header
+    // and is meant to see the global registry. Any *authenticated* caller
+    // (Personal Profile > Receiver Settings, the signed-in Connect
+    // coordinator dashboard) must never receive other accounts' receiver
+    // data, so when a bearer token is present we scope the snapshot down to
+    // the caller's own care circle(s) using the same care_circle_memberships
+    // lookup every other Connect resource (calls, audio, messages) already
+    // uses for this exact purpose.
+    const accessToken = accessTokenFromRequest(request);
+    const scopedSnapshot = accessToken
+      ? scopeSnapshotToCaller(snapshot, await callerCareCircleIds(accessToken))
+      : snapshot;
+
+    return NextResponse.json(scopedSnapshot, { status: 200 });
   } catch (error) {
     return NextResponse.json(
       {
@@ -33,6 +50,104 @@ export async function GET(request: Request) {
       { status: 502 }
     );
   }
+}
+
+function accessTokenFromRequest(request: Request) {
+  return (request.headers.get("authorization") ?? "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+}
+
+async function callerCareCircleIds(accessToken: string): Promise<Set<string>> {
+  const userClient = createSupabaseUserClient(accessToken);
+  const { data: userData, error: userError } = await userClient.auth.getUser();
+
+  if (userError || !userData.user?.id) {
+    // An invalid/expired token should scope to nothing rather than fall
+    // back to the unscoped global snapshot -- fail closed, not open.
+    return new Set();
+  }
+
+  const { data: memberships, error: membershipsError } = await userClient
+    .from("care_circle_memberships")
+    .select("care_circle_id")
+    .eq("user_id", userData.user.id);
+
+  if (membershipsError) {
+    return new Set();
+  }
+
+  return new Set(
+    (memberships ?? [])
+      .map((membership) => (membership as { care_circle_id?: string }).care_circle_id)
+      .filter((careCircleId): careCircleId is string => Boolean(careCircleId))
+  );
+}
+
+function scopeSnapshotToCaller(
+  snapshot: ConnectProvisioningSnapshot,
+  callerCareCircleIds: Set<string>
+): ConnectProvisioningSnapshot {
+  const belongsToCaller = (careCircleId?: string | null) =>
+    Boolean(careCircleId && callerCareCircleIds.has(careCircleId));
+
+  const receiverDevices = (snapshot.receiverDevices ?? []).filter((device) =>
+    belongsToCaller(device.careCircleId)
+  );
+  const receiverHouseholds = (snapshot.receiverHouseholds ?? []).filter((household) =>
+    belongsToCaller(household.careCircleId)
+  );
+  const setupTokens = (snapshot.setupTokens ?? []).filter((token) =>
+    belongsToCaller(token.careCircleId)
+  );
+  const auditEvents = (snapshot.auditEvents ?? []).filter((event) =>
+    belongsToCaller(event.careCircleId)
+  );
+  const activeSetupTokenCount = setupTokens.filter(
+    (token) => token.status === "active" || token.status === "available"
+  ).length;
+  const receiverPeopleCount = receiverHouseholds.reduce(
+    (count, household) =>
+      count + (household.receiverPersonCount ?? household.receiverPeople?.length ?? 0),
+    0
+  );
+
+  return {
+    ...snapshot,
+    auditEvents,
+    receiverDevices,
+    receiverHouseholds,
+    setupTokens,
+    // Recompute totals from the scoped arrays -- the prototype backend's
+    // totals describe the global snapshot, which would otherwise show a
+    // count that doesn't match what the caller can actually see.
+    summary: snapshot.summary
+      ? {
+          ...snapshot.summary,
+          totals: {
+            ...snapshot.summary.totals,
+            activeReceiverDevices: receiverDevices.filter(
+              (device) => device.status !== "revoked"
+            ).length,
+            activeSetupTokens: activeSetupTokenCount,
+            households: receiverHouseholds.length,
+            receiverDevices: receiverDevices.length,
+            receiverHouseholds: receiverHouseholds.length,
+            receiverPeople: receiverPeopleCount,
+            setupTokens: setupTokens.length,
+            revokedReceiverDevices: receiverDevices.filter(
+              (device) => device.status === "revoked"
+            ).length,
+          },
+        }
+      : snapshot.summary,
+    totals: {
+      ...snapshot.totals,
+      receiverDevices: receiverDevices.length,
+      receiverHouseholds: receiverHouseholds.length,
+      receiverPeople: receiverPeopleCount,
+    },
+  };
 }
 
 async function fetchPrototypeProvisioningSnapshot(

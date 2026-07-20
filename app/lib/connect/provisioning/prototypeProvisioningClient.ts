@@ -1,6 +1,7 @@
 import type { ConnectProvisioningSnapshot } from "./types";
 
 export type FetchConnectProvisioningSnapshotOptions = {
+  headers?: Record<string, string>;
   includeInactiveHouseholds?: boolean;
   includeInactivePeople?: boolean;
 };
@@ -18,11 +19,11 @@ export async function fetchConnectProvisioningSnapshot(
     url.searchParams.set("includeInactivePeople", "1");
   }
 
-  return fetchJson<ConnectProvisioningSnapshot>(url.toString());
+  return fetchJson<ConnectProvisioningSnapshot>(url.toString(), options.headers);
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+async function fetchJson<T>(url: string, headers?: Record<string, string>): Promise<T> {
+  const response = await fetch(url, headers ? { headers } : undefined);
   const body = (await response.json().catch(() => ({}))) as T & {
     error?: string;
     ok?: boolean;

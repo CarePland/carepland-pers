@@ -1163,6 +1163,7 @@ export function ConnectDashboard() {
         fetchConnectMainUserContext(),
         fetchConnectFocusPeople(),
         fetchConnectProvisioningSnapshot({
+          headers: authHeaders,
           includeInactiveHouseholds: true,
         }),
       ]);
@@ -2443,7 +2444,7 @@ export function ConnectDashboard() {
         method: "POST",
       });
       const result = (await response.json().catch(() => ({}))) as {
-        assistantResponse?: string;
+        assistantMessage?: string;
         error?: string;
         threadId?: string;
       };
@@ -2459,7 +2460,11 @@ export function ConnectDashboard() {
         ...messages,
         {
           body:
-            result.assistantResponse ||
+            // SECURITY/CORRECTNESS: the API returns `assistantMessage`, not
+            // `assistantResponse` -- this field name mismatch previously
+            // meant this fallback text ran on every single reply, even when
+            // the AI had produced a real answer.
+            result.assistantMessage ||
             "Thanks. I saved that with the current Connect context.",
           role: "assistant",
         },
@@ -2705,6 +2710,7 @@ export function ConnectProfileSettingsPanel({
   const refresh = useCallback(async () => {
     setStatus("Refreshing receiver settings...");
     try {
+      const authHeaders = await connectAuthHeaders();
       const [
         contextResult,
         focusPeopleResult,
@@ -2713,6 +2719,7 @@ export function ConnectProfileSettingsPanel({
         fetchConnectMainUserContext(),
         fetchConnectFocusPeople(),
         fetchConnectProvisioningSnapshot({
+          headers: authHeaders,
           includeInactiveHouseholds: true,
         }),
       ]);
