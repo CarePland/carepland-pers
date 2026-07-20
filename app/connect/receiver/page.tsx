@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: "Low-choice receiver experience for CarePland Connect.",
 };
 
+export const dynamic = "force-dynamic";
+
 type ConnectReceiverPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };

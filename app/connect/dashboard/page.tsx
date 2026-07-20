@@ -8,6 +8,8 @@ export const metadata: Metadata = {
     "Operational CarePland Connect receiver dashboard backed by the current Connect prototype contracts.",
 };
 
+export const dynamic = "force-dynamic";
+
 export default function CarePlandConnectDashboardPage() {
   return <ConnectDashboard />;
 }

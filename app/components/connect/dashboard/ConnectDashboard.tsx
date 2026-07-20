@@ -1326,7 +1326,10 @@ export function ConnectDashboard() {
 
   useEffect(() => {
     if (activeView !== "connect") return;
-    void refreshCallPathDiagnostics();
+    const timer = window.setTimeout(() => {
+      void refreshCallPathDiagnostics();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [activeView, refreshCallPathDiagnostics]);
 
   useEffect(() => {
@@ -1547,12 +1550,15 @@ export function ConnectDashboard() {
     if (activeDevices.some((device) => receiverKey(device) === selectedReceiverKey)) return;
 
     const stickyKey = readStickySelectedReceiverKey(activeConnectPersonId);
-    if (stickyKey && activeDevices.some((device) => receiverKey(device) === stickyKey)) {
-      setSelectedReceiverKey(stickyKey);
-      return;
-    }
+    const nextReceiverKey =
+      stickyKey && activeDevices.some((device) => receiverKey(device) === stickyKey)
+        ? stickyKey
+        : receiverKey(activeDevices[0]);
 
-    setSelectedReceiverKey(receiverKey(activeDevices[0]));
+    const timer = window.setTimeout(() => {
+      setSelectedReceiverKey(nextReceiverKey);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [activeConnectPersonId, activeDevices, selectedReceiverKey]);
 
   useEffect(() => {
@@ -1629,11 +1635,12 @@ export function ConnectDashboard() {
       setShowAdminItems(readShowAdminItemsPreference());
     }
 
-    syncShowAdminItems();
+    const timer = window.setTimeout(syncShowAdminItems, 0);
     window.addEventListener(adminItemsVisibilityChangedEvent, syncShowAdminItems);
     window.addEventListener("storage", syncShowAdminItems);
 
     return () => {
+      window.clearTimeout(timer);
       window.removeEventListener(adminItemsVisibilityChangedEvent, syncShowAdminItems);
       window.removeEventListener("storage", syncShowAdminItems);
     };
@@ -1641,7 +1648,10 @@ export function ConnectDashboard() {
 
   useEffect(() => {
     if (!receiverRenameOpen) {
-      setReceiverLabelDraft(selectedReceiverLabel);
+      const timer = window.setTimeout(() => {
+        setReceiverLabelDraft(selectedReceiverLabel);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
   }, [receiverRenameOpen, selectedReceiverLabel, selectedReceiverId]);
 
@@ -2770,7 +2780,10 @@ export function ConnectProfileSettingsPanel({
   }, []);
 
   useEffect(() => {
-    void refresh();
+    const timer = window.setTimeout(() => {
+      void refresh();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [refresh]);
 
   const activeDevices = useMemo(
@@ -2794,12 +2807,15 @@ export function ConnectProfileSettingsPanel({
     if (activeDevices.some((device) => receiverKey(device) === selectedReceiverKey)) return;
 
     const stickyKey = readStickySelectedReceiverKey(activeMainConnectUserPersonId);
-    if (stickyKey && activeDevices.some((device) => receiverKey(device) === stickyKey)) {
-      setSelectedReceiverKey(stickyKey);
-      return;
-    }
+    const nextReceiverKey =
+      stickyKey && activeDevices.some((device) => receiverKey(device) === stickyKey)
+        ? stickyKey
+        : receiverKey(activeDevices[0]);
 
-    setSelectedReceiverKey(receiverKey(activeDevices[0]));
+    const timer = window.setTimeout(() => {
+      setSelectedReceiverKey(nextReceiverKey);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [activeDevices, activeMainConnectUserPersonId, selectedReceiverKey]);
 
   useEffect(() => {
@@ -3809,6 +3825,9 @@ function SetupPanel({
     "rename" | "pair" | null
   >(null);
   const [currentReceiverAdvancedOpen, setCurrentReceiverAdvancedOpen] = useState(false);
+  const [receiverHeartbeatNowMs, setReceiverHeartbeatNowMs] = useState<number | null>(
+    null
+  );
   const setupPerson = state.connectContext?.people.find(
     (person) => person.id === activeMainConnectUserPersonId
   );
@@ -3834,6 +3853,17 @@ function SetupPanel({
         new Date(first.lastSeenAt || first.pairedAt || 0).getTime()
       );
     });
+
+  useEffect(() => {
+    const updateHeartbeatNow = () => setReceiverHeartbeatNowMs(Date.now());
+    const initialTimer = window.setTimeout(updateHeartbeatNow, 0);
+    const interval = window.setInterval(updateHeartbeatNow, 60_000);
+
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+    };
+  }, []);
   const sortedActiveReceiverListDevices = sortReceiverListDevices(activeReceiverListDevices);
   const receiverLabel =
     selectedDevice ? receiverDisplayName(selectedDevice) : "No receiver selected";
@@ -4006,7 +4036,7 @@ function SetupPanel({
       };
     }
 
-    const ageMs = Date.now() - lastSeenMs;
+    const ageMs = (receiverHeartbeatNowMs ?? lastSeenMs) - lastSeenMs;
     if (ageMs <= receiverHealthyHeartbeatMs) {
       return {
         isStale: false,

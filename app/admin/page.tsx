@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: "CarePland Admin operations workspace.",
 };
 
+export const dynamic = "force-dynamic";
+
 export default function CarePlandAdminPage() {
   return <AdminApp />;
 }

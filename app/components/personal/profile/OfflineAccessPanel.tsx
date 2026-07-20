@@ -222,7 +222,7 @@ export function OfflineAccessPanel({
                   </p>
                 </div>
                 <label className="block text-sm font-medium text-slate-700">
-                  I'm going offline because...
+                  I&apos;m going offline because...
                   <select
                     className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
                     onChange={(event) =>
@@ -242,10 +242,10 @@ export function OfflineAccessPanel({
                 </label>
                 <div>
                   <p className="mt-1 text-sm leading-6 text-slate-600">
-                    You'll have up to {EXTENDED_OFFLINE_DAYS} days of access to
+                    You&apos;ll have up to {EXTENDED_OFFLINE_DAYS} days of access to
                     information already available on this device. New
                     information and features that require a connection will
-                    resume the next time you're online.
+                    resume the next time you&apos;re online.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">

@@ -4290,36 +4290,33 @@ export function CarePlandPers({
     [careSubjects]
   );
   useEffect(() => {
-    if (careSubjects.length === 0) {
-      if (selectedHealthStorySubjectId) {
-        setSelectedHealthStorySubjectId("");
-      }
-      return;
-    }
+    let nextSubjectId: string | null = null;
 
-    if (
+    if (careSubjects.length === 0) {
+      nextSubjectId = "";
+    } else if (
       selectedSubjectId !== ALL_SUBJECTS &&
       careSubjects.some((subject) => subject.id === selectedSubjectId)
     ) {
-      if (selectedHealthStorySubjectId !== selectedSubjectId) {
-        setSelectedHealthStorySubjectId(selectedSubjectId);
-      }
-      return;
-    }
-
-    if (careSubjects.length === 1 && !careSubjects[0].is_default) {
-      if (selectedHealthStorySubjectId) {
-        setSelectedHealthStorySubjectId("");
-      }
-      return;
-    }
-
-    if (
+      nextSubjectId = selectedSubjectId;
+    } else if (careSubjects.length === 1 && !careSubjects[0].is_default) {
+      nextSubjectId = "";
+    } else if (
       !selectedHealthStorySubjectId ||
       !careSubjects.some((subject) => subject.id === selectedHealthStorySubjectId)
     ) {
-      setSelectedHealthStorySubjectId(careSubjects[0].id);
+      nextSubjectId = careSubjects[0].id;
     }
+
+    if (nextSubjectId === null || selectedHealthStorySubjectId === nextSubjectId) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setSelectedHealthStorySubjectId(nextSubjectId);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [careSubjects, selectedHealthStorySubjectId, selectedSubjectId]);
 	  const hasUnsavedProfileChanges =
 	    profileDraftKey(profileDraft) !== profileDraftKey(savedProfileDraft);
@@ -4433,9 +4430,11 @@ export function CarePlandPers({
 
   useEffect(() => {
     if (!signedInEmail || needsBetaAgreement) {
-      setHasConfiguredReceiver(false);
-      setReceiverDevices([]);
-      return;
+      const timer = window.setTimeout(() => {
+        setHasConfiguredReceiver(false);
+        setReceiverDevices([]);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
 
     let cancelled = false;
@@ -6047,7 +6046,11 @@ export function CarePlandPers({
       return;
     }
 
-    void loadHomeTodayFocus();
+    const timer = window.setTimeout(() => {
+      void loadHomeTodayFocus();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
     // loadHomeTodayFocus intentionally uses current auth/session and subject state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [careSubjects, mainTab, selectedSubjectId, signedInEmail]);
@@ -6189,7 +6192,11 @@ export function CarePlandPers({
       return;
     }
 
-    void loadHomeMessages();
+    const timer = window.setTimeout(() => {
+      void loadHomeMessages();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
     // loadHomeMessages intentionally uses current auth/session and subject state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [careSubjects, mainTab, selectedSubjectId, signedInEmail]);
