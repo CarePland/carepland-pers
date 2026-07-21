@@ -4894,6 +4894,26 @@ export function CarePlandPers({
   }, []);
 
   useEffect(() => {
+    const authSurfaceVisible =
+      !signedInEmail ||
+      authMode === "updatePassword" ||
+      sessionValidity.state === "session_lost";
+
+    if (authSurfaceVisible) {
+      document.body.dataset.careplandAuthSurface = "true";
+    } else {
+      delete document.body.dataset.careplandAuthSurface;
+    }
+
+    window.dispatchEvent(new Event("carepland:visibility-context-change"));
+
+    return () => {
+      delete document.body.dataset.careplandAuthSurface;
+      window.dispatchEvent(new Event("carepland:visibility-context-change"));
+    };
+  }, [authMode, sessionValidity.state, signedInEmail]);
+
+  useEffect(() => {
     const updateStickyOffset = () => {
       setStickySecondaryOffset(
         Math.ceil(mainHeaderRef.current?.getBoundingClientRect().height ?? 0)

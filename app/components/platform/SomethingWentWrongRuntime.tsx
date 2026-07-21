@@ -51,6 +51,8 @@ export function SomethingWentWrongRuntime() {
       const params = new URLSearchParams(window.location.search);
       const isPublicHomepage =
         document.body.dataset.careplandPublicHomepage === "true";
+      const isAuthSurface =
+        document.body.dataset.careplandAuthSurface === "true";
       const receiverLayout = String(
         params.get("receiverLayout") || params.get("layout") || ""
       ).toLowerCase();
@@ -59,6 +61,7 @@ export function SomethingWentWrongRuntime() {
         (receiverLayout === "modern" || receiverLayout === "modern2");
       const inappropriate =
         isPublicHomepage ||
+        isAuthSurface ||
         hiddenExactPaths.includes(path) ||
         hiddenPathPrefixes.some((prefix) => path.startsWith(prefix)) ||
         (path.startsWith("/connect/receiver") && !isReceiverModern) ||
