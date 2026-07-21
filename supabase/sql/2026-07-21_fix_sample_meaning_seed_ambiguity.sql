@@ -123,7 +123,7 @@ end;
 $$;
 
 create or replace function public.seed_sample_meaning_layer_for_user(
-  v_target_user_id uuid default auth.uid()
+  target_user_id uuid default auth.uid()
 )
 returns jsonb
 language plpgsql
@@ -133,6 +133,7 @@ as $$
 declare
   v_caller_user_id uuid := auth.uid();
   v_caller_is_admin boolean := false;
+  v_effective_target_user_id uuid;
   v_target_profile public.profiles%rowtype;
   v_target_care_circle_id uuid;
   v_target_subject_id uuid;
@@ -148,21 +149,21 @@ begin
     raise exception 'Must be signed in to seed sample meaning data';
   end if;
 
-  v_target_user_id := coalesce(v_target_user_id, v_caller_user_id);
+  v_effective_target_user_id := coalesce(target_user_id, v_caller_user_id);
 
   select coalesce(p.is_admin, false)
     into v_caller_is_admin
   from public.profiles p
   where p.id = v_caller_user_id;
 
-  if v_target_user_id <> v_caller_user_id and not coalesce(v_caller_is_admin, false) then
+  if v_effective_target_user_id <> v_caller_user_id and not coalesce(v_caller_is_admin, false) then
     raise exception 'Only an admin can seed sample meaning data for another user';
   end if;
 
   select p.*
     into v_target_profile
   from public.profiles p
-  where p.id = v_target_user_id
+  where p.id = v_effective_target_user_id
   for update;
 
   if not found then
@@ -176,7 +177,7 @@ begin
   select ccm.care_circle_id
     into v_target_care_circle_id
   from public.care_circle_memberships ccm
-  where ccm.user_id = v_target_user_id
+  where ccm.user_id = v_effective_target_user_id
     and ccm.status = 'active'
   order by case when ccm.role = 'owner' then 0 else 1 end, ccm.created_at
   limit 1;
@@ -218,9 +219,9 @@ begin
   end if;
 
   perform public.remove_sample_meaning_layer_for_current_user()
-  where v_target_user_id = v_caller_user_id;
+  where v_effective_target_user_id = v_caller_user_id;
 
-  if v_target_user_id <> v_caller_user_id then
+  if v_effective_target_user_id <> v_caller_user_id then
     -- Admin reseeds another user's sample meaning layer directly.
     delete from public.care_recommendation_review_events crre
     where crre.care_circle_id = v_target_care_circle_id
@@ -297,7 +298,7 @@ begin
       sf.completion_config,
       sf.importance_score,
       sf.sort_order,
-      v_target_user_id,
+      v_effective_target_user_id,
       jsonb_build_object('is_sample_data', true, 'sample_data_seed_version', v_seed_version, 'sample_seed_key', sf.seed_key)
     from seeded_focus sf
     returning id, metadata
@@ -337,7 +338,7 @@ begin
     event.note,
     event.structured_payload,
     1,
-    v_target_user_id,
+    v_effective_target_user_id,
     jsonb_build_object('is_sample_data', true, 'sample_data_seed_version', v_seed_version, 'sample_seed_key', event.seed_key)
   from (
     values
@@ -389,7 +390,7 @@ begin
       sr.confidence,
       sr.priority,
       case when sr.dedupe_key = 'home_blood_pressure_monitoring' then 'approved' else 'candidate' end,
-      v_target_user_id,
+      v_effective_target_user_id,
       sr.structured_payload || jsonb_build_object('recommendationTrace', jsonb_build_object('sampleSeedVersion', v_seed_version, 'generationRule', sr.dedupe_key)),
       jsonb_build_object('is_sample_data', true, 'sample_data_seed_version', v_seed_version, 'sample_seed_key', sr.dedupe_key)
     from seeded_recommendations sr
@@ -492,7 +493,7 @@ begin
     'candidate',
     'approved',
     'Sample review: this is useful because multiple visits mention home BP readings.',
-    v_target_user_id,
+    v_effective_target_user_id,
     v_seeded_at,
     jsonb_build_object('is_sample_data', true, 'sample_data_seed_version', v_seed_version)
   from _sample_meaning_recommendation_map
@@ -535,7 +536,7 @@ begin
       v_target_care_circle_id,
       v_target_subject_id,
       'dashboard',
-      v_target_user_id,
+      v_effective_target_user_id,
       sm.sender_display_name,
       coalesce(nullif(v_target_profile.display_name, ''), nullif(v_target_profile.given_name, ''), 'Care VIP'),
       sm.body,
@@ -574,7 +575,7 @@ begin
     v_target_subject_id,
     event.event_type,
     event.actor_role,
-    v_target_user_id,
+    v_effective_target_user_id,
     jsonb_build_object('is_sample_data', true, 'sample_data_seed_version', v_seed_version),
     event.created_at
   from _sample_meaning_message_map msg
@@ -607,7 +608,7 @@ begin
     'weekly',
     md5(v_seed_version || '|walking_balance_followup'),
     'Sample preference: walking is useful, but not every day.',
-    v_target_user_id,
+    v_effective_target_user_id,
     jsonb_build_object('is_sample_data', true, 'sample_data_seed_version', v_seed_version)
   from _sample_meaning_recommendation_map rec_map
   where rec_map.dedupe_key = 'walking_balance_followup';
@@ -652,7 +653,7 @@ begin
     work.avoided_effort_max,
     'sample_effort_v1',
     work.idempotency_key,
-    v_target_user_id,
+    v_effective_target_user_id,
     work.structured_payload,
     jsonb_build_object('is_sample_data', true, 'sample_data_seed_version', v_seed_version)
   from (
@@ -668,7 +669,7 @@ begin
 
   update public.profiles p
     set sample_data_seed_version = v_seed_version
-  where p.id = v_target_user_id;
+  where p.id = v_effective_target_user_id;
 
   return jsonb_build_object(
     'status', 'seeded',
