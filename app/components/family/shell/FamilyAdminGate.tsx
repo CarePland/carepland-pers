@@ -1,18 +1,14 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
 import { type ReactNode, useEffect, useState } from "react";
 
+import { browserSupabase as supabase } from "../../../lib/platform/browserSupabase";
 import { carePlandSignInPath } from "../../../lib/platform/authRedirect";
 import {
   currentReturnTo,
   reportSessionLossFromError,
   sessionValidityStore,
 } from "../../../lib/platform/sessionValidity";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type FamilyAdminGateProps = {
   children: ReactNode;

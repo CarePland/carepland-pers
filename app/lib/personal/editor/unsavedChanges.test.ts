@@ -57,9 +57,7 @@ function buildEmptySignOutChanges(overrides = {}) {
   return buildUnsavedSignOutChanges({
     appointmentDrafts: {},
     appointmentsById: new Map(),
-    askConversationComplete: true,
     askInput: "",
-    askMessagesLength: 0,
     bulkAppointmentDraftsLength: 0,
     carePrepDrafts: {},
     contextualTextIntakeValue: "",
@@ -164,6 +162,20 @@ describe("unsavedChanges", () => {
 
     assert.deepEqual(changes, []);
     assert.equal(hasAnyUnsavedWork(changes), false);
+  });
+
+  it("treats Ask as dirty only while text is typed or a reply is in flight", () => {
+    assert.deepEqual(
+      buildEmptySignOutChanges({
+      }),
+      []
+    );
+    assert.deepEqual(buildEmptySignOutChanges({ askInput: "Help me" }), [
+      { key: "ask", label: "Ask conversation" },
+    ]);
+    assert.deepEqual(buildEmptySignOutChanges({ askInFlight: true }), [
+      { key: "ask", label: "Ask conversation" },
+    ]);
   });
 
   it("summarizes appointment message drafts for sign-out", () => {

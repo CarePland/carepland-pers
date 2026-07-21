@@ -1,8 +1,8 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { browserSupabase as supabase } from "../../../lib/platform/browserSupabase";
 
 import { CarePlandTopNav } from "../../shared/CarePlandTopNav";
 import { UserFacingFooter } from "../../public/UserFacingFooter";
@@ -175,10 +175,6 @@ const dashboardAudioPack = {
   sit: "/connect/receiver/audio/sit.wav",
   unavailable: "/connect/receiver/audio/number-not-available.mp3",
 };
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type PendingMessageRecording = {
   artifactId?: string;

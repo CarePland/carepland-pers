@@ -1097,6 +1097,7 @@ function ProfileAddressPage({
           onApplyAddress={onApplyProfileAddress}
           onChange={(value) => onChangeField("addressLine1", value)}
           placeholder="Start typing your address"
+          required={profileDetailsRequired}
           value={profileDraft.addressLine1}
         />
         <label className="block text-sm font-medium text-slate-700 md:col-span-2">
@@ -1110,20 +1111,32 @@ function ProfileAddressPage({
           />
         </label>
         <label className="block text-sm font-medium text-slate-700">
-          City
+          <span className="flex items-center justify-between gap-3">
+            <span>City</span>
+            <span className="text-xs font-normal text-slate-400">
+              {requirementLabel}
+            </span>
+          </span>
           <input
             autoComplete="address-level2"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) => onChangeField("city", event.target.value)}
+            required={profileDetailsRequired}
             value={profileDraft.city}
           />
         </label>
         <label className="block text-sm font-medium text-slate-700">
-          State
+          <span className="flex items-center justify-between gap-3">
+            <span>State</span>
+            <span className="text-xs font-normal text-slate-400">
+              {requirementLabel}
+            </span>
+          </span>
           <input
             autoComplete="address-level1"
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
             onChange={(event) => onChangeField("region", event.target.value)}
+            required={profileDetailsRequired}
             value={profileDraft.region}
           />
         </label>
@@ -1141,6 +1154,7 @@ function ProfileAddressPage({
             maxLength={10}
             onChange={(event) => onChangeZip(event.target.value)}
             placeholder="12345"
+            required={profileDetailsRequired}
             title="Use 12345 or 12345-6789."
             value={profileDraft.postalCode}
           />

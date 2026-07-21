@@ -14,6 +14,7 @@ type AddressAutocompleteFieldProps = {
   onApplyAddress: (address: PlaceAddressResult) => void;
   onChange: (value: string) => void;
   placeholder?: string;
+  required?: boolean;
   value: string;
 };
 
@@ -32,6 +33,7 @@ export function AddressAutocompleteField({
   onApplyAddress,
   onChange,
   placeholder = "Start typing your address",
+  required = false,
   value,
 }: AddressAutocompleteFieldProps) {
   const [suggestions, setSuggestions] = useState<PlaceAutocompleteSuggestion[]>(
@@ -168,7 +170,12 @@ export function AddressAutocompleteField({
 
   return (
     <label className={`relative block text-sm font-medium text-slate-700 ${className}`}>
-      {label}
+      <span className="flex items-center justify-between gap-3">
+        <span>{label}</span>
+        <span className="text-xs font-normal text-slate-400">
+          {required ? "required" : "optional"}
+        </span>
+      </span>
       <input
         autoComplete="address-line1"
         className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
@@ -180,6 +187,7 @@ export function AddressAutocompleteField({
           setStatus("");
         }}
         placeholder={placeholder}
+        required={required}
         value={value}
       />
       {suggestions.length > 0 ? (

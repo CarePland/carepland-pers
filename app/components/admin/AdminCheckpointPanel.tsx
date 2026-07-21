@@ -1,8 +1,8 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { browserSupabase as supabase } from "../../lib/platform/browserSupabase";
 
 import type { HealthFocusTopicSummary } from "@/app/components/personal/healthTopics/HealthFocusCard";
 import {
@@ -86,10 +86,6 @@ type DecisionQualityReview = NonNullable<
 >[number];
 
 type CheckpointReviewType = "careprep" | "health_stories";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const decisions = [
   { label: "Proceed", value: "proceed" },

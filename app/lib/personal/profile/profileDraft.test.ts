@@ -72,7 +72,7 @@ describe("profileDraft", () => {
     assert.equal(isValidUsZip("9029"), false);
   });
 
-  it("uses display name, full name, then email for profile labels", () => {
+  it("uses display name, full name, then a neutral profile label", () => {
     assert.equal(
       profileDisplayName({
         displayName: "Care Captain",
@@ -98,7 +98,18 @@ describe("profileDraft", () => {
         familyName: "",
         givenName: "",
       }),
-      "pat@example.com"
+      "You"
+    );
+  });
+
+  it("does not hydrate an email-like stored display name as a visible display-name default", () => {
+    assert.equal(
+      profileDraftFromRow({
+        fallbackEmail: "pat@example.com",
+        fallbackTimezone: "America/Los_Angeles",
+        row: { display_name: "pat@example.com" },
+      }).displayName,
+      ""
     );
   });
 

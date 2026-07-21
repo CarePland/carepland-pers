@@ -1,19 +1,14 @@
-import { createClient } from "@supabase/supabase-js";
-
 import type {
   ConnectMainUserContext,
   ConnectPersPerson,
   UpdateConnectMainUserContextInput,
 } from "./types";
+import { browserSupabase as supabase } from "../../platform/browserSupabase";
 import {
   reportSessionLossFromResponse,
   sessionValidityStore,
   type SessionValiditySurface,
 } from "../../platform/sessionValidity";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export async function fetchConnectMainUserContext(): Promise<ConnectMainUserContext> {
   return fetchJson<ConnectMainUserContext>("/api/connect/context", {

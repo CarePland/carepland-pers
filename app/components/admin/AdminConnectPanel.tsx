@@ -11,7 +11,11 @@ import {
   useMemo,
   useState,
 } from "react";
-import { createClient } from "@supabase/supabase-js";
+import {
+  browserSupabase,
+  supabaseAnonKey as adminSupabaseAnonKey,
+  supabaseUrl as adminSupabaseUrl,
+} from "../../lib/platform/browserSupabase";
 
 import {
   adminPanelsForArea,
@@ -447,12 +451,8 @@ const connectAudioReviewBundleDownloadEndpoint =
 const connectAudioTimelineEndpoint = connectPrototypeEndpoints.audioTimeline;
 const connectAdminAreaStorageKey = "carepland.admin.connect.activeArea.v1";
 const connectThemeStorageKey = "carepland.connect.receiver.theme.v2";
-const adminSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const adminSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const adminSupabase =
-  adminSupabaseUrl && adminSupabaseAnonKey
-    ? createClient(adminSupabaseUrl, adminSupabaseAnonKey)
-    : null;
+  adminSupabaseUrl && adminSupabaseAnonKey ? browserSupabase : null;
 
 const defaultConnectTheme: ConnectTheme = {
   name: "Classic Green",
