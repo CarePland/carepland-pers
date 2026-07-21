@@ -166,6 +166,22 @@ describe("unsavedChanges", () => {
     assert.equal(hasAnyUnsavedWork(changes), false);
   });
 
+  it("treats Ask as dirty only while text is typed or a reply is in flight", () => {
+    assert.deepEqual(
+      buildEmptySignOutChanges({
+        askConversationComplete: false,
+        askMessagesLength: 2,
+      }),
+      []
+    );
+    assert.deepEqual(buildEmptySignOutChanges({ askInput: "Help me" }), [
+      { key: "ask", label: "Ask conversation" },
+    ]);
+    assert.deepEqual(buildEmptySignOutChanges({ askInFlight: true }), [
+      { key: "ask", label: "Ask conversation" },
+    ]);
+  });
+
   it("summarizes appointment message drafts for sign-out", () => {
     const changes = buildEmptySignOutChanges({
       appointmentMessageDraft: {

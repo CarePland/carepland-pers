@@ -45,9 +45,10 @@ type BuildUnsavedSignOutChangesInput = {
   } | null;
   appointmentDrafts: Record<string, AppointmentDetailsDraft>;
   appointmentsById: Map<string, AppointmentSummarySource>;
-  askConversationComplete: boolean;
+  askConversationComplete?: boolean;
+  askInFlight?: boolean;
   askInput: string;
-  askMessagesLength: number;
+  askMessagesLength?: number;
   bulkAppointmentDraftsLength: number;
   carePrepDrafts: Record<string, CarePrepFormDraft>;
   contextualTextIntakeValue: string;
@@ -77,9 +78,8 @@ export function buildUnsavedSignOutChanges({
   appointmentMessageDraft,
   appointmentDrafts,
   appointmentsById,
-  askConversationComplete,
+  askInFlight = false,
   askInput,
-  askMessagesLength,
   bulkAppointmentDraftsLength,
   carePrepDrafts,
   contextualTextIntakeValue,
@@ -273,7 +273,7 @@ export function buildUnsavedSignOutChanges({
     });
   });
 
-  if (askInput.trim() || (askMessagesLength > 0 && !askConversationComplete)) {
+  if (askInput.trim() || askInFlight) {
     addChange({ key: "ask", label: "Ask conversation" });
   }
 

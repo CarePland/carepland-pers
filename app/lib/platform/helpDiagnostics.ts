@@ -1,15 +1,12 @@
 "use client";
 
 import { generatedBuildDttm, generatedBuildNumber } from "../../build-info";
-import { createClient } from "@supabase/supabase-js";
+import { browserSupabase as supabase } from "./browserSupabase";
 
 const maxEntries = 60;
 const maxVisibleTextLength = 5000;
 const maxScreenHtmlLength = 80000;
 const helpDiagnosticsEndpoint = "/api/platform/help-diagnostics";
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type Breadcrumb = {
   at: string;

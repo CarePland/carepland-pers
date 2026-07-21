@@ -1,6 +1,5 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
 import Image from "next/image";
 import {
   DragEvent,
@@ -161,6 +160,11 @@ import {
   savePageViewState,
 } from "./lib/navigation/pageViewState";
 import { carePlandReturnToFromCurrentLocation } from "./lib/platform/authRedirect";
+import {
+  browserSupabase as supabase,
+  supabaseAnonKey,
+  supabaseUrl,
+} from "./lib/platform/browserSupabase";
 import {
   sessionValidityStore,
   type SessionValiditySnapshot,
@@ -657,7 +661,12 @@ const adminTabs = [
 function isAdminTab(value: string | null): value is AdminTab {
   return Boolean(value && adminTabs.includes(value as AdminTab));
 }
-type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
+type AuthMode =
+  | "reset"
+  | "signIn"
+  | "signUp"
+  | "signUpConfirmation"
+  | "updatePassword";
 type AppointmentPanel = "add" | "quickAdd";
 type MainTab = "admin" | "appointments" | "home" | "profile";
 type PendingImportLeaveAction =
@@ -1323,8 +1332,6 @@ const emptyTextIntakeDraft: IntakeReviewDraftContent = {
   takeaways: "",
 };
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
 const productionAppUrl = "https://app.carepland.com";
 const generatedBuildNumberFallback = generatedBuildNumber || "Unknown";
@@ -1335,7 +1342,6 @@ const careplandBuildNumber =
 const careplandBuildDttm =
   process.env.NEXT_PUBLIC_CAREPLAND_BUILD_DTTM ?? generatedBuildDttm;
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const sessionValidityServerSnapshot: SessionValiditySnapshot = {
   duplicateLossCount: 0,
   reason: "",
@@ -3010,6 +3016,8 @@ export function CarePlandPers({
   const [showAuthGateway, setShowAuthGateway] = useState(
     adminRoute || shouldStayOnPersonalRoute()
   );
+  const accountCreationInFlightRef = useRef(false);
+  const [signUpConfirmationEmail, setSignUpConfirmationEmail] = useState("");
   const [planHelpExpanded, setPlanHelpExpanded] = useState(false);
   const [adminPlanPreviewId, setAdminPlanPreviewId] = useState("");
   const [activeAppointmentPanel, setActiveAppointmentPanel] =
@@ -3665,10 +3673,7 @@ export function CarePlandPers({
   const canCreateNewAppointment =
     Boolean(newAppointmentTargetSubjectId) &&
     Boolean(newAppointmentTitle.trim()) &&
-    Boolean(newAppointmentStartsAt.trim()) &&
-    Boolean(newAppointmentLocationAddress.trim()) &&
-    Boolean(newAppointmentProviderName.trim()) &&
-    Boolean(newAppointmentReason.trim());
+    Boolean(newAppointmentStartsAt.trim());
   const saveAppointmentsViewState = useCallback((
     overrides: Partial<AppointmentsPageViewState> = {}
   ) => {
@@ -4498,6 +4503,7 @@ export function CarePlandPers({
       appointmentDrafts,
       appointmentsById,
       askConversationComplete,
+      askInFlight: sendingAskMessage,
       askInput,
       askMessagesLength: askMessages.length,
       bulkAppointmentDraftsLength: bulkAppointmentDrafts.length,
@@ -4522,7 +4528,8 @@ export function CarePlandPers({
       hasUnsavedProfileChanges,
       importAnythingItemsLength: importAnythingItems.length,
       importAnythingSourcesLength: importAnythingSources.length,
-      newAppointmentDraft,
+      newAppointmentDraft:
+        activeAppointmentPanel === "add" ? newAppointmentDraft : emptyAppointmentDraft,
       newCareVipName,
       noteDrafts,
       notesByAppointment,
@@ -4538,6 +4545,7 @@ export function CarePlandPers({
 	    askConversationComplete,
 	    askInput,
 	    askMessages.length,
+    sendingAskMessage,
 	    bulkAppointmentDrafts.length,
 	    carePrepDrafts,
 	    contextualTextIntakeValue,
@@ -4549,6 +4557,7 @@ export function CarePlandPers({
 	    hasUnsavedProfileChanges,
 	    importAnythingItems.length,
 	    importAnythingSources.length,
+    activeAppointmentPanel,
 	    newAppointmentDraft,
 	    newCareVipName,
 	    noteDrafts,
@@ -8061,6 +8070,11 @@ export function CarePlandPers({
 
   async function handleSignUp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (accountCreationInFlightRef.current) {
+      return;
+    }
+
+    accountCreationInFlightRef.current = true;
     setLoading(true);
     setMessage("");
 
@@ -8100,6 +8114,7 @@ export function CarePlandPers({
       if (data.session) {
         setSessionProfileLoaded(false);
         setSignedInEmail(trimmedEmail);
+        setSignUpConfirmationEmail("");
         setWelcomeGuideDismissed(false);
         setMessage("Account created and signed in. Finish profile setup to continue.");
         recordSessionActivity();
@@ -8108,14 +8123,59 @@ export function CarePlandPers({
         return;
       }
 
-      setAuthMode("signIn");
+      setSignUpConfirmationEmail(trimmedEmail);
+      setAuthMode("signUpConfirmation");
       setPassword("");
       setConfirmPassword("");
-      setMessage(
-        "If this email can be used to create an account, CarePland will send a confirmation link. If you already have an account, sign in or reset your password."
-      );
+      setMessage("");
     } catch (error) {
       logAuthError("signUp", error);
+      setMessage(getAuthErrorMessage(error));
+    } finally {
+      accountCreationInFlightRef.current = false;
+      setLoading(false);
+    }
+  }
+
+  async function handleResendSignUpConfirmationEmail() {
+    const trimmedEmail = (signUpConfirmationEmail || email).trim();
+
+    if (!trimmedEmail || loading) {
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error(
+          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel."
+        );
+      }
+
+      if (!isLikelyEmail(trimmedEmail)) {
+        throw new Error("Enter a valid email address.");
+      }
+
+      const { error } = await supabase.auth.resend({
+        email: trimmedEmail,
+        options: {
+          emailRedirectTo: emailConfirmationRedirectUrl(),
+        },
+        type: "signup",
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setSignUpConfirmationEmail(trimmedEmail);
+      setMessage(
+        "If this email can be used to create an account, CarePland will send a confirmation link. Check your inbox and junk folder."
+      );
+    } catch (error) {
+      logAuthError("resendSignUpConfirmation", error);
       setMessage(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
@@ -8266,6 +8326,7 @@ export function CarePlandPers({
     setPendingModifierSwitch(null);
     setPendingAppointmentPanelView(null);
     setActiveAppointmentPanel(null);
+    setNewAppointmentDraft({ ...emptyAppointmentDraft });
     setMessage("");
     saveAppointmentsViewState({
       activeAppointmentPanel: null,
@@ -9342,6 +9403,9 @@ export function CarePlandPers({
     setPendingModifierSwitch(null);
     setFileImportStatus("");
     resetPlaceLookup();
+    if (panel !== "add") {
+      setNewAppointmentDraft({ ...emptyAppointmentDraft });
+    }
     setActiveAppointmentPanel(panel);
     setMainTab("appointments");
     saveAppointmentsViewState({
@@ -11276,15 +11340,15 @@ export function CarePlandPers({
                     "last name",
                     "phone",
                     "time zone",
+                    "address line 1",
+                    "city",
+                    "state / region",
                     "ZIP code",
                   ],
                   requires_email_update: requiresEmailUpdate,
                   optional_fields: [
                     "display name",
-                    "address line 1",
                     "address line 2",
-                    "city",
-                    "state / region",
                     "country",
                   ],
                 }
@@ -12352,7 +12416,7 @@ export function CarePlandPers({
           durationMs: 7000,
           type: "success",
         });
-        return;
+        return true;
       }
 
       if (status.status === "declined") {
@@ -12360,8 +12424,10 @@ export function CarePlandPers({
       }
 
       setMessage(sampleDataStatusText(status));
+      return false;
     } catch (error) {
       setMessage(getErrorMessage(error));
+      return false;
     } finally {
       setSeedingSampleData(false);
     }
@@ -15158,18 +15224,6 @@ export function CarePlandPers({
         throw new Error("Please enter a date and time.");
       }
 
-      if (!newAppointmentLocationAddress.trim()) {
-        throw new Error("Please enter a location.");
-      }
-
-      if (!newAppointmentProviderName.trim()) {
-        throw new Error("Please enter a provider.");
-      }
-
-      if (!newAppointmentReason.trim()) {
-        throw new Error("Please enter a reason.");
-      }
-
       const { careCircleId, careSubjectId, userId } =
         await getPrimaryCareContext(newAppointmentTargetSubjectId);
 
@@ -15221,6 +15275,14 @@ export function CarePlandPers({
     } finally {
       setCreatingAppointment(false);
     }
+  }
+
+  function cancelNewAppointment() {
+    setPendingModifierSwitch(null);
+    setNewAppointmentDraft({ ...emptyAppointmentDraft });
+    resetPlaceLookup();
+    setActiveAppointmentPanel(null);
+    setMessage("");
   }
 
   function startEditingAppointment(appointment: Appointment) {
@@ -16624,8 +16686,14 @@ export function CarePlandPers({
             isAdmin={isAdmin}
             onAddExamples={() => {
               void (async () => {
+                const seeded = await handleSeedSampleDataForCurrentUser(true);
+                if (!seeded) {
+                  return;
+                }
+
                 await markWelcomeGuideRead();
-                await handleSeedSampleDataForCurrentUser(true);
+                setMainTab("appointments");
+                applyAppointmentViewChange("upcoming");
               })();
             }}
             onAddFirstAppointment={() => {
@@ -17557,12 +17625,21 @@ export function CarePlandPers({
               onClearMessage={() => setMessage("")}
               onGoogleSignIn={handleGoogleSignIn}
               onPasswordReset={handlePasswordReset}
+              onResendConfirmationEmail={handleResendSignUpConfirmationEmail}
               onSignIn={handleSignIn}
               onSignUp={handleSignUp}
+              onUseDifferentSignUpEmail={() => {
+                setAuthMode("signUp");
+                setSignUpConfirmationEmail("");
+                setEmail("");
+                setPassword("");
+                setConfirmPassword("");
+              }}
               password={password}
               passwordsMismatch={passwordsMismatch}
               signInButtonLabel="Sign in again"
               signInDescription="Your session ended. Sign in to continue."
+              signUpConfirmationEmail={signUpConfirmationEmail}
               signedInEmail={null}
             />
           </aside>
@@ -17577,7 +17654,18 @@ export function CarePlandPers({
     !showAuthGateway &&
     entryHostMode === "public"
   ) {
-    return <PublicWebsite onOpenApp={() => setShowAuthGateway(true)} />;
+    return (
+      <PublicWebsite
+        onGetStarted={() => {
+          setAuthMode("signUp");
+          setShowAuthGateway(true);
+        }}
+        onOpenApp={() => {
+          setAuthMode("signIn");
+          setShowAuthGateway(true);
+        }}
+      />
+    );
   }
 
   const adminWorkspaceProps = createAdminWorkspaceProps({
@@ -18125,10 +18213,19 @@ export function CarePlandPers({
               onClearMessage={() => setMessage("")}
               onGoogleSignIn={handleGoogleSignIn}
               onPasswordReset={handlePasswordReset}
+              onResendConfirmationEmail={handleResendSignUpConfirmationEmail}
               onSignIn={handleSignIn}
               onSignUp={handleSignUp}
+              onUseDifferentSignUpEmail={() => {
+                setAuthMode("signUp");
+                setSignUpConfirmationEmail("");
+                setEmail("");
+                setPassword("");
+                setConfirmPassword("");
+              }}
               password={password}
               passwordsMismatch={passwordsMismatch}
+              signUpConfirmationEmail={signUpConfirmationEmail}
               signedInEmail={signedInEmail}
             />
 
@@ -18500,111 +18597,6 @@ export function CarePlandPers({
                   </form>
                 ) : null}
               </section>
-            ) : null}
-
-            {signedInEmail ? (
-              <form
-                className="mt-6 border-t border-slate-200 pt-6"
-                onSubmit={handleCreateAppointment}
-              >
-                <h2 className="text-xl font-semibold">Add appointment</h2>
-                {canUseMultipleCareVips ? (
-                  <label className="mt-4 block text-sm font-medium text-slate-700">
-                    Who is this for?
-                    <select
-                      className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                      disabled={careSubjects.length === 0}
-                      onChange={(event) =>
-                        setNewAppointmentSubjectId(event.target.value)
-                      }
-                      value={newAppointmentSubjectId}
-                    >
-                      {careSubjects.length === 0 ? (
-                        <option value="">No Care VIPs found</option>
-                      ) : null}
-                      {careSubjects.map((subject) => (
-                        <option key={subject.id} value={subject.id}>
-                          {careSubjectDisplayLabel(subject)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                {renderPlaceLookup("mt-4")}
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  Title
-                  <input
-                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                    onChange={(event) => setNewAppointmentTitle(event.target.value)}
-                    placeholder="e.g. Follow-up with Dr. Smith"
-                    type="text"
-                    value={newAppointmentTitle}
-                  />
-                </label>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  Date & time
-                  <input
-                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                    onChange={(event) =>
-                      setNewAppointmentStartsAt(event.target.value)
-                    }
-                    type="datetime-local"
-                    value={newAppointmentStartsAt}
-                  />
-                </label>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  Provider
-                  <input
-                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                    onChange={(event) =>
-                      setNewAppointmentProviderName(event.target.value)
-                    }
-                    placeholder="e.g. Dr. Smith"
-                    type="text"
-                    value={newAppointmentProviderName}
-                  />
-                </label>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  Practice
-                  <input
-                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                    onChange={(event) =>
-                      setNewAppointmentProviderOrganization(event.target.value)
-                    }
-                    placeholder="e.g. Main Street Clinic"
-                    type="text"
-                    value={newAppointmentProviderOrganization}
-                  />
-                </label>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  Address
-                  <input
-                    className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                    onChange={(event) =>
-                      setNewAppointmentLocationAddress(event.target.value)
-                    }
-                    placeholder="Street, city, state"
-                    type="text"
-                    value={newAppointmentLocationAddress}
-                  />
-                </label>
-                <label className="mt-4 block text-sm font-medium text-slate-700">
-                  Reason
-                  <textarea
-                    className="mt-2 min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-                    onChange={(event) => setNewAppointmentReason(event.target.value)}
-                    placeholder="What is this appointment for?"
-                    value={newAppointmentReason}
-                  />
-                </label>
-                <button
-                  className={`mt-4 w-full ${gentlePrimaryButtonClass}`}
-                  disabled={creatingAppointment}
-                  type="submit"
-                >
-                  {creatingAppointment ? "Adding..." : "Add appointment"}
-                </button>
-              </form>
             ) : null}
 
             {signedInEmail && message ? (
@@ -19069,6 +19061,7 @@ export function CarePlandPers({
                             setNewAppointmentSubjectId(event.target.value)
                           }
                           value={newAppointmentSubjectId}
+                          required
                         >
                           {careSubjects.length === 0 ? (
                             <option value="">No Care VIPs found</option>
@@ -19083,23 +19076,31 @@ export function CarePlandPers({
                     ) : null}
                     <label className="block text-base font-medium text-slate-700">
                       Appointment Title
+                      <span className="ml-2 text-xs font-normal text-slate-400">
+                        required
+                      </span>
                       <input
                         className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
                           setNewAppointmentTitle(event.target.value)
                         }
                         placeholder="e.g. Follow-up with Dr. Smith"
+                        required
                         type="text"
                         value={newAppointmentTitle}
                       />
                     </label>
                     <label className="block text-base font-medium text-slate-700">
                       Date & Time
+                      <span className="ml-2 text-xs font-normal text-slate-400">
+                        required
+                      </span>
                       <input
                         className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
                         onChange={(event) =>
                           setNewAppointmentStartsAt(event.target.value)
                         }
+                        required
                         type="datetime-local"
                         value={newAppointmentStartsAt}
                       />
@@ -19157,10 +19158,7 @@ export function CarePlandPers({
                       </button>
                       <button
                         className={gentleSecondaryButtonClass}
-                        onClick={() => {
-                          resetPlaceLookup();
-                          setActiveAppointmentPanel(null);
-                        }}
+                        onClick={cancelNewAppointment}
                         type="button"
                       >
                         Cancel

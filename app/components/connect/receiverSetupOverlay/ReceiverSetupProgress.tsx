@@ -36,7 +36,7 @@ export function ReceiverSetupProgress({
               {canNavigate && onNavigate ? (
                 <button
                   aria-current={active ? "step" : undefined}
-                  className={`${className} w-full transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#4e84b2]`}
+                  className={`${className} w-full hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#4e84b2]`}
                   onClick={() => onNavigate(item)}
                   type="button"
                 >

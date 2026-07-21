@@ -1,7 +1,7 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { browserSupabase as supabase } from "../../../lib/platform/browserSupabase";
 
 import {
   addTimeToDueIntent,
@@ -31,10 +31,6 @@ import {
   panelClass,
 } from "../../shared/uiStyles";
 import { ErrandStatusPill } from "./ErrandStatusPill";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type ErrandDraft = {
   title: string;

@@ -1,7 +1,7 @@
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
 import { useEffect, useMemo, useState } from "react";
+import { browserSupabase as supabase } from "../../lib/platform/browserSupabase";
 
 type AdminRecommendationsCareSubject = {
   careCircleId: string;
@@ -126,10 +126,6 @@ export function clearAdminRecommendationsReviewDraftStorage() {
 
   window.sessionStorage.removeItem(adminRecommendationsReviewDraftStorageKey);
 }
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export function AdminRecommendationsReviewPanel({
   careSubjects,

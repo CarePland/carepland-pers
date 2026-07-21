@@ -26,8 +26,12 @@ export function ReceiverStartStep({
   return (
     <section className="mx-auto grid w-full max-w-5xl gap-6 pt-10 pb-4">
       <div>
-        <p className="mx-auto max-w-4xl text-center text-lg font-semibold leading-relaxed text-[#5f6e84] sm:text-xl">
-          Receiver provides an uncluttered, straightforward experience for those who need
+        <p className="mx-auto max-w-4xl text-center text-lg font-black leading-relaxed text-[#172f49] sm:text-xl">
+          Receiver is a simplified CarePland experience for the person you&apos;re
+          caring for, set up on a separate device like a tablet, phone, or computer.
+        </p>
+        <p className="mx-auto mt-2 max-w-4xl text-center text-base font-semibold leading-relaxed text-[#5f6e84] sm:text-lg">
+          It provides an uncluttered, straightforward experience for those who need
           simplicity.
         </p>
       </div>

@@ -35,7 +35,7 @@ export function profileDisplayName(
     .filter(Boolean)
     .join(" ");
 
-  return profile.displayName.trim() || fullName || profile.email.trim();
+  return profile.displayName.trim() || fullName || "You";
 }
 
 export function profileDraftKey(profile: ProfileDraft) {
@@ -51,12 +51,18 @@ export function profileDraftFromRow({
   fallbackTimezone: string;
   row: Record<string, unknown> | null | undefined;
 }): ProfileDraft {
+  const fallbackEmailValue = fallbackEmail.trim().toLowerCase();
+  const storedDisplayName = String(row?.display_name ?? "");
+
   return {
     addressLine1: String(row?.address_line1 ?? ""),
     addressLine2: String(row?.address_line2 ?? ""),
     city: String(row?.city ?? ""),
     country: String(row?.country ?? "US"),
-    displayName: String(row?.display_name ?? ""),
+    displayName:
+      storedDisplayName.trim().toLowerCase() === fallbackEmailValue
+        ? ""
+        : storedDisplayName,
     email: String(row?.email ?? fallbackEmail),
     familyName: String(row?.family_name ?? ""),
     givenName: String(row?.given_name ?? ""),

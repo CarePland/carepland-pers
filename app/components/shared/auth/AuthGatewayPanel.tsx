@@ -1,8 +1,15 @@
 "use client";
 
-import { FormEvent } from "react";
+import { FormEvent, useEffect, useRef } from "react";
 
-type AuthMode = "reset" | "signIn" | "signUp" | "updatePassword";
+import { createAccountProcessingText } from "../../../lib/platform/createAccountFeedback";
+
+type AuthMode =
+  | "reset"
+  | "signIn"
+  | "signUp"
+  | "signUpConfirmation"
+  | "updatePassword";
 
 type AuthGatewayPanelProps = {
   authMode: AuthMode;
@@ -21,12 +28,15 @@ type AuthGatewayPanelProps = {
   onClearMessage: () => void;
   onGoogleSignIn: () => void;
   onPasswordReset: (event: FormEvent<HTMLFormElement>) => void;
+  onResendConfirmationEmail?: () => void;
   onSignIn: (event: FormEvent<HTMLFormElement>) => void;
   onSignUp: (event: FormEvent<HTMLFormElement>) => void;
+  onUseDifferentSignUpEmail?: () => void;
   password: string;
   passwordsMismatch: boolean;
   signInButtonLabel?: string;
   signInDescription?: string;
+  signUpConfirmationEmail?: string;
   signedInEmail: string | null;
 };
 
@@ -47,18 +57,38 @@ export function AuthGatewayPanel({
   onClearMessage,
   onGoogleSignIn,
   onPasswordReset,
+  onResendConfirmationEmail,
   onSignIn,
   onSignUp,
+  onUseDifferentSignUpEmail,
   password,
   passwordsMismatch,
   signInButtonLabel,
   signInDescription,
+  signUpConfirmationEmail,
   signedInEmail,
 }: AuthGatewayPanelProps) {
+  const statusRef = useRef<HTMLParagraphElement | null>(null);
+
+  useEffect(() => {
+    if (
+      authMode === "signUpConfirmation" ||
+      (message && !loading) ||
+      (authMode === "signUp" && loading)
+    ) {
+      statusRef.current?.focus();
+    }
+  }, [authMode, loading, message]);
+
   return (
     <>
       {!signedInEmail && message ? (
-        <p className="mb-5 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
+        <p
+          aria-live="polite"
+          className="mb-5 rounded-md bg-slate-100 p-3 text-sm text-slate-700"
+          ref={statusRef}
+          tabIndex={-1}
+        >
           {message}
         </p>
       ) : null}
@@ -68,6 +98,65 @@ export function AuthGatewayPanel({
           <h2 className="text-xl font-semibold">Signed in</h2>
           <p className="mt-2 break-words text-slate-600">{signedInEmail}</p>
         </div>
+      ) : authMode === "signUpConfirmation" ? (
+        <section aria-labelledby="auth-confirmation-heading">
+          <h2
+            className="text-xl font-semibold text-slate-950"
+            id="auth-confirmation-heading"
+          >
+            Check your email
+          </h2>
+          <p
+            aria-live="polite"
+            className="mt-3 rounded-md bg-blue-50 p-3 text-sm leading-6 text-blue-950"
+            ref={statusRef}
+            tabIndex={-1}
+          >
+            We sent a confirmation link to{" "}
+            <strong className="break-words">
+              {signUpConfirmationEmail || "the email address you submitted"}
+            </strong>
+            . Open that link to finish creating your CarePland account.
+          </p>
+          <p className="mt-3 text-sm leading-6 text-slate-500">
+            If this email can be used to create an account, the confirmation
+            link will arrive shortly. Check your inbox and junk folder.
+          </p>
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            {onResendConfirmationEmail ? (
+              <button
+                className={gentlePrimaryButtonClass}
+                disabled={loading}
+                onClick={onResendConfirmationEmail}
+                type="button"
+              >
+                {loading ? "Sending..." : "Resend confirmation email"}
+              </button>
+            ) : null}
+            <button
+              className={gentleSecondaryButtonClass}
+              disabled={loading}
+              onClick={() => {
+                onUseDifferentSignUpEmail?.();
+                onClearMessage();
+              }}
+              type="button"
+            >
+              Use a different email
+            </button>
+            <button
+              className="font-semibold text-blue-700 disabled:text-slate-400"
+              disabled={loading}
+              onClick={() => {
+                onChangeAuthMode("signIn");
+                onClearMessage();
+              }}
+              type="button"
+            >
+              Return to sign in
+            </button>
+          </div>
+        </section>
       ) : (
         <form
           onSubmit={
@@ -126,6 +215,7 @@ export function AuthGatewayPanel({
                       ? "bg-white text-blue-800 shadow-sm"
                       : "text-slate-500 hover:text-blue-800"
                   }`}
+                  disabled={loading}
                   onClick={() => {
                     onChangeAuthMode("signIn");
                     onClearMessage();
@@ -141,6 +231,7 @@ export function AuthGatewayPanel({
                       ? "bg-white text-blue-800 shadow-sm"
                       : "text-slate-500 hover:text-blue-800"
                   }`}
+                  disabled={loading}
                   onClick={() => {
                     onChangeAuthMode("signUp");
                     onClearMessage();
@@ -152,10 +243,21 @@ export function AuthGatewayPanel({
               </div>
             </>
           ) : null}
+          {authMode === "signUp" && loading ? (
+            <p
+              aria-live="polite"
+              className="mt-5 rounded-md bg-blue-50 p-3 text-sm font-semibold text-blue-900"
+              ref={statusRef}
+              tabIndex={-1}
+            >
+              {createAccountProcessingText}
+            </p>
+          ) : null}
           <label className="mt-5 block text-sm font-medium text-slate-700">
             Email
             <input
               className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+              disabled={loading}
               onChange={(event) => onChangeEmail(event.target.value)}
               required
               type="email"
@@ -168,6 +270,7 @@ export function AuthGatewayPanel({
               Password
               <input
                 className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-base"
+                disabled={loading}
                 minLength={8}
                 onChange={(event) => {
                   onChangePassword(event.target.value);
@@ -188,6 +291,7 @@ export function AuthGatewayPanel({
                 className={`mt-2 w-full rounded-md border px-3 py-2 text-base ${
                   passwordsMismatch ? "border-red-500" : "border-slate-300"
                 }`}
+                disabled={loading}
                 minLength={8}
                 onChange={(event) => {
                   onChangeConfirmPassword(event.target.value);
@@ -206,12 +310,15 @@ export function AuthGatewayPanel({
           ) : null}
 
           <button
+            aria-busy={loading}
             className={`${gentlePrimaryButtonClass} mt-5 w-full`}
             disabled={!canSubmitAuth}
             type="submit"
           >
             {loading
-              ? "Working..."
+              ? authMode === "signUp"
+                ? createAccountProcessingText
+                : "Working..."
               : authMode === "signUp"
                 ? "Create account"
                 : authMode === "reset"
