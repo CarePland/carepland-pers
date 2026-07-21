@@ -742,6 +742,48 @@ type SampleDataSeedStage =
   | "meaning_layer"
   | "receiver_messages";
 
+type SampleDataSeedWorkflowStatus = "idle" | "running" | "failed" | "succeeded";
+
+type SampleDataSeedProgress = {
+  completedStages: SampleDataSeedStage[];
+  errorMessage: string;
+  failedStage: SampleDataSeedStage | null;
+  stage: SampleDataSeedStage;
+  status: SampleDataSeedWorkflowStatus;
+};
+
+type SampleDataSeedStageDefinition = {
+  detail: string;
+  id: Exclude<SampleDataSeedStage, "idle">;
+  label: string;
+};
+
+const sampleDataSeedStages: SampleDataSeedStageDefinition[] = [
+  {
+    detail: "Adding sample appointments, notes, and CarePrep context.",
+    id: "core",
+    label: "Creating example appointments",
+  },
+  {
+    detail: "Adding recommendations, Focus items, Track history, and work examples.",
+    id: "meaning_layer",
+    label: "Adding example recommendations and Focus items",
+  },
+  {
+    detail: "Adding Receiver, Messages, MessagePrep, and Admin diagnostic examples.",
+    id: "receiver_messages",
+    label: "Adding example messages",
+  },
+];
+
+const initialSampleDataSeedProgress: SampleDataSeedProgress = {
+  completedStages: [],
+  errorMessage: "",
+  failedStage: null,
+  stage: "idle",
+  status: "idle",
+};
+
 type StoredUiState = {
   adminTab?: StoredAdminTab;
   aiAdminTab?: AiAdminTab;
@@ -1863,24 +1905,122 @@ function sampleDataStatusText(status: SampleDataStatus | null): string {
   return `Sample data status: ${status.status}`;
 }
 
-function sampleDataSeedStageLabel(stage: SampleDataSeedStage) {
-  if (stage === "core") {
-    return "Creating example appointments";
-  }
-
-  if (stage === "meaning_layer") {
-    return "Adding example recommendations and Focus items";
-  }
-
-  if (stage === "receiver_messages") {
-    return "Adding example messages";
-  }
-
-  return "Preparing examples";
-}
-
 function friendlySampleDataSeedError() {
   return "CarePland could not add examples just now. Nothing is stuck; please try again in a moment.";
+}
+
+function sampleDataSeedStageDefinition(stage: SampleDataSeedStage) {
+  return (
+    sampleDataSeedStages.find((seedStage) => seedStage.id === stage) ??
+    sampleDataSeedStages[0]
+  );
+}
+
+function sampleDataSeedStageOrder(stage: SampleDataSeedStage) {
+  return sampleDataSeedStages.findIndex((seedStage) => seedStage.id === stage);
+}
+
+function SampleDataSeedProgressPanel({
+  onRetry,
+  progress,
+  retryDisabled,
+}: {
+  onRetry: () => void;
+  progress: SampleDataSeedProgress;
+  retryDisabled: boolean;
+}) {
+  if (progress.status === "idle") {
+    return null;
+  }
+
+  const activeStage = sampleDataSeedStageDefinition(
+    progress.failedStage ?? progress.stage
+  );
+  const isFailed = progress.status === "failed";
+  const isSucceeded = progress.status === "succeeded";
+
+  return (
+    <div
+      aria-live="polite"
+      className={`mx-auto mt-3 max-w-3xl rounded-md border px-4 py-3 text-sm shadow-sm ${
+        isFailed
+          ? "border-rose-200 bg-rose-50 text-rose-950"
+          : "border-blue-100 bg-blue-50 text-blue-950"
+      }`}
+      role="status"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold">
+            {isFailed
+              ? "Examples did not finish"
+              : isSucceeded
+                ? "Examples are ready"
+                : activeStage.label}
+          </p>
+          <p className="mt-1 text-sm opacity-90">
+            {isFailed
+              ? progress.errorMessage || friendlySampleDataSeedError()
+              : isSucceeded
+                ? "Opening Appointments now."
+                : activeStage.detail}
+          </p>
+        </div>
+        {isFailed ? (
+          <button
+            className="rounded-md bg-rose-700 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={retryDisabled}
+            onClick={onRetry}
+            type="button"
+          >
+            Try Again
+          </button>
+        ) : null}
+      </div>
+      <ol className="mt-3 grid gap-2 sm:grid-cols-3">
+        {sampleDataSeedStages.map((stage) => {
+          const stageIndex = sampleDataSeedStageOrder(stage.id);
+          const activeIndex = sampleDataSeedStageOrder(progress.stage);
+          const failed = progress.failedStage === stage.id;
+          const done =
+            progress.completedStages.includes(stage.id) ||
+            (isSucceeded && stageIndex >= 0);
+          const active =
+            progress.status === "running" && progress.stage === stage.id;
+          const pending =
+            !done && !active && !failed && stageIndex > activeIndex;
+
+          return (
+            <li
+              className={`rounded-md border px-3 py-2 ${
+                failed
+                  ? "border-rose-200 bg-white text-rose-950"
+                  : active
+                    ? "border-blue-300 bg-white text-blue-950"
+                    : done
+                      ? "border-emerald-200 bg-white text-emerald-950"
+                      : "border-slate-200 bg-white text-slate-600"
+              }`}
+              key={stage.id}
+            >
+              <span className="block text-xs font-semibold uppercase">
+                {done
+                  ? "Done"
+                  : failed
+                    ? "Needs retry"
+                    : active
+                      ? "Working"
+                      : pending
+                        ? "Next"
+                        : "Ready"}
+              </span>
+              <span className="mt-1 block font-medium">{stage.label}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
 }
 
 function authRedirectUrl(): string | undefined {
@@ -3702,8 +3842,8 @@ export function CarePlandPers({
     };
   }, [openAppointmentMenuId]);
   const [seedingSampleData, setSeedingSampleData] = useState(false);
-  const [sampleDataSeedStage, setSampleDataSeedStage] =
-    useState<SampleDataSeedStage>("idle");
+  const [sampleDataSeedProgress, setSampleDataSeedProgress] =
+    useState<SampleDataSeedProgress>(initialSampleDataSeedProgress);
   const [removingSampleData, setRemovingSampleData] = useState(false);
   const [adminSampleEmail, setAdminSampleEmail] = useState("");
   const [adminSampleStatus, setAdminSampleStatus] =
@@ -11855,10 +11995,44 @@ export function CarePlandPers({
   }
 
   async function handleSeedSampleDataForCurrentUser(forceIfDeclined = false) {
+    if (seedingSampleData) {
+      return false;
+    }
+
     setSeedingSampleData(true);
-    setSampleDataSeedStage("core");
+    setSampleDataSeedProgress({
+      completedStages: [],
+      errorMessage: "",
+      failedStage: null,
+      stage: "core",
+      status: "running",
+    });
     setMessage("");
     let activeSeedStage: SampleDataSeedStage = "core";
+    const completedStages: SampleDataSeedStage[] = [];
+
+    const markSeedStageRunning = (stage: Exclude<SampleDataSeedStage, "idle">) => {
+      activeSeedStage = stage;
+      setSampleDataSeedProgress({
+        completedStages: [...completedStages],
+        errorMessage: "",
+        failedStage: null,
+        stage,
+        status: "running",
+      });
+    };
+
+    const markSeedStageCompleted = (
+      stage: Exclude<SampleDataSeedStage, "idle">
+    ) => {
+      if (!completedStages.includes(stage)) {
+        completedStages.push(stage);
+      }
+      setSampleDataSeedProgress((currentProgress) => ({
+        ...currentProgress,
+        completedStages: [...completedStages],
+      }));
+    };
 
     try {
       const { data, error } = await supabase.rpc(
@@ -11876,8 +12050,8 @@ export function CarePlandPers({
       const status = sampleDataStatusFromValue(data);
 
       if (status.status === "seeded" || status.status === "already_seeded") {
-        activeSeedStage = "meaning_layer";
-        setSampleDataSeedStage(activeSeedStage);
+        markSeedStageCompleted("core");
+        markSeedStageRunning("meaning_layer");
         const { error: meaningLayerError } = await supabase.rpc(
           "seed_sample_meaning_layer_for_current_user"
         );
@@ -11887,8 +12061,8 @@ export function CarePlandPers({
           throw meaningLayerError;
         }
 
-        activeSeedStage = "receiver_messages";
-        setSampleDataSeedStage(activeSeedStage);
+        markSeedStageCompleted("meaning_layer");
+        markSeedStageRunning("receiver_messages");
         const { error: receiverMessagesLayerError } = await supabase.rpc(
           "seed_sample_receiver_messages_layer_for_current_user"
         );
@@ -11901,6 +12075,14 @@ export function CarePlandPers({
           throw receiverMessagesLayerError;
         }
 
+        markSeedStageCompleted("receiver_messages");
+        setSampleDataSeedProgress({
+          completedStages: [...completedStages],
+          errorMessage: "",
+          failedStage: null,
+          stage: "receiver_messages",
+          status: "succeeded",
+        });
         setSampleDataSeededAt(
           status.seeded_at ?? new Date().toISOString()
         );
@@ -11918,13 +12100,21 @@ export function CarePlandPers({
       }
 
       setMessage(sampleDataStatusText(status));
+      setSampleDataSeedProgress(initialSampleDataSeedProgress);
       return false;
     } catch {
-      setMessage(friendlySampleDataSeedError());
+      const friendlyError = friendlySampleDataSeedError();
+      setSampleDataSeedProgress({
+        completedStages: [...completedStages],
+        errorMessage: friendlyError,
+        failedStage: activeSeedStage,
+        stage: activeSeedStage,
+        status: "failed",
+      });
+      setMessage(friendlyError);
       return false;
     } finally {
       setSeedingSampleData(false);
-      setSampleDataSeedStage("idle");
     }
   }
 
@@ -16281,23 +16471,13 @@ export function CarePlandPers({
                 welcomeExistingAppointmentsVariant
               }
             />
-            {seedingSampleData ? (
-              <LongOperationStatus
-                allowDiagnostics
-                className="mx-auto mt-3 max-w-3xl"
-                context={{
-                  source: "welcome_guide",
+            {sampleDataSeedProgress.status !== "idle" ? (
+              <SampleDataSeedProgressPanel
+                onRetry={() => {
+                  void handleSeedSampleDataForCurrentUser(true);
                 }}
-                delayMs={0}
-                escalationMs={30000}
-                messages={[
-                  "Creating a small set of appointments and notes...",
-                  "Adding examples that show how context becomes next steps...",
-                  "Still working. This should finish shortly.",
-                ]}
-                operation="sample_data_seed"
-                stage={sampleDataSeedStage}
-                title={sampleDataSeedStageLabel(sampleDataSeedStage)}
+                progress={sampleDataSeedProgress}
+                retryDisabled={seedingSampleData}
               />
             ) : null}
           </>
