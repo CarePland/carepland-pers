@@ -168,6 +168,7 @@ import {
   supabaseAnonKey,
   supabaseUrl,
 } from "./lib/platform/browserSupabase";
+import { recordHelpDiagnosticsEvent } from "./lib/platform/helpDiagnostics";
 import {
   sessionValidityStore,
   type SessionValiditySnapshot,
@@ -734,6 +735,12 @@ type SampleDataStatus = {
   status: string;
   user_id?: string | null;
 };
+
+type SampleDataSeedStage =
+  | "idle"
+  | "core"
+  | "meaning_layer"
+  | "receiver_messages";
 
 type StoredUiState = {
   adminTab?: StoredAdminTab;
@@ -1854,6 +1861,26 @@ function sampleDataStatusText(status: SampleDataStatus | null): string {
   }
 
   return `Sample data status: ${status.status}`;
+}
+
+function sampleDataSeedStageLabel(stage: SampleDataSeedStage) {
+  if (stage === "core") {
+    return "Creating example appointments";
+  }
+
+  if (stage === "meaning_layer") {
+    return "Adding example recommendations and Focus items";
+  }
+
+  if (stage === "receiver_messages") {
+    return "Adding example messages";
+  }
+
+  return "Preparing examples";
+}
+
+function friendlySampleDataSeedError() {
+  return "CarePland could not add examples just now. Nothing is stuck; please try again in a moment.";
 }
 
 function authRedirectUrl(): string | undefined {
@@ -3675,6 +3702,8 @@ export function CarePlandPers({
     };
   }, [openAppointmentMenuId]);
   const [seedingSampleData, setSeedingSampleData] = useState(false);
+  const [sampleDataSeedStage, setSampleDataSeedStage] =
+    useState<SampleDataSeedStage>("idle");
   const [removingSampleData, setRemovingSampleData] = useState(false);
   const [adminSampleEmail, setAdminSampleEmail] = useState("");
   const [adminSampleStatus, setAdminSampleStatus] =
@@ -11827,7 +11856,9 @@ export function CarePlandPers({
 
   async function handleSeedSampleDataForCurrentUser(forceIfDeclined = false) {
     setSeedingSampleData(true);
+    setSampleDataSeedStage("core");
     setMessage("");
+    let activeSeedStage: SampleDataSeedStage = "core";
 
     try {
       const { data, error } = await supabase.rpc(
@@ -11838,25 +11869,35 @@ export function CarePlandPers({
       );
 
       if (error) {
+        await recordSampleDataSeedFailure(activeSeedStage, error);
         throw error;
       }
 
       const status = sampleDataStatusFromValue(data);
 
       if (status.status === "seeded" || status.status === "already_seeded") {
+        activeSeedStage = "meaning_layer";
+        setSampleDataSeedStage(activeSeedStage);
         const { error: meaningLayerError } = await supabase.rpc(
           "seed_sample_meaning_layer_for_current_user"
         );
 
         if (meaningLayerError) {
+          await recordSampleDataSeedFailure(activeSeedStage, meaningLayerError);
           throw meaningLayerError;
         }
 
+        activeSeedStage = "receiver_messages";
+        setSampleDataSeedStage(activeSeedStage);
         const { error: receiverMessagesLayerError } = await supabase.rpc(
           "seed_sample_receiver_messages_layer_for_current_user"
         );
 
         if (receiverMessagesLayerError) {
+          await recordSampleDataSeedFailure(
+            activeSeedStage,
+            receiverMessagesLayerError
+          );
           throw receiverMessagesLayerError;
         }
 
@@ -11878,11 +11919,49 @@ export function CarePlandPers({
 
       setMessage(sampleDataStatusText(status));
       return false;
-    } catch (error) {
-      setMessage(getErrorMessage(error));
+    } catch {
+      setMessage(friendlySampleDataSeedError());
       return false;
     } finally {
       setSeedingSampleData(false);
+      setSampleDataSeedStage("idle");
+    }
+  }
+
+  async function recordSampleDataSeedFailure(
+    stage: SampleDataSeedStage,
+    error: unknown,
+    extraContext: Record<string, unknown> = {}
+  ) {
+    const errorText = getErrorMessage(error);
+    const errorCode =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code?: unknown }).code ?? "")
+        : "";
+    const context = {
+      errorCode: errorCode || undefined,
+      stage,
+      ...extraContext,
+    };
+
+    recordHelpDiagnosticsEvent("sample_data_seed_failed", {
+      ...context,
+      errorMessage: errorText,
+    });
+
+    try {
+      await supabase.rpc("record_integration_error", {
+        p_attempted_call_count: null,
+        p_context: context,
+        p_error_key: `sample_data_seed_${stage}`,
+        p_error_message: errorText,
+        p_integration_key: "sample_data_seed",
+      });
+    } catch (loggingError) {
+      recordHelpDiagnosticsEvent("sample_data_seed_failure_log_failed", {
+        stage,
+        errorMessage: getErrorMessage(loggingError),
+      });
     }
   }
 
@@ -11986,6 +12065,7 @@ export function CarePlandPers({
   async function handleSeedAdminSampleData() {
     setSeedingAdminSampleData(true);
     setMessage("");
+    let activeSeedStage: SampleDataSeedStage = "core";
 
     try {
       const emailForSeed = adminSampleEmail.trim();
@@ -12009,26 +12089,44 @@ export function CarePlandPers({
       });
 
       if (error) {
+        await recordSampleDataSeedFailure(activeSeedStage, error, {
+          adminInitiated: true,
+          targetEmail: emailForSeed,
+        });
         throw error;
       }
 
       const status = sampleDataStatusFromValue(data);
       if (status.status === "seeded" || status.status === "already_seeded") {
+        activeSeedStage = "meaning_layer";
         const { data: meaningData, error: meaningLayerError } =
           await supabase.rpc("admin_seed_sample_meaning_layer", {
             target_email: emailForSeed,
           });
 
         if (meaningLayerError) {
+          await recordSampleDataSeedFailure(activeSeedStage, meaningLayerError, {
+            adminInitiated: true,
+            targetEmail: emailForSeed,
+          });
           throw meaningLayerError;
         }
 
+        activeSeedStage = "receiver_messages";
         const { data: receiverMessagesData, error: receiverMessagesLayerError } =
           await supabase.rpc("admin_seed_sample_receiver_messages_layer", {
             target_email: emailForSeed,
           });
 
         if (receiverMessagesLayerError) {
+          await recordSampleDataSeedFailure(
+            activeSeedStage,
+            receiverMessagesLayerError,
+            {
+              adminInitiated: true,
+              targetEmail: emailForSeed,
+            }
+          );
           throw receiverMessagesLayerError;
         }
 
@@ -16131,57 +16229,78 @@ export function CarePlandPers({
     return (
       <div className="mt-1 space-y-2">
         {showWelcomeGuide ? (
-          <WelcomeGuide
-            actionsMode={welcomeActionsMode}
-            gentlePrimaryButtonClass={gentlePrimaryButtonClass}
-            gentleSecondaryButtonClass={gentleSecondaryButtonClass}
-            hasExistingWelcomeAppointments={hasExistingWelcomeAppointments}
-            isAdmin={isAdmin}
-            onAddExamples={() => {
-              void (async () => {
-                const seeded =
-                  await handleSeedSampleDataForCurrentUser(true);
+          <>
+            <WelcomeGuide
+              actionsMode={welcomeActionsMode}
+              gentlePrimaryButtonClass={gentlePrimaryButtonClass}
+              gentleSecondaryButtonClass={gentleSecondaryButtonClass}
+              hasExistingWelcomeAppointments={hasExistingWelcomeAppointments}
+              isAdmin={isAdmin}
+              onAddExamples={() => {
+                void (async () => {
+                  const seeded =
+                    await handleSeedSampleDataForCurrentUser(true);
 
-                if (!seeded) {
-                  return;
-                }
+                  if (!seeded) {
+                    return;
+                  }
 
-                await markWelcomeGuideRead();
-                setMainTab("appointments");
-                applyAppointmentViewChange("upcoming");
-              })();
-            }}
-            onAddFirstAppointment={() => {
-              void (async () => {
-                await markWelcomeGuideRead();
-                startAppointmentPanel("add");
-              })();
-            }}
-            onChangeExistingAppointmentsVariant={
-              setWelcomeExistingAppointmentsVariant
-            }
-            onImportAppointments={() => {
-              void (async () => {
-                await markWelcomeGuideRead();
-                startAppointmentPanel("quickAdd");
-              })();
-            }}
-            onNeedHelp={() => {
-              setAskPanelOpen(true);
-              setAskCloseConfirmOpen(false);
-            }}
-            onNextPanel={showNextWelcomePanel}
-            onPreviousPanel={showPreviousWelcomePanel}
-            onReturnHome={() => {
-              void markWelcomeGuideRead();
-            }}
-            panelIndex={welcomePanelIndex}
-            sampleDataSeededAt={sampleDataSeededAt}
-            seedingSampleData={seedingSampleData}
-            welcomeExistingAppointmentsVariant={
-              welcomeExistingAppointmentsVariant
-            }
-          />
+                  await markWelcomeGuideRead();
+                  setMainTab("appointments");
+                  applyAppointmentViewChange("upcoming");
+                })();
+              }}
+              onAddFirstAppointment={() => {
+                void (async () => {
+                  await markWelcomeGuideRead();
+                  startAppointmentPanel("add");
+                })();
+              }}
+              onChangeExistingAppointmentsVariant={
+                setWelcomeExistingAppointmentsVariant
+              }
+              onImportAppointments={() => {
+                void (async () => {
+                  await markWelcomeGuideRead();
+                  startAppointmentPanel("quickAdd");
+                })();
+              }}
+              onNeedHelp={() => {
+                setAskPanelOpen(true);
+                setAskCloseConfirmOpen(false);
+              }}
+              onNextPanel={showNextWelcomePanel}
+              onPreviousPanel={showPreviousWelcomePanel}
+              onReturnHome={() => {
+                void markWelcomeGuideRead();
+              }}
+              panelIndex={welcomePanelIndex}
+              sampleDataSeededAt={sampleDataSeededAt}
+              seedingSampleData={seedingSampleData}
+              welcomeExistingAppointmentsVariant={
+                welcomeExistingAppointmentsVariant
+              }
+            />
+            {seedingSampleData ? (
+              <LongOperationStatus
+                allowDiagnostics
+                className="mx-auto mt-3 max-w-3xl"
+                context={{
+                  source: "welcome_guide",
+                }}
+                delayMs={0}
+                escalationMs={30000}
+                messages={[
+                  "Creating a small set of appointments and notes...",
+                  "Adding examples that show how context becomes next steps...",
+                  "Still working. This should finish shortly.",
+                ]}
+                operation="sample_data_seed"
+                stage={sampleDataSeedStage}
+                title={sampleDataSeedStageLabel(sampleDataSeedStage)}
+              />
+            ) : null}
+          </>
         ) : (
           <>
             {canShowAdminItems ? (

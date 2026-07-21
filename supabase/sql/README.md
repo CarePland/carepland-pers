@@ -14,6 +14,9 @@ Supabase SQL editor history.
 - `2026-07-18_receiver_messages_sample_data.sql`
   Migration/admin utility: adds the next demo-data layer for Receiver and Messages. It creates a bound sample Receiver, Connect participant/settings rows, richer message lifecycle examples, appointment-linked MessagePrep, Receiver interaction attempts, a call-summary example, and Admin operational examples for Help/Priorities/Checkpoint, with matching removal support.
 
+- `2026-07-21_fix_sample_meaning_seed_ambiguity.sql`
+  Migration patch: replaces the sample meaning-layer seed functions with explicitly aliased SQL so PL/pgSQL variables do not shadow table/CTE columns, including the ambiguous `seed_key` track-event join. The app-facing onboarding flow now treats the example-data seed as a staged operation and logs failures for Admin diagnosis.
+
 - `2026-07-01_care_recommendations_foundation.sql`
   Migration: adds reviewable CarePland Recommendation candidates and supporting evidence rows. Recommendations bridge existing CarePland knowledge to possible Focus Items, but are not automatically shown or converted; initial generation is deterministic and evidence-based, with no AI prompt seeded. The v1 backend uses `dedupe_key` and `evidence_hash` so repeated scans can update open candidates without duplicating evidence.
 
