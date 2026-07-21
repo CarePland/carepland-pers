@@ -1010,6 +1010,10 @@ function nextAppointmentTitleForSubject(subject?: CareSubject | null) {
     : `Next appointment for ${subject.display_name}`;
 }
 
+function nextAppointmentTitleForUnassignedSubject() {
+  return "Next appointment";
+}
+
 function buildHomeAtAGlanceSummary({
   appointments,
   careSubjects,
@@ -1017,6 +1021,7 @@ function buildHomeAtAGlanceSummary({
   hasAnySavedAppointments,
   homeNextAppointment,
   homeNextAppointmentsBySubjectId,
+  homeNextUnassignedAppointment,
   homeNextGuidance,
   homeTodayFocusGroups,
   notesReminderAppointment,
@@ -1028,6 +1033,7 @@ function buildHomeAtAGlanceSummary({
   hasAnySavedAppointments: boolean;
   homeNextAppointment: Appointment | null;
   homeNextAppointmentsBySubjectId: Record<string, Appointment | null>;
+  homeNextUnassignedAppointment: Appointment | null;
   homeNextGuidance: CarePrepGuidance | null;
   homeTodayFocusGroups: HomeTodayFocusGroup[];
   notesReminderAppointment: NotesReminderAppointment | null;
@@ -1044,7 +1050,7 @@ function buildHomeAtAGlanceSummary({
   );
   const nextAppointmentCount = isEveryone
     ? careSubjects.filter((subject) => homeNextAppointmentsBySubjectId[subject.id])
-        .length
+        .length + (homeNextUnassignedAppointment ? 1 : 0)
     : homeNextAppointment
       ? 1
       : 0;
@@ -3929,11 +3935,14 @@ export function CarePlandPers({
     new Set()
   );
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
   const [appointmentPool, setAppointmentPool] = useState<Appointment[]>([]);
   const appointmentPoolRef = useRef<Appointment[]>([]);
+  const careSubjectsRef = useRef<CareSubject[]>([]);
   const appointmentViewRef = useRef<AppointmentView>(appointmentView);
   const selectedSubjectIdRef = useRef(selectedSubjectId);
   appointmentPoolRef.current = appointmentPool;
+  careSubjectsRef.current = careSubjects;
   appointmentViewRef.current = appointmentView;
   selectedSubjectIdRef.current = selectedSubjectId;
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -3946,6 +3955,8 @@ export function CarePlandPers({
     useState<Appointment | null>(null);
   const [homeNextAppointmentsBySubjectId, setHomeNextAppointmentsBySubjectId] =
     useState<Record<string, Appointment | null>>({});
+  const [homeNextUnassignedAppointment, setHomeNextUnassignedAppointment] =
+    useState<Appointment | null>(null);
   const [homeNextGuidance, setHomeNextGuidance] =
     useState<CarePrepGuidance | null>(null);
   const [appointmentDetailsHydrated, setAppointmentDetailsHydrated] =
@@ -4007,8 +4018,11 @@ export function CarePlandPers({
 
   const healthFocusDetailPrefetchingRef = useRef<Set<string>>(new Set());
   const healthFocusBackfillAttemptedRef = useRef(new Set<string>());
+  const healthFocusBackfillDiagnosticsRef = useRef(new Set<string>());
+  const appointmentCommunicationSummaryDiagnosticsRef = useRef(
+    new Set<string>()
+  );
   const appointmentMessagePrepBackfillAttemptedRef = useRef(new Set<string>());
-  const [careSubjects, setCareSubjects] = useState<CareSubject[]>([]);
   const [currentCareCircleId, setCurrentCareCircleId] = useState<string | null>(
     null
   );
@@ -5726,6 +5740,33 @@ export function CarePlandPers({
     });
   }
 
+  function isUpcomingAppointmentForView(
+    appointment: Appointment,
+    upcomingStart: Date
+  ) {
+    if (appointment.status === "archived" || appointment.current_note_id) {
+      return false;
+    }
+
+    if (!appointment.starts_at) {
+      return true;
+    }
+
+    return new Date(appointment.starts_at) >= upcomingStart;
+  }
+
+  function nextUpcomingAppointmentForView(
+    appointmentsForSubject: Appointment[],
+    upcomingStart: Date
+  ) {
+    const upcomingAppointments = appointmentsForSubject.filter((appointment) =>
+      isUpcomingAppointmentForView(appointment, upcomingStart)
+    );
+
+    sortAppointmentsForView(upcomingAppointments, "upcoming");
+    return upcomingAppointments[0] ?? null;
+  }
+
   function applyAppointmentSelection(
     loadedAppointments: Appointment[],
     view: AppointmentView,
@@ -5737,37 +5778,6 @@ export function CarePlandPers({
     const subjectAppointments = loadedAppointments.filter((appointment) =>
       appointmentMatchesSubject(appointment, subjectId)
     );
-    const nextAppointmentFor = (appointmentsForSubject: Appointment[]) =>
-      appointmentsForSubject
-        .filter((appointment) => {
-          if (appointment.status === "archived") {
-            return false;
-          }
-
-          if (!appointment.starts_at) {
-            return true;
-          }
-
-          return new Date(appointment.starts_at) >= upcomingStart;
-        })
-        .sort((firstAppointment, secondAppointment) => {
-          if (!firstAppointment.starts_at && !secondAppointment.starts_at) {
-            return 0;
-          }
-
-          if (!firstAppointment.starts_at) {
-            return 1;
-          }
-
-          if (!secondAppointment.starts_at) {
-            return -1;
-          }
-
-          return (
-            new Date(firstAppointment.starts_at).getTime() -
-            new Date(secondAppointment.starts_at).getTime()
-          );
-        })[0] ?? null;
     const reminderAppointment =
       subjectAppointments
         .filter(
@@ -5788,14 +5798,29 @@ export function CarePlandPers({
             new Date(firstAppointment.starts_at).getTime()
           );
         })[0] ?? null;
-    const nextHomeAppointment = nextAppointmentFor(subjectAppointments);
+    const nextHomeAppointment = nextUpcomingAppointmentForView(
+      subjectAppointments,
+      upcomingStart
+    );
+    const activeCareSubjectIds = new Set(
+      loadedCareSubjects.map((subject) => subject.id)
+    );
+    const nextUnassignedHomeAppointment = nextUpcomingAppointmentForView(
+      loadedAppointments.filter(
+        (appointment) =>
+          !appointment.care_subject_id ||
+          !activeCareSubjectIds.has(appointment.care_subject_id)
+      ),
+      upcomingStart
+    );
     const nextAppointmentsBySubjectId = loadedCareSubjects.reduce<
       Record<string, Appointment | null>
     >((nextBySubject, subject) => {
-      nextBySubject[subject.id] = nextAppointmentFor(
+      nextBySubject[subject.id] = nextUpcomingAppointmentForView(
         loadedAppointments.filter((appointment) =>
           appointmentMatchesSubject(appointment, subject.id)
-        )
+        ),
+        upcomingStart
       );
       return nextBySubject;
     }, {});
@@ -5805,10 +5830,7 @@ export function CarePlandPers({
         : view === "logged"
           ? appointment.status !== "archived" &&
             Boolean(appointment.current_note_id)
-          : appointment.status !== "archived" &&
-            !appointment.current_note_id &&
-            (!appointment.starts_at ||
-              new Date(appointment.starts_at) >= upcomingStart)
+          : isUpcomingAppointmentForView(appointment, upcomingStart)
     );
 
     sortAppointmentsForView(visibleAppointments, view);
@@ -5823,6 +5845,7 @@ export function CarePlandPers({
     );
     setHomeNextAppointment(nextHomeAppointment);
     setHomeNextAppointmentsBySubjectId(nextAppointmentsBySubjectId);
+    setHomeNextUnassignedAppointment(nextUnassignedHomeAppointment);
     setAppointments(visibleAppointments);
     setHomeNextGuidance(
       nextHomeAppointment
@@ -5889,8 +5912,66 @@ export function CarePlandPers({
     return true;
   }
 
+  function errorCodeForDiagnostics(error: unknown) {
+    return typeof error === "object" && error && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
+  }
+
+  function recordAppointmentCommunicationSummaryLoadIssue(error: unknown) {
+    const code = errorCodeForDiagnostics(error);
+    const message = getErrorMessage(error);
+    const key = `${code}:${message}`;
+
+    if (appointmentCommunicationSummaryDiagnosticsRef.current.has(key)) {
+      return;
+    }
+
+    appointmentCommunicationSummaryDiagnosticsRef.current.add(key);
+    recordHelpDiagnosticsEvent("appointment_communication_summary_load_failed", {
+      code: code || undefined,
+      message,
+    });
+    console.warn("Appointment communication summaries are unavailable.", error);
+  }
+
+  function recordHealthFocusBackfillIssue(
+    issue:
+      | {
+          error?: string;
+          errors?: Array<{ error: string; noteId: string }>;
+          failedCount?: number;
+          noteCount?: number;
+          ok?: boolean;
+          processedCount?: number;
+          topicSlugs?: string[];
+        }
+      | null
+      | unknown,
+    status?: number
+  ) {
+    const code = errorCodeForDiagnostics(issue);
+    const message =
+      typeof issue === "object" && issue && "error" in issue
+        ? String((issue as { error?: unknown }).error ?? "")
+        : getErrorMessage(issue);
+    const key = `${status ?? "exception"}:${code}:${message}`;
+
+    if (healthFocusBackfillDiagnosticsRef.current.has(key)) {
+      return;
+    }
+
+    healthFocusBackfillDiagnosticsRef.current.add(key);
+    recordHelpDiagnosticsEvent("health_focus_backfill_failed", {
+      code: code || undefined,
+      message: message || undefined,
+      status,
+    });
+  }
+
   async function hydrateAppointmentDetails(
-    loadedAppointments: Appointment[]
+    loadedAppointments: Appointment[],
+    loadedCareSubjects: CareSubject[] = careSubjectsRef.current
   ) {
     const appointmentIds = loadedAppointments.map((item) => item.id);
 
@@ -5898,7 +5979,13 @@ export function CarePlandPers({
       setNotes([]);
       setGuidance([]);
       setAppointmentCommunicationSummaries([]);
-      applyAppointmentSelection([], appointmentViewRef.current, selectedSubjectIdRef.current, []);
+      applyAppointmentSelection(
+        [],
+        appointmentViewRef.current,
+        selectedSubjectIdRef.current,
+        [],
+        loadedCareSubjects
+      );
       setAppointmentDetailsHydrated(true);
       return;
     }
@@ -5939,10 +6026,7 @@ export function CarePlandPers({
       }
 
       if (communicationSummaryError) {
-        console.warn(
-          "Unable to load appointment communication summaries.",
-          communicationSummaryError
-        );
+        recordAppointmentCommunicationSummaryLoadIssue(communicationSummaryError);
       }
 
       const loadedGuidanceRows = guidanceRows ?? [];
@@ -5965,7 +6049,8 @@ export function CarePlandPers({
         currentPool,
         appointmentViewRef.current,
         selectedSubjectIdRef.current,
-        loadedGuidanceRows
+        loadedGuidanceRows,
+        loadedCareSubjects
       );
       setAppointmentDetailsHydrated(true);
     } catch (error) {
@@ -6085,7 +6170,10 @@ export function CarePlandPers({
             | null;
 
           if (!backfillResponse.ok || backfillResult?.ok === false) {
-            console.warn("Health Focus backfill did not complete.", backfillResult);
+            recordHealthFocusBackfillIssue(
+              backfillResult,
+              backfillResponse.status
+            );
           }
 
           if (backfillResponse.ok) {
@@ -6108,7 +6196,7 @@ export function CarePlandPers({
             }
           }
         } catch (error) {
-          console.warn("Unable to backfill Health Focus summary", error);
+          recordHealthFocusBackfillIssue(error);
         }
       }
 
@@ -7400,6 +7488,7 @@ export function CarePlandPers({
       setAppointmentPool([]);
       setHasAnySavedAppointments(false);
       setHomeNextAppointment(null);
+      setHomeNextUnassignedAppointment(null);
       setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
       setCareSubjects([]);
@@ -7418,6 +7507,7 @@ export function CarePlandPers({
       setAppointmentPool([]);
       setHasAnySavedAppointments(false);
       setHomeNextAppointment(null);
+      setHomeNextUnassignedAppointment(null);
       setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
       setCareSubjects([]);
@@ -7456,6 +7546,7 @@ export function CarePlandPers({
       setAppointmentPool([]);
       setHasAnySavedAppointments(false);
       setHomeNextAppointment(null);
+      setHomeNextUnassignedAppointment(null);
       setHomeNextGuidance(null);
       setNotesReminderAppointment(null);
       setCareSubjects([]);
@@ -7661,7 +7752,7 @@ export function CarePlandPers({
       void loadHealthFocusSummary(nextHealthStorySubjectId);
     }
 
-    void hydrateAppointmentDetails(activeAppointmentRows);
+    void hydrateAppointmentDetails(activeAppointmentRows, subjects);
   }
 
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
@@ -16333,12 +16424,32 @@ export function CarePlandPers({
     const everyoneNextAppointmentRows = careSubjects
       .map((subject) => ({
         appointment: homeNextAppointmentsBySubjectId[subject.id] ?? null,
+        key: subject.id,
         subject,
+        title: nextAppointmentTitleForSubject(subject),
       }))
       .filter(
-        (row): row is { appointment: Appointment; subject: CareSubject } =>
+        (row): row is {
+          appointment: Appointment;
+          key: string;
+          subject: CareSubject;
+          title: string;
+        } =>
           Boolean(row.appointment)
       );
+    const everyoneNextAppointmentRowsWithUnassigned = [
+      ...everyoneNextAppointmentRows,
+      ...(homeNextUnassignedAppointment
+        ? [
+            {
+              appointment: homeNextUnassignedAppointment,
+              key: `unassigned-${homeNextUnassignedAppointment.id}`,
+              subject: null,
+              title: nextAppointmentTitleForUnassignedSubject(),
+            },
+          ]
+        : []),
+    ];
     const homeCarePrepGenerationError = homeNextAppointment
       ? carePrepGenerationErrors[homeNextAppointment.id]
       : null;
@@ -16362,6 +16473,7 @@ export function CarePlandPers({
     const hasExistingWelcomeAppointments =
       hasAnySavedAppointments ||
       Boolean(homeNextAppointment) ||
+      Boolean(homeNextUnassignedAppointment) ||
       Boolean(notesReminderAppointment);
     const welcomeActionsMode =
       hasExistingWelcomeAppointments &&
@@ -16385,6 +16497,7 @@ export function CarePlandPers({
       hasAnySavedAppointments,
       homeNextAppointment,
       homeNextAppointmentsBySubjectId,
+      homeNextUnassignedAppointment,
       homeNextGuidance,
       homeTodayFocusGroups,
       notesReminderAppointment,
@@ -16532,9 +16645,9 @@ export function CarePlandPers({
             </section>
 
             {isEveryoneFocus ? (
-              everyoneNextAppointmentRows.length > 0 ? (
+              everyoneNextAppointmentRowsWithUnassigned.length > 0 ? (
                 <div className="space-y-2">
-                  {everyoneNextAppointmentRows.map(({ appointment, subject }) => {
+                  {everyoneNextAppointmentRowsWithUnassigned.map(({ appointment, key, title }) => {
                     const rowPracticeLabel =
                       appointment.provider_organization ||
                       appointment.location_name ||
@@ -16549,12 +16662,12 @@ export function CarePlandPers({
                         highlights={[]}
                         isGenerating={false}
                         isCarePrepEligible={false}
-                        key={subject.id}
+                        key={key}
                         mapsLink={appointmentGoogleMapsUrl(appointment)}
                         nextSubject=""
                         onAddAppointment={() => startAppointmentPanel("add")}
                         practiceLabel={rowPracticeLabel}
-                        title={nextAppointmentTitleForSubject(subject)}
+                        title={title}
                       />
                     );
                   })}

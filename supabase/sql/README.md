@@ -20,6 +20,9 @@ Supabase SQL editor history.
 - `2026-07-21_expose_receiver_messages_sample_seed_rpc.sql`
   Migration patch: recreates the Receiver/Messages sample-data RPC family when production is missing it from the PostgREST schema cache, preserves the original public function signatures, and explicitly requests a PostgREST schema reload.
 
+- `2026-07-21_uat_home_warning_grants.sql`
+  Migration patch: grants authenticated read access for appointment communication summaries so the existing member RLS policy can apply, and grants the service role the Health Focus topic-mention write privileges used by the signed-in Home backfill route.
+
 - `2026-07-01_care_recommendations_foundation.sql`
   Migration: adds reviewable CarePland Recommendation candidates and supporting evidence rows. Recommendations bridge existing CarePland knowledge to possible Focus Items, but are not automatically shown or converted; initial generation is deterministic and evidence-based, with no AI prompt seeded. The v1 backend uses `dedupe_key` and `evidence_hash` so repeated scans can update open candidates without duplicating evidence.
 
