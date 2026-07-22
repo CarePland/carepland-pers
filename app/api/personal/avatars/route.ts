@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
+  getActiveSupabaseUser,
 } from "@/app/lib/platform/server/supabase";
 
 const avatarBucket = "carepland-avatars";
@@ -98,17 +99,11 @@ async function careCircleIdsForUser(
 
 async function loadAccessiblePerson(personId: string, accessToken: string) {
   const userClient = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  const userId = userData.user?.id;
-
-  if (!userId) {
-    throw new Error("Please sign in before changing avatars.");
-  }
+  const user = await getActiveSupabaseUser(
+    userClient,
+    "Please sign in before changing avatars."
+  );
+  const userId = user.id;
 
   const careCircleIds = await careCircleIdsForUser(userClient, userId);
 
@@ -139,19 +134,14 @@ export async function GET(request: NextRequest) {
     }
 
     const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    if (!userData.user?.id) {
-      throw new Error("Please sign in before loading avatars.");
-    }
+    const user = await getActiveSupabaseUser(
+      userClient,
+      "Please sign in before loading avatars."
+    );
 
     const careCircleIds = await careCircleIdsForUser(
       userClient,
-      userData.user.id
+      user.id
     );
 
     if (careCircleIds.length === 0) {

@@ -4,6 +4,7 @@ import {
   getSupabaseAnonConfig,
   getSupabaseServiceConfig,
 } from "./env";
+import { assertAccountActive } from "./accountStatus";
 
 export function createSupabasePublicClient() {
   const supabaseConfig = getSupabaseAnonConfig();
@@ -28,4 +29,25 @@ export function createSupabaseServiceClient() {
   return createClient(supabaseConfig.url, supabaseConfig.serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+}
+
+export async function getActiveSupabaseUser(
+  userClient: ReturnType<typeof createSupabaseUserClient>,
+  message?: string
+) {
+  const { data, error } = await userClient.auth.getUser();
+
+  if (error) {
+    throw error;
+  }
+
+  const user = data.user;
+
+  if (!user?.id) {
+    throw new Error(message ?? "Please sign in before continuing.");
+  }
+
+  await assertAccountActive(userClient, user.id, message);
+
+  return user;
 }

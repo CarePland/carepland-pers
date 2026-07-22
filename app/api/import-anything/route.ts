@@ -7,6 +7,7 @@ import { normalizeImportAnythingProviderCandidates } from "@/app/lib/personal/im
 import { normalizeImportAnythingRequest } from "@/app/lib/personal/importAnything/request";
 import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
 import { openAiResponseText } from "@/app/lib/platform/ai/responses";
+import { assertAccountActive } from "@/app/lib/platform/server/accountStatus";
 
 type JsonObject = Record<string, unknown>;
 
@@ -382,6 +383,12 @@ export async function POST(request: NextRequest) {
     if (!userId) {
       throw new Error("Please sign in before using Import Anything.");
     }
+
+    await assertAccountActive(
+      supabase,
+      userId,
+      "Please sign in before using Import Anything."
+    );
 
     const { data: memberships, error: membershipsError } = await supabase
       .from("care_circle_memberships")

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
 import {
   createSupabasePublicClient,
   createSupabaseServiceClient,
-  createSupabaseUserClient,
 } from "@/app/lib/platform/server/supabase";
 
 function errorMessage(error: unknown): string {
@@ -20,41 +20,16 @@ function errorMessage(error: unknown): string {
 }
 
 async function requireAdmin(request: NextRequest) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const { email, userId } = await requireAdminCaller(request, {
+    adminRequiredMessage: "Admin access is required to update admin access.",
+    signInMessage: "Please sign in before updating admin access.",
+  });
 
-  if (!accessToken) {
+  if (!email) {
     throw new Error("Please sign in before updating admin access.");
   }
 
-  const userClient = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  const adminUser = userData.user;
-
-  if (!adminUser?.id || !adminUser.email) {
-    throw new Error("Please sign in before updating admin access.");
-  }
-
-  const { data: adminProfile, error: adminProfileError } = await userClient
-    .from("profiles")
-    .select("is_admin")
-    .eq("id", adminUser.id)
-    .single();
-
-  if (adminProfileError) {
-    throw adminProfileError;
-  }
-
-  if (adminProfile?.is_admin !== true) {
-    throw new Error("Admin access is required to update admin access.");
-  }
-
-  return { email: adminUser.email, userId: adminUser.id };
+  return { email, userId };
 }
 
 async function verifyAdminPassword(email: string, password: string) {
@@ -116,7 +91,8 @@ export async function POST(request: NextRequest) {
       const { count, error: countError } = await serviceClient
         .from("profiles")
         .select("id", { count: "exact", head: true })
-        .eq("is_admin", true);
+        .eq("is_admin", true)
+        .eq("account_status", "active");
 
       if (countError) {
         throw countError;

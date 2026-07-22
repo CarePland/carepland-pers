@@ -110,6 +110,9 @@ import { AppointmentViewToolbar } from "./components/personal/appointments/Appoi
 import { AuthGatewayPanel } from "./components/shared/auth/AuthGatewayPanel";
 import {
   buildActiveAskContext,
+  buildAskCurrentPage,
+  buildAskProfileSetupContext,
+  buildAskRequestContext,
   buildHealthFocusAskContext,
 } from "./lib/personal/ask/activeAskContext";
 import { shouldRouteTopAskToCareContext } from "./lib/personal/ask/contextualAskRouting";
@@ -189,6 +192,11 @@ import {
   welcomeGuidePanelCount,
 } from "./components/personal/onboarding/WelcomeGuide";
 import {
+  carePlandGlossaryContentKey,
+  parseCarePlandGlossaryBody,
+  validateCarePlandGlossaryContent,
+} from "./lib/platform/content/carePlandGlossary";
+import {
   asTextList,
   carePrepGuidanceFormValues,
   carePrepGuidanceHasDraftChanges,
@@ -208,6 +216,11 @@ import {
   homeMessageSummaryModelVersion,
 } from "./lib/personal/messages/homeMessageSummary";
 import { personHasAttachedReceiver } from "./lib/connect/messaging/receiverAttachment";
+import {
+  hasAnyBoundReceiverDevice,
+  normalizeReceiverDevices,
+} from "./lib/connect/provisioning/receiverProvisioningStatus";
+import type { ConnectProvisioningSnapshot, ConnectReceiverDevice } from "./lib/connect/provisioning/types";
 import {
   buildWhatToKnowDisplayModel,
   type WhatToKnowDisplayItem,
@@ -262,6 +275,29 @@ import {
 } from "./lib/personal/importAnything/ownership";
 import { maxImportAnythingSourceSummaries } from "./lib/personal/importAnything/request";
 import { buildImportAnythingCarePrepDrafts } from "./lib/personal/importAnything/review";
+import {
+  hasImportAnythingProviderIdentity,
+  importAnythingDeterministicSummary,
+  importAnythingFieldLabel,
+  importAnythingFindSupportingNotes,
+  importAnythingKindLabel,
+  importAnythingNewAppointmentNoteCount,
+  importAnythingOwnershipClusterCounts,
+  importAnythingPetKindFromSubjectType,
+  importAnythingPetLabel,
+  importAnythingPetSubjectType,
+  importAnythingPracticeOfficeValue,
+  importAnythingSimpleFieldEntries,
+  importAnythingStagingItems,
+  importAnythingSummaryCounts,
+  isImportAnythingProviderStoreUnavailable,
+  type ImportAnythingItemKind,
+  type ImportAnythingOwnershipCluster,
+  type ImportAnythingPersonAssignment,
+  type ImportAnythingPetKind,
+  type ImportAnythingReviewItem,
+  type ImportAnythingReviewStatus,
+} from "./lib/personal/importAnything/reviewItems";
 import {
   formatImportAnythingPlaceholderSection,
   formatImportAnythingSourceSummary,
@@ -641,59 +677,6 @@ type TextIntakeMatch = {
   score: number;
 };
 
-type ImportAnythingItemKind =
-  | "appointment"
-  | "careprep"
-  | "medication_change"
-  | "note"
-  | "provider"
-  | "question"
-  | "task";
-type ImportAnythingReviewStatus = "approved" | "needs_review" | "rejected";
-type ImportAnythingReviewItem = {
-  createsNewAppointment: boolean;
-  confidence: number;
-  fields: Record<string, string>;
-  id: string;
-  ownerClusterId: string;
-  ownerCareSubjectId: string;
-  ownerConfidence: number;
-  ownerDetectedName: string;
-  ownerNeedsReview: boolean;
-  ownerNewPersonName: string;
-  ownerRationale: string;
-  kind: ImportAnythingItemKind;
-  matchedAppointmentId: string;
-  matchedProviderId: string;
-  needsReview: boolean;
-  providerMatchNote: string;
-  sourceExcerpt: string;
-  status: ImportAnythingReviewStatus;
-  summary: string;
-  title: string;
-  userReviewed?: boolean;
-};
-
-type ImportAnythingPersonAssignment = {
-  clusterId: string;
-  confidence: number;
-  detectedName: string;
-  matchedCareSubjectId: string;
-  needsReview: boolean;
-  rationale: string;
-  suggestedNewPersonName: string;
-};
-
-type ImportAnythingOwnershipCluster = {
-  clusterId: string;
-  confidence: number;
-  displayName: string;
-  entityType: string;
-  matchedCareSubjectId: string;
-  rationale: string;
-  suggestedNewPersonName: string;
-};
-
 type ImportAnythingIdentityResolutionChoice = {
   action: "" | "create" | "leave_unresolved" | "match";
   clusterId: string;
@@ -706,8 +689,6 @@ type ImportAnythingIdentityResolutionChoice = {
   petKind: ImportAnythingPetKind;
   subjectType: string;
 };
-
-type ImportAnythingPetKind = "cat" | "dog" | "other";
 
 type ImageTextExtractionResult = {
   errorMessage?: string;
@@ -942,47 +923,6 @@ function isManagedByHouseholdSubject(
   subject?: Pick<CareSubject, "managed_by_household" | "subject_type"> | null
 ) {
   return Boolean(subject?.managed_by_household) || isPetSubjectType(subject?.subject_type);
-}
-
-function importAnythingPetKindFromSubjectType(
-  subjectType?: string | null
-): ImportAnythingPetKind {
-  const normalizedSubjectType = subjectType?.trim().toLowerCase() ?? "";
-
-  if (normalizedSubjectType === "dog") {
-    return "dog";
-  }
-
-  if (normalizedSubjectType === "pet" || normalizedSubjectType.startsWith("pet:")) {
-    return "other";
-  }
-
-  return "cat";
-}
-
-function importAnythingPetLabel(kind: ImportAnythingPetKind, otherValue: string) {
-  if (kind === "cat") {
-    return "Cat";
-  }
-
-  if (kind === "dog") {
-    return "Dog";
-  }
-
-  return otherValue.trim() || "Pet";
-}
-
-function importAnythingPetSubjectType(
-  kind: ImportAnythingPetKind,
-  otherValue: string
-) {
-  if (kind === "cat" || kind === "dog") {
-    return kind;
-  }
-
-  const customType = otherValue.trim();
-
-  return customType ? `pet:${customType}` : "pet";
 }
 
 function careSubjectDisplayLabel(subject: CareSubject) {
@@ -1484,23 +1424,6 @@ function logAuthError(action: string, error: unknown) {
     action,
     error,
   });
-}
-
-function isImportAnythingProviderStoreUnavailable(error: unknown): boolean {
-  const maybeError = error as { code?: string; message?: string } | null;
-  const message = maybeError?.message?.toLowerCase() ?? "";
-
-  return (
-    maybeError?.code === "42P01" ||
-    maybeError?.code === "42703" ||
-    message.includes("care_providers")
-  );
-}
-
-function hasImportAnythingProviderIdentity(item: ImportAnythingReviewItem) {
-  return Boolean(
-    item.fields.providerName?.trim() || item.fields.providerOrganization?.trim()
-  );
 }
 
 const matchStopWords = new Set([
@@ -2465,31 +2388,6 @@ function arrayFromUnknown(value: unknown): Record<string, unknown>[] {
     : [];
 }
 
-function importAnythingKindLabel(kind: ImportAnythingItemKind): string {
-  switch (kind) {
-    case "appointment":
-      return "Appointment";
-    case "provider":
-      return "Provider";
-    case "note":
-      return "Note";
-    case "task":
-      return "Task";
-    case "medication_change":
-      return "Medication Change";
-    case "question":
-      return "Question";
-    case "careprep":
-      return "CarePrep";
-  }
-}
-
-function importAnythingFieldLabel(field: string): string {
-  return field
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (character) => character.toUpperCase());
-}
-
 function importAnythingReviewItem(
   kind: ImportAnythingItemKind,
   index: number,
@@ -2725,147 +2623,6 @@ function importAnythingItemsFromDraft(
   });
 }
 
-function importAnythingSummaryCounts(items: ImportAnythingReviewItem[]) {
-  return {
-    appointments: items.filter((item) => item.kind === "appointment").length,
-    careprep: items.filter((item) => item.kind === "careprep").length,
-    medicationChanges: items.filter(
-      (item) => item.kind === "medication_change"
-    ).length,
-    notes: items.filter((item) => item.kind === "note").length,
-    providers: items.filter((item) => item.kind === "provider").length,
-    questions: items.filter((item) => item.kind === "question").length,
-    tasks: items.filter((item) => item.kind === "task").length,
-  };
-}
-
-function importAnythingNewAppointmentNoteCount(
-  items: ImportAnythingReviewItem[]
-) {
-  return items.filter(
-    (item) =>
-      item.kind === "note" &&
-      item.createsNewAppointment &&
-      item.status !== "rejected"
-  ).length;
-}
-
-function normalizedImportAnythingText(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function importAnythingOwnerKey(item: ImportAnythingReviewItem) {
-  return (
-    item.ownerCareSubjectId ||
-    normalizedImportAnythingText(item.ownerNewPersonName) ||
-    normalizedImportAnythingText(item.ownerDetectedName)
-  );
-}
-
-function importAnythingFindSupportingNotes(
-  appointment: ImportAnythingReviewItem,
-  items: ImportAnythingReviewItem[]
-) {
-  if (appointment.kind !== "appointment") {
-    return [];
-  }
-
-  const appointmentTitle = normalizedImportAnythingText(
-    appointment.fields.appointmentTitle || appointment.title
-  );
-  const appointmentOwner = importAnythingOwnerKey(appointment);
-
-  if (!appointmentTitle) {
-    return [];
-  }
-
-  return items.filter((item) => {
-    if (item.kind !== "note" && item.kind !== "careprep") {
-      return false;
-    }
-
-    const itemTitle = normalizedImportAnythingText(
-      item.fields.appointmentTitle || item.title
-    );
-
-    return (
-      itemTitle === appointmentTitle &&
-      (!appointmentOwner || importAnythingOwnerKey(item) === appointmentOwner)
-    );
-  });
-}
-
-function importAnythingStagingItems(items: ImportAnythingReviewItem[]) {
-  const supportedItemIds = new Set(
-    items
-      .filter((item) => item.kind === "appointment")
-      .flatMap((item) =>
-        importAnythingFindSupportingNotes(item, items)
-          .filter(
-            (supportItem) =>
-              !supportItem.needsReview && supportItem.status !== "needs_review"
-          )
-          .map((supportItem) => supportItem.id)
-      )
-  );
-
-  return items.filter(
-    (item) => item.kind !== "provider" && !supportedItemIds.has(item.id)
-  );
-}
-
-function importAnythingPracticeOfficeValue(item: ImportAnythingReviewItem) {
-  return (
-    item.fields.providerOrganization?.trim() ||
-    item.fields.locationName?.trim() ||
-    ""
-  );
-}
-
-function importAnythingSimpleFieldEntries(item: ImportAnythingReviewItem) {
-  return Object.entries(item.fields).filter(
-    ([field]) => field !== "providerOrganization" && field !== "locationName"
-  );
-}
-
-function pluralizeCount(count: number, singularLabel: string) {
-  return `${count} ${singularLabel}${count === 1 ? "" : "s"}`;
-}
-
-function importAnythingDeterministicSummary(
-  items: ImportAnythingReviewItem[],
-  clusters: ImportAnythingOwnershipCluster[]
-) {
-  const counts = importAnythingSummaryCounts(items);
-  const itemParts = [
-    counts.appointments
-      ? pluralizeCount(counts.appointments, "appointment")
-      : "",
-    importAnythingNewAppointmentNoteCount(items)
-      ? pluralizeCount(
-          importAnythingNewAppointmentNoteCount(items),
-          "appointment from Visit Notes"
-        )
-      : "",
-    counts.tasks ? pluralizeCount(counts.tasks, "task") : "",
-    counts.medicationChanges
-      ? pluralizeCount(counts.medicationChanges, "medication change")
-      : "",
-    counts.questions ? pluralizeCount(counts.questions, "question") : "",
-    counts.careprep ? pluralizeCount(counts.careprep, "CarePrep item") : "",
-  ].filter(Boolean);
-  const clusterRows = importAnythingOwnershipClusterCounts(items, clusters);
-  const clusterLabels = clusterRows
-    .filter((row) => row.count > 0)
-    .map((row) => row.label);
-
-  return `Found ${itemParts.join(", ") || "review items"}${
-    clusterLabels.length > 0
-      ? ` across ${clusterLabels.join(", ")}`
-      : ""
-  }.${counts.notes ? " Supporting notes were attached automatically." : ""}`;
-}
-
 function importAnythingPersonAssignmentFromUnknown(
   value: unknown
 ): ImportAnythingPersonAssignment | null {
@@ -2914,51 +2671,6 @@ function importAnythingOwnershipClustersFromDraft(
       cluster.suggested_new_person_name
     ),
   }));
-}
-
-function importAnythingOwnershipClusterCounts(
-  items: ImportAnythingReviewItem[],
-  clusters: ImportAnythingOwnershipCluster[]
-) {
-  const counts = new Map<string, number>();
-  const clusterLabelById = new Map(
-    clusters.map((cluster) => [
-      cluster.clusterId,
-      cluster.displayName || cluster.suggestedNewPersonName || "Unnamed",
-    ])
-  );
-
-  for (const item of items) {
-    const key =
-      item.ownerClusterId && item.ownerConfidence >= 0.85
-        ? item.ownerClusterId
-        : "unassigned";
-
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-
-  const clusterRows = clusters.map((cluster) => ({
-    count: counts.get(cluster.clusterId) ?? 0,
-    label:
-      cluster.displayName ||
-      cluster.suggestedNewPersonName ||
-      cluster.clusterId ||
-      "Unnamed",
-  }));
-  const assignedClusterIds = new Set(clusters.map((cluster) => cluster.clusterId));
-  const orphanRows = Array.from(counts.entries())
-    .filter(([clusterId]) => clusterId !== "unassigned" && !assignedClusterIds.has(clusterId))
-    .map(([clusterId, count]) => ({
-      count,
-      label: clusterLabelById.get(clusterId) ?? clusterId,
-    }));
-  const unassignedCount = counts.get("unassigned") ?? 0;
-
-  return [
-    ...clusterRows,
-    ...orphanRows,
-    ...(unassignedCount > 0 ? [{ count: unassignedCount, label: "Unassigned" }] : []),
-  ].filter((row) => row.count > 0 || row.label !== "Unassigned");
 }
 
 function importAnythingMatchedAppointmentLabel(
@@ -3466,6 +3178,7 @@ export function CarePlandPers({
     useState(false);
   const [adminUserActivityFilter, setAdminUserActivityFilter] =
     useState<AdminUserActivityFilter>("all");
+  const [showInactiveAdminUsers, setShowInactiveAdminUsers] = useState(false);
   const [adminUserActivitySort, setAdminUserActivitySort] = useState<{
     direction: "asc" | "desc";
     key: AdminUserActivitySortKey;
@@ -3520,6 +3233,18 @@ export function CarePlandPers({
   >([]);
   const [loadingAdminIntegrationErrors, setLoadingAdminIntegrationErrors] =
     useState(false);
+  // Deliberately narrow -- Operate only needs enough to show what's
+  // waiting on a reply and jump to it, not the full report shape
+  // AdminHelpReportsPanel loads for itself.
+  const [adminOpenHelpReports, setAdminOpenHelpReports] = useState<
+    Array<{
+      id: string;
+      referenceId: string;
+      status: "new" | "needs_follow_up";
+      submittedAt: string;
+      user: string;
+    }>
+  >([]);
   const [
     selectedAdminIntegrationErrorKeys,
     setSelectedAdminIntegrationErrorKeys,
@@ -3887,16 +3612,9 @@ export function CarePlandPers({
   >(null);
   const [showOnboardingReady, setShowOnboardingReady] = useState(false);
   const [hasConfiguredReceiver, setHasConfiguredReceiver] = useState(false);
-  const [receiverDevices, setReceiverDevices] = useState<
-    Array<{
-      active?: boolean;
-      mainConnectUserPersonId?: string;
-      pairedAt?: string;
-      provisioningCompletedAt?: string;
-      receiverInstallId?: string;
-      status?: string;
-    }>
-  >([]);
+  const [receiverDevices, setReceiverDevices] = useState<ConnectReceiverDevice[]>(
+    []
+  );
   const [isAdmin, setIsAdmin] = useState(false);
   const [sessionProfileLoaded, setSessionProfileLoaded] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -4208,6 +3926,8 @@ export function CarePlandPers({
     adminDashboardFollowupCount,
     adminDashboardNewCount,
     adminTabForTopTab,
+    evaluateAdminNavItems,
+    evaluateAdminTabs,
     supportAdminNavItems,
     supportAdminTabs,
     systemAdminNavItems,
@@ -4245,9 +3965,15 @@ export function CarePlandPers({
       filterAdminUserActivity({
         filter: adminUserActivityFilter,
         rows: adminUserActivity,
+        showInactiveAccounts: showInactiveAdminUsers,
         sort: adminUserActivitySort,
       }),
-    [adminUserActivity, adminUserActivityFilter, adminUserActivitySort]
+    [
+      adminUserActivity,
+      adminUserActivityFilter,
+      adminUserActivitySort,
+      showInactiveAdminUsers,
+    ]
   );
   const adminIntegrationErrorKeys = useMemo(
     () => adminIntegrationErrors.map((row) => adminIntegrationErrorRowKey(row)),
@@ -4312,6 +4038,20 @@ export function CarePlandPers({
       ""
     );
   }
+
+  function publishedAppContentBody(key: keyof typeof appContentDefaults) {
+    return (
+      appContentVersions.find(
+        (version) => version.content_key === key && version.is_current
+      )?.body ??
+      (appContentDefaults as Record<string, string>)[key] ??
+      ""
+    );
+  }
+
+  const glossaryContent = parseCarePlandGlossaryBody(
+    publishedAppContentBody(carePlandGlossaryContentKey)
+  );
 
   function autoCarePrepSuccessText(appointment: Appointment) {
     return appContentText("careprep_auto_success_message").replaceAll(
@@ -4627,34 +4367,18 @@ export function CarePlandPers({
         const response = await fetch("/api/connect/provisioning", {
           cache: "no-store",
         });
-        const payload: unknown = await response.json().catch(() => null);
+        const payload = (await response
+          .json()
+          .catch(() => null)) as ConnectProvisioningSnapshot | null;
 
         if (cancelled || !response.ok) {
           return;
         }
 
-        const payloadRecord = payload as {
-          provisioning?: { receiverDevices?: unknown };
-          receiverDevices?: unknown;
-        } | null;
-        const receiverDeviceValue =
-          payloadRecord?.receiverDevices ??
-          payloadRecord?.provisioning?.receiverDevices;
-        const receiverDevices = Array.isArray(receiverDeviceValue)
-          ? (receiverDeviceValue as Array<{
-              active?: boolean;
-              mainConnectUserPersonId?: string;
-              pairedAt?: string;
-              provisioningCompletedAt?: string;
-              receiverInstallId?: string;
-              status?: string;
-            }>)
-          : [];
+        const devices = normalizeReceiverDevices(payload);
 
-        setReceiverDevices(receiverDevices);
-        setHasConfiguredReceiver(
-          receiverDevices.some((device) => device.status === "bound")
-        );
+        setReceiverDevices(devices);
+        setHasConfiguredReceiver(hasAnyBoundReceiverDevice(devices));
       } catch {
         if (!cancelled) {
           setHasConfiguredReceiver(false);
@@ -7381,13 +7105,21 @@ export function CarePlandPers({
     const { data: profileRow, error: profileError } = await supabase
       .from("profiles")
       .select(
-        "id,email,display_name,given_name,family_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,beta_terms_acknowledged_at,beta_privacy_acknowledged_at,beta_disclaimer_acknowledged_at,beta_agreement_version,onboarding_completed_at,is_admin,sample_data_seeded_at,sample_data_declined_at,sample_data_seed_version,welcome_guide_dismissed_at,welcome_guide_dismissed_version"
+        "id,email,display_name,given_name,family_name,phone,phone_e164,timezone,address_line1,address_line2,city,region,postal_code,country,beta_terms_acknowledged_at,beta_privacy_acknowledged_at,beta_disclaimer_acknowledged_at,beta_agreement_version,onboarding_completed_at,is_admin,account_status,sample_data_seeded_at,sample_data_declined_at,sample_data_seed_version,welcome_guide_dismissed_at,welcome_guide_dismissed_version"
       )
       .eq("id", user.id)
       .maybeSingle();
 
     if (profileError) {
       throw profileError;
+    }
+
+    if (profileRow?.account_status === "inactive") {
+      await handleSignOut({
+        bypassUnsavedChangesWarning: true,
+        message: "This CarePland account is inactive.",
+      });
+      return;
     }
 
     const timezoneDetection = browserTimezone();
@@ -8059,6 +7791,38 @@ export function CarePlandPers({
     }
   }
 
+  async function loadAdminOpenHelpReports() {
+    try {
+      const response = await fetch("/api/admin/help-reports", {
+        headers: await adminApiAuthHeaders(),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        reports?: Array<{
+          id: string;
+          referenceId: string;
+          status: string;
+          submittedAt: string;
+          user: string;
+        }>;
+      };
+
+      if (!response.ok) {
+        throw new Error("Help reports could not be loaded.");
+      }
+
+      // The endpoint returns up to 100 reports across every status; Operate
+      // only cares about the two that mean "nobody has acted on this yet."
+      const openReports = (body.reports ?? []).filter(
+        (report): report is typeof report & { status: "new" | "needs_follow_up" } =>
+          report.status === "new" || report.status === "needs_follow_up"
+      );
+      setAdminOpenHelpReports(openReports);
+    } catch (error) {
+      console.warn("Unable to load open help reports", error);
+      setAdminOpenHelpReports([]);
+    }
+  }
+
   async function handleChangeAdminPriorityStatus(
     priority: AdminPriority,
     status: AdminPriorityStatus
@@ -8154,6 +7918,7 @@ export function CarePlandPers({
       loadAdminAttentionSummary(),
       loadAdminAskQueues(),
       loadAdminIntegrationErrors(),
+      loadAdminOpenHelpReports(),
       loadProductMgmt(),
       loadAgentKnowledgeProposals(),
       loadAiOperationCostSummary(),
@@ -8609,7 +8374,7 @@ export function CarePlandPers({
       const { data, error } = await supabase
         .from("app_content_versions")
         .select(
-          "id,content_key,label,description,body,version_number,is_current,change_note,content_hash,created_at,superseded_at,superseded_by_version_id,copied_from_version_id"
+          "id,content_key,label,description,body,version_number,is_current,change_note,content_hash,created_at,created_by_user_id,superseded_at,superseded_by_version_id,copied_from_version_id"
         )
         .order("content_key", { ascending: true })
         .order("version_number", { ascending: false });
@@ -8713,6 +8478,17 @@ export function CarePlandPers({
     setAppContentSaveMessage(null);
 
     try {
+      if (selectedAppContentKey === carePlandGlossaryContentKey) {
+        const glossaryDraft = JSON.parse(appContentBody);
+        const validationErrors = validateCarePlandGlossaryContent(
+          parseCarePlandGlossaryBody(JSON.stringify(glossaryDraft))
+        );
+
+        if (validationErrors.length) {
+          throw new Error(validationErrors.join(" "));
+        }
+      }
+
       const { data, error } = await supabase.rpc("save_app_content_version", {
         p_body: appContentBody,
         p_change_note: appContentChangeNote.trim(),
@@ -8730,9 +8506,9 @@ export function CarePlandPers({
       resetAppContentEditor(newVersion);
       setAppContentSaveMessage({
         tone: "success",
-        text: "Content saved as a new version.",
+        text: "Content published as a new version.",
       });
-      showToast("Content saved as a new version.", { type: "success" });
+      showToast("Content published as a new version.", { type: "success" });
     } catch (error) {
       const errorText = getErrorMessage(error);
       setAppContentSaveMessage({
@@ -9699,6 +9475,61 @@ export function CarePlandPers({
     );
     setMessage(result.message ?? "Admin access updated.");
     showToast(result.message ?? "Admin access updated.", { type: "success" });
+  }
+
+  async function handleSetUserLifecycle({
+    action,
+    reason,
+    userId,
+  }: {
+    action: "deactivate" | "restore";
+    reason: string;
+    userId: string;
+  }) {
+    const { data: sessionData, error: sessionError } =
+      await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = sessionData.session?.access_token;
+
+    if (!accessToken) {
+      throw new Error("Please sign in before updating account status.");
+    }
+
+    const response = await fetch("/api/admin/user-lifecycle", {
+      body: JSON.stringify({ action, reason, userId }),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error ?? "Account status update failed.");
+    }
+
+    const nextStatus = result.accountStatus === "inactive" ? "inactive" : "active";
+    const inactivatedAt =
+      nextStatus === "inactive" ? new Date().toISOString() : null;
+
+    setAdminUserActivity((currentRows) =>
+      currentRows.map((row) =>
+        row.user_id === userId
+          ? {
+              ...row,
+              account_inactivated_at: inactivatedAt,
+              account_status: nextStatus,
+            }
+          : row
+      )
+    );
+    setMessage(result.message ?? "Account status updated.");
+    showToast(result.message ?? "Account status updated.", { type: "success" });
   }
 
   function toggleAdminUserActivitySort(key: AdminUserActivitySortKey) {
@@ -11016,39 +10847,21 @@ export function CarePlandPers({
 
       const response = await fetch("/api/ask", {
         body: JSON.stringify({
-          context: {
-            email: signedInEmail,
-            has_open_support_ticket: homeAskCanReply,
-            active_ask_context: activeAskContext,
-            is_profile_setup: needsOnboarding,
-            profile_label: savedProfileLabel,
-            profile_setup: needsOnboarding
-              ? {
-                  required_fields: [
-                    "email",
-                    "first name",
-                    "last name",
-                    "phone",
-                    "time zone",
-                    "address line 1",
-                    "city",
-                    "state / region",
-                    "ZIP code",
-                  ],
-                  requires_email_update: requiresEmailUpdate,
-                  optional_fields: [
-                    "display name",
-                    "address line 2",
-                    "country",
-                  ],
-                }
+          context: buildAskRequestContext({
+            activeAskContext,
+            hasOpenSupportTicket: homeAskCanReply,
+            isProfileSetup: needsOnboarding,
+            profileLabel: savedProfileLabel,
+            profileSetup: needsOnboarding
+              ? buildAskProfileSetupContext({ requiresEmailUpdate })
               : null,
-          },
-          currentPage: needsOnboarding
-            ? "profile_setup"
-            : showWelcomeGuide
-              ? "welcome_guide"
-              : mainTab,
+            signedInEmail,
+          }),
+          currentPage: buildAskCurrentPage({
+            mainTab,
+            needsOnboarding,
+            showWelcomeGuide,
+          }),
           message: outgoingMessage,
           threadId: askThreadId,
         }),
@@ -17541,12 +17354,13 @@ export function CarePlandPers({
     adminAskWorkspaceSubmission, adminAskWorkspaceThread, adminAttentionFor, adminDashboardFollowupCount,
     adminDashboardNewCount, adminEmailUpdateCurrentEmail, adminEmailUpdateNewEmail, adminEmailUpdateReason,
     adminEmailUpdateResult, adminIntegrationErrorRowKey, adminIntegrationErrorStats, adminIntegrationErrors,
+    adminOpenHelpReports,
     adminPriorities, adminPrioritiesError, adminPrioritiesSummary,
     adminLastViewedAt, adminReadonlyPanelRef, adminReadonlySnapshot, adminRevealedSensitiveData,
     setAdminRecommendationsReviewDraftSummary,
     adminSampleEmail, adminSampleForceDeclined, adminSampleStatus,
     adminTab, adminTabForTopTab, adminUserActivity, adminUserActivityFilter, adminUserActivitySort,
-    adminUserActivityStats, agentEscalationGuidance, agentKnowledgeAutomationSettings, agentKnowledgeChangeNote,
+    adminUserActivityStats, showInactiveAdminUsers, agentEscalationGuidance, agentKnowledgeAutomationSettings, agentKnowledgeChangeNote,
     agentKnowledgeCheckRuns, agentKnowledgeProposalDrafts, agentKnowledgeProposalNotes, agentKnowledgeProposalPublishNote,
     agentKnowledgeProposals, agentKnowledgeVersions, agentKnownLimitations, agentProductFacts,
     agentVoiceGuidance, aiAdminTab, aiInstructionVersion, aiInstructionVersions,
@@ -17559,7 +17373,8 @@ export function CarePlandPers({
     cancelEditingProductMgmtItem, careSubjects, carePrepHistory, closeAdminReadonlyUserView,
     deleteSelectedAdminIntegrationErrors, deletingAdminIntegrationErrors, draftSourceVersion,
     earlyAccessIntakeAdminNotes, earlyAccessIntakeDraft, earlyAccessIntakeFilter, earlyAccessIntakeRows,
-    earlyAccessIntakeStats, editingProductMgmtItemId, expandedAdminUserCareVipRows, filteredAdminUserActivity,
+    earlyAccessIntakeStats, editingProductMgmtItemId, evaluateAdminNavItems, evaluateAdminTabs,
+    expandedAdminUserCareVipRows, filteredAdminUserActivity,
     filteredAppContentOptions, filteredEarlyAccessIntakeRows,
     formatDate, formatDateOnly,
     handleAdminAskQuickStatus, handleAdminUpdateUserEmail, handleChangeAdminPriorityStatus, handleChangeAdminTab, handleChangeAiOperationCostRange, handleChangeAiAdminTab,
@@ -17570,7 +17385,7 @@ export function CarePlandPers({
     handleResolveProductMgmtItem, handleRetireProductMgmtArea, handleRevertAppContent, handleRevertInstructionVersion,
     handleReviewAgentKnowledgeProposalItem, handleRunAdminAskAnalysis, handleRunAskModuleLab, handleSaveAgentKnowledge, handleSaveAgentKnowledgeAutomationSettings,
     handleSaveAiInstructions, handleSaveAppContent, handleSaveAppSessionSettings, handleSeedAdminSampleData,
-    handleSendAdminAsk, handleSetUserAdmin,
+    handleSendAdminAsk, handleSetUserAdmin, handleSetUserLifecycle,
     handleUpdateAdminAskAnalysisRun, handleUpdateAskRoutingSettings,
     handleUpdateEarlyAccessIntake, handleUpdateProductMgmtItem, historyAppointmentId, instructionChangeNote,
     instructionModel, instructionOutputSchema, instructionSystemPrompt, instructionUserPrompt,
@@ -17601,7 +17416,7 @@ export function CarePlandPers({
     selectedProductMgmtSectionConfig, selectedVisibleAdminIntegrationErrorKeys, setAdminEmailUpdateCurrentEmail, setAdminEmailUpdateNewEmail,
     setAdminEmailUpdateReason, setAdminEmailUpdateResult, setAdminSampleEmail, setAdminSampleForceDeclined,
     setAdminSampleStatus,
-    setAdminUserActivityFilter, setAgentEscalationGuidance, setAgentKnowledgeAutomationSettings, setAgentKnowledgeChangeNote,
+    setAdminUserActivityFilter, setShowInactiveAdminUsers, setAgentEscalationGuidance, setAgentKnowledgeAutomationSettings, setAgentKnowledgeChangeNote,
     setAgentKnowledgeProposalDrafts, setAgentKnowledgeProposalNotes, setAgentKnowledgeProposalPublishNote, setAgentKnownLimitations,
     setAgentProductFacts, setAgentVoiceGuidance, setAppContentBody, setAppContentChangeNote,
     setAppContentDescription, setAppContentLabel, setAppSessionSettings, setAskModuleLabInput,
@@ -17857,6 +17672,7 @@ export function CarePlandPers({
             acceptBetaPrivacy={acceptBetaPrivacy}
             acceptBetaTerms={acceptBetaTerms}
             appContentText={appContentText}
+            glossaryContent={glossaryContent}
             loading={loading}
             message={message}
             needsBetaAgreement={needsBetaAgreement}
@@ -17966,6 +17782,7 @@ export function CarePlandPers({
               setPlanHelpExpanded,
             }}
             canShowAdminItems={canShowAdminItems}
+            glossaryContent={glossaryContent}
             contactDetailsProps={{
               accountPersonId: ACCOUNT_PROFILE_PERSON_ID,
               getPlacesAuthHeaders: placesAuthHeader,

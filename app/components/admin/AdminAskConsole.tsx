@@ -14,7 +14,13 @@ import {
   AdminAskWorkspace,
   AskCaseStatus,
 } from "./AdminAskWorkspace";
+import { aiWorkflows } from "./aiWorkflows";
 
+// The lab only tests the modules the router can actually call mid-request
+// (not ask_user_response_rubric, which is a shared text fragment rather
+// than a standalone module). aiWorkflows is the source of truth for each
+// key's label -- see aiWorkflows.ts -- so a label edited there does not
+// also need to be edited here.
 export type AskModuleLabKey =
   | "ask_bug_interpreter"
   | "ask_clarifier"
@@ -66,14 +72,17 @@ export type AdminAskQualityItem = AdminAskSubmission & {
 
 type AdminAskQueue = "needsResponse" | "qualityReview";
 
-const moduleLabOptions: Array<{ label: string; value: AskModuleLabKey }> = [
-  { label: "Router", value: "ask_router" },
-  { label: "Clarifier", value: "ask_clarifier" },
-  { label: "Bug interpreter", value: "ask_bug_interpreter" },
-  { label: "Feature interpreter", value: "ask_feature_interpreter" },
-  { label: "Onboarding helper", value: "ask_onboarding_helper" },
-  { label: "Off-topic handler", value: "ask_off_topic_handler" },
+const moduleLabKeys: AskModuleLabKey[] = [
+  "ask_router",
+  "ask_clarifier",
+  "ask_bug_interpreter",
+  "ask_feature_interpreter",
+  "ask_onboarding_helper",
+  "ask_off_topic_handler",
 ];
+
+const moduleLabOptions: Array<{ label: string; value: AskModuleLabKey }> =
+  moduleLabKeys.map((value) => ({ label: aiWorkflows[value].label, value }));
 
 function confidencePercent(value: number | string): string {
   const numeric = typeof value === "string" ? parseFloat(value) : value;

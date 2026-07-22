@@ -30,10 +30,7 @@ export async function POST(request: NextRequest) {
     }
 
     const access = await readConnectMessagePersonAccessForRequest(request, personId);
-    const { data: userData, error: userError } = await access.supabase.auth.getUser();
-    if (userError) throw userError;
-
-    const userId = userData.user?.id;
+    const userId = access.userContext?.userId ?? "";
     if (!userId) {
       throw new Error("Please sign in before sending summary feedback.");
     }

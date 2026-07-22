@@ -9,7 +9,12 @@ import {
 
 export type AiWorkflowKey =
   | "admin_hq_prioritization"
+  | "ask_bug_interpreter"
+  | "ask_clarifier"
+  | "ask_feature_interpreter"
+  | "ask_off_topic_handler"
   | "ask_onboarding_helper"
+  | "ask_router"
   | "ask_user_response_rubric"
   | "bulk_appointment_intake"
   | "careprep_generation"
@@ -28,8 +33,7 @@ export type AiWorkflowKey =
   | "health_topic_relationship_detection"
   | "home_context_answer"
   | "home_context_intent_classifier"
-  | "note_intake_interpretation"
-  | "support_assistant";
+  | "note_intake_interpretation";
 
 export const defaultCarePrepOutputSchema = {
   additionalProperties: false,
@@ -119,29 +123,6 @@ const defaultBulkAppointmentOutputSchema = {
     import_summary: { type: "string" },
   },
   required: ["appointments", "import_summary"],
-  type: "object",
-};
-
-const defaultSupportAssistantOutputSchema = {
-  additionalProperties: false,
-  properties: {
-    answer: { type: "string" },
-    category: { type: "string" },
-    confidence: { type: "number" },
-    escalation_recommended: { type: "boolean" },
-    escalation_reason: { type: "string" },
-    priority: { enum: ["low", "medium", "high", "urgent"], type: "string" },
-    suggested_next_step: { type: "string" },
-  },
-  required: [
-    "answer",
-    "suggested_next_step",
-    "confidence",
-    "escalation_recommended",
-    "escalation_reason",
-    "category",
-    "priority",
-  ],
   type: "object",
 };
 
@@ -732,12 +713,316 @@ export const aiWorkflows: Record<
     historyLabel: "Intake History",
     label: "Note intake interpretation",
   },
-  support_assistant: {
-    defaultChangeNote: "Initial support assistant instruction set",
-    defaultSchema: defaultSupportAssistantOutputSchema,
+  // The five entries below mirror the fallback schema/prompt literals in
+  // app/api/ask/route.ts (askRouterSchema, fallbackAskRouterPrompt, etc.) so
+  // Admin can see and version every instruction key Ask actually calls
+  // through runAskJsonModule -- not just ask_onboarding_helper and
+  // ask_user_response_rubric, which were the only two of the seven Ask
+  // instruction keys previously registered here. Runtime behavior is
+  // unchanged: ask/route.ts still prefers a DB instruction_versions row
+  // over its own hardcoded fallback, exactly as it already did for every
+  // other key. This only makes that DB row creatable/visible from the main
+  // AI Prompts panel instead of only from the Ask Module Lab test console.
+  ask_router: {
+    defaultChangeNote: "Initial Ask router instruction set",
+    defaultSchema: {
+      additionalProperties: false,
+      properties: {
+        action: {
+          enum: [
+            "answer_now",
+            "ask_clarifying_question",
+            "route_now",
+            "needs_human_review",
+            "off_topic",
+          ],
+          type: "string",
+        },
+        assistant_response: { type: "string" },
+        brief_summary: { type: "string" },
+        clarifying_question: { type: "string" },
+        confidence: { type: "number" },
+        primary_category: {
+          enum: [
+            "support_question",
+            "bug_report",
+            "feature_request",
+            "workflow_feedback",
+            "account_or_access_issue",
+            "unclear_or_needs_human_review",
+            "off_topic",
+          ],
+          type: "string",
+        },
+        rationale: { type: "string" },
+        recommended_actions: {
+          items: {
+            additionalProperties: true,
+            properties: {
+              action: { type: "string" },
+              app_area: { type: "string" },
+              category: { type: "string" },
+              confidence: { type: "number" },
+              priority: { type: "string" },
+              rationale: { type: "string" },
+              title: { type: "string" },
+            },
+            required: ["action", "confidence", "rationale"],
+            type: "object",
+          },
+          type: "array",
+        },
+        risk_flags: {
+          additionalProperties: false,
+          properties: {
+            account_or_access: { type: "boolean" },
+            data_loss: { type: "boolean" },
+            medical_or_emergency: { type: "boolean" },
+            privacy_or_security: { type: "boolean" },
+            spam_or_abuse: { type: "boolean" },
+          },
+          required: [
+            "account_or_access",
+            "data_loss",
+            "medical_or_emergency",
+            "privacy_or_security",
+            "spam_or_abuse",
+          ],
+          type: "object",
+        },
+      },
+      required: [
+        "action",
+        "assistant_response",
+        "brief_summary",
+        "clarifying_question",
+        "confidence",
+        "primary_category",
+        "rationale",
+        "recommended_actions",
+        "risk_flags",
+      ],
+      type: "object",
+    },
+    defaultSystemPrompt:
+      "You are the CarePland Personal Ask router. Your job is triage and recommendation, not doing every downstream task yourself. Review the current Ask conversation and decide whether to answer a safe app-use question, ask one useful clarifying question, route the intake for review, or mark it off-topic. Keep CarePland patient-facing language calm and plain. Avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical. If a user asks what you are, you may say: \"This is an AI assistant designed to help route questions, feedback, and ideas throughout CarePland. It is not a replacement for real people; its purpose is to help the CarePland team better understand and respond to what users need, almost like CarePrep for support and product feedback.\" Do not provide medical, legal, privacy, account-security, billing, or emergency advice. Do not perform destructive actions or claim that data has been changed. Prefer human review for account/access, privacy/security, possible data loss, medical/emergency, abusive/spam, or unclear cases. Use answer_now only for genuine feature or \"how do I...\" questions that are directly answered by the current product facts and known limitations supplied in the product context. If a question is not covered by the supplied facts, or you are not genuinely confident, do not fabricate an answer: choose route_now, needs_human_review, or ask_clarifying_question instead. Set confidence to honestly reflect how well the supplied product facts actually support your answer. Return valid JSON exactly matching the schema.",
     description:
-      "Instructions used to answer low-risk support questions before ticket escalation.",
-    historyLabel: "Support Assistant History",
-    label: "Support assistant",
+      "Instructions used to triage every incoming Ask message: answer directly, ask a clarifying question, route for review, or close as off-topic.",
+    historyLabel: "Ask Router History",
+    label: "Ask router",
+  },
+  ask_clarifier: {
+    defaultChangeNote: "Initial Ask clarifier instruction set",
+    defaultSchema: {
+      additionalProperties: false,
+      properties: {
+        clarifying_question: { type: "string" },
+        confidence: { type: "number" },
+        should_ask_question: { type: "boolean" },
+        stop_reason: {
+          enum: [
+            "ask_one_question",
+            "already_clear_enough",
+            "low_value_to_continue",
+            "limit_reached",
+            "needs_human_review",
+          ],
+          type: "string",
+        },
+        understanding_summary: { type: "string" },
+      },
+      required: [
+        "clarifying_question",
+        "confidence",
+        "should_ask_question",
+        "stop_reason",
+        "understanding_summary",
+      ],
+      type: "object",
+    },
+    defaultSystemPrompt:
+      "You are The Clarifier for CarePland Personal Ask. Your job is not to route everything; your job is to decide whether one more user question would materially improve routing, troubleshooting, or Admin review. Ask at most one concise follow-up question at a time. Sound conversational, brief, and forgiving, especially for likely typos. Avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical. If another question is low value, say not to ask and provide a brief understanding summary so the item can be routed for review. Do not interrogate the user. Do not ask questions just to be exhaustive. Return valid JSON exactly matching the schema.",
+    description:
+      "Instructions used by The Clarifier to decide whether one more follow-up question would materially improve an Ask conversation before it is sent for review.",
+    historyLabel: "Ask Clarifier History",
+    label: "Ask clarifier",
+  },
+  ask_off_topic_handler: {
+    defaultChangeNote: "Initial Ask off-topic handler instruction set",
+    defaultSchema: {
+      additionalProperties: false,
+      properties: {
+        confidence: { type: "number" },
+        review_reason: { type: "string" },
+        should_close: { type: "boolean" },
+        user_response: { type: "string" },
+      },
+      required: ["confidence", "review_reason", "should_close", "user_response"],
+      type: "object",
+    },
+    defaultSystemPrompt:
+      "You are the CarePland Personal Ask off-topic handler. Your job is narrow: briefly and kindly redirect clearly out-of-scope messages back to CarePland questions, appointment organization, bugs, ideas, workflow feedback, or support review. Avoid first-person assistant phrasing such as I, me, my, we, we're, we've, and we'll whenever practical. If the message includes possible medical, emergency, legal, privacy, security, account-access, abuse, or data-loss risk, do not close it as harmless off-topic; mark it for human review. Do not shame the user. Do not continue the conversation unnecessarily. Return valid JSON exactly matching the schema.",
+    description:
+      "Instructions used to briefly redirect harmless out-of-scope Ask messages, or flag risky off-topic messages for human review instead of closing them.",
+    historyLabel: "Ask Off-Topic History",
+    label: "Ask off-topic handler",
+  },
+  ask_feature_interpreter: {
+    defaultChangeNote: "Initial Ask feature/workflow interpreter instruction set",
+    defaultSchema: {
+      additionalProperties: false,
+      properties: {
+        interpretation: {
+          additionalProperties: false,
+          properties: {
+            affected_app_area: { type: "string" },
+            desired_outcome: { type: "string" },
+            pain_point: { type: "string" },
+            suggested_feature_or_workflow: { type: "string" },
+            urgency_clues: { type: "string" },
+          },
+          required: [
+            "affected_app_area",
+            "desired_outcome",
+            "pain_point",
+            "suggested_feature_or_workflow",
+            "urgency_clues",
+          ],
+          type: "object",
+        },
+        recommended_actions: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              action: {
+                enum: [
+                  "create_wishlist_item",
+                  "create_workflow_item",
+                  "needs_human_review",
+                ],
+                type: "string",
+              },
+              app_area: { type: "string" },
+              category: {
+                enum: ["feature_request", "workflow_feedback"],
+                type: "string",
+              },
+              confidence: { type: "number" },
+              desired_outcome: { type: "string" },
+              pain_point: { type: "string" },
+              priority: { enum: ["low", "medium", "high"], type: "string" },
+              rationale: { type: "string" },
+              suggested_feature: { type: "string" },
+              title: { type: "string" },
+              urgency: { type: "string" },
+            },
+            required: [
+              "action",
+              "app_area",
+              "category",
+              "confidence",
+              "desired_outcome",
+              "pain_point",
+              "priority",
+              "rationale",
+              "suggested_feature",
+              "title",
+              "urgency",
+            ],
+            type: "object",
+          },
+          type: "array",
+        },
+      },
+      required: ["interpretation", "recommended_actions"],
+      type: "object",
+    },
+    defaultSystemPrompt:
+      "You are the CarePland Personal Ask feature/workflow interpreter. Convert the routed Ask conversation into structured review candidates for Admin. Preserve the user's original wording and intent. Extract the suggested feature or workflow, pain point, desired outcome, affected app area, urgency clues, and a concise recommended action. Do not make roadmap commitments. Return valid JSON exactly matching the schema.",
+    description:
+      "Instructions used to convert routed feature-request and workflow-feedback Ask conversations into structured Admin review candidates.",
+    historyLabel: "Ask Feature Interpreter History",
+    label: "Ask feature interpreter",
+  },
+  ask_bug_interpreter: {
+    defaultChangeNote: "Initial Ask bug/friction interpreter instruction set",
+    defaultSchema: {
+      additionalProperties: false,
+      properties: {
+        interpretation: {
+          additionalProperties: false,
+          properties: {
+            actual_behavior: { type: "string" },
+            affected_app_area: { type: "string" },
+            expected_behavior: { type: "string" },
+            possible_usability_confusion: { type: "boolean" },
+            reproducibility_clues: { type: "string" },
+            tried_to_do: { type: "string" },
+          },
+          required: [
+            "actual_behavior",
+            "affected_app_area",
+            "expected_behavior",
+            "possible_usability_confusion",
+            "reproducibility_clues",
+            "tried_to_do",
+          ],
+          type: "object",
+        },
+        recommended_actions: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              action: {
+                enum: [
+                  "create_bug_item",
+                  "create_workflow_item",
+                  "needs_human_review",
+                ],
+                type: "string",
+              },
+              actual_behavior: { type: "string" },
+              app_area: { type: "string" },
+              category: {
+                enum: ["bug_report", "workflow_feedback"],
+                type: "string",
+              },
+              confidence: { type: "number" },
+              expected_behavior: { type: "string" },
+              possible_usability_confusion: { type: "boolean" },
+              priority: { enum: ["low", "medium", "high"], type: "string" },
+              rationale: { type: "string" },
+              reproducibility_clues: { type: "string" },
+              title: { type: "string" },
+              tried_to_do: { type: "string" },
+            },
+            required: [
+              "action",
+              "actual_behavior",
+              "app_area",
+              "category",
+              "confidence",
+              "expected_behavior",
+              "possible_usability_confusion",
+              "priority",
+              "rationale",
+              "reproducibility_clues",
+              "title",
+              "tried_to_do",
+            ],
+            type: "object",
+          },
+          type: "array",
+        },
+      },
+      required: ["interpretation", "recommended_actions"],
+      type: "object",
+    },
+    defaultSystemPrompt:
+      "You are the CarePland Personal Ask bug/friction interpreter. Convert the routed Ask conversation into structured review candidates for Admin. Capture what the user tried to do, what they expected, what happened instead, affected app area, reproducibility clues, and whether this may be usability confusion rather than a product defect. Do not overstate certainty. Return valid JSON exactly matching the schema.",
+    description:
+      "Instructions used to convert routed bug-report and friction Ask conversations into structured Admin review candidates.",
+    historyLabel: "Ask Bug Interpreter History",
+    label: "Ask bug interpreter",
   },
 };

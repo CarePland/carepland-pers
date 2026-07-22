@@ -3,6 +3,10 @@
 import { ComponentProps, useState } from "react";
 
 import { ConnectProfileSettingsPanel } from "../../connect/dashboard/ConnectDashboard";
+import {
+  CarePlandGlossaryDialog,
+  type CarePlandGlossaryContent,
+} from "../glossary/CarePlandGlossary";
 import { OfflineAccessPanel } from "./OfflineAccessPanel";
 import { ProfileAccountSummary } from "./ProfileAccountSummary";
 import { ProfileContactDetailsForm } from "./ProfileContactDetailsForm";
@@ -11,26 +15,34 @@ type ProfilePageProps = {
   accountSummaryProps: ComponentProps<typeof ProfileAccountSummary>;
   canShowAdminItems: boolean;
   contactDetailsProps: ComponentProps<typeof ProfileContactDetailsForm>;
+  glossaryContent: CarePlandGlossaryContent;
   offlineAccessProps: ComponentProps<typeof OfflineAccessPanel>;
   message?: string;
 };
 
-type ProfileSettingsTab = "account" | "offlineAccess" | "receiverSettings";
+type ProfileSettingsTab =
+  | "account"
+  | "offlineAccess"
+  | "receiverSettings"
+  | "glossary";
 
 const profileSettingsTabs: Array<{ id: ProfileSettingsTab; label: string }> = [
   { id: "account", label: "Your CarePland Account" },
   { id: "offlineAccess", label: "Offline Access" },
   { id: "receiverSettings", label: "Receiver Settings" },
+  { id: "glossary", label: "Glossary" },
 ];
 
 export function ProfilePage({
   accountSummaryProps,
   canShowAdminItems,
   contactDetailsProps,
+  glossaryContent,
   offlineAccessProps,
   message,
 }: ProfilePageProps) {
   const [activeTab, setActiveTab] = useState<ProfileSettingsTab>("account");
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
 
   return (
     <div className="mt-6 space-y-5">
@@ -47,7 +59,14 @@ export function ProfilePage({
                 : "text-slate-500 hover:bg-blue-50/70 hover:text-blue-800"
             }`}
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              if (tab.id === "glossary") {
+                setGlossaryOpen(true);
+                return;
+              }
+
+              setActiveTab(tab.id);
+            }}
             type="button"
           >
             {tab.label}
@@ -73,6 +92,12 @@ export function ProfilePage({
           setupView="receivers"
         />
       )}
+      {glossaryOpen ? (
+        <CarePlandGlossaryDialog
+          content={glossaryContent}
+          onClose={() => setGlossaryOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
+  getActiveSupabaseUser,
 } from "../../../platform/server/supabase";
 import { careplandRuntimeTempPath } from "../../../platform/server/runtimeTemp";
 import { connectAvatarAltText } from "../../avatar";
@@ -376,19 +377,12 @@ export async function createConnectUserContext(accessToken: string) {
   }
 
   const supabase = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const user = await getActiveSupabaseUser(
+    supabase,
+    "Please sign in before loading Connect people."
+  );
 
-  if (userError) {
-    throw userError;
-  }
-
-  const userId = userData.user?.id;
-
-  if (!userId) {
-    throw new Error("Please sign in before loading Connect people.");
-  }
-
-  return { accessToken, userId } satisfies ConnectUserContext;
+  return { accessToken, userId: user.id } satisfies ConnectUserContext;
 }
 
 export async function connectUserCanAccessPerson(

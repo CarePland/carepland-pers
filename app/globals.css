@@ -83,16 +83,22 @@ body {
 
 .something-went-wrong-button {
   align-items: center;
-  background: rgba(15, 23, 42, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgb(220, 236, 248);
+  border: 1px solid rgb(182, 218, 255);
   border-radius: 999px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
-  color: white;
+  box-shadow: 0 8px 20px rgba(52, 93, 131, 0.12);
+  color: rgb(23, 47, 73);
   display: inline-flex;
   font-size: 0.78rem;
   font-weight: 700;
   min-height: 2.5rem;
   padding: 0.55rem 0.85rem;
+}
+
+.something-went-wrong-button:hover {
+  background: rgb(237, 245, 252);
+  border-color: rgb(133, 169, 204);
+  box-shadow: 0 10px 22px rgba(52, 93, 131, 0.14);
 }
 
 .something-went-wrong-panel {

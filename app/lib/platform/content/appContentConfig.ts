@@ -3,6 +3,10 @@ import {
   planProfilePanelContentKey,
   pricingTiers,
 } from "../entitlements/pricingTiers";
+import {
+  carePlandGlossaryContentKey,
+  defaultCarePlandGlossaryBody,
+} from "./carePlandGlossary";
 
 export const appContentDefaults = {
   beta_disclaimer_ack:
@@ -53,12 +57,13 @@ export const appContentDefaults = {
   support_agent_known_limitations:
     "Calendar sync is not live yet. SMS/text notifications are not live yet. Favorite location management is basic. Google Places autocomplete can be temporarily unavailable if quota or key restrictions block requests. Self-service billing and plan changes are not wired up yet; plan questions or account-specific tier issues should be escalated to support.",
   support_agent_product_facts:
-    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask questions in the app. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Early Access currently gives early adopters full access, including multiple Care VIPs and automatic appointment preparation where available. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual, Group, and Early Access tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider.",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. Users can add appointments manually, import appointments from pasted text, images, and .ics calendar files, search Google Places for clinics/businesses/addresses, save favorite locations with nicknames, generate CarePrep for upcoming appointments, add notes to logged appointments, and ask questions in the app. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Early Access currently gives early adopters full access, including multiple Care VIPs and automatic appointment preparation where available. Manual CarePrep generation can be metered by plan; automatic appointment preparation is intended for Premium Individual, Group, and Early Access tiers. After Visit Notes are saved, CarePland can automatically prepare the next upcoming appointment for the same Care VIP when the plan includes automatic CarePrep. CarePrep refresh is only available when there are additional appointments to consider. Health Focus surfaces recurring health topics noticed across saved Visit Notes, shown alongside specific appointments and visit records rather than as its own Home destination; it groups related mentions over time so a topic like a medication change or a symptom can be traced back to when it first came up.",
   support_agent_voice_guidance:
     "Use a warm, steady, and practical tone. Be empathetic without pretending intimacy, supportive without being syrupy, and clear about limits without sounding cold. Be confident on app guidance, humble on care-related questions, and never corporate-deflective or fake-cheerful when a user is frustrated.",
   welcome_guide_body:
     "Help is always available in the upper right [?].",
   welcome_guide_title: "Welcome to CarePland",
+  [carePlandGlossaryContentKey]: defaultCarePlandGlossaryBody,
 };
 
 export const appContentOptions = [
@@ -176,6 +181,13 @@ export const appContentOptions = [
     contentKey: "demo_profile_add_body",
     description: "Profile page explanation shown before adding demo data.",
     label: "Demo data add note",
+  },
+  {
+    category: "onboarding",
+    contentKey: carePlandGlossaryContentKey,
+    description:
+      "Managed glossary shown as an optional setup page and from Profile settings.",
+    label: "CarePland Glossary",
   },
   ...pricingTiers.map((tier) => ({
     category: "plans",

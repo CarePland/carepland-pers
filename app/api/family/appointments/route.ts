@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import {
-  createSupabaseServiceClient,
-  createSupabaseUserClient,
-} from "../../../lib/platform/server/supabase";
+import { requireAdminCaller } from "../../../lib/platform/server/adminAuth";
+import { createSupabaseServiceClient } from "../../../lib/platform/server/supabase";
 
 type AppointmentRow = {
   id: string;
@@ -118,39 +116,12 @@ export async function GET(request: NextRequest) {
 }
 
 async function requireFamilyAdmin(request: NextRequest) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
-
-  if (!accessToken) {
-    throw new FamilyAccessError("Please sign in before using Family.", 401);
-  }
-
-  const userClient = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  const userId = userData.user?.id;
-
-  if (!userId) {
-    throw new FamilyAccessError("Please sign in before using Family.", 401);
-  }
-
-  const { data: profile, error: profileError } = await userClient
-    .from("profiles")
-    .select("is_admin")
-    .eq("id", userId)
-    .single();
-
-  if (profileError) {
-    throw profileError;
-  }
-
-  if (profile?.is_admin !== true) {
-    throw new FamilyAccessError("Admin access is required to use Family.", 403);
-  }
+  await requireAdminCaller(request, {
+    adminRequiredMessage: "Admin access is required to use Family.",
+    makeAdminRequiredError: (message) => new FamilyAccessError(message, 403),
+    makeSignInError: (message) => new FamilyAccessError(message, 401),
+    signInMessage: "Please sign in before using Family.",
+  });
 }
 
 function filterAppointments(appointments: AppointmentRow[], searchText: string) {

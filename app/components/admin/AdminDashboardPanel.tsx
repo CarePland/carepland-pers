@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 import {
   filterAdminPriorities,
@@ -17,6 +17,8 @@ import {
   readShowAllPlatformModulesOverride,
   writeShowAllPlatformModulesOverride,
 } from "../../lib/platform/moduleAccess";
+import type { AdminAskThread } from "./AdminAskWorkspace";
+import type { AdminIntegrationErrorSummaryRow } from "./AdminIntegrationErrorsPanel";
 
 export type AiOperationCostSummaryRow = {
   cached_input_tokens: number | string | null;
@@ -39,6 +41,23 @@ export type AiOperationCostUserSummaryRow = {
 
 export type AiOperationCostViewMode = "user" | "workflow";
 
+type AdminDashboardEarlyAccessFollowup = {
+  created_at: string;
+  email: string;
+  first_name: string;
+  id: string;
+  last_name: string;
+  status: string;
+};
+
+type AdminDashboardOpenHelpReport = {
+  id: string;
+  referenceId: string;
+  status: "needs_follow_up" | "new";
+  submittedAt: string;
+  user: string;
+};
+
 type AdminDashboardPanelProps = {
   aiOperationCostRows: AiOperationCostSummaryRow[];
   aiOperationCostError: string;
@@ -46,21 +65,104 @@ type AdminDashboardPanelProps = {
   aiOperationCostRangeDays: number;
   aiOperationCostUserRows: AiOperationCostUserSummaryRow[];
   aiOperationCostViewMode: AiOperationCostViewMode;
+  earlyAccessFollowups: AdminDashboardEarlyAccessFollowup[];
   followupCount: number;
+  integrationErrorRows: AdminIntegrationErrorSummaryRow[];
   loadingAdminPriorities: boolean;
   loadingAiOperationCosts: boolean;
+  needsResponseThreads: AdminAskThread[];
   newCount: number;
   onChangeAiOperationCostRange: (rangeDays: number) => void;
   onChangeAiOperationCostViewMode: (viewMode: AiOperationCostViewMode) => void;
   onChangePriorityStatus: (priority: AdminPriority, status: AdminPriorityStatus) => void;
   onDeferPriority: (priority: AdminPriority) => void;
+  onOpenEarlyAccessFollowup: () => void;
+  onOpenErrors: () => void;
+  onOpenHelpReport: () => void;
   onOpenPriorityDestination: (destination: string) => void;
   onOpenPrioritizationPrompt: () => void;
+  onOpenSupportThread: (threadId: string) => void;
   onRefreshSignals: () => void;
+  openHelpReports: AdminDashboardOpenHelpReport[];
   priorities: AdminPriority[];
   prioritiesError: string;
   prioritiesSummary: AdminPrioritySummary;
 };
+
+// Local to this page on purpose. All four "waiting on you" cards below
+// follow the same shape because they're the same kind of thing, not
+// because there's a shared cross-page pattern yet -- see
+// CarePland_Admin_Redesign_SoloFounder.md. If a fifth Operate source shows
+// up and still fits this shape, keep reusing this; if it doesn't fit,
+// don't bend it to match, write that one concretely instead.
+function WaitingOnYouCard<Item>({
+  emptyText,
+  itemKey,
+  items,
+  onOpenAll,
+  onOpenItem,
+  renderPrimary,
+  renderSecondary,
+  subtitle,
+  title,
+}: {
+  emptyText: string;
+  itemKey: (item: Item) => string;
+  items: Item[];
+  onOpenAll: () => void;
+  onOpenItem: (item: Item) => void;
+  renderPrimary: (item: Item) => ReactNode;
+  renderSecondary: (item: Item) => ReactNode;
+  subtitle: string;
+  title: string;
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{title}</p>
+          <p className="mt-1 text-sm text-slate-600">{subtitle}</p>
+        </div>
+        {items.length > 0 ? (
+          <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-bold text-red-700">
+            {items.length}
+          </span>
+        ) : null}
+      </div>
+
+      {items.length > 0 ? (
+        <div className="mt-3 grid gap-2">
+          {items.slice(0, 4).map((item) => (
+            <button
+              className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-blue-300 hover:bg-blue-50"
+              key={itemKey(item)}
+              onClick={() => onOpenItem(item)}
+              type="button"
+            >
+              <span className="font-medium text-slate-900">
+                {renderPrimary(item)}
+              </span>
+              <span className="text-xs text-slate-500">
+                {renderSecondary(item)}
+              </span>
+            </button>
+          ))}
+          {items.length > 4 ? (
+            <button
+              className="text-left text-xs font-semibold text-blue-700 hover:text-blue-900"
+              onClick={onOpenAll}
+              type="button"
+            >
+              +{items.length - 4} more
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-slate-600">{emptyText}</p>
+      )}
+    </div>
+  );
+}
 
 const aiOperationCostRangeOptions = [
   { label: "7 days", value: 7 },
@@ -124,17 +226,25 @@ export function AdminDashboardPanel({
   aiOperationCostRows,
   aiOperationCostUserRows,
   aiOperationCostViewMode,
+  earlyAccessFollowups,
   followupCount,
+  integrationErrorRows,
   loadingAdminPriorities,
   loadingAiOperationCosts,
+  needsResponseThreads,
   newCount,
   onChangeAiOperationCostRange,
   onChangeAiOperationCostViewMode,
   onChangePriorityStatus,
   onDeferPriority,
+  onOpenEarlyAccessFollowup,
+  onOpenErrors,
+  onOpenHelpReport,
   onOpenPriorityDestination,
   onOpenPrioritizationPrompt,
+  onOpenSupportThread,
   onRefreshSignals,
+  openHelpReports,
   priorities,
   prioritiesError,
   prioritiesSummary,
@@ -239,6 +349,63 @@ export function AdminDashboardPanel({
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
+        <WaitingOnYouCard
+          emptyText="Nothing waiting on a reply right now."
+          itemKey={(thread) => thread.id}
+          items={needsResponseThreads}
+          onOpenAll={() => onOpenSupportThread(needsResponseThreads[0]?.id ?? "")}
+          onOpenItem={(thread) => onOpenSupportThread(thread.id)}
+          renderPrimary={(thread) => thread.user_label}
+          renderSecondary={(thread) =>
+            formatDateTime(thread.updated_at || thread.created_at)
+          }
+          subtitle="Open Ask threads with no admin reply yet."
+          title="Support threads waiting on you"
+        />
+
+        <WaitingOnYouCard
+          emptyText="No integration errors right now."
+          itemKey={(row) => `${row.integration_key}-${row.error_key}-${row.window_start}`}
+          items={integrationErrorRows}
+          onOpenAll={onOpenErrors}
+          onOpenItem={onOpenErrors}
+          renderPrimary={(row) => `${row.integration_key} · ${row.error_key}`}
+          renderSecondary={(row) => formatDateTime(row.latest_occurred_at)}
+          subtitle="Third-party integrations reporting failures."
+          title="Integration errors"
+        />
+
+        <WaitingOnYouCard
+          emptyText="No help reports waiting on review."
+          itemKey={(report) => report.id}
+          items={openHelpReports}
+          onOpenAll={onOpenHelpReport}
+          onOpenItem={onOpenHelpReport}
+          renderPrimary={(report) => report.user}
+          renderSecondary={(report) =>
+            report.status === "new" ? "New" : "Follow-up"
+          }
+          subtitle="Send Help reports nobody has reviewed yet."
+          title="Help reports waiting on you"
+        />
+
+        <WaitingOnYouCard
+          emptyText="No Early Access sign-ups waiting on a reply."
+          itemKey={(row) => row.id}
+          items={earlyAccessFollowups}
+          onOpenAll={onOpenEarlyAccessFollowup}
+          onOpenItem={onOpenEarlyAccessFollowup}
+          renderPrimary={(row) =>
+            [row.first_name, row.last_name].filter(Boolean).join(" ") ||
+            row.email
+          }
+          renderSecondary={(row) => readableLabel(row.status)}
+          subtitle="Early Access sign-ups waiting to hear back from you."
+          title="Early Access follow-ups"
+        />
       </div>
 
       <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4">

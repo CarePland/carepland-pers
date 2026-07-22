@@ -10,6 +10,7 @@ import {
   validateAndPrepareHelpReportSubmission,
 } from "@/app/lib/platform/helpReports";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
+import { assertAccountActive } from "@/app/lib/platform/server/accountStatus";
 import { careplandRuntimeTempPath } from "@/app/lib/platform/server/runtimeTemp";
 import {
   createSupabaseServiceClient,
@@ -156,6 +157,12 @@ async function userContextFromRequest(request: Request) {
   const { data, error } = await userClient.auth.getUser();
 
   if (error || !data.user?.id) return null;
+
+  try {
+    await assertAccountActive(userClient, data.user.id);
+  } catch {
+    return null;
+  }
 
   return { userId: data.user.id };
 }

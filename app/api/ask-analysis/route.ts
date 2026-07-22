@@ -1,7 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
 
 type JsonObject = Record<string, unknown>;
 
@@ -76,13 +76,17 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
-// Ask's native bulk QA analysis -- mirrors /api/support-assistant-analysis's
-// shape (same model, same schema, same cost-logging call) but reads
-// ask_submissions plus their ask_submission_reviews (the human quality
-// verdicts from the unified admin workspace) instead of the legacy
-// interactions table, and writes to ask_analysis_runs. Reviews are
-// included in the prompt so a run can surface patterns the admins have
-// already flagged, not just what the model infers cold from transcripts.
+// Ask's native bulk QA analysis. Reads ask_submissions plus their
+// ask_submission_reviews (the human quality verdicts from the unified admin
+// workspace) and writes to ask_analysis_runs. Reviews are included in the
+// prompt so a run can surface patterns the admins have already flagged, not
+// just what the model infers cold from transcripts.
+//
+// The legacy /api/support-assistant and /api/support-assistant-analysis
+// routes this used to mirror have been retired (2026-07): they had no
+// remaining callers anywhere in the app -- Ask is the sole live caregiver
+// Q&A entry point now. See docs/CAREPLAND_STABLE_PROJECT_CONTEXT.md,
+// "Support And Admin Architecture."
 export async function POST(request: NextRequest) {
   try {
     if (!supabaseUrl || !supabaseAnonKey) {
@@ -117,36 +121,10 @@ export async function POST(request: NextRequest) {
       throw new Error("Analyze 50 or fewer Ask answers at a time.");
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false },
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    const { userClient: supabase, userId } = await requireAdminCaller(request, {
+      adminRequiredMessage: "Admin access is required to analyze Ask answers.",
+      signInMessage: "Please sign in before analyzing Ask answers.",
     });
-
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    const userId = userData.user?.id;
-
-    if (!userId) {
-      throw new Error("Please sign in before analyzing Ask answers.");
-    }
-
-    const { data: profileRows, error: profileError } = await supabase
-      .from("profiles")
-      .select("is_admin")
-      .eq("id", userId)
-      .limit(1);
-
-    if (profileError) {
-      throw profileError;
-    }
-
-    if (!profileRows?.[0]?.is_admin) {
-      throw new Error("Admin access is required to analyze Ask answers.");
-    }
 
     const { data: submissions, error: submissionsError } = await supabase
       .from("ask_submissions")

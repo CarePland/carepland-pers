@@ -5,7 +5,10 @@ import {
   normalizeFeedbackDraft,
   type HealthTopicFeedbackDraft,
 } from "@/app/lib/personal/healthTopics/feedback";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+import {
+  createSupabaseUserClient,
+  getActiveSupabaseUser,
+} from "@/app/lib/platform/server/supabase";
 
 type FeedbackInsertResult = {
   id: string;
@@ -95,17 +98,11 @@ export async function POST(request: NextRequest) {
     }
 
     const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    const userId = userData.user?.id;
-
-    if (!userId) {
-      throw new Error("Please sign in before saving Health Story feedback.");
-    }
+    const user = await getActiveSupabaseUser(
+      userClient,
+      "Please sign in before saving Health Story feedback."
+    );
+    const userId = user.id;
 
     const body = (await request.json().catch(() => ({}))) as Record<
       string,
@@ -176,17 +173,11 @@ export async function DELETE(request: NextRequest) {
     }
 
     const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    const userId = userData.user?.id;
-
-    if (!userId) {
-      throw new Error("Please sign in before undoing Health Story feedback.");
-    }
+    const user = await getActiveSupabaseUser(
+      userClient,
+      "Please sign in before undoing Health Story feedback."
+    );
+    const userId = user.id;
 
     const body = (await request.json().catch(() => ({}))) as Record<
       string,

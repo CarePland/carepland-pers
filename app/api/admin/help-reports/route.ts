@@ -9,11 +9,9 @@ import {
   isHelpReportResolutionCategory,
   isHelpReportStatus,
 } from "@/app/lib/platform/helpReports";
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
-import {
-  createSupabaseServiceClient,
-  createSupabaseUserClient,
-} from "@/app/lib/platform/server/supabase";
+import { createSupabaseServiceClient } from "@/app/lib/platform/server/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -241,35 +239,12 @@ export async function PATCH(request: NextRequest) {
 }
 
 async function requireAdmin(request: Request) {
-  const accessToken = request.headers
-    .get("authorization")
-    ?.replace(/^Bearer\s+/i, "")
-    .trim();
+  const { userId } = await requireAdminCaller(request, {
+    adminRequiredMessage: "Admin access is required to open Help Reports.",
+    signInMessage: "Please sign in before opening Help Reports.",
+  });
 
-  if (!accessToken) {
-    throw new Error("Please sign in before opening Help Reports.");
-  }
-
-  const userClient = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-
-  if (userError) throw userError;
-
-  const adminUserId = userData.user?.id;
-  if (!adminUserId) throw new Error("Please sign in before opening Help Reports.");
-
-  const { data: profile, error: profileError } = await userClient
-    .from("profiles")
-    .select("is_admin")
-    .eq("id", adminUserId)
-    .single();
-
-  if (profileError) throw profileError;
-  if ((profile as { is_admin?: boolean } | null)?.is_admin !== true) {
-    throw new Error("Admin access is required to open Help Reports.");
-  }
-
-  return adminUserId;
+  return userId;
 }
 
 async function loadReportEvents(adminClient: ReturnType<typeof createSupabaseServiceClient>, reportId: string) {

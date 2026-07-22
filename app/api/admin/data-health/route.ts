@@ -1,11 +1,9 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
-import {
-  createSupabaseServiceClient,
-  createSupabaseUserClient,
-} from "@/app/lib/platform/server/supabase";
+import { createSupabaseServiceClient } from "@/app/lib/platform/server/supabase";
 
 const betaAgreementVersion = "beta-2026-05-19";
 
@@ -39,37 +37,12 @@ function errorMessage(error: unknown): string {
 }
 
 async function requireAdmin(request: NextRequest) {
-  const authHeader = request.headers.get("authorization") ?? "";
-  const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const { userId } = await requireAdminCaller(request, {
+    adminRequiredMessage: "Admin access is required to run Data Health.",
+    signInMessage: "Please sign in before running Data Health.",
+  });
 
-  if (!accessToken) {
-    throw new Error("Please sign in before running Data Health.");
-  }
-
-  const userClient = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-
-  if (userError) throw userError;
-
-  const adminUserId = userData.user?.id;
-
-  if (!adminUserId) {
-    throw new Error("Please sign in before running Data Health.");
-  }
-
-  const { data: adminProfile, error: adminProfileError } = await userClient
-    .from("profiles")
-    .select("is_admin")
-    .eq("id", adminUserId)
-    .single();
-
-  if (adminProfileError) throw adminProfileError;
-
-  if (adminProfile?.is_admin !== true) {
-    throw new Error("Admin access is required to run Data Health.");
-  }
-
-  return adminUserId;
+  return userId;
 }
 
 async function listAllAuthUsers(adminClient: SupabaseClient) {

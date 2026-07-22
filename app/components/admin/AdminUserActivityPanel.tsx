@@ -13,6 +13,8 @@ export type AdminUserActivityRow = {
   display_name: string | null;
   care_subjects?: AdminUserActivityCareSubject[];
   user_group?: string | null;
+  account_status?: "active" | "inactive" | string | null;
+  account_inactivated_at?: string | null;
   account_created_at: string | null;
   last_seen_at: string | null;
   appointment_count: number;
@@ -49,6 +51,7 @@ export type AdminUserActivitySortKey =
   | "last_activity"
   | "last_seen"
   | "notes"
+  | "status"
   | "tickets"
   | "user";
 
@@ -72,15 +75,22 @@ type AdminUserActivityPanelProps = {
   formatAdminDate: (value: string | null) => string;
   loadingReadonlyUserId: string | null;
   onChangeFilter: (filter: AdminUserActivityFilter) => void;
+  onChangeShowInactiveAccounts: (showInactiveAccounts: boolean) => void;
   onOpenReadonlyUserView: (userId: string) => void;
   onSetUserAdmin: (input: {
     isAdmin: boolean;
     password: string;
     userId: string;
   }) => Promise<void>;
+  onSetUserLifecycle: (input: {
+    action: "deactivate" | "restore";
+    reason: string;
+    userId: string;
+  }) => Promise<void>;
   onToggleCareVips: (userId: string) => void;
   onToggleSort: (key: AdminUserActivitySortKey) => void;
   rows: AdminUserActivityRow[];
+  showInactiveAccounts: boolean;
   sort: AdminUserActivitySort;
   stats: AdminUserActivityStats;
 };
@@ -103,11 +113,14 @@ export function AdminUserActivityPanel({
   formatAdminDate,
   loadingReadonlyUserId,
   onChangeFilter,
+  onChangeShowInactiveAccounts,
   onOpenReadonlyUserView,
   onSetUserAdmin,
+  onSetUserLifecycle,
   onToggleCareVips,
   onToggleSort,
   rows,
+  showInactiveAccounts,
   sort,
   stats,
 }: AdminUserActivityPanelProps) {
@@ -117,6 +130,11 @@ export function AdminUserActivityPanel({
   const [adminChangePassword, setAdminChangePassword] = useState("");
   const [adminChangeError, setAdminChangeError] = useState("");
   const [savingAdminChange, setSavingAdminChange] = useState(false);
+  const [lifecycleTarget, setLifecycleTarget] =
+    useState<AdminUserActivityRow | null>(null);
+  const [lifecycleReason, setLifecycleReason] = useState("");
+  const [lifecycleError, setLifecycleError] = useState("");
+  const [savingLifecycleChange, setSavingLifecycleChange] = useState(false);
 
   const closeAdminChangeDialog = () => {
     if (savingAdminChange) {
@@ -132,7 +150,21 @@ export function AdminUserActivityPanel({
   const pendingAdminValue = adminChangeTarget
     ? !adminChangeTarget.is_admin
     : false;
-  const knownAdminCount = rows.filter((row) => row.is_admin).length;
+  const knownAdminCount = rows.filter(
+    (row) => row.is_admin && row.account_status !== "inactive"
+  ).length;
+  const pendingLifecycleAction =
+    lifecycleTarget?.account_status === "inactive" ? "restore" : "deactivate";
+
+  const closeLifecycleDialog = () => {
+    if (savingLifecycleChange) {
+      return;
+    }
+
+    setLifecycleTarget(null);
+    setLifecycleReason("");
+    setLifecycleError("");
+  };
 
   async function submitAdminChange(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -160,6 +192,36 @@ export function AdminUserActivityPanel({
       );
     } finally {
       setSavingAdminChange(false);
+    }
+  }
+
+  async function submitLifecycleChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!lifecycleTarget) {
+      return;
+    }
+
+    setSavingLifecycleChange(true);
+    setLifecycleError("");
+
+    try {
+      await onSetUserLifecycle({
+        action: pendingLifecycleAction,
+        reason: lifecycleReason,
+        userId: lifecycleTarget.user_id,
+      });
+      setLifecycleTarget(null);
+      setLifecycleReason("");
+      setLifecycleError("");
+    } catch (error) {
+      setLifecycleError(
+        error instanceof Error
+          ? error.message
+          : "Unable to update account status."
+      );
+    } finally {
+      setSavingLifecycleChange(false);
     }
   }
 
@@ -195,23 +257,37 @@ export function AdminUserActivityPanel({
       </div>
 
       <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
-        <label className="block text-sm font-medium text-slate-700">
-          View
-          <select
-            className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
-            onChange={(event) =>
-              onChangeFilter(event.target.value as AdminUserActivityFilter)
-            }
-            value={filter}
-          >
-            <option value="all">All users</option>
-            <option value="real">Real users</option>
-            <option value="test">Test/admin users</option>
-            <option value="active">Active last 14 days</option>
-            <option value="inactive">Inactive 14+ days</option>
-            <option value="needs_followup">Needs follow-up</option>
-          </select>
-        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block text-sm font-medium text-slate-700">
+            View
+            <select
+              className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-base"
+              disabled={showInactiveAccounts}
+              onChange={(event) =>
+                onChangeFilter(event.target.value as AdminUserActivityFilter)
+              }
+              value={filter}
+            >
+              <option value="all">All users</option>
+              <option value="real">Real users</option>
+              <option value="test">Test/admin users</option>
+              <option value="active">Active last 14 days</option>
+              <option value="inactive">Inactive 14+ days</option>
+              <option value="needs_followup">Needs follow-up</option>
+            </select>
+          </label>
+          <label className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              checked={showInactiveAccounts}
+              className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600"
+              onChange={(event) =>
+                onChangeShowInactiveAccounts(event.target.checked)
+              }
+              type="checkbox"
+            />
+            Show Inactive
+          </label>
+        </div>
         <p className="text-sm text-slate-500">
           Showing {filteredRows.length} of {rows.length}
         </p>
@@ -280,10 +356,17 @@ export function AdminUserActivityPanel({
                 const areCareVipsExpanded =
                   expandedCareVipRows[row.user_id] ?? false;
                 const isLastKnownAdmin = row.is_admin && knownAdminCount <= 1;
+                const isInactiveAccount = row.account_status === "inactive";
 
                 return (
                   <tr
-                    className={isReadonlyViewTarget ? "bg-blue-50" : undefined}
+                    className={
+                      isReadonlyViewTarget
+                        ? "bg-blue-50"
+                        : isInactiveAccount
+                          ? "bg-slate-50"
+                          : undefined
+                    }
                     key={row.user_id}
                   >
                     <td className="border-b border-slate-100 px-3 py-3 align-top">
@@ -293,13 +376,33 @@ export function AdminUserActivityPanel({
                       <p className="break-all text-xs text-slate-500">
                         {row.email || row.user_id}
                       </p>
-                      <button
-                        className="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
-                        onClick={() => onToggleCareVips(row.user_id)}
-                        type="button"
-                      >
-                        {areCareVipsExpanded ? "Hide VIPs" : "View VIPs"}
-                      </button>
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <button
+                          className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                          onClick={() => onToggleCareVips(row.user_id)}
+                          type="button"
+                        >
+                          {areCareVipsExpanded ? "Hide VIPs" : "View VIPs"}
+                        </button>
+                        <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                          <input
+                            checked={isInactiveAccount}
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-slate-500"
+                            onChange={() => {
+                              setLifecycleTarget(row);
+                              setLifecycleReason("");
+                              setLifecycleError("");
+                            }}
+                            title={
+                              isInactiveAccount
+                                ? "Restore account access"
+                                : "Deactivate account"
+                            }
+                            type="checkbox"
+                          />
+                          Inactive
+                        </label>
+                      </div>
                       {areCareVipsExpanded ? (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {rowCareSubjects.length > 0 ? (
@@ -408,22 +511,39 @@ export function AdminUserActivityPanel({
                       </div>
                     </td>
                     <td className="border-b border-slate-100 px-3 py-3 align-top">
-                      <button
-                        className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:text-slate-400 ${
-                          isReadonlyViewTarget
-                            ? "border-blue-300 bg-blue-100 text-blue-800"
-                            : "border-slate-300 text-slate-700"
-                        }`}
-                        disabled={loadingReadonlyUserId === row.user_id}
-                        onClick={() => onOpenReadonlyUserView(row.user_id)}
-                        type="button"
-                      >
-                        {loadingReadonlyUserId === row.user_id
-                          ? "Loading..."
-                          : isReadonlyViewTarget
-                            ? "Viewing"
-                            : "View as user"}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:text-slate-400 ${
+                            isReadonlyViewTarget
+                              ? "border-blue-300 bg-blue-100 text-blue-800"
+                              : "border-slate-300 text-slate-700"
+                          }`}
+                          disabled={loadingReadonlyUserId === row.user_id}
+                          onClick={() => onOpenReadonlyUserView(row.user_id)}
+                          type="button"
+                        >
+                          {loadingReadonlyUserId === row.user_id
+                            ? "Loading..."
+                            : isReadonlyViewTarget
+                              ? "Viewing"
+                              : "View as user"}
+                        </button>
+                        <button
+                          className={`rounded-md border px-3 py-1.5 text-xs font-semibold disabled:text-slate-400 ${
+                            isInactiveAccount
+                              ? "border-emerald-300 text-emerald-700"
+                              : "border-slate-300 text-slate-700"
+                          }`}
+                          onClick={() => {
+                            setLifecycleTarget(row);
+                            setLifecycleReason("");
+                            setLifecycleError("");
+                          }}
+                          type="button"
+                        >
+                          {isInactiveAccount ? "Restore" : "Deactivate"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -524,6 +644,81 @@ export function AdminUserActivityPanel({
                   Yes
                 </button>
               )}
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {lifecycleTarget ? (
+        <div
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+          role="dialog"
+        >
+          <form
+            className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl"
+            onSubmit={submitLifecycleChange}
+          >
+            <h3 className="text-lg font-semibold text-slate-900">
+              {pendingLifecycleAction === "restore"
+                ? "Restore account access?"
+                : "Deactivate account?"}
+            </h3>
+            <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm font-semibold text-slate-900">
+                {lifecycleTarget.display_name || "Unknown name"}
+              </p>
+              <p className="break-all text-sm text-slate-600">
+                {lifecycleTarget.email || lifecycleTarget.user_id}
+              </p>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-700">
+              {pendingLifecycleAction === "restore"
+                ? "This restores login access and normal notifications for this account."
+                : "This blocks login access, prevents refresh, suppresses notifications, and keeps history intact."}
+            </p>
+            <label className="mt-4 block text-sm font-medium text-slate-700">
+              Reason
+              <textarea
+                className="mt-2 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2"
+                disabled={savingLifecycleChange}
+                minLength={8}
+                onChange={(event) => setLifecycleReason(event.target.value)}
+                required
+                value={lifecycleReason}
+              />
+            </label>
+
+            {lifecycleError ? (
+              <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+                {lifecycleError}
+              </p>
+            ) : null}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                className="rounded-md border border-slate-300 px-4 py-2 font-semibold text-slate-700 disabled:text-slate-400"
+                disabled={savingLifecycleChange}
+                onClick={closeLifecycleDialog}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className={`rounded-md px-4 py-2 font-semibold text-white disabled:bg-slate-300 ${
+                  pendingLifecycleAction === "restore"
+                    ? "bg-emerald-700"
+                    : "bg-slate-800"
+                }`}
+                disabled={savingLifecycleChange || lifecycleReason.trim().length < 8}
+                type="submit"
+              >
+                {savingLifecycleChange
+                  ? "Saving..."
+                  : pendingLifecycleAction === "restore"
+                    ? "Restore"
+                    : "Deactivate"}
+              </button>
             </div>
           </form>
         </div>

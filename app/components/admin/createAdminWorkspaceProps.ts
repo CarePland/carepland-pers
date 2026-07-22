@@ -30,6 +30,7 @@ export function createAdminWorkspaceProps({
   adminIntegrationErrorStats,
   adminIntegrationErrors,
   adminLastViewedAt,
+  adminOpenHelpReports,
   adminPriorities,
   adminPrioritiesError,
   adminPrioritiesSummary,
@@ -45,6 +46,7 @@ export function createAdminWorkspaceProps({
   adminUserActivityFilter,
   adminUserActivitySort,
   adminUserActivityStats,
+  showInactiveAdminUsers,
   agentEscalationGuidance,
   agentKnowledgeAutomationSettings,
   agentKnowledgeChangeNote,
@@ -96,6 +98,8 @@ export function createAdminWorkspaceProps({
   earlyAccessIntakeRows,
   earlyAccessIntakeStats,
   editingProductMgmtItemId,
+  evaluateAdminNavItems,
+  evaluateAdminTabs,
   expandedAdminUserCareVipRows,
   filteredAdminUserActivity,
   filteredAppContentOptions,
@@ -136,6 +140,7 @@ export function createAdminWorkspaceProps({
   handleSeedAdminSampleData,
   handleSendAdminAsk,
   handleSetUserAdmin,
+  handleSetUserLifecycle,
   handleUpdateAdminAskAnalysisRun,
   handleUpdateAskRoutingSettings,
   handleUpdateEarlyAccessIntake,
@@ -245,6 +250,7 @@ export function createAdminWorkspaceProps({
   setAdminSampleForceDeclined,
   setAdminSampleStatus,
   setAdminUserActivityFilter,
+  setShowInactiveAdminUsers,
   setAgentEscalationGuidance,
   setAiOperationCostViewMode,
   setAgentKnowledgeAutomationSettings,
@@ -519,23 +525,40 @@ export function createAdminWorkspaceProps({
                   aiOperationCostRows: aiOperationCostSummary,
                   aiOperationCostUserRows: aiOperationCostUserSummary,
                   aiOperationCostViewMode,
+                  earlyAccessFollowups: (earlyAccessIntakeRows ?? []).filter(
+                    (row: { status: string }) =>
+                      ["new", "reviewing", "contacted", "interested"].includes(
+                        row.status
+                      )
+                  ),
                   followupCount: adminDashboardFollowupCount,
+                  integrationErrorRows: adminIntegrationErrors,
                   loadingAdminPriorities,
                   loadingAiOperationCosts,
+                  needsResponseThreads: adminAskNeedsResponse,
                   newCount: adminDashboardNewCount,
                   onChangeAiOperationCostRange: handleChangeAiOperationCostRange,
                   onChangeAiOperationCostViewMode: setAiOperationCostViewMode,
                   onChangePriorityStatus: handleChangeAdminPriorityStatus,
                   onDeferPriority: handleDeferAdminPriority,
+                  onOpenEarlyAccessFollowup: () =>
+                    void handleChangeAdminTab("intake"),
+                  onOpenErrors: () => void handleChangeAdminTab("errors"),
+                  onOpenHelpReport: () => void handleChangeAdminTab("helpReports"),
                   onOpenPriorityDestination: openAdminPriorityDestination,
                   onOpenPrioritizationPrompt: () => {
                     setSelectedAiWorkflow("admin_hq_prioritization");
                     void handleChangeAdminTab("ai");
                   },
+                  onOpenSupportThread: (threadId: string) => {
+                    selectAdminAskThread(threadId);
+                    void handleChangeAdminTab("askConsole");
+                  },
                   onRefreshSignals: () => {
                     void loadAdminAttentionOverview();
                     void loadAdminPriorities();
                   },
+                  openHelpReports: adminOpenHelpReports,
                   priorities: adminPriorities,
                   prioritiesError: adminPrioritiesError,
                   prioritiesSummary: adminPrioritiesSummary,
@@ -629,7 +652,9 @@ export function createAdminWorkspaceProps({
                     ? systemAdminNavItems
                     : supportAdminTabs.includes(adminTab)
                       ? supportAdminNavItems
-                      : undefined,
+                      : evaluateAdminTabs.includes(adminTab)
+                        ? evaluateAdminNavItems
+                        : undefined,
     recommendations: recommendationsReviewProps,
     stickyTop: stickySecondaryOffset,
     tools: {
@@ -683,8 +708,10 @@ export function createAdminWorkspaceProps({
                   loadingAdminUserActivity,
                   navItems: usersAdminNavItems,
                   onRefresh: loadAdminUserActivity,
+                  onShowInactiveAccountsChange: setShowInactiveAdminUsers,
                   onSelectTab: handleChangeAdminTab,
                   onSetUserAdmin: handleSetUserAdmin,
+                  onSetUserLifecycle: handleSetUserLifecycle,
                   openAdminReadonlyUserView,
                   revealAdminSensitiveData,
                   revealingAdminSensitiveKey,
@@ -692,6 +719,7 @@ export function createAdminWorkspaceProps({
                   savingAdminContactDetails,
                   setAdminUserActivityFilter,
                   setExpandedAdminUserCareVipRows,
+                  showInactiveAccounts: showInactiveAdminUsers,
                   shortId,
                   toggleAdminUserActivitySort,
                 },

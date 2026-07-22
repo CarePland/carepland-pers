@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  createSupabaseServiceClient,
-  createSupabaseUserClient,
-} from "@/app/lib/platform/server/supabase";
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
+import { createSupabaseServiceClient } from "@/app/lib/platform/server/supabase";
 
 type RecommendationCountRow = {
   care_subject_id: string;
@@ -28,40 +26,10 @@ const GLOBAL_CARE_VIP_GROUP_ID = "all-care-vips";
 
 export async function GET(request: Request) {
   try {
-    const accessToken = (request.headers.get("authorization") ?? "")
-      .replace(/^Bearer\s+/i, "")
-      .trim();
-
-    if (!accessToken) {
-      throw new Error("Please sign in before loading Today's Focus groups.");
-    }
-
-    const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    const adminUserId = userData.user?.id;
-
-    if (!adminUserId) {
-      throw new Error("Please sign in before loading Today's Focus groups.");
-    }
-
-    const { data: adminProfile, error: adminProfileError } = await userClient
-      .from("profiles")
-      .select("is_admin")
-      .eq("id", adminUserId)
-      .single();
-
-    if (adminProfileError) {
-      throw adminProfileError;
-    }
-
-    if (adminProfile?.is_admin !== true) {
-      throw new Error("Admin access is required to load Today's Focus groups.");
-    }
+    const { userClient } = await requireAdminCaller(request, {
+      adminRequiredMessage: "Admin access is required to load Today's Focus groups.",
+      signInMessage: "Please sign in before loading Today's Focus groups.",
+    });
 
     const adminClient = createSupabaseServiceClient();
     const { data: activityRows, error: activityError } = await userClient.rpc(

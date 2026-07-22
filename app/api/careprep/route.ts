@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { recordCarePlandWorkEventBestEffort } from "@/app/lib/personal/workEvents";
 import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+import { assertAccountActive } from "@/app/lib/platform/server/accountStatus";
 
 type JsonObject = Record<string, unknown>;
 type AppContentFilter = {
@@ -318,6 +319,12 @@ export async function POST(request: NextRequest) {
     if (!userId) {
       throw new Error("Please sign in before generating CarePrep.");
     }
+
+    await assertAccountActive(
+      supabase,
+      userId,
+      "Please sign in before generating CarePrep."
+    );
 
     const { data: appointment, error: appointmentError } = await supabase
       .from("appointments")

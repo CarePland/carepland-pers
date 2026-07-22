@@ -13,7 +13,10 @@ import {
   connectProvisioningPrototypeProxyEndpoints,
   provisioningSearchParams,
 } from "@/app/lib/connect/provisioning/server/prototypeProvisioningProxy";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+import {
+  createSupabaseUserClient,
+  getActiveSupabaseUser,
+} from "@/app/lib/platform/server/supabase";
 
 export async function GET(request: Request) {
   try {
@@ -60,9 +63,12 @@ function accessTokenFromRequest(request: Request) {
 
 async function callerCareCircleIds(accessToken: string): Promise<Set<string>> {
   const userClient = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await userClient.auth.getUser();
+  const user = await getActiveSupabaseUser(
+    userClient,
+    "Please sign in before loading Receiver settings."
+  ).catch(() => null);
 
-  if (userError || !userData.user?.id) {
+  if (!user?.id) {
     // An invalid/expired token should scope to nothing rather than fall
     // back to the unscoped global snapshot -- fail closed, not open.
     return new Set();
@@ -71,7 +77,7 @@ async function callerCareCircleIds(accessToken: string): Promise<Set<string>> {
   const { data: memberships, error: membershipsError } = await userClient
     .from("care_circle_memberships")
     .select("care_circle_id")
-    .eq("user_id", userData.user.id);
+    .eq("user_id", user.id);
 
   if (membershipsError) {
     return new Set();

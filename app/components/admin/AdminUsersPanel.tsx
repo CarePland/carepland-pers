@@ -33,8 +33,10 @@ type AdminUsersPanelProps<TabKey extends string> = {
   loadingAdminReadonlyUserId: string | null;
   navItems: AdminNavItem<TabKey>[];
   onRefresh: () => void;
+  onShowInactiveAccountsChange: (showInactiveAccounts: boolean) => void;
   onSelectTab: (tab: TabKey) => void;
   onSetUserAdmin: AdminUserActivityPanelProps["onSetUserAdmin"];
+  onSetUserLifecycle: AdminUserActivityPanelProps["onSetUserLifecycle"];
   openAdminReadonlyUserView: (userId: string) => void;
   revealAdminSensitiveData: AdminReadonlyUserPanelProps["onReveal"];
   revealingAdminSensitiveKey: string | null;
@@ -44,6 +46,7 @@ type AdminUsersPanelProps<TabKey extends string> = {
   setExpandedAdminUserCareVipRows: (
     updater: (currentRows: Record<string, boolean>) => Record<string, boolean>
   ) => void;
+  showInactiveAccounts: boolean;
   shortId: (value: string | null) => string;
   toggleAdminUserActivitySort: (key: AdminUserActivitySortKey) => void;
 };
@@ -67,8 +70,10 @@ export function AdminUsersPanel<TabKey extends string>({
   loadingAdminUserActivity,
   navItems,
   onRefresh,
+  onShowInactiveAccountsChange,
   onSelectTab,
   onSetUserAdmin,
+  onSetUserLifecycle,
   openAdminReadonlyUserView,
   revealAdminSensitiveData,
   revealingAdminSensitiveKey,
@@ -76,6 +81,7 @@ export function AdminUsersPanel<TabKey extends string>({
   savingAdminContactDetails,
   setAdminUserActivityFilter,
   setExpandedAdminUserCareVipRows,
+  showInactiveAccounts,
   shortId,
   toggleAdminUserActivitySort,
 }: AdminUsersPanelProps<TabKey>) {
@@ -125,8 +131,10 @@ export function AdminUsersPanel<TabKey extends string>({
         formatAdminDate={formatAdminDate}
         loadingReadonlyUserId={loadingAdminReadonlyUserId}
         onChangeFilter={setAdminUserActivityFilter}
+        onChangeShowInactiveAccounts={onShowInactiveAccountsChange}
         onOpenReadonlyUserView={openAdminReadonlyUserView}
         onSetUserAdmin={onSetUserAdmin}
+        onSetUserLifecycle={onSetUserLifecycle}
         onToggleCareVips={(userId) =>
           setExpandedAdminUserCareVipRows((currentRows) => ({
             ...currentRows,
@@ -135,6 +143,7 @@ export function AdminUsersPanel<TabKey extends string>({
         }
         onToggleSort={toggleAdminUserActivitySort}
         rows={adminUserActivity}
+        showInactiveAccounts={showInactiveAccounts}
         sort={adminUserActivitySort}
         stats={adminUserActivityStats}
       />

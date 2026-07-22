@@ -6074,6 +6074,58 @@
   text-align: center;
 }
 
+.flyingHeroCountdownWrap {
+  position: relative;
+  isolation: isolate;
+  perspective: 900px;
+}
+
+.screenCleaningView .flyingHeroCountdown {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  width: auto;
+  min-width: 4ch;
+  transform-style: preserve-3d;
+}
+
+.flyingHeroCountdownDigit {
+  display: inline-block;
+  min-width: 0.62em;
+  transform: perspective(900px) rotateY(0deg);
+  transform-origin: 50% 52%;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.flyingHeroCountdownColon {
+  min-width: 0.35em;
+  transform-origin: 50% 54%;
+}
+
+.flyingHero {
+  position: fixed;
+  /* Above .flyingHeroCountdown (z-index: 2) on purpose: at this size the
+     digits' font-weight: 950 strokes are wide enough to swallow most of a
+     150-220px hero if it flew behind them, which severed the "something
+     just flew past" cause from the digit-wobble effect. */
+  z-index: 3;
+  width: 150px;
+  max-width: 20vw;
+  height: auto;
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+  will-change: transform, opacity;
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.2));
+}
+
+.flyingHeroVisible {
+  opacity: 0.86;
+}
+
 .microwaveCleaningCenter {
   width: min(100%, 1800px, calc((100dvh - clamp(12px, 2.4dvh, 36px)) * 1.5));
   max-height: 100%;
@@ -6292,6 +6344,15 @@
 
   .wordmarkPlain {
     display: block;
+  }
+
+  .flyingHero {
+    display: none;
+  }
+
+  .flyingHeroCountdownDigit {
+    transform: none;
+    will-change: auto;
   }
 }
 

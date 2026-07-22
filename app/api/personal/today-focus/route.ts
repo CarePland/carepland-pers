@@ -10,7 +10,10 @@ import {
   type FocusCadencePreferenceRow,
 } from "@/app/lib/personal/track/focusCadencePreferences";
 import { todayFocusCompletionWindow } from "@/app/lib/personal/track/todayFocusDay";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+import {
+  createSupabaseUserClient,
+  getActiveSupabaseUser,
+} from "@/app/lib/platform/server/supabase";
 
 export async function GET(request: Request) {
   try {
@@ -35,18 +38,11 @@ export async function GET(request: Request) {
     }
 
     const supabase = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-
-    if (userError) throw userError;
-
-    const userId = userData.user?.id;
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Please sign in before loading Today's Focus.", focusItems: [], ok: false },
-        { status: 401 }
-      );
-    }
+    const user = await getActiveSupabaseUser(
+      supabase,
+      "Please sign in before loading Today's Focus."
+    );
+    const userId = user.id;
 
     const timeZone = await loadUserTimeZone(supabase, userId);
     const completionWindow = todayFocusCompletionWindow(new Date(), timeZone);

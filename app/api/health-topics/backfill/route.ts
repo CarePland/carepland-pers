@@ -4,6 +4,7 @@ import { extractTopicMentionsForNote } from "@/app/lib/personal/healthTopics/ser
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
+  getActiveSupabaseUser,
 } from "@/app/lib/platform/server/supabase";
 
 type BackfillNoteRow = {
@@ -46,15 +47,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const limit = numberFromBody(body.limit, 50);
     const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    if (!userData.user?.id) {
-      throw new Error("Please sign in before rebuilding Health Focus.");
-    }
+    await getActiveSupabaseUser(
+      userClient,
+      "Please sign in before rebuilding Health Focus."
+    );
 
     const careSubjectId =
       typeof body.careSubjectId === "string" ? body.careSubjectId.trim() : "";

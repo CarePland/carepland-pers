@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  createSupabaseServiceClient,
-  createSupabaseUserClient,
-} from "@/app/lib/platform/server/supabase";
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
+import { createSupabaseServiceClient } from "@/app/lib/platform/server/supabase";
 import {
   deriveInteractionReviewQueue,
   readLocalInteractionAttempts,
@@ -72,32 +70,10 @@ async function readLocalInteractionAttemptDetail(attemptId: string) {
 }
 
 async function requireAdmin(request: Request) {
-  const accessToken = (request.headers.get("authorization") ?? "")
-    .replace(/^Bearer\s+/i, "")
-    .trim();
-
-  if (!accessToken) {
-    throw new Error("Admin sign-in is required to load Interaction Review Queue.");
-  }
-
-  const userClient = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-  if (userError) throw userError;
-
-  const userId = userData.user?.id ?? "";
-  if (!userId) {
-    throw new Error("Admin sign-in is required to load Interaction Review Queue.");
-  }
-
-  const { data: profile, error: profileError } = await userClient
-    .from("profiles")
-    .select("is_admin")
-    .eq("id", userId)
-    .single();
-  if (profileError) throw profileError;
-  if ((profile as { is_admin?: boolean } | null)?.is_admin !== true) {
-    throw new Error("Admin access is required to load Interaction Review Queue.");
-  }
+  await requireAdminCaller(request, {
+    adminRequiredMessage: "Admin access is required to load Interaction Review Queue.",
+    signInMessage: "Admin sign-in is required to load Interaction Review Queue.",
+  });
 }
 
 async function readSupabaseInteractionReviewQueue() {

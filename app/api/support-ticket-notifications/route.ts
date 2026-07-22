@@ -289,12 +289,17 @@ export async function POST(request: NextRequest) {
 
     const { data: recipientProfile, error: recipientError } = await supabase
       .from("profiles")
-      .select("id,email,display_name,given_name,family_name,last_seen_at")
+      .select("id,email,display_name,given_name,family_name,last_seen_at,account_status")
       .eq("id", ticket.user_id)
       .single();
 
     if (recipientError) {
       throw recipientError;
+    }
+
+    if (recipientProfile?.account_status === "inactive") {
+      await updateMessageEmailStatus(supabase, message.id, "not_queued");
+      return NextResponse.json({ status: "suppressed_inactive_account" });
     }
 
     if (!recipientProfile?.email) {

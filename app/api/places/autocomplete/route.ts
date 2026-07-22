@@ -5,7 +5,10 @@ import {
   PlaceAutocompleteSuggestion,
 } from "../../../lib/platform/integrations/places";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+import {
+  createSupabaseUserClient,
+  getActiveSupabaseUser,
+} from "@/app/lib/platform/server/supabase";
 
 const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY ?? "";
 
@@ -54,16 +57,10 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createSupabaseUserClient(accessToken);
-
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    if (!userData.user?.id) {
-      throw new Error("Please sign in before searching locations.");
-    }
+    await getActiveSupabaseUser(
+      supabase,
+      "Please sign in before searching locations."
+    );
 
     const body = (await request.json()) as {
       input?: unknown;

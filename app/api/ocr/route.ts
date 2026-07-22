@@ -3,7 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
 import { openAiResponseText } from "@/app/lib/platform/ai/responses";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+import {
+  createSupabaseUserClient,
+  getActiveSupabaseUser,
+} from "@/app/lib/platform/server/supabase";
 
 type JsonObject = Record<string, unknown>;
 
@@ -43,16 +46,10 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createSupabaseUserClient(accessToken);
-
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    if (!userData.user?.id) {
-      throw new Error("Please sign in before extracting text.");
-    }
+    const user = await getActiveSupabaseUser(
+      supabase,
+      "Please sign in before extracting text."
+    );
 
     const formData = await request.formData();
     const scope =
@@ -150,7 +147,7 @@ export async function POST(request: NextRequest) {
         openAiResponse.headers.get("x-request-id") ??
         openAiResponse.headers.get("openai-request-id"),
       supabase,
-      userId: userData.user.id,
+      userId: user.id,
     });
 
     return NextResponse.json({ extractedText });

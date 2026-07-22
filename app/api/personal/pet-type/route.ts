@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
+  getActiveSupabaseUser,
 } from "@/app/lib/platform/server/supabase";
 
 type CareCircleMembershipRow = {
@@ -110,17 +111,11 @@ export async function POST(request: NextRequest) {
     }
 
     const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    const userId = userData.user?.id;
-
-    if (!userId) {
-      throw new Error("Please sign in before changing pet details.");
-    }
+    const user = await getActiveSupabaseUser(
+      userClient,
+      "Please sign in before changing pet details."
+    );
+    const userId = user.id;
 
     const careCircleIds = await careCircleIdsForUser(userClient, userId);
 

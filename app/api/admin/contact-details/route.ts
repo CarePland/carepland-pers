@@ -10,6 +10,7 @@ import {
   normalizeAdminPhone,
   redactedContactDetails,
 } from "../../../lib/admin/contactDetails";
+import { requireAdminCaller } from "../../../lib/platform/server/adminAuth";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -78,39 +79,13 @@ async function findAuthUserByEmail(
   }
 }
 
-async function assertAdmin(accessToken: string) {
-  const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+async function assertAdmin(request: NextRequest) {
+  const { userId } = await requireAdminCaller(request, {
+    adminRequiredMessage: "Admin access is required to manage contact details.",
+    signInMessage: "Please sign in before managing contact details.",
   });
 
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  const adminUserId = userData.user?.id;
-
-  if (!adminUserId) {
-    throw new Error("Please sign in before managing contact details.");
-  }
-
-  const { data: adminProfile, error: adminProfileError } = await userClient
-    .from("profiles")
-    .select("is_admin")
-    .eq("id", adminUserId)
-    .single();
-
-  if (adminProfileError) {
-    throw adminProfileError;
-  }
-
-  if (adminProfile?.is_admin !== true) {
-    throw new Error("Admin access is required to manage contact details.");
-  }
-
-  return adminUserId;
+  return userId;
 }
 
 async function getTargetContactDetails(
@@ -202,7 +177,7 @@ export async function POST(request: NextRequest) {
       throw new Error("Target user is required.");
     }
 
-    const adminUserId = await assertAdmin(accessToken);
+    const adminUserId = await assertAdmin(request);
     const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });

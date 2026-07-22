@@ -20,6 +20,7 @@ import {
   meaningfulRelatedTopics,
   type HealthStoryStatus,
 } from "@/app/lib/personal/healthTopics/topicSummary";
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
 import {
   createSupabaseServiceClient,
@@ -290,38 +291,12 @@ export async function POST(request: NextRequest) {
 }
 
 async function requireAdmin(request: NextRequest) {
-  const accessToken = (request.headers.get("authorization") ?? "")
-    .replace(/^Bearer\s+/i, "")
-    .trim();
+  const { userId } = await requireAdminCaller(request, {
+    adminRequiredMessage: "Admin access is required to use Checkpoint.",
+    signInMessage: "Please sign in before using Checkpoint.",
+  });
 
-  if (!accessToken) {
-    throw new Error("Please sign in before using Checkpoint.");
-  }
-
-  const userClient = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-
-  if (userError) throw userError;
-
-  const adminUserId = userData.user?.id;
-
-  if (!adminUserId) {
-    throw new Error("Please sign in before using Checkpoint.");
-  }
-
-  const { data: adminProfile, error: adminProfileError } = await userClient
-    .from("profiles")
-    .select("is_admin")
-    .eq("id", adminUserId)
-    .single();
-
-  if (adminProfileError) throw adminProfileError;
-
-  if (adminProfile?.is_admin !== true) {
-    throw new Error("Admin access is required to use Checkpoint.");
-  }
-
-  return adminUserId;
+  return userId;
 }
 
 async function loadContext(request: NextRequest, adminClient: SupabaseClient) {

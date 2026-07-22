@@ -4,6 +4,7 @@ import { extractTopicMentionsForNote } from "@/app/lib/personal/healthTopics/ser
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
+  getActiveSupabaseUser,
 } from "@/app/lib/platform/server/supabase";
 
 type AppointmentRow = {
@@ -94,17 +95,11 @@ export async function POST(request: NextRequest) {
     }
 
     const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    const userId = userData.user?.id;
-
-    if (!userId) {
-      throw new Error("Please sign in before saving Visit Notes.");
-    }
+    const user = await getActiveSupabaseUser(
+      userClient,
+      "Please sign in before saving Visit Notes."
+    );
+    const userId = user.id;
 
     const { data: appointment, error: appointmentError } = await userClient
       .from("appointments")

@@ -40,16 +40,13 @@ export type AdminWorkspaceTab =
   | "workflows";
 
 export type AdminWorkspaceTopTab =
-  | "checkpoint"
   | "connect"
   | "dashboard"
-  | "layout"
-  | "recommendations"
+  | "evaluate"
   | "support"
   | "system"
   | "tools"
-  | "users"
-  | "workflows";
+  | "users";
 
 export type AdminWorkspaceProps = {
   activeSecondaryKey: AdminWorkspaceTab;

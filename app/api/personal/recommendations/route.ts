@@ -25,6 +25,7 @@ import {
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
+  getActiveSupabaseUser,
 } from "@/app/lib/platform/server/supabase";
 
 type UserContext = {
@@ -970,17 +971,11 @@ async function verifyPersonAccess(
   }
 
   const supabase = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-
-  if (userError) {
-    throw userError;
-  }
-
-  const userId = userData.user?.id;
-
-  if (!userId) {
-    throw new Error("Please sign in before loading recommendations.");
-  }
+  const user = await getActiveSupabaseUser(
+    supabase,
+    "Please sign in before loading recommendations."
+  );
+  const userId = user.id;
 
   const { data: adminProfile, error: adminProfileError } = await supabase
     .from("profiles")

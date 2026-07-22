@@ -11,6 +11,7 @@ import {
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
+  getActiveSupabaseUser,
 } from "@/app/lib/platform/server/supabase";
 
 type FeatureAccessResult = {
@@ -157,18 +158,11 @@ async function requestContext(request: Request) {
   }
 
   const userSupabase = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } =
-    await userSupabase.auth.getUser();
-
-  if (userError) throw userError;
-
-  const userId = userData.user?.id;
-  if (!userId) {
-    return NextResponse.json(
-      { error: "Please sign in before preparing offline access.", ok: false },
-      { status: 401 }
-    );
-  }
+  const user = await getActiveSupabaseUser(
+    userSupabase,
+    "Please sign in before preparing offline access."
+  );
+  const userId = user.id;
 
   return {
     accountId,

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { estimateOpenAiResponseCost } from "@/app/lib/platform/ai/usageCosts";
 import { appContentDefaults } from "@/app/lib/platform/content/appContentConfig";
+import { assertAccountActive } from "@/app/lib/platform/server/accountStatus";
 
 type JsonObject = Record<string, unknown>;
 
@@ -532,7 +533,8 @@ async function productContextForAsk({
       "Connect receiver provisioning is device setup, not receiver-user login. A coordinator provisions receiver devices for a household; receiver people are the people who may use that receiver. In MVP, Connect keeps the active people list small and tied to the configured receiver household.",
       "Guide Mode is a shared visual pointing loop: the coordinator clicks the actual receiver UI to highlight a control, the receiver sees the same highlighted control and darkened surrounding UI, and the receiver remains in control.",
       "Connect's trust boundary: no hidden listening, no recording by default, and requests should be named, authorized, and logged.",
-      "Ask should use the provided Connect app context to answer or route questions about selected person, receiver status, active tab, recent call/message state, provisioning/setup state, audio/optional sounds, and confusing Connect workflows. Do not pretend to perform receiver-device actions unless the app context shows the action is wired.",
+      "The Receiver experience includes Today's Focus, a short list of focus items the receiver person can mark complete; completions can also be created hands-free through Receiver Talk.",
+      "Ask should use the provided Connect app context to answer or route questions about selected person, receiver status, active tab, recent call/message state, provisioning/setup state, audio/optional sounds, Today's Focus items, and confusing Connect workflows. Do not pretend to perform receiver-device actions unless the app context shows the action is wired.",
     ].join("\n");
   }
 
@@ -542,13 +544,32 @@ async function productContextForAsk({
 
   return [
     "Product context:",
-    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Ask has a separate onboarding helper module for low-risk getting-started questions.",
+    "CarePland Personal helps people remember appointment details, prepare for future visits, and bring saved context forward. New users complete profile basics, Early Access acknowledgements, Care Circle setup, and a Home welcome guide before regular app use. Ask has a separate onboarding helper module for low-risk getting-started questions -- see onboardingKnowledgeForAsk below for what it knows.",
     `Current product facts: ${productFacts}`,
     `Known limitations: ${knownLimitations}`,
     "Ask is intended for questions, ideas, workflow feedback, bugs, confusing moments, and things that may need review. When a user asks a straightforward feature or \"how do I...\" question that the product facts or known limitations above answer, respond directly and specifically using answer_now -- do not just acknowledge the question. If the facts above do not cover it, or the honest answer is that something is not available yet, say so plainly rather than guessing, and let it route to the team as feedback instead of inventing an answer.",
     "Do not deny being AI or pretend to be human, but keep AI framing in the background unless the user asks or it matters for trust/review. If a user asks what you are, it is okay to say you are an AI assistant designed to help route questions, feedback, and ideas throughout CarePland, and that you are not a replacement for real people.",
   ].join("\n");
 }
+
+// Ask has exactly two caregiver-facing knowledge sources, and they are
+// intentionally different shapes rather than one merged blob:
+//   1. productContextForAsk() above -- general product facts and known
+//      limitations. Admin-editable (app_content_versions), because these
+//      change as the product ships and Admin needs to correct them without
+//      a code change.
+//   2. onboardingKnowledgeForAsk below -- narrow, procedural, safety-scoped
+//      getting-started facts (required profile fields by auth source,
+//      welcome-guide behavior). Static rather than Admin-editable because
+//      this is core account-setup policy that should change alongside the
+//      onboarding UI itself, not drift independently from an Admin text
+//      box. If this ever needs to be Admin-editable, give it its own
+//      app_content_versions key rather than folding it into
+//      support_agent_product_facts -- it answers a different question
+//      ("what does someone need to do to finish setup") than product facts
+//      do ("what can CarePland do").
+const onboardingKnowledgeForAsk =
+  "Onboarding facts:\nNew users complete profile basics, Early Access acknowledgements, Care Circle setup, and then land on Home with the first-run welcome guide. Profile setup asks for basic account/contact details so dates, reminders, time zones, and support follow-up work correctly. For email/password or email-update setup, first and last name, phone, time zone, street address, city, state, and ZIP are required; display name and address line 2 are optional. The welcome guide explains the appointment loop, keeps first actions focused, and may hide normal header navigation while still offering a Need help link that opens Ask. First useful actions are adding a real appointment, importing appointment details the user already has, or adding clearly labeled fictional demo examples. Demo examples can be removed later from Profile. Account-specific onboarding blockers should be reviewed by support/admin.";
 
 function isLikelyOnboardingAsk({
   context,
@@ -886,6 +907,8 @@ export async function POST(request: NextRequest) {
     if (!userId) {
       throw new Error("Please sign in before using Ask.");
     }
+
+    await assertAccountActive(supabase, userId, "Please sign in before using Ask.");
 
     const normalizedMessage = normalizeAskMessage(message);
     const recentDuplicateCutoff = new Date(
@@ -1300,6 +1323,7 @@ export async function POST(request: NextRequest) {
             )}`,
             `App context:\n${JSON.stringify(context, null, 2)}`,
             productContext,
+            `Response rubric:\n${responseRubric}`,
             `Ask transcript:\n${transcript}`,
           ].join("\n\n"),
         });
@@ -1370,7 +1394,7 @@ export async function POST(request: NextRequest) {
               2
             )}`,
             `App context:\n${JSON.stringify(context, null, 2)}`,
-            "Onboarding facts:\nNew users complete profile basics, Early Access acknowledgements, Care Circle setup, and then land on Home with the first-run welcome guide. Profile setup asks for basic account/contact details so dates, reminders, time zones, and support follow-up work correctly. For email/password or email-update setup, first and last name, phone, time zone, street address, city, state, and ZIP are required; display name and address line 2 are optional. The welcome guide explains the appointment loop, keeps first actions focused, and may hide normal header navigation while still offering a Need help link that opens Ask. First useful actions are adding a real appointment, importing appointment details the user already has, or adding clearly labeled fictional demo examples. Demo examples can be removed later from Profile. Account-specific onboarding blockers should be reviewed by support/admin.",
+            onboardingKnowledgeForAsk,
             `Response rubric:\n${responseRubric}`,
             `Ask transcript:\n${transcript}`,
           ].join("\n\n"),

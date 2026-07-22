@@ -4,6 +4,7 @@ import { extractTopicMentionsForNote } from "@/app/lib/personal/healthTopics/ser
 import {
   createSupabaseServiceClient,
   createSupabaseUserClient,
+  getActiveSupabaseUser,
 } from "@/app/lib/platform/server/supabase";
 
 function errorMessage(error: unknown): string {
@@ -35,15 +36,10 @@ export async function POST(request: NextRequest) {
     }
 
     const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    if (!userData.user?.id) {
-      throw new Error("Please sign in before extracting Health Focus topics.");
-    }
+    await getActiveSupabaseUser(
+      userClient,
+      "Please sign in before extracting Health Focus topics."
+    );
 
     const result = await extractTopicMentionsForNote({
       noteId,

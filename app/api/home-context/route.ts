@@ -15,7 +15,10 @@ import {
   openAiResponseText,
   runOpenAiResponse,
 } from "@/app/lib/platform/ai/responses";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+import {
+  createSupabaseUserClient,
+  getActiveSupabaseUser,
+} from "@/app/lib/platform/server/supabase";
 
 type JsonObject = Record<string, unknown>;
 
@@ -872,20 +875,15 @@ export async function POST(request: NextRequest) {
     }
 
     const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    if (!userData.user?.id) {
-      throw new Error("Please sign in before asking for more context.");
-    }
+    const user = await getActiveSupabaseUser(
+      userClient,
+      "Please sign in before asking for more context."
+    );
 
     const { data: membershipRows, error: membershipError } = await userClient
       .from("care_circle_memberships")
       .select("care_circle_id")
-      .eq("user_id", userData.user.id)
+      .eq("user_id", user.id)
       .eq("status", "active")
       .order("created_at")
       .limit(1);
@@ -964,7 +962,7 @@ export async function POST(request: NextRequest) {
         ),
         providerRequestId: classifierResponse.requestId,
         supabase: userClient,
-        userId: userData.user.id,
+        userId: user.id,
       });
     }
     const intent = applyAskContextToIntent(
@@ -1351,7 +1349,7 @@ export async function POST(request: NextRequest) {
       ),
       providerRequestId: openAiResponse.requestId,
       supabase: userClient,
-      userId: userData.user.id,
+      userId: user.id,
     });
 
     return NextResponse.json({

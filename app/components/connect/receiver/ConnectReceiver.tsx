@@ -893,7 +893,7 @@ const defaultSoundSettings: SoundSettings = {
   retroSounds: true,
 };
 
-type ScreenCleaningTheme = "classic" | "microwave";
+type ScreenCleaningTheme = "classic" | "flyingHero" | "microwave";
 
 type StoredReceiverModal =
   | { type: "contact"; contactId: string }
@@ -1676,7 +1676,9 @@ function readInitialSoundSettings(): SoundSettings {
 }
 
 function readInitialScreenCleaningTheme(): ScreenCleaningTheme {
-  return readStoredReceiverSession().screenCleaningTheme === "microwave" ? "microwave" : "classic";
+  const storedTheme = readStoredReceiverSession().screenCleaningTheme;
+  if (storedTheme === "flyingHero" || storedTheme === "microwave") return storedTheme;
+  return "classic";
 }
 
 function readInitialMessageTextSize(): ReaderTextSize {
@@ -9524,6 +9526,8 @@ function ScreenCleaningView({
   secondsRemaining: number;
   theme: ScreenCleaningTheme;
 }) {
+  const defaultCountdownLabel = formatCountdownSeconds(secondsRemaining);
+
   return (
     <div
       className={`${styles.screenCleaningView} ${
@@ -9645,9 +9649,269 @@ function ScreenCleaningView({
       ) : (
         <div className={styles.screenCleaningCenter}>
           <p>{message}</p>
-          <strong>{formatCountdownSeconds(secondsRemaining)}</strong>
+          {theme === "flyingHero" ? (
+            <>
+              <FlyingHeroCountdown label={defaultCountdownLabel} />
+              <span className={styles.srOnly}>
+                Screen cleaning. {defaultCountdownLabel} remaining.
+              </span>
+            </>
+          ) : (
+            <strong>{defaultCountdownLabel}</strong>
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+type DigitSpinParams = {
+  isColon: boolean;
+  direction: 1 | -1;
+  amp: number; // degrees for digits, px for the colon
+  periodMs: number;
+  tauMs: number;
+};
+
+// A digit's reaction is a damped harmonic oscillator rather than a hand-authored
+// keyframe list. Physically it's the same math a flicked spring settles with,
+// which is exactly the "cardboard cutout spinning on a pole, then wobbling to
+// a stop" feel we want — and it produces 1-3 decaying wobbles for free, with
+// no keyframe/easing bookkeeping (a shared `easing` string re-applied at each
+// keyframe boundary was making the old version's swing rush early and hang).
+function spinParamsFor(influence: number, isColon: boolean): DigitSpinParams {
+  const direction: 1 | -1 = Math.random() < 0.5 ? 1 : -1;
+  if (isColon) {
+    return {
+      isColon: true,
+      direction,
+      amp: 1.5 + influence * 7.5,
+      periodMs: 260 - influence * 90,
+      tauMs: 90 + influence * 90,
+    };
+  }
+  return {
+    isColon: false,
+    direction,
+    amp: 20 + Math.pow(influence, 1.3) * 280,
+    periodMs: 420 - influence * 190,
+    tauMs: 140 + influence * 120,
+  };
+}
+
+function sampleSpin(params: DigitSpinParams, tMs: number): string {
+  const omega = (2 * Math.PI) / params.periodMs;
+  const decay = Math.exp(-tMs / params.tauMs);
+  const wave = Math.sin(omega * tMs);
+  if (params.isColon) {
+    const x = params.amp * params.direction * wave * decay;
+    const scale = 1 + 0.06 * decay * wave;
+    return `translate3d(${x.toFixed(2)}px, 0, 0) scale(${scale.toFixed(3)})`;
+  }
+  const angle = params.amp * params.direction * wave * decay;
+  return `perspective(900px) rotateY(${angle.toFixed(2)}deg)`;
+}
+
+function FlyingHeroCountdown({ label }: { label: string }) {
+  const countdownRef = useRef<HTMLDivElement | null>(null);
+  const heroRef = useRef<HTMLImageElement | null>(null);
+  const digitRefs = useRef<Array<HTMLSpanElement | null>>([]);
+
+  useEffect(() => {
+    const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (reduceMotionQuery.matches) return;
+
+    const countdown = countdownRef.current;
+    const hero = heroRef.current;
+    if (!countdown || !hero) return;
+
+    const digits = digitRefs.current;
+    let wakeTimer: number | null = null;
+    let frameId: number | null = null;
+    let disposed = false;
+
+    const clearWakeTimer = () => {
+      if (wakeTimer !== null) {
+        window.clearTimeout(wakeTimer);
+        wakeTimer = null;
+      }
+    };
+
+    const resetHero = () => {
+      hero.classList.remove(styles.flyingHeroVisible);
+      hero.style.transform = "translate3d(-160px, -999px, 0)";
+    };
+
+    const scheduleFlyby = () => {
+      clearWakeTimer();
+      if (disposed) return;
+      wakeTimer = window.setTimeout(
+        startFlyby,
+        20_000 + Math.random() * 25_000
+      );
+    };
+
+    const startFlyby = () => {
+      const stageRect = countdown.closest(`.${styles.screenCleaningView}`)?.getBoundingClientRect();
+      const digitRects = digits
+        .map((digit) => (digit ? { digit, rect: digit.getBoundingClientRect() } : null))
+        .filter((entry): entry is { digit: HTMLSpanElement; rect: DOMRect } => Boolean(entry));
+
+      if (!stageRect || !digitRects.length || disposed) {
+        scheduleFlyby();
+        return;
+      }
+
+      const cast = [
+        {
+          aspectRatio: 1024 / 1536,
+          maxWidth: 220,
+          minWidth: 116,
+          src: "/connect/receiver/flying-burger.png",
+          widthRatio: 0.16,
+        },
+        {
+          aspectRatio: 1386 / 1135,
+          maxWidth: 156,
+          minWidth: 82,
+          src: "/connect/receiver/banana-hero.png",
+          widthRatio: 0.105,
+        },
+      ];
+      const character = cast[Math.floor(Math.random() * cast.length)];
+      const heroWidth = Math.min(
+        Math.max(stageRect.width * character.widthRatio, character.minWidth),
+        character.maxWidth
+      );
+      const heroHeight = heroWidth * character.aspectRatio;
+
+      // Flight heights are derived from the ACTUAL measured digit row, not
+      // arbitrary fractions of the whole stage. The old 31/50/68% split meant
+      // the bottom band regularly landed 250px+ from the row — outside the
+      // wake radius entirely, so roughly a third of flybys disturbed nothing
+      // and looked like a bare glitch had occurred, not a chosen gag.
+      const rowTop = Math.min(...digitRects.map(({ rect }) => rect.top));
+      const rowBottom = Math.max(...digitRects.map(({ rect }) => rect.bottom));
+      const rowCenterY = (rowTop + rowBottom) / 2 - stageRect.top;
+      const rowHeight = rowBottom - rowTop;
+      const heights = [
+        rowCenterY - rowHeight * 0.32,
+        rowCenterY,
+        rowCenterY + rowHeight * 0.32,
+      ];
+      const heroCenterY = heights[Math.floor(Math.random() * heights.length)];
+      const startX = -heroWidth - 40;
+      const endX = stageRect.width + heroWidth + 40;
+      const fromX = startX;
+      const toX = endX;
+      const distance = Math.abs(toX - fromX);
+      const speed = stageRect.width * (0.72 + Math.random() * 0.16);
+      const duration = Math.max(1250, Math.min(2150, (distance / speed) * 1000));
+      const wakeRadius = 130 + Math.random() * 60;
+      const triggered = new WeakSet<HTMLSpanElement>();
+      const active = new Map<HTMLSpanElement, { params: DigitSpinParams; startedAt: number }>();
+      const startedAt = performance.now();
+
+      hero.src = character.src;
+      hero.style.width = `${heroWidth}px`;
+      hero.style.left = "0px";
+      hero.style.top = "0px";
+      hero.classList.add(styles.flyingHeroVisible);
+
+      const tick = (now: number) => {
+        if (disposed) return;
+        const progress = Math.min(1, (now - startedAt) / duration);
+        const x = fromX + (toX - fromX) * progress;
+        const bobPhase = progress * Math.PI * 2.2;
+        const y = heroCenterY - heroHeight / 2 + Math.sin(bobPhase) * 5;
+        // Bank angle leads the vertical bob (its derivative), so the hero
+        // visibly tilts into its own flight path instead of sliding flat —
+        // a small, cheap touch that reads as "confident flight" rather than
+        // "image translating across the screen."
+        const bank = Math.cos(bobPhase) * 7;
+        const heroNoseX = x + heroWidth * 0.78;
+        const viewportX = stageRect.left + x;
+        const viewportY = stageRect.top + y;
+
+        hero.style.transform = `translate3d(${viewportX.toFixed(2)}px, ${viewportY.toFixed(2)}px, 0) rotate(${bank.toFixed(2)}deg)`;
+
+        digitRects.forEach(({ digit, rect }) => {
+          if (triggered.has(digit)) return;
+          const digitCenterX = rect.left - stageRect.left + rect.width / 2;
+          const reached = heroNoseX >= digitCenterX;
+          if (!reached) return;
+          triggered.add(digit);
+          const digitCenterY = rect.top - stageRect.top + rect.height / 2;
+          const influence = Math.max(0, 1 - Math.abs(heroCenterY - digitCenterY) / wakeRadius);
+          if (influence <= 0) return;
+          active.set(digit, {
+            params: spinParamsFor(influence, digit.textContent === ":"),
+            startedAt: now,
+          });
+        });
+
+        active.forEach((entry, digit) => {
+          const tMs = now - entry.startedAt;
+          if (tMs > entry.params.tauMs * 4.5) {
+            digit.style.transform = "";
+            active.delete(digit);
+            return;
+          }
+          digit.style.transform = sampleSpin(entry.params, tMs);
+        });
+
+        if (progress < 1 || active.size > 0) {
+          frameId = window.requestAnimationFrame(tick);
+          return;
+        }
+
+        resetHero();
+        scheduleFlyby();
+      };
+
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    resetHero();
+    scheduleFlyby();
+
+    return () => {
+      disposed = true;
+      clearWakeTimer();
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      digits.forEach((digit) => {
+        if (digit) digit.style.transform = "";
+      });
+      resetHero();
+    };
+  }, []);
+
+  return (
+    <div className={styles.flyingHeroCountdownWrap} aria-hidden="true">
+      <strong ref={countdownRef} className={styles.flyingHeroCountdown}>
+        {Array.from(label).map((character, index) => (
+          <span
+            className={`${styles.flyingHeroCountdownDigit} ${
+              character === ":" ? styles.flyingHeroCountdownColon : ""
+            }`}
+            key={`${character}-${index}`}
+            ref={(node) => {
+              digitRefs.current[index] = node;
+            }}
+          >
+            {character}
+          </span>
+        ))}
+      </strong>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        ref={heroRef}
+        className={styles.flyingHero}
+        src="/connect/receiver/flying-burger.png"
+        alt=""
+        draggable={false}
+      />
     </div>
   );
 }
@@ -10835,6 +11099,7 @@ function ReceiverModal({
     }
     const cleanScreenThemeChoices: Array<{ label: string; theme: ScreenCleaningTheme }> = [
       { label: "Classic", theme: "classic" },
+      { label: "Flying Heroes", theme: "flyingHero" },
       { label: "Microwave", theme: "microwave" },
     ];
 

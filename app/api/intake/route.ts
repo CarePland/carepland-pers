@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 import { logOpenAiOperationCost } from "@/app/lib/platform/ai/operationLogs";
+import { assertAccountActive } from "@/app/lib/platform/server/accountStatus";
 
 type JsonObject = Record<string, unknown>;
 type IntakeMode = "bulk_appointments" | "single";
@@ -208,6 +209,12 @@ export async function POST(request: NextRequest) {
     if (!userId) {
       throw new Error("Please sign in before using intake.");
     }
+
+    await assertAccountActive(
+      supabase,
+      userId,
+      "Please sign in before using intake."
+    );
 
     const { data: memberships, error: membershipsError } = await supabase
       .from("care_circle_memberships")

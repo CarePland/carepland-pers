@@ -34,10 +34,12 @@ export function adminUserActivityStats(rows: AdminUserActivityRow[]) {
 export function filterAdminUserActivity({
   filter,
   rows,
+  showInactiveAccounts = false,
   sort,
 }: {
   filter: AdminUserActivityFilter;
   rows: AdminUserActivityRow[];
+  showInactiveAccounts?: boolean;
   sort: AdminUserActivitySort;
 }) {
   const lastActivityForRow = (row: AdminUserActivityRow) =>
@@ -49,6 +51,16 @@ export function filterAdminUserActivity({
   const inactiveSince = Date.now() - 1000 * 60 * 60 * 24 * 14;
 
   const filteredRows = rows.filter((row) => {
+    const isInactiveAccount = row.account_status === "inactive";
+
+    if (showInactiveAccounts) {
+      return isInactiveAccount;
+    }
+
+    if (isInactiveAccount) {
+      return false;
+    }
+
     if (filter === "real") {
       return !row.is_test_user;
     }
@@ -108,6 +120,8 @@ export function filterAdminUserActivity({
           return row.last_seen_at ?? "";
         case "notes":
           return row.note_count;
+        case "status":
+          return row.account_status === "inactive" ? "inactive" : "active";
         case "tickets":
           return row.open_support_ticket_count;
         case "user":

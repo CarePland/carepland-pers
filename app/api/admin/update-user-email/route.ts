@@ -1,11 +1,9 @@
 import { SupabaseClient, User } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
-import {
-  createSupabaseServiceClient,
-  createSupabaseUserClient,
-} from "@/app/lib/platform/server/supabase";
+import { createSupabaseServiceClient } from "@/app/lib/platform/server/supabase";
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -90,34 +88,10 @@ export async function POST(request: NextRequest) {
       throw new Error("The replacement email must be different.");
     }
 
-    const userClient = createSupabaseUserClient(accessToken);
-
-    const { data: userData, error: userError } =
-      await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    const adminUserId = userData.user?.id;
-
-    if (!adminUserId) {
-      throw new Error("Please sign in before updating user email.");
-    }
-
-    const { data: adminProfile, error: adminProfileError } = await userClient
-      .from("profiles")
-      .select("is_admin")
-      .eq("id", adminUserId)
-      .single();
-
-    if (adminProfileError) {
-      throw adminProfileError;
-    }
-
-    if (adminProfile?.is_admin !== true) {
-      throw new Error("Admin access is required to update user email.");
-    }
+    const { userId: adminUserId } = await requireAdminCaller(request, {
+      adminRequiredMessage: "Admin access is required to update user email.",
+      signInMessage: "Please sign in before updating user email.",
+    });
 
     const adminClient = createSupabaseServiceClient();
 

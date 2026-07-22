@@ -11,11 +11,9 @@ import {
   type AdminPriorityState,
   type AdminPriorityStatus,
 } from "@/app/lib/admin/priorities";
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
 import { isMissingServerEnvError } from "@/app/lib/platform/server/env";
-import {
-  createSupabaseServiceClient,
-  createSupabaseUserClient,
-} from "@/app/lib/platform/server/supabase";
+import { createSupabaseServiceClient } from "@/app/lib/platform/server/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -174,33 +172,12 @@ export async function PATCH(request: NextRequest) {
 }
 
 async function requireAdmin(request: NextRequest) {
-  const accessToken = request.headers
-    .get("authorization")
-    ?.replace(/^Bearer\s+/i, "")
-    .trim();
+  const { userId } = await requireAdminCaller(request, {
+    adminRequiredMessage: "Admin access is required to load Priorities.",
+    signInMessage: "Admin sign-in is required to load Priorities.",
+  });
 
-  if (!accessToken) {
-    throw new Error("Admin sign-in is required to load Priorities.");
-  }
-
-  const userClient = createSupabaseUserClient(accessToken);
-  const { data: userData, error: userError } = await userClient.auth.getUser();
-  if (userError) throw userError;
-
-  const adminUserId = userData.user?.id;
-  if (!adminUserId) throw new Error("Admin sign-in is required to load Priorities.");
-
-  const { data: profile, error: profileError } = await userClient
-    .from("profiles")
-    .select("is_admin")
-    .eq("id", adminUserId)
-    .single();
-  if (profileError) throw profileError;
-  if ((profile as { is_admin?: boolean } | null)?.is_admin !== true) {
-    throw new Error("Admin access is required to load Priorities.");
-  }
-
-  return adminUserId;
+  return userId;
 }
 
 async function collectPriorityCandidates(adminClient: ReturnType<typeof createSupabaseServiceClient>) {

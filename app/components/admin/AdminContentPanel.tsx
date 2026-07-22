@@ -2,6 +2,9 @@
 
 import { FormEvent } from "react";
 
+import { AdminGlossaryEditor } from "./AdminGlossaryEditor";
+import { carePlandGlossaryContentKey } from "../personal/glossary/CarePlandGlossary";
+
 export type AppContentVersion = {
   id: string;
   body: string;
@@ -10,6 +13,7 @@ export type AppContentVersion = {
   content_key: string;
   copied_from_version_id: string | null;
   created_at: string;
+  created_by_user_id: string | null;
   description: string | null;
   is_current: boolean;
   label: string;
@@ -98,6 +102,7 @@ export function AdminContentPanel({
   const selectedVersions = appContentVersions.filter(
     (version) => version.content_key === selectedAppContentKey
   );
+  const editingGlossary = selectedAppContentKey === carePlandGlossaryContentKey;
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -212,16 +217,23 @@ export function AdminContentPanel({
                   />
                 </label>
 
-                <label className="block text-sm font-medium text-slate-700">
-                  {selectedAppContentCategory === "health_focus"
-                    ? "Text shown in the app. Format: canonical = label_full;label_short"
-                    : "Text shown in the app"}
-                  <textarea
-                    className="mt-2 min-h-64 w-full rounded-md border border-slate-300 px-3 py-2 text-base leading-7"
-                    onChange={(event) => setAppContentBody(event.target.value)}
-                    value={appContentBody}
+                {editingGlossary ? (
+                  <AdminGlossaryEditor
+                    appContentBody={appContentBody}
+                    setAppContentBody={setAppContentBody}
                   />
-                </label>
+                ) : (
+                  <label className="block text-sm font-medium text-slate-700">
+                    {selectedAppContentCategory === "health_focus"
+                      ? "Text shown in the app. Format: canonical = label_full;label_short"
+                      : "Text shown in the app"}
+                    <textarea
+                      className="mt-2 min-h-64 w-full rounded-md border border-slate-300 px-3 py-2 text-base leading-7"
+                      onChange={(event) => setAppContentBody(event.target.value)}
+                      value={appContentBody}
+                    />
+                  </label>
+                )}
 
                 <label className="block text-sm font-medium text-slate-700">
                   Change note
@@ -240,7 +252,7 @@ export function AdminContentPanel({
                   disabled={savingAppContent}
                   type="submit"
                 >
-                  {savingAppContent ? "Saving..." : "Save new version"}
+                  {savingAppContent ? "Publishing..." : "Publish new version"}
                 </button>
                 {appContentSaveMessage ? (
                   <p
@@ -272,7 +284,10 @@ export function AdminContentPanel({
                             {version.is_current ? " · current" : ""}
                           </p>
                           <p className="mt-1 text-sm text-slate-500">
-                            {formatDate(version.created_at)}
+                            Published {formatDate(version.created_at)}
+                            {version.created_by_user_id
+                              ? ` · ${version.created_by_user_id}`
+                              : ""}
                           </p>
                           {version.content_hash ? (
                             <p className="mt-1 font-mono text-xs text-slate-500">

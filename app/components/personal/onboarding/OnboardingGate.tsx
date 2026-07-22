@@ -16,6 +16,10 @@ import {
   type ProfileDraft,
 } from "../../../lib/personal/profile/profileDraft";
 import { type PlaceAddressResult } from "../../../lib/platform/integrations/places";
+import {
+  CarePlandGlossaryPage,
+  type CarePlandGlossaryContent,
+} from "../glossary/CarePlandGlossary";
 
 type TimeZoneOption = {
   label: string;
@@ -27,6 +31,7 @@ type OnboardingGateProps = {
   acceptBetaPrivacy: boolean;
   acceptBetaTerms: boolean;
   appContentText: (key: string) => string;
+  glossaryContent: CarePlandGlossaryContent;
   loading: boolean;
   message: string;
   needsBetaAgreement: boolean;
@@ -67,6 +72,7 @@ type PersonalOnboardingStep =
   | "earlyAccess"
   | "profileBasics"
   | "profileAddress"
+  | "glossary"
   | "ready";
 
 export function OnboardingGate({
@@ -74,6 +80,7 @@ export function OnboardingGate({
   acceptBetaPrivacy,
   acceptBetaTerms,
   appContentText,
+  glossaryContent,
   loading,
   message,
   needsBetaAgreement,
@@ -125,7 +132,9 @@ export function OnboardingGate({
     useState<PersonalOnboardingStep>(firstStep);
   const [stepValidationMessage, setStepValidationMessage] = useState("");
   const visibleStep =
-    showReady
+    showReady && activeStep !== "ready"
+      ? "glossary"
+      : showReady
       ? "ready"
       : !needsBetaAgreement && activeStep === "earlyAccess"
       ? "profileBasics"
@@ -138,6 +147,8 @@ export function OnboardingGate({
         ? profileBasicsFormId
         : visibleStep === "profileAddress"
           ? profileAddressFormId
+          : visibleStep === "glossary"
+            ? undefined
           : undefined;
   const primaryDisabled =
     visibleStep === "ready"
@@ -146,10 +157,14 @@ export function OnboardingGate({
       ? loading || !betaComplete
       : visibleStep === "profileAddress"
       ? savingProfile
+      : visibleStep === "glossary"
+      ? false
       : savingProfile || viewingBlockedProfile;
   const primaryLabel =
     visibleStep === "ready"
       ? "Open CarePland"
+      : visibleStep === "glossary"
+      ? "Continue"
       : visibleStep === "earlyAccess"
       ? loading
         ? "Saving..."
@@ -228,6 +243,16 @@ export function OnboardingGate({
     submitProfileAddressForm();
   }
 
+  function goToGlossary() {
+    setStepValidationMessage("");
+    setActiveStep("glossary");
+  }
+
+  function goToReady() {
+    setStepValidationMessage("");
+    setActiveStep("ready");
+  }
+
   if (needsBetaAgreement) {
     return visibleStep === "earlyAccess" ? (
       <PersonalOnboardingShell
@@ -292,8 +317,10 @@ export function OnboardingGate({
         onBack={
           visibleStep === "profileAddress"
             ? goToProfileBasics
-            : visibleStep === "ready"
+            : visibleStep === "glossary"
               ? goToProfileAddress
+            : visibleStep === "ready"
+              ? goToGlossary
               : undefined
         }
         onSelectStep={handleSelectStep}
@@ -308,11 +335,16 @@ export function OnboardingGate({
         primaryOnClick={
           visibleStep === "ready"
             ? onOpenCarePland
+            : visibleStep === "glossary"
+              ? goToReady
             : visibleStep === "profileBasics"
               ? handleProfileBasicsNextClick
             : visibleStep === "profileAddress"
               ? handleProfileAddressNextClick
               : undefined
+        }
+        footerCenter={
+          visibleStep === "glossary" ? <GlossaryFooterNote /> : undefined
         }
         secondaryDisabled={visibleStep === "ready" ? false : undefined}
         secondaryLabel={
@@ -320,9 +352,17 @@ export function OnboardingGate({
             ? receiverConfigured
               ? "Manage Receivers"
               : "Set Up Receiver"
+            : visibleStep === "glossary"
+              ? "Skip"
             : undefined
         }
-        secondaryOnClick={visibleStep === "ready" ? onOpenReceiver : undefined}
+        secondaryOnClick={
+          visibleStep === "ready"
+            ? onOpenReceiver
+            : visibleStep === "glossary"
+              ? goToReady
+              : undefined
+        }
         betaComplete={betaComplete}
         profileAddressComplete={profileAddressComplete}
         profileBasicsComplete={Boolean(profileBasicsComplete)}
@@ -351,6 +391,8 @@ export function OnboardingGate({
             profileDetailsRequired={profileDetailsRequired}
             profileDraft={profileDraft}
           />
+        ) : visibleStep === "glossary" ? (
+          <CarePlandGlossaryPage content={glossaryContent} />
         ) : (
           <ReadyPage
             actionsDisabled={readyActionsDisabled}
@@ -372,8 +414,10 @@ export function OnboardingGate({
         onBack={
           visibleStep === "profileAddress"
             ? goToProfileBasics
-            : visibleStep === "ready"
+            : visibleStep === "glossary"
               ? goToProfileAddress
+            : visibleStep === "ready"
+              ? goToGlossary
               : undefined
         }
         onSelectStep={handleSelectStep}
@@ -388,11 +432,16 @@ export function OnboardingGate({
         primaryOnClick={
           visibleStep === "ready"
             ? onOpenCarePland
+            : visibleStep === "glossary"
+              ? goToReady
             : visibleStep === "profileBasics"
               ? handleProfileBasicsNextClick
             : visibleStep === "profileAddress"
               ? handleProfileAddressNextClick
               : undefined
+        }
+        footerCenter={
+          visibleStep === "glossary" ? <GlossaryFooterNote /> : undefined
         }
         secondaryDisabled={visibleStep === "ready" ? false : undefined}
         secondaryLabel={
@@ -400,9 +449,17 @@ export function OnboardingGate({
             ? receiverConfigured
               ? "Manage Receivers"
               : "Set Up Receiver"
+            : visibleStep === "glossary"
+              ? "Skip"
             : undefined
         }
-        secondaryOnClick={visibleStep === "ready" ? onOpenReceiver : undefined}
+        secondaryOnClick={
+          visibleStep === "ready"
+            ? onOpenReceiver
+            : visibleStep === "glossary"
+              ? goToReady
+              : undefined
+        }
         betaComplete={betaComplete}
         profileAddressComplete={profileAddressComplete}
         profileBasicsComplete={Boolean(profileBasicsComplete)}
@@ -431,6 +488,8 @@ export function OnboardingGate({
             profileDetailsRequired={profileDetailsRequired}
             profileDraft={profileDraft}
           />
+        ) : visibleStep === "glossary" ? (
+          <CarePlandGlossaryPage content={glossaryContent} />
         ) : (
           <ReadyPage
             actionsDisabled={readyActionsDisabled}
@@ -455,6 +514,7 @@ function PersonalOnboardingShell({
   onSelectStep,
   onSignOut,
   primaryDisabled,
+  footerCenter,
   primaryFormId,
   primaryLabel,
   primaryOnClick,
@@ -473,6 +533,7 @@ function PersonalOnboardingShell({
   onSelectStep: (step: PersonalOnboardingStep) => void;
   onSignOut: () => void;
   primaryDisabled: boolean;
+  footerCenter?: ReactNode;
   primaryFormId?: string;
   primaryLabel: string;
   primaryOnClick?: () => void;
@@ -519,6 +580,12 @@ function PersonalOnboardingShell({
       ready: profileAddressComplete,
     },
     {
+      complete: currentStep === "ready",
+      id: "glossary",
+      label: "Glossary",
+      ready: true,
+    },
+    {
       complete: betaComplete && profileBasicsComplete && profileAddressComplete,
       id: "ready",
       label: "You’re Ready",
@@ -554,7 +621,7 @@ function PersonalOnboardingShell({
                 ×
               </button>
               <nav aria-label="Personal setup progress">
-                <ol className="grid grid-cols-4 gap-3">
+                <ol className="grid grid-cols-5 gap-3">
                   {progressItems.map((item, index) => {
                     const active = item.id === currentStep;
                     const itemClassName = active
@@ -617,7 +684,7 @@ function PersonalOnboardingShell({
         </div>
 
         <footer className="sticky bottom-0 bg-white/95 px-8 backdrop-blur sm:px-12 lg:px-14">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#d6e3f2] py-4">
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-t border-[#d6e3f2] py-4">
             <button
               className="min-h-11 rounded-lg border border-[#cbd9e7] bg-white px-4 text-sm font-black text-[#173150] hover:bg-[#edf5fc] focus:outline-none focus:ring-2 focus:ring-[#4e84b2]"
               onClick={onBack ?? onSignOut}
@@ -625,6 +692,7 @@ function PersonalOnboardingShell({
             >
               {onBack ? "Back" : "Sign out"}
             </button>
+            <div className="min-w-0 px-4 text-center">{footerCenter}</div>
             <div className="flex flex-wrap items-center justify-end gap-3">
               {secondaryLabel ? (
                 <button
@@ -651,6 +719,14 @@ function PersonalOnboardingShell({
         </div>
       </div>
     </section>
+  );
+}
+
+function GlossaryFooterNote() {
+  return (
+    <p className="text-sm font-semibold leading-snug text-[#5f6e84]">
+      This glossary lives on your Profile page. Or just... Ask!
+    </p>
   );
 }
 

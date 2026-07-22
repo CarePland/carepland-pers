@@ -1,7 +1,8 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 import { estimateOpenAiResponseCost } from "@/app/lib/platform/ai/usageCosts";
+import { requireAdminCaller } from "@/app/lib/platform/server/adminAuth";
 
 type JsonObject = Record<string, unknown>;
 
@@ -741,36 +742,10 @@ export async function POST(request: NextRequest) {
       throw new Error("Paste at least one question to test.");
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false },
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    const { userClient: supabase, userId } = await requireAdminCaller(request, {
+      adminRequiredMessage: "Admin access is required to test Ask modules.",
+      signInMessage: "Please sign in before testing Ask modules.",
     });
-
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    const userId = userData.user?.id;
-
-    if (!userId) {
-      throw new Error("Please sign in before testing Ask modules.");
-    }
-
-    const { data: profileRows, error: profileError } = await supabase
-      .from("profiles")
-      .select("is_admin")
-      .eq("id", userId)
-      .limit(1);
-
-    if (profileError) {
-      throw profileError;
-    }
-
-    if (!profileRows?.[0]?.is_admin) {
-      throw new Error("Admin access is required to test Ask modules.");
-    }
 
     const { data: memberships, error: membershipsError } = await supabase
       .from("care_circle_memberships")

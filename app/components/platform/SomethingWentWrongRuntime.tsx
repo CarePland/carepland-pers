@@ -344,7 +344,7 @@ export function SomethingWentWrongRuntime() {
         onClick={openPanel}
         type="button"
       >
-        Something Went Wrong
+        Something went wrong
       </button>
       <div aria-live="polite" className="sr-only">
         {announcement}

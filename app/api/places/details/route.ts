@@ -6,6 +6,7 @@ import {
   placesUnavailableMessage,
   PlaceDetailsResult,
 } from "../../../lib/platform/integrations/places";
+import { assertAccountActive } from "@/app/lib/platform/server/accountStatus";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -138,6 +139,12 @@ export async function POST(request: NextRequest) {
     if (!userData.user?.id) {
       throw new Error("Please sign in before loading location details.");
     }
+
+    await assertAccountActive(
+      supabase,
+      userData.user.id,
+      "Please sign in before loading location details."
+    );
 
     const body = (await request.json()) as {
       placeId?: unknown;

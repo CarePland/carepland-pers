@@ -14,7 +14,10 @@ import {
   meaningfulRelatedTopics,
   type HealthStoryStatus,
 } from "@/app/lib/personal/healthTopics/topicSummary";
-import { createSupabaseUserClient } from "@/app/lib/platform/server/supabase";
+import {
+  createSupabaseUserClient,
+  getActiveSupabaseUser,
+} from "@/app/lib/platform/server/supabase";
 
 const allCareSubjectsKey = "all";
 
@@ -155,15 +158,10 @@ export async function GET(request: NextRequest) {
     const careSubjectId =
       request.nextUrl.searchParams.get("careSubjectId")?.trim() ?? "";
     const userClient = createSupabaseUserClient(accessToken);
-    const { data: userData, error: userError } = await userClient.auth.getUser();
-
-    if (userError) {
-      throw userError;
-    }
-
-    if (!userData.user?.id) {
-      throw new Error("Please sign in before loading Health Focus.");
-    }
+    await getActiveSupabaseUser(
+      userClient,
+      "Please sign in before loading Health Focus."
+    );
 
     let mentionsQuery = userClient
       .from("topic_mentions")

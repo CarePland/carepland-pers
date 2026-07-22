@@ -44,7 +44,6 @@ type AdminNavigationModelParams = {
 export const systemAdminTabs: AdminWorkspaceTab[] = [
   "errors",
   "content",
-  "ai",
   "product",
 ];
 
@@ -59,91 +58,58 @@ export const usersAdminTabs: AdminWorkspaceTab[] = [
   "userAudit",
 ];
 
+// Co-location, not a redesign: these five already existed as their own
+// destinations (four top-level, one buried in System). This just groups
+// them under one parent using the same list-plus-secondary-nav mechanism
+// System/Support already use. No renaming, no reordering opinion, no new
+// mechanism -- see CarePland_Admin_Redesign_SoloFounder.md on why this
+// phase is deliberately about proving the grouping through real use
+// before touching how the five relate to each other.
+export const evaluateAdminTabs: AdminWorkspaceTab[] = [
+  "checkpoint",
+  "layout",
+  "workflows",
+  "recommendations",
+  "ai",
+];
+
 export function createAdminNavigationModel({
   actionableAdminAttentionSummaries,
-  adminAskNeedsResponseThreads,
-  adminAttentionFor,
-  adminIntegrationErrors,
-  adminLastViewedAt,
   adminTab,
-  earlyAccessIntakeFollowupCount,
-  earlyAccessIntakeNewCount,
-  isNewForAdmin,
 }: AdminNavigationModelParams) {
-  const adminAttentionCountsForTab = (tabKey: AdminWorkspaceTab) => {
-    const attention = adminAttentionFor("admin_tab", tabKey);
-    let fallbackNewCount = 0;
-    let fallbackFollowupCount = 0;
-
-    if (tabKey === "askConsole") {
-      // Every thread in this queue already needs an admin response --
-      // followupCount is just its size. "New to me" is whichever of those
-      // threads updated since this admin last opened the console.
-      fallbackFollowupCount = adminAskNeedsResponseThreads.length;
-      fallbackNewCount = adminAskNeedsResponseThreads.filter((thread) =>
-        isNewForAdmin(
-          thread.updated_at || thread.created_at,
-          adminLastViewedAt("admin_tab", "askConsole")
-        )
-      ).length;
-    } else if (tabKey === "users" || tabKey === "intake") {
-      fallbackNewCount = earlyAccessIntakeNewCount;
-      fallbackFollowupCount = earlyAccessIntakeFollowupCount;
-    } else if (tabKey === "errors") {
-      fallbackNewCount = adminIntegrationErrors.filter((row) =>
-        isNewForAdmin(
-          row.latest_occurred_at,
-          adminLastViewedAt("admin_tab", "errors")
-        )
-      ).length;
-      fallbackFollowupCount = adminIntegrationErrors.length;
-    }
-
-    return {
-      followupCount: Math.max(
-        attention?.followup_count ?? 0,
-        fallbackFollowupCount
-      ),
-      newCount: Math.max(attention?.new_count ?? 0, fallbackNewCount),
-    };
-  };
-
-  const adminAttentionCountsForTabs = (tabKeys: AdminWorkspaceTab[]) =>
-    tabKeys.reduce(
-      (totals, tabKey) => {
-        const counts = adminAttentionCountsForTab(tabKey);
-        return {
-          followupCount: totals.followupCount + counts.followupCount,
-          newCount: totals.newCount + counts.newCount,
-        };
-      },
-      { followupCount: 0, newCount: 0 }
-    );
-
+  // Badges exist in exactly one place: Operate ("dashboard"). Everything
+  // that used to badge System/Support/Users now has a real card on Operate
+  // instead (see AdminDashboardPanel's "waiting on you" cards) -- Ask
+  // threads, integration errors, Help Reports, and Early Access follow-ups
+  // all moved there. The one exception was the "AI Prompts" badge, which
+  // was never really about AI Prompts: it silently mirrored Agent Knowledge
+  // Proposals awaiting review (see adminAttentionFor's admin_tab:"ai"
+  // redirect in CarePlandPers.tsx). Reviewing an AI-drafted proposal isn't
+  // something external is waiting on -- nobody's blocked if it sits for a
+  // week -- so per the Operate/Evaluate split it doesn't belong badged at
+  // all. It's still fully visible the moment you open AI Prompts; it just
+  // doesn't compete for attention from outside that panel anymore.
   const usersAdminNavItems: AdminNavItem<AdminWorkspaceTab>[] = [
     { key: "users", label: "User Activity" },
-    {
-      followupCount: earlyAccessIntakeFollowupCount,
-      key: "intake",
-      label: "Early Access Intake",
-      newCount: earlyAccessIntakeNewCount,
-    },
+    { key: "intake", label: "Early Access Intake" },
     { key: "userAudit", label: "Audit Trail" },
   ];
   const systemAdminNavItems: AdminNavItem<AdminWorkspaceTab>[] = [
-    { ...adminAttentionCountsForTab("errors"), key: "errors", label: "Errors" },
+    { key: "errors", label: "Errors" },
     { key: "content", label: "Dynamic Text" },
-    { ...adminAttentionCountsForTab("ai"), key: "ai", label: "AI Prompts" },
     { key: "product", label: "Prod Mgmt" },
   ];
   const supportAdminNavItems: AdminNavItem<AdminWorkspaceTab>[] = [
-    { ...adminAttentionCountsForTab("askConsole"), key: "askConsole", label: "Ask" },
-    { ...adminAttentionCountsForTab("helpReports"), key: "helpReports", label: "Help Reports" },
+    { key: "askConsole", label: "Ask" },
+    { key: "helpReports", label: "Help Reports" },
   ];
-  const systemAdminAttentionCounts = adminAttentionCountsForTabs(systemAdminTabs);
-  const supportAdminAttentionCounts =
-    adminAttentionCountsForTabs(supportAdminTabs);
-  const usersAdminAttentionCounts = adminAttentionCountsForTabs(usersAdminTabs);
+  const evaluateAdminNavItems: AdminNavItem<AdminWorkspaceTab>[] = [
+    { key: "checkpoint", label: "Checkpoint" },
+    { key: "layout", label: "Layout" },
+    { key: "workflows", label: "Workflow View" },
+    { key: "recommendations", label: "Today's Focus" },
+    { key: "ai", label: "AI Prompts" },
+  ];
   const adminDashboardNewCount = actionableAdminAttentionSummaries.reduce(
     (total, item) => total + (item.new_count ?? 0),
     0
@@ -153,16 +119,20 @@ export function createAdminNavigationModel({
     0
   );
   const topAdminNavItems: AdminNavItem<AdminWorkspaceTopTab>[] = [
-    { key: "dashboard", label: "Dashboard" },
-    { key: "checkpoint", label: "Checkpoint" },
+    // Label only, for now -- the internal key stays "dashboard" so this
+    // stays a pure rename with no blast radius into adminTab routing,
+    // isActionableAdminAttentionScope, or the workspace switch statement.
+    { key: "dashboard", label: "Operate" },
+    // Evaluate is now a real group, same mechanism as Users/System/Support
+    // below -- five things that already existed, co-located under one
+    // parent. See evaluateAdminTabs for what's in it and why this phase
+    // stops at grouping rather than redesigning how they relate.
+    { key: "evaluate", label: "Evaluate" },
     { key: "connect", label: "Connect" },
-    { key: "layout", label: "Layout" },
-    { key: "workflows", label: "Workflow View" },
-    { key: "recommendations", label: "Today's Focus" },
     { key: "tools", label: "Tools" },
-    { ...usersAdminAttentionCounts, key: "users", label: "Users" },
-    { ...systemAdminAttentionCounts, key: "system", label: "System" },
-    { ...supportAdminAttentionCounts, key: "support", label: "Support" },
+    { key: "users", label: "Users" },
+    { key: "system", label: "System" },
+    { key: "support", label: "Support" },
   ];
   const activeAdminTopTab: AdminWorkspaceTopTab = usersAdminTabs.includes(
     adminTab
@@ -172,16 +142,10 @@ export function createAdminNavigationModel({
       ? "system"
       : supportAdminTabs.includes(adminTab)
         ? "support"
-        : adminTab === "workflows"
-        ? "workflows"
-        : adminTab === "checkpoint"
-          ? "checkpoint"
-        : adminTab === "recommendations"
-          ? "recommendations"
+        : evaluateAdminTabs.includes(adminTab)
+          ? "evaluate"
           : adminTab === "connect"
-          ? "connect"
-          : adminTab === "layout"
-            ? "layout"
+            ? "connect"
             : adminTab === "dashboard"
               ? "dashboard"
               : "tools";
@@ -200,6 +164,10 @@ export function createAdminNavigationModel({
       return supportAdminTabs.includes(adminTab) ? adminTab : "askConsole";
     }
 
+    if (topTab === "evaluate") {
+      return evaluateAdminTabs.includes(adminTab) ? adminTab : "checkpoint";
+    }
+
     return topTab;
   };
 
@@ -208,6 +176,8 @@ export function createAdminNavigationModel({
     adminDashboardFollowupCount,
     adminDashboardNewCount,
     adminTabForTopTab,
+    evaluateAdminNavItems,
+    evaluateAdminTabs,
     supportAdminNavItems,
     supportAdminTabs,
     systemAdminNavItems,

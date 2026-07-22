@@ -11,6 +11,7 @@ import {
   type ProfileDraft,
 } from "../../lib/personal/profile/profileDraft";
 import type { PlaceAddressResult } from "../../lib/platform/integrations/places";
+import { defaultCarePlandGlossaryContent } from "../../lib/platform/content/carePlandGlossary";
 
 type WorkflowPreview = "personal" | "receiver";
 
@@ -170,6 +171,7 @@ export function AdminWorkflowPreviewClient({
         acceptBetaTerms={acceptBetaTerms}
         appContentText={(key) => previewAgreementCopy[key] ?? key}
         getPlacesAuthHeaders={async () => ({})}
+        glossaryContent={defaultCarePlandGlossaryContent}
         loading={false}
         message={message}
         needsBetaAgreement
