@@ -10,6 +10,7 @@ import { LongOperationStatus } from "@/app/components/shared/LongOperationStatus
 
 import { ReceiverSetupStatus } from "./ReceiverSetupStatus";
 import type { ReceiverSetupStepProps } from "./types";
+import { currentAccountReceiverUserDraftId } from "./utils";
 
 export function ReceiverPairStep({
   draft,
@@ -37,7 +38,12 @@ export function ReceiverPairStep({
   const readyMessage = isReturningReceiverSetup
     ? "This Receiver is already paired."
     : "Receiver paired successfully.";
-  const receiverUserMissing = !selectedUser;
+  // selectedUser can be a client-only placeholder (currentAccountReceiverUserDraftId) when the
+  // account's own Connect Person record hasn't been created yet. Pairing needs a real person id,
+  // so treat the unresolved placeholder the same as "no user chosen" rather than letting the
+  // request reach the server, where it will always be rejected.
+  const receiverUserUnresolved = selectedUser?.id === currentAccountReceiverUserDraftId;
+  const receiverUserMissing = !selectedUser || receiverUserUnresolved;
 
   async function checkCode() {
     const pairingCode = normalizeBrowserReceiverPairingCode(draft.pairingCode);
@@ -74,7 +80,7 @@ export function ReceiverPairStep({
   }
 
   async function pairReceiver() {
-    if (!selectedUser?.id || !codeReady) return;
+    if (!selectedUser?.id || receiverUserUnresolved || !codeReady) return;
     const pairingCode = normalizeBrowserReceiverPairingCode(draft.pairingCode);
     setDraft((current) => ({ ...current, pairingError: "", pairingStatus: "pending" }));
     try {

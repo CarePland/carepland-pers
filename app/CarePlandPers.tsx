@@ -216,6 +216,7 @@ import {
   homeMessageSummaryModelVersion,
 } from "./lib/personal/messages/homeMessageSummary";
 import { personHasAttachedReceiver } from "./lib/connect/messaging/receiverAttachment";
+import { formatDate } from "./lib/platform/dateFormatting";
 import {
   hasAnyBoundReceiverDevice,
   normalizeReceiverDevices,
@@ -281,8 +282,11 @@ import {
   importAnythingFieldLabel,
   importAnythingFindSupportingNotes,
   importAnythingKindLabel,
+  importAnythingItemsFromDraft,
   importAnythingNewAppointmentNoteCount,
   importAnythingOwnershipClusterCounts,
+  importAnythingOwnershipClustersFromDraft,
+  importAnythingPersonAssignmentFromUnknown,
   importAnythingPetKindFromSubjectType,
   importAnythingPetLabel,
   importAnythingPetSubjectType,
@@ -291,7 +295,6 @@ import {
   importAnythingStagingItems,
   importAnythingSummaryCounts,
   isImportAnythingProviderStoreUnavailable,
-  type ImportAnythingItemKind,
   type ImportAnythingOwnershipCluster,
   type ImportAnythingPersonAssignment,
   type ImportAnythingPetKind,
@@ -1676,17 +1679,6 @@ async function hashInstructionContent({
     .join("");
 }
 
-function formatDate(value: string | null): string {
-  if (!value) {
-    return "Date not set";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
 function formatDateOnly(value: string | null): string {
   if (!value) {
     return "Date not set";
@@ -2361,316 +2353,6 @@ function intakeDraftFromResult(value: unknown): IntakeReviewDraftContent {
     suggestedAction: String(draft.suggested_action ?? ""),
     takeaways: asTextList(draft.takeaways).join("\n"),
   };
-}
-
-function stringFromUnknown(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "";
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(stringFromUnknown).filter(Boolean).join("\n");
-  }
-
-  return String(value);
-}
-
-function numberFromUnknown(value: unknown): number {
-  return typeof value === "number" ? value : Number(value) || 0;
-}
-
-function arrayFromUnknown(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value)
-    ? value.filter(
-        (item): item is Record<string, unknown> =>
-          Boolean(item) && typeof item === "object" && !Array.isArray(item)
-      )
-    : [];
-}
-
-function importAnythingReviewItem(
-  kind: ImportAnythingItemKind,
-  index: number,
-  item: Record<string, unknown>,
-  fields: Record<string, string>,
-  titleFallback: string,
-  summaryParts: string[]
-): ImportAnythingReviewItem {
-  const confidence = numberFromUnknown(item.confidence);
-  const needsReview = item.needs_review === true || confidence < 0.86;
-  const title = titleFallback.trim() || importAnythingKindLabel(kind);
-  const summary =
-    summaryParts.map((part) => part.trim()).filter(Boolean).join(" · ") ||
-    title;
-  const itemPersonAssignment = importAnythingPersonAssignmentFromUnknown(
-    item.person_assignment
-  );
-  const matchedAppointmentId = stringFromUnknown(item.matched_appointment_id);
-  const hasConfidentOwner =
-    Boolean(itemPersonAssignment?.clusterId) &&
-    (itemPersonAssignment?.confidence ?? 0) >= 0.85 &&
-    itemPersonAssignment?.needsReview !== true;
-  const itemNeedsReview = needsReview || !hasConfidentOwner;
-
-  return {
-    confidence,
-    createsNewAppointment: false,
-    fields,
-    id: `${kind}-${index}-${title}`,
-    kind,
-    matchedAppointmentId,
-    matchedProviderId: stringFromUnknown(item.matched_provider_id),
-    needsReview: itemNeedsReview,
-    ownerClusterId: hasConfidentOwner
-      ? itemPersonAssignment?.clusterId ?? ""
-      : "",
-    ownerCareSubjectId:
-      hasConfidentOwner &&
-      itemPersonAssignment &&
-      itemPersonAssignment.matchedCareSubjectId
-        ? itemPersonAssignment.matchedCareSubjectId
-        : "",
-    ownerConfidence: itemPersonAssignment?.confidence ?? 0,
-    ownerDetectedName: itemPersonAssignment?.detectedName ?? "",
-    ownerNeedsReview: itemPersonAssignment?.needsReview ?? true,
-    ownerNewPersonName:
-      !itemPersonAssignment?.matchedCareSubjectId &&
-      itemPersonAssignment?.suggestedNewPersonName
-        ? itemPersonAssignment.suggestedNewPersonName
-        : "",
-    ownerRationale: itemPersonAssignment?.rationale ?? "",
-    providerMatchNote: stringFromUnknown(item.provider_match_note),
-    sourceExcerpt: stringFromUnknown(item.source_excerpt),
-    status: itemNeedsReview ? "needs_review" : "approved",
-    summary,
-    title,
-  };
-}
-
-function importAnythingItemsFromDraft(
-  draftValue: unknown
-): ImportAnythingReviewItem[] {
-  const draft =
-    draftValue && typeof draftValue === "object" && !Array.isArray(draftValue)
-      ? (draftValue as Record<string, unknown>)
-      : {};
-  const items: ImportAnythingReviewItem[] = [];
-
-  arrayFromUnknown(draft.appointments).forEach((item, index) => {
-    const fields = {
-      appointmentReason: stringFromUnknown(item.appointment_reason),
-      appointmentTitle: stringFromUnknown(item.appointment_title),
-      locationAddress: stringFromUnknown(item.location_address),
-      locationName: stringFromUnknown(item.location_name),
-      locationPhone: stringFromUnknown(item.location_phone),
-      providerName: stringFromUnknown(item.provider_name),
-      providerOrganization: stringFromUnknown(item.provider_organization),
-      startsAt: stringFromUnknown(item.starts_at_local),
-      suggestedAction: stringFromUnknown(item.suggested_action),
-    };
-    items.push(
-      importAnythingReviewItem(
-        "appointment",
-        index,
-        item,
-        fields,
-        fields.appointmentTitle || fields.appointmentReason,
-        [
-          fields.startsAt,
-          fields.providerName || fields.providerOrganization,
-          fields.locationName,
-          fields.suggestedAction,
-        ]
-      )
-    );
-  });
-
-  arrayFromUnknown(draft.providers).forEach((item, index) => {
-    const fields = {
-      locationAddress: stringFromUnknown(item.location_address),
-      locationName: stringFromUnknown(item.location_name),
-      phone: stringFromUnknown(item.phone),
-      providerName: stringFromUnknown(item.provider_name),
-      providerOrganization: stringFromUnknown(item.provider_organization),
-    };
-    items.push(
-      importAnythingReviewItem(
-        "provider",
-        index,
-        item,
-        fields,
-        fields.providerName || fields.providerOrganization,
-        [fields.providerOrganization, fields.locationName, fields.phone]
-      )
-    );
-  });
-
-  arrayFromUnknown(draft.notes).forEach((item, index) => {
-    const fields = {
-      appointmentReason: stringFromUnknown(item.appointment_reason),
-      appointmentTitle: stringFromUnknown(item.appointment_title),
-      followups: asTextList(item.followups).join("\n"),
-      locationAddress: stringFromUnknown(item.location_address),
-      locationName: stringFromUnknown(item.location_name),
-      locationPhone: stringFromUnknown(item.location_phone),
-      providerName: stringFromUnknown(item.provider_name),
-      providerOrganization: stringFromUnknown(item.provider_organization),
-      startsAt: stringFromUnknown(item.starts_at_local),
-      summary: stringFromUnknown(item.summary),
-      takeaways: asTextList(item.takeaways).join("\n"),
-    };
-    items.push(
-      importAnythingReviewItem(
-        "note",
-        index,
-        item,
-        fields,
-        fields.appointmentTitle || "Visit note",
-        [fields.summary]
-      )
-    );
-  });
-
-  arrayFromUnknown(draft.tasks).forEach((item, index) => {
-    const fields = {
-      details: stringFromUnknown(item.details),
-      dueAt: stringFromUnknown(item.due_at_local),
-      title: stringFromUnknown(item.title),
-    };
-    items.push(
-      importAnythingReviewItem("task", index, item, fields, fields.title, [
-        fields.dueAt,
-        fields.details,
-      ])
-    );
-  });
-
-  arrayFromUnknown(draft.medication_changes).forEach((item, index) => {
-    const fields = {
-      changeSummary: stringFromUnknown(item.change_summary),
-      instructions: stringFromUnknown(item.instructions),
-      medicationName: stringFromUnknown(item.medication_name),
-    };
-    items.push(
-      importAnythingReviewItem(
-        "medication_change",
-        index,
-        item,
-        fields,
-        fields.medicationName || "Medication change",
-        [fields.changeSummary, fields.instructions]
-      )
-    );
-  });
-
-  arrayFromUnknown(draft.questions_to_ask).forEach((item, index) => {
-    const fields = {
-      question: stringFromUnknown(item.question),
-      topic: stringFromUnknown(item.topic),
-    };
-    items.push(
-      importAnythingReviewItem(
-        "question",
-        index,
-        item,
-        fields,
-        fields.question,
-        [fields.topic]
-      )
-    );
-  });
-
-  arrayFromUnknown(draft.careprep_items).forEach((item, index) => {
-    const fields = {
-      appointmentTitle: stringFromUnknown(item.appointment_title),
-      detail: stringFromUnknown(item.detail),
-    };
-    items.push(
-      importAnythingReviewItem(
-        "careprep",
-        index,
-        item,
-        fields,
-        fields.appointmentTitle || "CarePrep item",
-        [fields.detail]
-      )
-    );
-  });
-
-  return items.map((item) => {
-    if (item.kind !== "note" || item.matchedAppointmentId) {
-      return item;
-    }
-
-    const supportsExtractedAppointment = items.some(
-      (candidate) =>
-        candidate.kind === "appointment" &&
-        importAnythingFindSupportingNotes(candidate, items).some(
-          (supportItem) => supportItem.id === item.id
-        )
-    );
-
-    if (supportsExtractedAppointment) {
-      return item;
-    }
-
-    return {
-      ...item,
-      createsNewAppointment: true,
-      needsReview: true,
-      status: "needs_review",
-    };
-  });
-}
-
-function importAnythingPersonAssignmentFromUnknown(
-  value: unknown
-): ImportAnythingPersonAssignment | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const assignment = value as Record<string, unknown>;
-  const confidence =
-    typeof assignment.confidence === "number" &&
-    Number.isFinite(assignment.confidence)
-      ? Math.min(1, Math.max(0, assignment.confidence))
-      : 0;
-
-  return {
-    clusterId: stringFromUnknown(assignment.cluster_id),
-    confidence,
-    detectedName: stringFromUnknown(assignment.detected_name),
-    matchedCareSubjectId: stringFromUnknown(
-      assignment.matched_care_subject_id
-    ),
-    needsReview: assignment.needs_review === true,
-    rationale: stringFromUnknown(assignment.rationale),
-    suggestedNewPersonName: stringFromUnknown(
-      assignment.suggested_new_person_name
-    ),
-  };
-}
-
-function importAnythingOwnershipClustersFromDraft(
-  draftValue: unknown
-): ImportAnythingOwnershipCluster[] {
-  const draft =
-    draftValue && typeof draftValue === "object" && !Array.isArray(draftValue)
-      ? (draftValue as Record<string, unknown>)
-      : {};
-
-  return arrayFromUnknown(draft.ownership_clusters).map((cluster) => ({
-    clusterId: stringFromUnknown(cluster.cluster_id),
-    confidence: numberFromUnknown(cluster.confidence),
-    displayName: stringFromUnknown(cluster.display_name),
-    entityType: stringFromUnknown(cluster.entity_type),
-    matchedCareSubjectId: stringFromUnknown(cluster.matched_care_subject_id),
-    rationale: stringFromUnknown(cluster.rationale),
-    suggestedNewPersonName: stringFromUnknown(
-      cluster.suggested_new_person_name
-    ),
-  }));
 }
 
 function importAnythingMatchedAppointmentLabel(

@@ -501,9 +501,19 @@ export function ReceiverSetupOverlay({
       !connectContext.currentAccountPersonId
     ) {
       if (draft.receiverUserPersonId === currentAccountReceiverUserDraftId) {
-        await ensureCurrentAccountPerson({
+        const accountPersonId = await ensureCurrentAccountPerson({
           moveToReceiverUser: false,
         });
+        if (!accountPersonId) {
+          // Creating the account's own Connect Person record failed. Stay on this step rather
+          // than advancing with the placeholder id still selected -- letting the wizard move on
+          // here is what let earlier setups reach Pair with a person id the server can never
+          // recognize.
+          setReceiverUserPreparationStatus(
+            "CarePland could not set up your profile as this Receiver's user. Check your connection and try again."
+          );
+          return;
+        }
       } else {
         void ensureCurrentAccountPerson({ moveToReceiverUser: false });
       }
